@@ -18,9 +18,9 @@ export default function Index() {
       <Stack gap="lg">
         <Title order={1}>CampTool</Title>
         <Text c="dimmed">
-          Registration and management for Burning Man theme camps — members,
-          the camp map, dues, onboarding, docs, announcements, and Discord
-          outreach, all self-hosted.
+          Registration and management for Burning Man theme camps — members, the
+          camp map, dues, onboarding, docs, announcements, and Discord outreach,
+          all self-hosted.
         </Text>
         <Group>
           <Button component={Link} to="/dashboard">
