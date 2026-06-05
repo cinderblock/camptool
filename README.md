@@ -20,9 +20,12 @@ other camps to self-host.
 
 ## Status
 
-Phase 1 — foundation. The multi-camp data model, auth (email/password, magic
-link, passkeys, optional Discord), and the member directory with role management
-are in place. Next: the public recruit page and onboarding (Phase 2).
+Phase 2 — recruiting & onboarding. On top of the Phase 1 foundation (multi-camp
+data model; auth via email/password, magic link, passkeys, optional Discord;
+member directory with role management) the app now has a public application page
+at `/c/:slug`, an officer review queue that accepts applicants into the camp
+(membership if they have an account, otherwise an invitation), and a per-member
+onboarding checklist camps define themselves. Next: the camp map editor (Phase 3).
 
 ## Develop
 

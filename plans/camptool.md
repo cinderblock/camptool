@@ -115,8 +115,28 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
 - "Are you in our Discord?" check + account link.
 
 **Phase 2 — Public recruit page (#7, #4)**
-- Public camp page + recruit application funnel feeding `recruit_application`.
-- Onboarding checklist for accepted members.
+- Public camp page (`/c/:slug`, no auth) + recruit application funnel feeding
+  `recruit_application`.
+- Admin/officer review queue: accept (→ recruit membership if the applicant has
+  an account, else a better-auth invitation), reject, waitlist.
+- Onboarding checklist: camp defines `onboarding_task` rows; accepted members
+  tick them off (`onboarding_completion`, one row per membership×task).
+
+**Phase 2.5 — Theming & extensibility (locked direction: self-host = deep code)**
+- Per-camp UI customization is **build-time, per-deployment**, not templates and
+  not runtime-loaded code (the latter is unsafe in a shared multi-tenant SSR
+  process). A self-hoster adds a `camp-theme/` Bun workspace package (or git
+  submodule) and points one config value at it (`CAMP_THEME`, default →
+  built-in `@camptool/default-theme`).
+- The theme package implements one typed contract:
+  `{ mantineTheme, slots, routes?, rootProvider? }`. `slots` is a map of named
+  React components overriding defaults; core UI renders customizable regions as
+  `<Slot name="header">{<DefaultHeader/>}</Slot>` so a camp overrides only what
+  it wants and upstream upgrades stay non-breaking. Core imports everything
+  through a single `~/theme` alias resolving to the active package.
+- Does NOT touch the multi-camp invariant: a single instance can still host many
+  camps' *data*; the code-level theme is per-deployment. A shared/SaaS instance
+  ships no `camp-theme` package and gets the data-driven default.
 
 **Phase 3 — Camp map editor (#2)** — the big one, sub-plan when we start
 - 2D SVG/canvas editor tied to DB placements; "highlight my spot."
