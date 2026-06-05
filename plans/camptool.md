@@ -22,9 +22,6 @@ camps to self-host or (eventually) run as multi-camp SaaS.
   (`PUBLIC_BASE_URL`) so the host is a one-line change, no code edits.
 - **Repo visibility:** public / open-source (MIT). Keep secrets out of git;
   treat all docs/code as publishable.
-- **Closest prior art in the user's repos:** `Gate Manager` (React Router 7 +
-  Bun + Mantine) is the same shape as this app — use it as the reference template.
-  `OpenSlate` shows the user's monorepo/workspace style.
 
 ## Decisions already made (don't re-ask)
 

@@ -26,8 +26,7 @@ open-sourced (MIT) so other camps can self-host. See `README.md`.
 
 Bun · React Router v7 (framework mode, SSR) · React 19 · Mantine · Drizzle ·
 better-auth · Biome. TypeScript strict. Scripts: `bun run dev | build | start |
-typecheck | lint | format`. The `Gate Manager` project (sibling dir) is the
-closest template for RR7+Bun+Mantine conventions.
+typecheck | lint | format`.
 
 ## Current state
 
