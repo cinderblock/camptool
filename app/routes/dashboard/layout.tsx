@@ -12,6 +12,7 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { authClient, signOut } from "~/lib/auth-client";
+import { hasAtLeast } from "~/lib/permissions";
 import { resolveActiveCamp } from "~/lib/session.server";
 import type { Route } from "./+types/layout";
 
@@ -20,6 +21,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     user,
     activeCampId: active?.camp.id ?? null,
+    activeRole: active?.membership.role ?? null,
     camps: camps.map((c) => ({
       id: c.camp.id,
       name: c.camp.name,
@@ -28,13 +30,16 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
-const NAV = [
-  { to: "/dashboard", label: "Overview", end: true },
-  { to: "/dashboard/members", label: "Members", end: false },
-];
-
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
-  const { user, camps, activeCampId } = loaderData;
+  const { user, camps, activeCampId, activeRole } = loaderData;
+  const nav = [
+    { to: "/dashboard", label: "Overview", end: true },
+    { to: "/dashboard/members", label: "Members", end: false },
+    ...(activeRole && hasAtLeast(activeRole, "officer")
+      ? [{ to: "/dashboard/recruits", label: "Recruits", end: false }]
+      : []),
+    { to: "/dashboard/onboarding", label: "Onboarding", end: false },
+  ];
   const [opened, { toggle }] = useDisclosure();
   const navigate = useNavigate();
   const location = useLocation();
@@ -100,7 +105,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
       </AppShell.Header>
 
       <AppShell.Navbar p="sm">
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <MantineNavLink
             key={item.to}
             component={NavLink}
