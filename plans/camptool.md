@@ -189,6 +189,19 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
   permission sets, not ranked. We keep a `ROLE_RANK` map (admin 3 > officer 2 >
   member 1 > recruit 0) in `permissions.ts` and compare rank for "at least"
   checks; access-control statements gate specific actions.
+- **The `invitation` table needs `created_at`.** better-auth's org plugin reads
+  a `createdAt` field on the invitation model; without it, `createInvitation`
+  throws at runtime (typecheck won't catch it). Latent since Phase 1 because the
+  member-directory only used `addMember`. Phase 2 accept-by-invitation surfaced
+  it. Migration 0002 adds it via a **table rebuild**, not `ALTER ADD COLUMN`,
+  because SQLite refuses a NOT NULL add with a non-constant default
+  (`(unixepoch()*1000)`). The expression default is only legal inside
+  `CREATE TABLE`.
+- **`bun run db:migrate` (drizzle-kit) does NOT work here.** drizzle-kit needs a
+  node SQLite driver (`better-sqlite3`/`@libsql/client`) we don't install.
+  Migrations apply on app startup via the `drizzle-orm/bun-sqlite` migrator in
+  `db/client.server.ts`. Use `db:generate` to author migrations; restart the app
+  (or the dev server) to apply them. Don't rely on `db:migrate`.
 
 ## Progress log
 
@@ -206,6 +219,14 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
       link surfacing. typecheck + build + biome green. Golden path validated
       end-to-end over HTTP (signup → create camp → add recruit → promote →
       negative 403 for non-officer) and login UI verified in-browser.
+- [x] Phase 2 recruiting & onboarding — public `/c/:slug` application funnel →
+      `recruit_application`; officer+ review queue (accept → membership if the
+      applicant has an account else a better-auth invitation; waitlist; reject)
+      with a shareable apply link; per-member onboarding checklist that officers
+      define and members tick off. Fixed the latent `invitation.created_at` gap.
+      typecheck + build + biome green. Validated end-to-end over HTTP: apply →
+      list → accept-as-invitation, apply-with-account → accept-as-membership,
+      onboarding add/toggle on+off.
 
 ## Resolved (formerly open) questions
 
