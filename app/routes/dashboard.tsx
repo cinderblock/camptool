@@ -6,7 +6,7 @@ export function meta(_: Route.MetaArgs) {
 }
 
 const SECTIONS = [
-  { title: "Members", note: "Admins, members, recruits — coming next." },
+  { title: "Members", note: "Admins, officers, members, recruits — coming next." },
   { title: "Camp map", note: "Visual placement editor — planned." },
   { title: "Dues", note: "Optional financials — planned." },
   { title: "Onboarding", note: "New-member checklists — planned." },

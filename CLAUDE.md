@@ -16,7 +16,7 @@ open-sourced (MIT) so other camps can self-host. See `README.md`.
   `camp_id`. Never assume a single camp anywhere.
 - **SQLite + Drizzle** over `bun:sqlite`. Keep schema portable to Postgres.
 - **better-auth** for auth: Discord + email/password + magic link + passkeys,
-  org/roles plugin → admin/member/recruit.
+  org/roles plugin → admin/officer/member/recruit (hierarchy, high→low).
 - **Discord = REST + interaction webhooks inside the web server.** No persistent
   gateway bot process unless a feature truly needs live events.
 - **Everything env-driven** (`PUBLIC_BASE_URL`). Localhost now;

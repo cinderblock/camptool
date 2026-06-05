@@ -37,9 +37,9 @@ camps to self-host or (eventually) run as multi-camp SaaS.
    low-friction. Don't lean on SQLite-only quirks without noting it here.
 3. **Auth = better-auth.** TS-native, clean React Router integration. Use:
    Discord social provider, email/password, magic link, passkeys; org + roles
-   plugin to model admin/member/recruit. Reason: matches "lots of auth options"
+   plugin to model admin/officer/member/recruit. Reason: matches "lots of auth options"
    plus first-class Discord.
-4. **First slice = Foundation:** auth + admin/member/recruit roles + member
+4. **First slice = Foundation:** auth + admin/officer/member/recruit roles + member
    directory + Discord account link. Everything else hangs off member identity.
 5. **Stack (from the user's other projects, not re-asked):** Bun runtime, React
    Router v7 framework mode (SSR), React 19, Mantine UI, Biome or oxfmt for
@@ -88,9 +88,12 @@ Foundation tables (better-auth owns several user/session tables; we add ours):
 - `camp` — id, slug, name, settings, created_at. The tenant root.
 - `user` — global identity (better-auth). One human, may belong to many camps.
 - `account`, `session`, `verification` — better-auth managed.
-- `membership` — (user_id, **camp_id**, role: admin|member|recruit, status,
-  playa_name, joined_at). The join table that scopes a user into a camp with a
-  role. This is the core of requirement #1.
+- `membership` — (user_id, **camp_id**, role: admin|officer|member|recruit,
+  status, playa_name, joined_at). The join table that scopes a user into a camp
+  with a role. This is the core of requirement #1. Role hierarchy high→low is
+  admin > officer > member > recruit; `officer` is an elevated-but-not-full-admin
+  tier (e.g. can help run onboarding/dues/announcements) — model it so permission
+  checks compare rank, not just equality.
 - `discord_link` — user_id, discord_user_id, discord_username, guild_member?(per
   camp). Lets us DM them and verify they're in the server.
 
@@ -108,7 +111,7 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
 **Phase 1 — Foundation (first slice)**
 - Drizzle SQLite schema: camp, membership, discord_link (+ better-auth tables).
 - better-auth: Discord + email/password + magic link + passkeys; roles.
-- Member directory; admin role management (recruit→member→admin); recruit intake.
+- Member directory; admin role management (recruit→member→officer→admin); recruit intake.
 - "Are you in our Discord?" check + account link.
 
 **Phase 2 — Public recruit page (#7, #4)**
