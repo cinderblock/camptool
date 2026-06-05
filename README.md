@@ -20,19 +20,26 @@ other camps to self-host.
 
 ## Status
 
-Phase 0 — scaffold. A runnable app shell (public landing + placeholder
-dashboard). Auth, the multi-camp data model, and the member directory come next.
+Phase 1 — foundation. The multi-camp data model, auth (email/password, magic
+link, passkeys, optional Discord), and the member directory with role management
+are in place. Next: the public recruit page and onboarding (Phase 2).
 
 ## Develop
 
 ```sh
 bun install
-cp .env.example .env   # fill in as phases require
+cp .env.example .env   # set PUBLIC_BASE_URL + BETTER_AUTH_SECRET; Discord optional
 bun run dev            # http://localhost:3000
 ```
 
+The SQLite database is created and migrated automatically on first start
+(`DATABASE_PATH`, default `./data/camptool.db`). Auth works without Discord
+credentials; setting `DISCORD_CLIENT_ID`/`DISCORD_CLIENT_SECRET` lights up the
+Discord login and link features (see [`docs/discord-setup.md`](docs/discord-setup.md)).
+
 Other scripts: `bun run typecheck`, `bun run build`, `bun run start`,
-`bun run lint`, `bun run format`.
+`bun run lint`, `bun run format`. Database: `bun run db:generate` (new
+migration from schema changes), `bun run db:migrate`, `bun run db:studio`.
 
 ## Design notes
 

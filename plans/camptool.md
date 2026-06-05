@@ -134,7 +134,41 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
 
 ## Findings / gotchas
 
-- (none yet — record negative results here as we hit them)
+- **better-auth 1.6.14** is the version we built Phase 1 on. Pin awareness: the
+  passkey plugin is a SEPARATE package (`@better-auth/passkey` +
+  `@better-auth/passkey/client`) in 1.6.x — it is NOT in `better-auth/plugins`.
+  `organization`, `magicLink` are in `better-auth/plugins`; `createAccessControl`
+  is in `better-auth/plugins/access`; `drizzleAdapter` is in
+  `better-auth/adapters/drizzle`.
+- **Org plugin IS our camp/membership spine.** Resolved the apparent tension
+  between "use the org/roles plugin" and the explicit `membership(user_id,
+  camp_id, …)` column spec: the organization plugin is mapped via
+  `schema: { organization: { modelName: "camp" }, member: { modelName:
+  "membership", additionalFields: { playaName, status, joinedAt } } }`. So `camp`
+  = better-auth organization, `membership` = better-auth member, `invitation` =
+  org invitation. No redundant second membership table.
+- **SQL column names are free; JS keys are load-bearing.** Verified by reading
+  the drizzle-adapter source: it does `schema[model]` (export key = model name)
+  and `schemaModel[fieldName]` (JS property key = better-auth field name). The
+  string passed to the column builder (the SQL column name) is never used by the
+  adapter. So we use **snake_case SQL columns** (Postgres-idiomatic, portable)
+  while JS keys match better-auth's field names. This lets the membership tenant
+  FK be the literal SQL column **`camp_id`** (honoring the hard invariant) while
+  the better-auth field stays `organizationId` (so the plugin works unmodified).
+- **db.query needs the schema.** The adapter uses `db.query[model]`, so the
+  drizzle client must be created as `drizzle(client, { schema })` with export
+  keys exactly: user, session, account, verification, passkey, camp, membership,
+  invitation.
+- **SQLite type modes the adapter expects:** booleans → `integer({mode:
+  "boolean"})`, all timestamps → `integer({mode: "timestamp_ms"})` (epoch ms).
+  Don't use text/seconds or the adapter reads garbage.
+- **`creatorRole` must be one of our roles.** Org plugin defaults `creatorRole`
+  to `"owner"`, which we don't have. Set it to `"admin"` so creating a camp
+  assigns the creator the admin role.
+- **Role hierarchy is ours, not better-auth's.** better-auth roles are
+  permission sets, not ranked. We keep a `ROLE_RANK` map (admin 3 > officer 2 >
+  member 1 > recruit 0) in `permissions.ts` and compare rank for "at least"
+  checks; access-control statements gate specific actions.
 
 ## Progress log
 
@@ -144,7 +178,14 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
 - [x] Resolved hosting/visibility/Discord questions (see above).
 - [x] Discord setup guide written (`docs/discord-setup.md`).
 - [x] MIT LICENSE + project CLAUDE.md added for open-source + agent handoff.
-- [ ] Phase 1 foundation — Drizzle multi-camp schema, better-auth, member dir.
+- [x] Phase 1 foundation — Drizzle multi-camp schema (10 tables, `camp_id` on
+      every tenant table), auto-migrate on startup; better-auth wired (server +
+      client: email/password, magic link, passkeys, optional Discord, org/roles
+      plugin → admin/officer/member/recruit via `ROLE_RANK`); member directory +
+      role management UI (add recruit, rank-checked promote/demote) + Discord
+      link surfacing. typecheck + build + biome green. Golden path validated
+      end-to-end over HTTP (signup → create camp → add recruit → promote →
+      negative 403 for non-officer) and login UI verified in-browser.
 
 ## Resolved (formerly open) questions
 
