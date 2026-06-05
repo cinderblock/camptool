@@ -17,6 +17,11 @@ camps to self-host or (eventually) run as multi-camp SaaS.
   `C:\Users\camer\git\Personal Projects\CampTool` (its own git repo; the parent
   `Personal Projects` is NOT a git repo).
 - **Toolchain:** Bun 1.3.0, Node 24.11, git 2.45. No Docker confirmed.
+- **Deployment URL:** localhost for now (dev + testing). Real domain comes later
+  — likely `tool.mathcamp.us` or the apex `mathcamp.us`. All URLs are env-driven
+  (`PUBLIC_BASE_URL`) so the host is a one-line change, no code edits.
+- **Repo visibility:** public / open-source (MIT). Keep secrets out of git;
+  treat all docs/code as publishable.
 - **Closest prior art in the user's repos:** `Gate Manager` (React Router 7 +
   Bun + Mantine) is the same shape as this app — use it as the reference template.
   `OpenSlate` shows the user's monorepo/workspace style.
@@ -134,18 +139,22 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
 ## Progress log
 
 - [x] Decisions captured (tenancy, db, auth, first slice, stack).
-- [ ] Phase 0 scaffold.
-- [ ] Phase 1 foundation.
+- [x] Phase 0 scaffold — runnable RR7+Mantine shell, typecheck+build green,
+      committed (646fa9c). README, Biome, .env.example in place.
+- [x] Resolved hosting/visibility/Discord questions (see above).
+- [x] Discord setup guide written (`docs/discord-setup.md`).
+- [x] MIT LICENSE + project CLAUDE.md added for open-source + agent handoff.
+- [ ] Phase 1 foundation — Drizzle multi-camp schema, better-auth, member dir.
 
-## Open questions for the user
+## Resolved (formerly open) questions
 
-1. Repo visibility/publishing: keep private until Phase 2, or public from the
-   start (MIT like OpenSlate)? (Recommend: private now, decide license later.)
-2. Where will this be hosted/deployed (the "little webserver")? Affects how we
-   wire migrations + Discord redirect URLs. (Recommend: confirm domain + host
-   before Phase 1 auth, since OAuth needs a callback URL.)
-3. Discord: do you already have a registered Discord application/bot + guild ID
-   we should target, or should I document how to create one?
+1. **Repo visibility:** public, MIT-licensed. Work in the open from now.
+2. **Hosting:** localhost for dev/testing now; real domain later
+   (`tool.mathcamp.us` or apex `mathcamp.us`). Keep everything env-driven via
+   `PUBLIC_BASE_URL` so switching the host is a config change only.
+3. **Discord app:** user does not have one pre-made. We document the setup
+   click-by-click in `docs/discord-setup.md` — written generically so any camp
+   self-hosting CampTool can wire their own Discord integration.
 
 ## Things not to do
 

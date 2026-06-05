@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "Self-hosted Burning Man theme-camp registration & management.",
   "scripts": {
     "dev": "bun --bun react-router dev",
