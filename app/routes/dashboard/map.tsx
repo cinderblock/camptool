@@ -27,7 +27,7 @@ export function meta(_: Route.MetaArgs) {
 
 // Structure palette. Each kind carries a footprint `shape`, default size (feet),
 // and vehicle rules: `vehicle` = fixed width + length-only; `rigid` = no resize.
-type ShapeKind = "rect" | "hexagon" | "diamond";
+type ShapeKind = "rect" | "hexagon" | "diamond" | "hypar";
 type Kind = {
   value: string;
   label: string;
@@ -50,24 +50,26 @@ const KINDS = [
     rigid: false,
   },
   {
+    // Regular hexagon, 8ft edges → 16ft point-to-point, 8√3 ≈ 13.86ft flat-to-flat.
     value: "hexayurt",
     label: "Hexayurt",
     color: "#0ca678",
-    w: 14,
-    h: 14,
+    w: 16,
+    h: 13.86,
     shape: "hexagon",
     vehicle: false,
-    rigid: false,
+    rigid: true,
   },
   {
+    // 8ft square base; the roof is a hypar with one high corner (diagonal gradient).
     value: "hyparhut",
     label: "Hyparhut",
     color: "#15aabf",
-    w: 12,
-    h: 12,
-    shape: "diamond",
+    w: 8,
+    h: 8,
+    shape: "hypar",
     vehicle: false,
-    rigid: false,
+    rigid: true,
   },
   {
     value: "rv",
@@ -199,18 +201,37 @@ function ShapeSwatch({ kind }: { kind: Kind }) {
       style={{ display: "block", flex: "0 0 auto" }}
       aria-hidden="true"
     >
-      {kind.shape === "rect" ? (
+      {kind.shape === "hexagon" || kind.shape === "diamond" ? (
+        <polygon
+          points={footprintPoints(kind.shape, 1, 1, s - 2, s - 2)}
+          fill={kind.color}
+        />
+      ) : kind.shape === "hypar" ? (
+        <>
+          <rect
+            x={2}
+            y={2}
+            width={s - 4}
+            height={s - 4}
+            rx={2}
+            fill={kind.color}
+          />
+          <line
+            x1={2}
+            y1={2}
+            x2={s - 2}
+            y2={s - 2}
+            stroke="#1c1c1c"
+            strokeOpacity={0.4}
+          />
+        </>
+      ) : (
         <rect
           x={2}
           y={2}
           width={s - 4}
           height={s - 4}
           rx={2}
-          fill={kind.color}
-        />
-      ) : (
-        <polygon
-          points={footprintPoints(kind.shape, 1, 1, s - 2, s - 2)}
           fill={kind.color}
         />
       )}
@@ -825,6 +846,12 @@ function Editor({
         aria-label="Camp layout"
       >
         <title>Camp layout</title>
+        <defs>
+          <linearGradient id="hypar-roof" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#ffffff" stopOpacity={0.55} />
+            <stop offset="1" stopColor="#000000" stopOpacity={0.35} />
+          </linearGradient>
+        </defs>
         <clipPath id={clipId}>
           <polygon points={lotPoints} />
         </clipPath>
@@ -1077,6 +1104,50 @@ function MapObjectShape({
           style={bodyStyle}
           onPointerDown={onBodyDown}
         />
+      ) : def.shape === "hypar" ? (
+        <>
+          <rect
+            x={px}
+            y={py}
+            width={w}
+            height={h}
+            rx={2}
+            fill={fill}
+            fillOpacity={0.78}
+            stroke={selected ? "#1c1c1c" : fill}
+            strokeWidth={selected ? 2 : 1}
+            style={bodyStyle}
+            onPointerDown={onBodyDown}
+          />
+          {/* Roof shading: high corner (top-left) light → low corner dark. */}
+          <rect
+            x={px}
+            y={py}
+            width={w}
+            height={h}
+            rx={2}
+            fill="url(#hypar-roof)"
+            pointerEvents="none"
+          />
+          <line
+            x1={px}
+            y1={py}
+            x2={px + w}
+            y2={py + h}
+            stroke="#1c1c1c"
+            strokeOpacity={0.3}
+            pointerEvents="none"
+          />
+          <circle
+            cx={px + 3}
+            cy={py + 3}
+            r={2}
+            fill="#fff"
+            stroke="#1c1c1c"
+            strokeWidth={1}
+            pointerEvents="none"
+          />
+        </>
       ) : (
         <polygon
           points={footprintPoints(def.shape, px, py, w, h)}
@@ -1121,7 +1192,7 @@ function MapObjectShape({
             style={{ cursor: "grab" }}
             onPointerDown={onRotateDown}
           />
-          {def.vehicle ? null : (
+          {def.vehicle || def.rigid ? null : (
             <rect
               x={px + w - 6}
               y={py + h - 6}
@@ -1228,7 +1299,9 @@ function SidePanel({
                 const d = kindDef(v);
                 const fields: Partial<ObjRow> = { kind: v };
                 const out: Record<string, string | number> = { kind: v };
-                if (d.vehicle) {
+                // Rigid kinds (hexayurt, hyparhut, car, truck) snap to a fixed
+                // footprint; RVs snap only their fixed width.
+                if (d.rigid || d.vehicle) {
                   fields.width = d.w;
                   out.width = d.w;
                 }
@@ -1242,8 +1315,7 @@ function SidePanel({
             />
             {kindDef(selected.kind).rigid ? (
               <Text size="xs" c="dimmed">
-                Fixed footprint: {round(selected.width)}′ ×{" "}
-                {round(selected.height)}′
+                {fixedSizeLabel(selected.kind, selected.width, selected.height)}
               </Text>
             ) : kindDef(selected.kind).vehicle ? (
               <Group grow>
@@ -1414,4 +1486,9 @@ function clamp(v: number, lo: number, hi: number) {
 }
 function round(v: number) {
   return Math.round(v * 2) / 2;
+}
+function fixedSizeLabel(kind: string, w: number, h: number): string {
+  if (kind === "hexayurt") return "Fixed: 8′ edges (≈16′ across)";
+  if (kind === "hyparhut") return "Fixed: 8′ square";
+  return `Fixed footprint: ${round(w)}′ × ${round(h)}′`;
 }
