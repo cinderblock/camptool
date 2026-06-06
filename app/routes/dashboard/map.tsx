@@ -27,7 +27,7 @@ export function meta(_: Route.MetaArgs) {
 
 // Structure palette. Each kind carries a footprint `shape`, default size (feet),
 // and vehicle rules: `vehicle` = fixed width + length-only; `rigid` = no resize.
-type ShapeKind = "rect" | "hexagon" | "diamond" | "hypar";
+type ShapeKind = "rect" | "hexagon" | "hypar";
 type Kind = {
   value: string;
   label: string;
@@ -174,20 +174,79 @@ function kindColor(kind: string) {
   return kindDef(kind).color;
 }
 
-/** Polygon points for a non-rect footprint inside the box (x,y,w,h). */
-function footprintPoints(
-  shape: ShapeKind,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-): string {
-  if (shape === "diamond") {
-    return `${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`;
-  }
-  // flat-top hexagon: corners inset horizontally by w/4
+/** Flat-top hexagon vertices (corners inset horizontally by w/4). */
+function hexVertices(x: number, y: number, w: number, h: number) {
   const i = w / 4;
-  return `${x + i},${y} ${x + w - i},${y} ${x + w},${y + h / 2} ${x + w - i},${y + h} ${x + i},${y + h} ${x},${y + h / 2}`;
+  return [
+    { x: x + i, y },
+    { x: x + w - i, y },
+    { x: x + w, y: y + h / 2 },
+    { x: x + w - i, y: y + h },
+    { x: x + i, y: y + h },
+    { x, y: y + h / 2 },
+  ];
+}
+
+/** Hexagon footprint points inside the box (x,y,w,h). */
+function hexPoints(x: number, y: number, w: number, h: number): string {
+  return hexVertices(x, y, w, h)
+    .map((p) => `${p.x},${p.y}`)
+    .join(" ");
+}
+
+/** Door symbol: opening gap + leaf + swing arc, centered on an edge. Swings
+ * OUT (away from the interior). (mx,my) = edge midpoint; (ex,ey) = unit along
+ * the edge; (nx,ny) = inward normal; len = door width in px. Drawn in local
+ * coords so it rotates with the object. */
+function Door({
+  mx,
+  my,
+  ex,
+  ey,
+  nx,
+  ny,
+  len,
+}: {
+  mx: number;
+  my: number;
+  ex: number;
+  ey: number;
+  nx: number;
+  ny: number;
+  len: number;
+}) {
+  const hx = mx - (ex * len) / 2;
+  const hy = my - (ey * len) / 2;
+  const lx = mx + (ex * len) / 2;
+  const ly = my + (ey * len) / 2;
+  // Open 180° outward: the leaf lies flat against the exterior wall, extending
+  // from the hinge away from the opening; the swing arc is the outward semicircle.
+  const ox = -nx;
+  const oy = -ny;
+  const off = 1.5;
+  const tipx = hx - ex * len;
+  const tipy = hy - ey * len;
+  const sweep = ey * nx - ex * ny > 0 ? 1 : 0;
+  return (
+    <g pointerEvents="none">
+      <line x1={hx} y1={hy} x2={lx} y2={ly} stroke="#fff" strokeWidth={2.5} />
+      <line
+        x1={hx + ox * off}
+        y1={hy + oy * off}
+        x2={tipx + ox * off}
+        y2={tipy + oy * off}
+        stroke="#1c1c1c"
+        strokeWidth={1}
+      />
+      <path
+        d={`M ${lx} ${ly} A ${len} ${len} 0 1 ${sweep} ${tipx} ${tipy}`}
+        stroke="#1c1c1c"
+        strokeWidth={0.75}
+        strokeOpacity={0.5}
+        fill="none"
+      />
+    </g>
+  );
 }
 
 /** Small legend/icon swatch showing a kind's footprint shape. */
@@ -201,11 +260,8 @@ function ShapeSwatch({ kind }: { kind: Kind }) {
       style={{ display: "block", flex: "0 0 auto" }}
       aria-hidden="true"
     >
-      {kind.shape === "hexagon" || kind.shape === "diamond" ? (
-        <polygon
-          points={footprintPoints(kind.shape, 1, 1, s - 2, s - 2)}
-          fill={kind.color}
-        />
+      {kind.shape === "hexagon" ? (
+        <polygon points={hexPoints(1, 1, s - 2, s - 2)} fill={kind.color} />
       ) : kind.shape === "hypar" ? (
         <>
           <rect
@@ -847,10 +903,17 @@ function Editor({
       >
         <title>Camp layout</title>
         <defs>
-          <linearGradient id="hypar-roof" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#ffffff" stopOpacity={0.55} />
-            <stop offset="1" stopColor="#000000" stopOpacity={0.35} />
+          {/* Hypar roof: high corner light → low corner dark, tilted ~10° off
+              the diagonal so the high point reads off-axis. */}
+          <linearGradient id="hypar-roof" x1="0" y1="0" x2="0.72" y2="1">
+            <stop offset="0" stopColor="#ffffff" stopOpacity={0.6} />
+            <stop offset="1" stopColor="#000000" stopOpacity={0.38} />
           </linearGradient>
+          {/* Hexayurt roof: bright apex at the center → dark at the eaves. */}
+          <radialGradient id="hexayurt-roof" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stopColor="#ffffff" stopOpacity={0.62} />
+            <stop offset="1" stopColor="#000000" stopOpacity={0.32} />
+          </radialGradient>
         </defs>
         <clipPath id={clipId}>
           <polygon points={lotPoints} />
@@ -1119,7 +1182,7 @@ function MapObjectShape({
             style={bodyStyle}
             onPointerDown={onBodyDown}
           />
-          {/* Roof shading: high corner (top-left) light → low corner dark. */}
+          {/* Roof shading: high corner light → low corner dark (tilted). */}
           <rect
             x={px}
             y={py}
@@ -1129,28 +1192,46 @@ function MapObjectShape({
             fill="url(#hypar-roof)"
             pointerEvents="none"
           />
-          <line
-            x1={px}
-            y1={py}
-            x2={px + w}
-            y2={py + h}
-            stroke="#1c1c1c"
-            strokeOpacity={0.3}
+        </>
+      ) : def.shape === "hexagon" ? (
+        <>
+          <polygon
+            points={hexPoints(px, py, w, h)}
+            fill={fill}
+            fillOpacity={0.78}
+            stroke={selected ? "#1c1c1c" : fill}
+            strokeWidth={selected ? 2 : 1}
+            style={bodyStyle}
+            onPointerDown={onBodyDown}
+          />
+          {/* Pyramidal roof: bright apex at center → dark eaves. */}
+          <polygon
+            points={hexPoints(px, py, w, h)}
+            fill="url(#hexayurt-roof)"
             pointerEvents="none"
           />
-          <circle
-            cx={px + 3}
-            cy={py + 3}
-            r={2}
-            fill="#fff"
-            stroke="#1c1c1c"
-            strokeWidth={1}
-            pointerEvents="none"
-          />
+          {/* Ridge lines from each vertex to the center apex. */}
+          {hexVertices(px, py, w, h).map((v) => (
+            <line
+              key={`${v.x},${v.y}`}
+              x1={cx}
+              y1={cy}
+              x2={v.x}
+              y2={v.y}
+              stroke="#1c1c1c"
+              strokeOpacity={0.35}
+              strokeWidth={0.75}
+              pointerEvents="none"
+            />
+          ))}
         </>
       ) : (
-        <polygon
-          points={footprintPoints(def.shape, px, py, w, h)}
+        <rect
+          x={px}
+          y={py}
+          width={w}
+          height={h}
+          rx={3}
           fill={fill}
           fillOpacity={0.78}
           stroke={selected ? "#1c1c1c" : fill}
@@ -1159,6 +1240,41 @@ function MapObjectShape({
           onPointerDown={onBodyDown}
         />
       )}
+      {o.kind === "rv" ? (
+        <Door
+          mx={px + w}
+          my={cy}
+          ex={0}
+          ey={1}
+          nx={-1}
+          ny={0}
+          len={Math.min(3 * ppf, h * 0.4)}
+        />
+      ) : o.kind === "hexayurt" || o.kind === "hyparhut" ? (
+        <Door
+          mx={cx}
+          my={py + h}
+          ex={1}
+          ey={0}
+          nx={0}
+          ny={-1}
+          len={Math.min(3 * ppf, w * 0.5)}
+        />
+      ) : null}
+      {o.kind === "tent" ? (
+        <rect
+          x={cx - Math.min(6 * ppf, w * 0.7) / 2}
+          y={py + h}
+          width={Math.min(6 * ppf, w * 0.7)}
+          height={3 * ppf}
+          rx={1}
+          fill={fill}
+          fillOpacity={0.28}
+          stroke={fill}
+          strokeWidth={1}
+          pointerEvents="none"
+        />
+      ) : null}
       {o.name && w > 28 ? (
         <text
           x={cx}
