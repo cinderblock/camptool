@@ -27,7 +27,7 @@ import {
   kindDef,
 } from "~/lib/structures";
 import { db } from "../../../db/client.server";
-import { mapObject, placement } from "../../../db/schema";
+import { mapObject, membership, placement, user } from "../../../db/schema";
 import type { Route } from "./+types/map";
 
 export function meta(_: Route.MetaArgs) {
@@ -117,8 +117,33 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from(mapObject)
     .where(and(eq(mapObject.campId, campId), eq(mapObject.placed, true)));
 
+  const canManage = hasAtLeast(active.membership.role, "officer");
+  // Declared-but-unplaced items (the officer placement queue), with owner names.
+  const unplacedRows = canManage
+    ? await db
+        .select({
+          id: mapObject.id,
+          kind: mapObject.kind,
+          width: mapObject.width,
+          height: mapObject.height,
+          ownerName: user.name,
+        })
+        .from(mapObject)
+        .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
+        .leftJoin(user, eq(membership.userId, user.id))
+        .where(and(eq(mapObject.campId, campId), eq(mapObject.placed, false)))
+    : [];
+
   return {
     canEdit: hasAtLeast(active.membership.role, "member"),
+    canManage,
+    unplaced: unplacedRows.map((u) => ({
+      id: u.id,
+      kind: u.kind,
+      width: u.width,
+      height: u.height,
+      ownerName: u.ownerName,
+    })),
     campName: active.camp.name,
     lot: lot
       ? {
@@ -255,6 +280,34 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
+  if (intent === "placeObject") {
+    // Officer drops a declared (unplaced) item onto the lot.
+    if (!hasAtLeast(active.membership.role, "officer")) {
+      return data({ error: "Officers place items." }, { status: 403 });
+    }
+    const id = String(form.get("id"));
+    const [row] = await db
+      .update(mapObject)
+      .set({ placed: true, x: num("x"), y: num("y"), updatedAt: new Date() })
+      .where(and(eq(mapObject.id, id), eq(mapObject.campId, campId)))
+      .returning();
+    if (!row) return data({ error: "Item not found." }, { status: 404 });
+    return data({
+      created: {
+        id: row.id,
+        name: row.name,
+        kind: row.kind,
+        x: row.x,
+        y: row.y,
+        width: row.width,
+        height: row.height,
+        rotation: row.rotation,
+        color: row.color,
+        notes: row.notes,
+      } satisfies ObjRow,
+    });
+  }
+
   if (intent === "deleteObject") {
     const id = String(form.get("id"));
     await db
@@ -309,7 +362,7 @@ function mapUpBearingFor(addr: string | null): number | null {
 type Lot = NonNullable<Route.ComponentProps["loaderData"]["lot"]>;
 
 export default function CampMap({ loaderData }: Route.ComponentProps) {
-  const { canEdit, lot } = loaderData;
+  const { canEdit, canManage, unplaced, lot } = loaderData;
   const fetcher = useFetcher();
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -374,6 +427,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           style={{ flex: "1 1 240px", minWidth: 240, maxWidth: 340 }}
         >
           <Compass mapUpBearing={mapUpBearingFor(lot.address)} />
+          {canManage ? <UnplacedTray unplaced={unplaced} /> : null}
           {canEdit ? <Legend /> : null}
           <SidePanel
             lot={lot}
@@ -386,6 +440,71 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         </Stack>
       </Group>
     </Stack>
+  );
+}
+
+type Unplaced = Route.ComponentProps["loaderData"]["unplaced"][number];
+
+/** Officer queue of declared-but-unplaced items; drag one onto the lot to place. */
+function UnplacedTray({ unplaced }: { unplaced: Unplaced[] }) {
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Text size="xs" fw={600} mb={6}>
+        Unplaced ({unplaced.length}) — drag onto the map
+      </Text>
+      {unplaced.length === 0 ? (
+        <Text size="xs" c="dimmed">
+          Everything declared has been placed.
+        </Text>
+      ) : (
+        <Stack gap={6}>
+          {unplaced.map((u) => {
+            const def = kindDef(u.kind);
+            return (
+              <Group
+                key={u.id}
+                gap={6}
+                wrap="nowrap"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("application/camptool-place-id", u.id);
+                  e.dataTransfer.setData(
+                    "application/camptool-w",
+                    String(u.width),
+                  );
+                  e.dataTransfer.setData(
+                    "application/camptool-h",
+                    String(u.height),
+                  );
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                style={{
+                  cursor: "grab",
+                  border: "1px solid var(--mantine-color-gray-3)",
+                  borderRadius: 6,
+                  padding: "3px 8px",
+                  userSelect: "none",
+                }}
+              >
+                <ShapeSwatch kind={def} size={14} />
+                <Text size="xs" style={{ flex: 1 }}>
+                  {def.label}
+                  <Text span c="dimmed">
+                    {" "}
+                    · {round(u.width)}×{round(u.height)}′
+                  </Text>
+                </Text>
+                {u.ownerName ? (
+                  <Text size="xs" c="dimmed" truncate maw={90}>
+                    {u.ownerName}
+                  </Text>
+                ) : null}
+              </Group>
+            );
+          })}
+        </Stack>
+      )}
+    </Paper>
   );
 }
 
@@ -662,11 +781,30 @@ function Editor({
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
+    const p = svgPoint(e);
+    // Dropping a declared (unplaced) item from the tray places it here.
+    const placeId = e.dataTransfer.getData("application/camptool-place-id");
+    if (placeId) {
+      const iw = Number(e.dataTransfer.getData("application/camptool-w")) || 10;
+      const ih = Number(e.dataTransfer.getData("application/camptool-h")) || 10;
+      fetcher.submit(
+        {
+          intent: "placeObject",
+          id: placeId,
+          x: round(
+            clamp(fx(p.x) - iw / 2, 0, Math.max(0, lot.frontageFt - iw)),
+          ),
+          y: round(clamp(fy(p.y) - ih / 2, 0, Math.max(0, lot.depthFt - ih))),
+        },
+        { method: "post" },
+      );
+      return;
+    }
+    // Otherwise it's a new kind from the legend.
     const kind =
       e.dataTransfer.getData("application/camptool-kind") ||
       e.dataTransfer.getData("text/plain");
     if (!kind || !isKind(kind)) return;
-    const p = svgPoint(e);
     addObjectAt(kind, fx(p.x), fy(p.y));
   }
 
