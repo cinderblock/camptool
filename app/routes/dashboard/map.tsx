@@ -322,25 +322,70 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       </Group>
 
       <Group align="flex-start" gap="lg" wrap="wrap">
-        <Editor
-          lot={lot}
-          objects={objects}
-          setObjects={setObjects}
-          selectedId={selectedId}
-          setSelectedId={setSelectedId}
-          canEdit={canEdit}
-          fetcher={fetcher}
-        />
-        <SidePanel
-          lot={lot}
-          objects={objects}
-          setObjects={setObjects}
-          selectedId={selectedId}
-          canEdit={canEdit}
-          fetcher={fetcher}
-        />
+        <div style={{ flex: "1 1 360px", minWidth: 300, maxWidth: 760 }}>
+          <Editor
+            lot={lot}
+            objects={objects}
+            setObjects={setObjects}
+            selectedId={selectedId}
+            setSelectedId={setSelectedId}
+            canEdit={canEdit}
+            fetcher={fetcher}
+          />
+        </div>
+        <Stack
+          gap="md"
+          style={{ flex: "1 1 240px", minWidth: 240, maxWidth: 340 }}
+        >
+          <Compass mapUpBearing={mapUpBearingFor(lot.address)} />
+          {canEdit ? <Legend /> : null}
+          <SidePanel
+            lot={lot}
+            objects={objects}
+            setObjects={setObjects}
+            selectedId={selectedId}
+            canEdit={canEdit}
+            fetcher={fetcher}
+          />
+        </Stack>
       </Group>
     </Stack>
+  );
+}
+
+/** Draggable palette — drag a chip onto the map to place that kind. */
+function Legend() {
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Text size="xs" fw={600} mb={6}>
+        Legend — drag onto the map
+      </Text>
+      <Group gap="xs">
+        {KINDS.map((k) => (
+          <Group
+            key={k.value}
+            gap={6}
+            wrap="nowrap"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("application/camptool-kind", k.value);
+              e.dataTransfer.setData("text/plain", k.value);
+              e.dataTransfer.effectAllowed = "copy";
+            }}
+            style={{
+              cursor: "grab",
+              border: "1px solid var(--mantine-color-gray-3)",
+              borderRadius: 6,
+              padding: "2px 8px",
+              userSelect: "none",
+            }}
+          >
+            <ColorSwatch color={k.color} size={12} />
+            <Text size="xs">{k.label}</Text>
+          </Group>
+        ))}
+      </Group>
+    </Paper>
   );
 }
 
@@ -448,8 +493,6 @@ function Editor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [canEdit, selectedId, objects, lot.frontageFt, lot.depthFt]);
-
-  const mapUpBearing = mapUpBearingFor(lot.address);
 
   // Trapezoid taper: rear edge widens with depth when the inner radius is known.
   const rear = lot.innerRadiusFt
@@ -593,100 +636,68 @@ function Editor({
 
   const clipId = "lot-clip";
   return (
-    <Stack gap="xs" style={{ flex: "1 1 560px", minWidth: 320 }}>
-      <Paper withBorder radius="md" p={0} style={{ overflow: "hidden" }}>
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${VIEW_W} ${viewH}`}
-          style={{
-            width: "100%",
-            height: "auto",
-            display: "block",
-            touchAction: "none",
-          }}
-          onPointerDown={() => setSelectedId(null)}
-          onDragOver={canEdit ? (e) => e.preventDefault() : undefined}
-          onDrop={canEdit ? onDrop : undefined}
-          role="img"
-          aria-label="Camp layout"
-        >
-          <title>Camp layout</title>
-          <clipPath id={clipId}>
-            <polygon points={lotPoints} />
-          </clipPath>
-          <g clipPath={`url(#${clipId})`}>
-            <Grid
-              frontageFt={lot.frontageFt}
-              depthFt={lot.depthFt}
-              rear={rear}
-              originX={originX}
-              originY={originY}
-              rearCenterX={rearCenterX}
-              ppf={ppf}
-            />
-          </g>
-          <polygon
-            points={lotPoints}
-            fill="none"
-            stroke="#adb5bd"
-            strokeWidth={2}
+    <Paper
+      withBorder
+      radius="md"
+      p={0}
+      style={{ overflow: "hidden", display: "inline-block", maxWidth: "100%" }}
+    >
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${VIEW_W} ${viewH}`}
+        width={VIEW_W}
+        height={viewH}
+        style={{
+          display: "block",
+          maxWidth: "100%",
+          maxHeight: "calc(100vh - 180px)",
+          width: "auto",
+          height: "auto",
+          touchAction: "none",
+        }}
+        onPointerDown={() => setSelectedId(null)}
+        onDragOver={canEdit ? (e) => e.preventDefault() : undefined}
+        onDrop={canEdit ? onDrop : undefined}
+        role="img"
+        aria-label="Camp layout"
+      >
+        <title>Camp layout</title>
+        <clipPath id={clipId}>
+          <polygon points={lotPoints} />
+        </clipPath>
+        <g clipPath={`url(#${clipId})`}>
+          <Grid
+            frontageFt={lot.frontageFt}
+            depthFt={lot.depthFt}
+            rear={rear}
+            originX={originX}
+            originY={originY}
+            rearCenterX={rearCenterX}
+            ppf={ppf}
           />
-          {objects.map((o) => (
-            <MapObjectShape
-              key={o.id}
-              o={o}
-              originX={originX}
-              originY={originY}
-              ppf={ppf}
-              selected={o.id === selectedId}
-              canEdit={canEdit}
-              onBodyDown={(e) => startDrag(e, o, "move")}
-              onResizeDown={(e) => startDrag(e, o, "resize")}
-              onRotateDown={(e) => startDrag(e, o, "rotate")}
-            />
-          ))}
-          <Compass mapUpBearing={mapUpBearing} />
-        </svg>
-      </Paper>
-
-      <div>
-        <Text size="xs" c="dimmed" mb={4}>
-          {canEdit ? "Legend — drag onto the map to add" : "Legend"}
-        </Text>
-        <Group gap="xs">
-          {KINDS.map((k) => (
-            <Group
-              key={k.value}
-              gap={6}
-              wrap="nowrap"
-              draggable={canEdit}
-              onDragStart={
-                canEdit
-                  ? (e) => {
-                      e.dataTransfer.setData(
-                        "application/camptool-kind",
-                        k.value,
-                      );
-                      e.dataTransfer.setData("text/plain", k.value);
-                      e.dataTransfer.effectAllowed = "copy";
-                    }
-                  : undefined
-              }
-              style={{
-                cursor: canEdit ? "grab" : "default",
-                border: "1px solid var(--mantine-color-gray-3)",
-                borderRadius: 6,
-                padding: "2px 8px",
-                userSelect: "none",
-              }}
-            >
-              <ColorSwatch color={k.color} size={12} />
-              <Text size="xs">{k.label}</Text>
-            </Group>
-          ))}
-        </Group>
-      </div>
-    </Stack>
+        </g>
+        <polygon
+          points={lotPoints}
+          fill="none"
+          stroke="#adb5bd"
+          strokeWidth={2}
+        />
+        {objects.map((o) => (
+          <MapObjectShape
+            key={o.id}
+            o={o}
+            originX={originX}
+            originY={originY}
+            ppf={ppf}
+            selected={o.id === selectedId}
+            canEdit={canEdit}
+            onBodyDown={(e) => startDrag(e, o, "move")}
+            onResizeDown={(e) => startDrag(e, o, "resize")}
+            onRotateDown={(e) => startDrag(e, o, "rotate")}
+          />
+        ))}
+      </svg>
+    </Paper>
   );
 }
 
@@ -747,34 +758,38 @@ function Grid({
   return <g>{lines}</g>;
 }
 
+/** Standalone compass widget (its own SVG) so it never overlaps the map. */
 function Compass({ mapUpBearing }: { mapUpBearing: number | null }) {
-  const cx = VIEW_W - 82;
-  const cy = 86;
-  const r = 50;
+  const S = 168;
+  const cx = S / 2;
+  const cy = S / 2 + 4;
+  const r = 60;
+  const vec = (bearing: number) => {
+    const phi = (((bearing - (mapUpBearing ?? 0)) % 360) * Math.PI) / 180;
+    return { x: Math.sin(phi), y: -Math.cos(phi) };
+  };
   const ray = (
     bearing: number,
     color: string,
     label: string,
     opts?: { lw?: number; weight?: number; len?: number },
   ) => {
-    const phi = (((bearing - (mapUpBearing ?? 0)) % 360) * Math.PI) / 180;
-    const ux = Math.sin(phi);
-    const uy = -Math.cos(phi);
+    const u = vec(bearing);
     const len = opts?.len ?? r;
     return (
       <g key={label}>
         <line
           x1={cx}
           y1={cy}
-          x2={cx + ux * len}
-          y2={cy + uy * len}
+          x2={cx + u.x * len}
+          y2={cy + u.y * len}
           stroke={color}
           strokeWidth={opts?.lw ?? 1.25}
         />
         <text
-          x={cx + ux * (r + 11)}
-          y={cy + uy * (r + 11)}
-          fontSize={9}
+          x={cx + u.x * (r + 9)}
+          y={cy + u.y * (r + 9)}
+          fontSize={10}
           fontWeight={opts?.weight ?? 400}
           fill={color}
           textAnchor="middle"
@@ -785,30 +800,50 @@ function Compass({ mapUpBearing }: { mapUpBearing: number | null }) {
       </g>
     );
   };
+  // Daylight wedge: from sunrise clockwise through the south to sunset.
+  const dr = vec(SUNRISE_AZ);
+  const ds = vec(SUNSET_AZ);
+  const daylight = `M ${cx} ${cy} L ${cx + dr.x * r} ${cy + dr.y * r} A ${r} ${r} 0 1 1 ${cx + ds.x * r} ${cy + ds.y * r} Z`;
   return (
-    <g pointerEvents="none">
-      <circle
-        cx={cx}
-        cy={cy}
-        r={r}
-        fill="#ffffff"
-        fillOpacity={0.82}
-        stroke="#dee2e6"
-      />
-      {/* The Man is always toward the frontage (map up). */}
-      <line x1={cx} y1={cy} x2={cx} y2={cy - r + 18} stroke="#1c1c1c" />
-      <ManGlyph x={cx} y={cy - r + 11} size={20} />
-      {mapUpBearing != null ? (
-        <>
-          {ray(0, "#e03131", "N", { lw: 2, weight: 700 })}
-          {ray(90, "#adb5bd", "E", { lw: 0.6 })}
-          {ray(180, "#adb5bd", "S", { lw: 0.6 })}
-          {ray(270, "#adb5bd", "W", { lw: 0.6 })}
-          {ray(SUNRISE_AZ, "#f08c00", "rise", { len: r - 8 })}
-          {ray(SUNSET_AZ, "#5f3dc4", "set", { len: r - 8 })}
-        </>
+    <Paper withBorder p="sm" radius="md">
+      <Text size="xs" fw={600} mb={4}>
+        Orientation
+      </Text>
+      <svg
+        viewBox={`0 0 ${S} ${S}`}
+        style={{
+          width: "100%",
+          maxWidth: 190,
+          height: "auto",
+          display: "block",
+        }}
+        role="img"
+        aria-label="Compass"
+      >
+        <title>Compass</title>
+        <circle cx={cx} cy={cy} r={r} fill="#ffffff" stroke="#dee2e6" />
+        {mapUpBearing != null ? (
+          <path d={daylight} fill="#ffe066" fillOpacity={0.4} stroke="none" />
+        ) : null}
+        <line x1={cx} y1={cy} x2={cx} y2={cy - r + 20} stroke="#1c1c1c" />
+        <ManGlyph x={cx} y={cy - r + 12} size={22} />
+        {mapUpBearing != null ? (
+          <>
+            {ray(0, "#e03131", "N", { lw: 2, weight: 700 })}
+            {ray(90, "#adb5bd", "E", { lw: 0.6 })}
+            {ray(180, "#adb5bd", "S", { lw: 0.6 })}
+            {ray(270, "#adb5bd", "W", { lw: 0.6 })}
+            {ray(SUNRISE_AZ, "#f08c00", "rise", { len: r - 10 })}
+            {ray(SUNSET_AZ, "#5f3dc4", "set", { len: r - 10 })}
+          </>
+        ) : null}
+      </svg>
+      {mapUpBearing == null ? (
+        <Text size="xs" c="dimmed" mt={4}>
+          Set the lot address (e.g. 3:00) for true north & sun.
+        </Text>
       ) : null}
-    </g>
+    </Paper>
   );
 }
 
@@ -956,7 +991,7 @@ function SidePanel({
   }
 
   return (
-    <Stack gap="md" style={{ flex: "0 0 280px", width: 280 }}>
+    <Stack gap="md">
       {selected ? (
         <Paper withBorder p="md" radius="md">
           <Stack gap="sm">

@@ -319,6 +319,19 @@ placement page.)
   `await` a tick so React's effect attaches the window listeners → pointermove(s)
   on window → pointerup), then assert on DOM attrs + the DB. Don't conclude drag is
   broken from `left_click_drag` alone.
+- **BRC compass orientation (map editor).** Anchored to user ground truth: a
+  3:00 camp's frontage faces **NE toward the Man**. So the bearing the map's "up"
+  (toward the Man, across the frontage) points to, for clock address H, is
+  `(135 − 30·H) mod 360` — 3:00→45°(NE), 4:30→0°(N), 6:00→315°(NW), 12:00→135°(SE).
+  Sun azimuths are event-week approximations (~40.8°N, late Aug): sunrise ENE ≈73°,
+  sunset WNW ≈287°; the compass shades the daylight wedge (sunrise→south→sunset).
+  Earlier I had this 180° flipped (added +180 for "inward"); the frontage *is* the
+  Man side, so map-up = the toward-Man bearing directly, no +180.
+- **Compass lives outside the map SVG.** It's a standalone widget in the right
+  rail, not an overlay, so it never covers the lot. The map SVG is size-capped
+  (`maxHeight: calc(100vh - 180px)`, intrinsic width/height + `maxWidth:100%`) so a
+  wide window doesn't balloon it — the whole lot stays visible. Legend + selected-
+  object properties + lot form sit in the rail beside the map.
 - **Map coordinate model = plot-local feet.** `map_object.x/y/width/height` are
   feet with origin at the lot's front-left corner, +x along the frontage, +y into
   the lot. This keeps a camp's internal layout stable even if its city lot moves
