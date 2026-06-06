@@ -242,6 +242,34 @@ function rotateVec(vx: number, vy: number, deg: number) {
   return { x: vx * cos - vy * sin, y: vx * sin + vy * cos };
 }
 
+// Black Rock City orientation, anchored to ground truth: a 3:00 camp's frontage
+// faces NE toward the Man. So the bearing the map's "up" (toward the Man, across
+// the frontage) points to, for a clock address H, is (135 - 30·H) mod 360
+// — 3:00 → 45° (NE), 4:30 → 0° (N), 6:00 → 315° (NW), 12:00 → 135° (SE).
+// Sun azimuths are event-week approximations for ~40.8°N (late Aug / early Sep):
+// sunrise ENE, sunset WNW.
+const SUNRISE_AZ = 73;
+const SUNSET_AZ = 287;
+
+/** Parse a clock address like "3:00" or "4:30" to decimal hours (1–12), else null. */
+function parseClock(addr: string | null): number | null {
+  if (!addr) return null;
+  const m = addr.match(/^\s*(\d{1,2})(?::(\d{1,2}))?/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mm = m[2] ? Number(m[2]) : 0;
+  if (h < 1 || h > 12 || mm > 59) return null;
+  return h + mm / 60;
+}
+
+/** Compass bearing (deg from true north) the map's "up" points to, from the
+ * clock address. Map-up faces the Man across the frontage. */
+function mapUpBearingFor(addr: string | null): number | null {
+  const h = parseClock(addr);
+  if (h == null) return null;
+  return (((135 - 30 * h) % 360) + 360) % 360;
+}
+
 type Lot = NonNullable<Route.ComponentProps["loaderData"]["lot"]>;
 
 export default function CampMap({ loaderData }: Route.ComponentProps) {
@@ -362,6 +390,66 @@ function Editor({
       window.removeEventListener("pointercancel", up);
     };
   }, [dragging]);
+
+  // Keyboard shortcuts for the selected object: R rotates (Shift = the other
+  // way), arrows nudge (Shift = 10ft), Delete removes, Escape deselects.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commit/fetcher are stable
+  useEffect(() => {
+    if (!canEdit) return;
+    function onKey(e: KeyboardEvent) {
+      if (!selectedId) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t?.tagName === "INPUT" ||
+        t?.tagName === "TEXTAREA" ||
+        t?.isContentEditable
+      )
+        return;
+      const obj = objects.find((o) => o.id === selectedId);
+      if (!obj) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        setObjects((prev) => prev.filter((o) => o.id !== selectedId));
+        fetcher.submit(
+          { intent: "deleteObject", id: selectedId },
+          { method: "post" },
+        );
+        setSelectedId(null);
+        return;
+      }
+      if (e.key === "Escape") {
+        setSelectedId(null);
+        return;
+      }
+      const step = e.shiftKey ? 10 : 1;
+      let next: ObjRow | null = null;
+      if (e.key === "r" || e.key === "R") {
+        next = {
+          ...obj,
+          rotation: Math.round(obj.rotation + (e.shiftKey ? -15 : 15)),
+        };
+      } else if (e.key === "ArrowLeft") {
+        next = { ...obj, x: clamp(obj.x - step, 0, lot.frontageFt) };
+      } else if (e.key === "ArrowRight") {
+        next = { ...obj, x: clamp(obj.x + step, 0, lot.frontageFt) };
+      } else if (e.key === "ArrowUp") {
+        next = { ...obj, y: clamp(obj.y - step, 0, lot.depthFt) };
+      } else if (e.key === "ArrowDown") {
+        next = { ...obj, y: clamp(obj.y + step, 0, lot.depthFt) };
+      }
+      if (!next) return;
+      e.preventDefault();
+      const committed = next;
+      setObjects((prev) =>
+        prev.map((o) => (o.id === selectedId ? committed : o)),
+      );
+      commit(committed);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canEdit, selectedId, objects, lot.frontageFt, lot.depthFt]);
+
+  const mapUpBearing = mapUpBearingFor(lot.address);
 
   // Trapezoid taper: rear edge widens with depth when the inner radius is known.
   const rear = lot.innerRadiusFt
@@ -557,6 +645,7 @@ function Editor({
               onRotateDown={(e) => startDrag(e, o, "rotate")}
             />
           ))}
+          <Compass mapUpBearing={mapUpBearing} />
         </svg>
       </Paper>
 
@@ -656,6 +745,92 @@ function Grid({
     );
   }
   return <g>{lines}</g>;
+}
+
+function Compass({ mapUpBearing }: { mapUpBearing: number | null }) {
+  const cx = VIEW_W - 82;
+  const cy = 86;
+  const r = 50;
+  const ray = (
+    bearing: number,
+    color: string,
+    label: string,
+    opts?: { lw?: number; weight?: number; len?: number },
+  ) => {
+    const phi = (((bearing - (mapUpBearing ?? 0)) % 360) * Math.PI) / 180;
+    const ux = Math.sin(phi);
+    const uy = -Math.cos(phi);
+    const len = opts?.len ?? r;
+    return (
+      <g key={label}>
+        <line
+          x1={cx}
+          y1={cy}
+          x2={cx + ux * len}
+          y2={cy + uy * len}
+          stroke={color}
+          strokeWidth={opts?.lw ?? 1.25}
+        />
+        <text
+          x={cx + ux * (r + 11)}
+          y={cy + uy * (r + 11)}
+          fontSize={9}
+          fontWeight={opts?.weight ?? 400}
+          fill={color}
+          textAnchor="middle"
+          dominantBaseline="central"
+        >
+          {label}
+        </text>
+      </g>
+    );
+  };
+  return (
+    <g pointerEvents="none">
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r}
+        fill="#ffffff"
+        fillOpacity={0.82}
+        stroke="#dee2e6"
+      />
+      {/* The Man is always toward the frontage (map up). */}
+      <line x1={cx} y1={cy} x2={cx} y2={cy - r + 18} stroke="#1c1c1c" />
+      <ManGlyph x={cx} y={cy - r + 11} size={20} />
+      {mapUpBearing != null ? (
+        <>
+          {ray(0, "#e03131", "N", { lw: 2, weight: 700 })}
+          {ray(90, "#adb5bd", "E", { lw: 0.6 })}
+          {ray(180, "#adb5bd", "S", { lw: 0.6 })}
+          {ray(270, "#adb5bd", "W", { lw: 0.6 })}
+          {ray(SUNRISE_AZ, "#f08c00", "rise", { len: r - 8 })}
+          {ray(SUNSET_AZ, "#5f3dc4", "set", { len: r - 8 })}
+        </>
+      ) : null}
+    </g>
+  );
+}
+
+/** Minimal "the Man" glyph — a stick figure with arms raised, centered at (x,y). */
+function ManGlyph({ x, y, size }: { x: number; y: number; size: number }) {
+  const s = size / 22;
+  return (
+    <g
+      stroke="#1c1c1c"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      fill="none"
+      pointerEvents="none"
+    >
+      <circle cx={x} cy={y - 9 * s} r={2.4 * s} fill="#1c1c1c" stroke="none" />
+      <line x1={x} y1={y - 6.5 * s} x2={x} y2={y + 3 * s} />
+      <line x1={x} y1={y - 4.5 * s} x2={x - 6 * s} y2={y - 11 * s} />
+      <line x1={x} y1={y - 4.5 * s} x2={x + 6 * s} y2={y - 11 * s} />
+      <line x1={x} y1={y + 3 * s} x2={x - 4.5 * s} y2={y + 10 * s} />
+      <line x1={x} y1={y + 3 * s} x2={x + 4.5 * s} y2={y + 10 * s} />
+    </g>
+  );
 }
 
 function MapObjectShape({
