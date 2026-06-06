@@ -144,6 +144,15 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
   service/flammable/solar/etc markers.
 - Stretch: cross-camp neighborhood map sharing; 3D + sun/shade render.
 
+*MVP increment shipped:* `placement` (one BRC lot per camp) + `map_object`
+(structures in plot-local feet) schema; `/dashboard/map` SVG editor — add from a
+kind palette, drag to move, corner-handle resize, top-dot rotate, side panel for
+name/kind/size/rotation/notes + delete, and a lot-setup form (street, address,
+frontage, depth, optional inner-radius → wedge taper). Members+ edit; recruits
+view-only. Still TODO: "highlight my spot", premade/shared blocks, Borg outline
+import, fire-lane/marker overlays, true radial placement of objects (see taper
+note below), 3D/sun-shade.
+
 **Phase 4 — Operations**
 - Dues/financials with per-field view/edit permissions (#3).
 - Shared documents (#5); announcements (#6).
@@ -151,6 +160,67 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
 **Phase 5 — Data lifecycle**
 - Import last year's data (#8); exportable database (#10).
 - Discord/email reminder campaigns + scheduled DMs (#9).
+
+## BRC city geometry reference (for the map editor, Phase 3)
+
+Black Rock City is concentric arcs centered on the Man, so every camp is a
+**radial wedge**, not a rectangle — the edge nearer the Man is shorter than the
+edge farther out. The map editor will need real placement geometry, so capture
+the canonical numbers here.
+
+**Source — 2025 BRC Measurements** (BMorg, dated 3.5.2025):
+`https://bm-innovate.s3.amazonaws.com/2025/2025%20BRC%20Measurements.doc.pdf`
+A local copy of the page-1 text is the basis for the table below. These figures
+are **per-year** — BMorg republishes a measurements doc each year and the layout
+does shift (street count, block depths, plaza radii, mid-city double-block
+placement). Before trusting these for a given year, pull that year's doc from
+`bm-innovate.s3.amazonaws.com/<year>/` (or the placement page) and diff against
+2025. Year-over-year comparison tells us whether our camp's trapezoid changes.
+
+**Key 2025 constants:**
+- Esplanade center = 2,500′ from the Man.
+- Block depths (Man → outward): Esplanade→Atwood 400′; Atwood→Ishiguro 250′ each;
+  Ishiguro→Kilgore 150′ each. **Mid-city double block Ellison→Farmer = 450′.**
+- Annular (lettered) streets 30′ wide, except Esplanade & Ellison 40′, Kilgore 50′.
+- Radial avenues 40′ wide. Outer road Kilgore = 11,510′ diameter.
+
+**Derived street-center radii** (block depth + adjacent street half-widths;
+validated against two independent doc data points):
+
+| Street | Center radius from Man |
+|---|---|
+| Esplanade | 2,500′ |
+| Atwood (A) | 2,935′ |
+| Bradbury (B) | 3,215′ ✓ (doc: plazas "centered 3215′") |
+| C | 3,495′ |
+| D | 3,775′ |
+| **Ellison (E)** | **≈ 4,060′** |
+| Farmer (F) | 4,545′ |
+| Gibson (G) | 4,825′ ✓ (doc: mid-city plazas "centered 4,825′") |
+
+**Trapezoid formula.** For a camp fronting a street at inner radius `r` with
+frontage arc `f` and radial depth `d`, the far (service-alley) edge is longer by
+`Δ = d × f / r = (f·d)/r`. Side walls are radial lines toward the Man.
+
+**Our camp (Math Camp @ Group W, fronting E/Ellison, 100′ frontage × 200′ deep,
+toward the Man = inner/short side):** Δ = (100 × 200)/4,060 ≈ **4.9′**. So the
+frontage ≈ 100′ and the rear/service-alley edge ≈ **105′**; a ~1.4° wedge. The
+200′ depth + 20′ shared service alley is the back-to-back arrangement inside the
+450′ Ellison→Farmer mid-city double block.
+
+## Fire-lane determination (current Borg outline)
+
+Our 200′ depth trips the "depth > 125′ from frontage" fire-lane trigger, but the
+rule is really about **reach**: a lane may dead-end as long as fire hose reaches
+125′ to every camp border. We have access on two opposite edges — E-street
+frontage (covers depth 0–125′) and the rear 20′ shared service alley (covers
+75–200′) — which overlap and cover the whole depth, so **no internal fire lane is
+required**. Caveats to confirm with Placement: the shared alley must count as
+fire access (unobstructed, no sharp turns, 20′ curve on 90° turns, straight truck
+path out), and interior structures must not block hose routing. Independent
+triggers still apply if we join the BRC Fuel Program, need OSS water/pumpouts, or
+place a generator/fuel tank >20′ from the street. (Source: BMorg camp-layouts
+placement page.)
 
 ## Findings / gotchas
 
@@ -202,6 +272,44 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
   Migrations apply on app startup via the `drizzle-orm/bun-sqlite` migrator in
   `db/client.server.ts`. Use `db:generate` to author migrations; restart the app
   (or the dev server) to apply them. Don't rely on `db:migrate`.
+- **"/dashboard redirects to /login" was NOT a code bug.** Reproduced the full
+  flow over HTTP (signup → `Set-Cookie better-auth.session_token` →
+  `GET /dashboard` returns 200; `get-session` returns the session) — the loader
+  chain (`requireUser`/`resolveActiveCamp`) honors the cookie correctly, even for
+  a brand-new user with no camp (they get the "Create your camp" screen, not a
+  redirect). The redirect happens only when the server sees no valid session
+  cookie. Root cause is environmental: a **stale session cookie** in the browser
+  from earlier dev-server churn (DB recreated / different process), or the user
+  browsing a **different origin/port than the running server**. Fix for the user:
+  ensure one dev server is up on the origin they're visiting, clear CampTool
+  cookies, sign up fresh.
+  **Resolved properly:** in `auth.server.ts`, set `advanced.cookiePrefix:
+  "camptool"` **only on localhost dev** (gated by `isLocalDev`), so dev cookies are
+  `camptool.session_token`. localhost cookies are host-scoped (not port-scoped), so
+  the default name collides with every other better-auth app on the dev box; a
+  unique prefix means a foreign/stale token can't be mistaken for ours. In
+  production each deployment owns its domain, so the default `better-auth.*` name is
+  already isolated — no prefix there. Old dev `better-auth.*` cookies are now
+  ignored; a fresh login overwrites the namespaced one, no DevTools cleanup needed.
+- **Concurrent dev servers + dual-stack localhost cause confusing 404s.** With
+  another agent's `react-router dev` already on `[::1]:3000`, starting a second
+  on `127.0.0.1:3000` makes `localhost` curls alternate between two servers
+  (one warming up → 404, one serving → 200). Don't start a second dev server on
+  an occupied port; check `netstat`/`Get-NetTCPConnection` first and match the
+  PID's creation time to your own launch before killing anything.
+- **better-auth state-changing API needs an `Origin` header.** Hitting
+  `/api/auth/organization/create` (and friends) over curl returns 403
+  `MISSING_OR_NULL_ORIGIN` without `-H "Origin: <baseURL>"`. The browser sends
+  Origin automatically; smoke-test scripts must add it. The origin must be in
+  `trustedOrigins` (we set it to `baseURL`). GET/session endpoints don't need it.
+- **Map coordinate model = plot-local feet.** `map_object.x/y/width/height` are
+  feet with origin at the lot's front-left corner, +x along the frontage, +y into
+  the lot. This keeps a camp's internal layout stable even if its city lot moves
+  year to year — only the `placement` row's anchoring changes. **Taper caveat:**
+  BRC lots are radial wedges (rear edge wider than frontage). The editor draws the
+  true trapezoid outline from `inner_radius_ft`, but objects live on a rectangular
+  frontage×depth grid (the ~5′/100′ taper is visually negligible). True radial
+  object placement is a later refinement, not MVP.
 
 ## Progress log
 
@@ -227,6 +335,14 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
       typecheck + build + biome green. Validated end-to-end over HTTP: apply →
       list → accept-as-invitation, apply-with-account → accept-as-membership,
       onboarding add/toggle on+off.
+- [x] Phase 3 (MVP increment) camp map editor — `placement` + `map_object`
+      schema (migration 0003, plain CREATE TABLEs), `/dashboard/map` SVG editor
+      with add/drag/resize/rotate/edit/delete + lot-setup form; members+ edit,
+      recruits view-only; "Map" nav link. typecheck + build + biome green.
+      Server actions validated end-to-end over HTTP (savePlacement → addObject →
+      updateObject move/rotate → deleteObject all persist; SSR renders clean).
+      Client-side pointer drag/resize/rotate implemented but not yet exercised in
+      a real browser — needs in-browser testing.
 
 ## Resolved (formerly open) questions
 
