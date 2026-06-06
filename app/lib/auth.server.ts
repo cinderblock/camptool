@@ -7,6 +7,14 @@ import { ac, roles } from "./permissions";
 
 const baseURL = process.env.PUBLIC_BASE_URL ?? "http://localhost:3000";
 
+// localhost cookies are scoped by host, not port, so on a shared dev box every
+// better-auth app collides on the default `better-auth.session_token`. We only
+// namespace the cookie there; in production each deployment owns its own domain,
+// so the default name is already isolated and needs no prefix.
+const isLocalDev = ["localhost", "127.0.0.1", "[::1]"].includes(
+  new URL(baseURL).hostname,
+);
+
 // Discord is optional: email/password + magic link + passkeys all work without
 // it. When these two env vars are present, Discord login lights up automatically.
 const discordConfigured = Boolean(
@@ -17,6 +25,10 @@ export const auth = betterAuth({
   baseURL,
   secret: process.env.BETTER_AUTH_SECRET,
   trustedOrigins: [baseURL],
+
+  // See isLocalDev above: prefix dev cookies to dodge cross-app collisions on
+  // localhost; leave production on the default name (its domain isolates it).
+  ...(isLocalDev ? { advanced: { cookiePrefix: "camptool" } } : {}),
 
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
 
