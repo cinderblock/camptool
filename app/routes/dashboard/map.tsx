@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Button,
-  ColorSwatch,
   Group,
   NumberInput,
   Paper,
@@ -26,21 +25,139 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Camp map · CampTool" }];
 }
 
-// Structure palette: value → label + default color + default size (feet).
+// Structure palette. Each kind carries a footprint `shape`, default size (feet),
+// and vehicle rules: `vehicle` = fixed width + length-only; `rigid` = no resize.
+type ShapeKind = "rect" | "hexagon" | "diamond";
+type Kind = {
+  value: string;
+  label: string;
+  color: string;
+  w: number;
+  h: number;
+  shape: ShapeKind;
+  vehicle: boolean;
+  rigid: boolean;
+};
 const KINDS = [
-  { value: "tent", label: "Tent", color: "#12b886", w: 10, h: 10 },
-  { value: "rv", label: "RV / trailer", color: "#228be6", w: 12, h: 30 },
-  { value: "shade", label: "Shade", color: "#f59f00", w: 20, h: 20 },
-  { value: "kitchen", label: "Kitchen", color: "#fd7e14", w: 16, h: 16 },
-  { value: "art", label: "Art", color: "#ae3ec9", w: 15, h: 15 },
-  { value: "power", label: "Generator / power", color: "#e03131", w: 6, h: 8 },
-  { value: "container", label: "Container", color: "#868e96", w: 8, h: 20 },
   {
-    value: "structure",
-    label: "Other structure",
-    color: "#4263eb",
+    value: "tent",
+    label: "Tent",
+    color: "#12b886",
     w: 10,
     h: 10,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+  },
+  {
+    value: "hexayurt",
+    label: "Hexayurt",
+    color: "#0ca678",
+    w: 14,
+    h: 14,
+    shape: "hexagon",
+    vehicle: false,
+    rigid: false,
+  },
+  {
+    value: "hyparhut",
+    label: "Hyparhut",
+    color: "#15aabf",
+    w: 12,
+    h: 12,
+    shape: "diamond",
+    vehicle: false,
+    rigid: false,
+  },
+  {
+    value: "rv",
+    label: "RV / trailer",
+    color: "#228be6",
+    w: 8,
+    h: 24,
+    shape: "rect",
+    vehicle: true,
+    rigid: false,
+  },
+  {
+    value: "car",
+    label: "Car",
+    color: "#4263eb",
+    w: 6,
+    h: 14,
+    shape: "rect",
+    vehicle: true,
+    rigid: true,
+  },
+  {
+    value: "truck",
+    label: "Truck",
+    color: "#3b5bdb",
+    w: 7,
+    h: 19,
+    shape: "rect",
+    vehicle: true,
+    rigid: true,
+  },
+  {
+    value: "shade",
+    label: "Shade",
+    color: "#f59f00",
+    w: 20,
+    h: 20,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+  },
+  {
+    value: "kitchen",
+    label: "Kitchen",
+    color: "#fd7e14",
+    w: 16,
+    h: 16,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+  },
+  {
+    value: "art",
+    label: "Art",
+    color: "#ae3ec9",
+    w: 15,
+    h: 15,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+  },
+  {
+    value: "power",
+    label: "Generator",
+    color: "#e03131",
+    w: 6,
+    h: 8,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+  },
+  {
+    value: "container",
+    label: "Container",
+    color: "#868e96",
+    w: 8,
+    h: 20,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+  },
+  {
+    value: "structure",
+    label: "Other",
+    color: "#7048e8",
+    w: 10,
+    h: 10,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
   },
 ] as const;
 
@@ -53,6 +170,52 @@ function kindDef(kind: string): (typeof KINDS)[number] {
 }
 function kindColor(kind: string) {
   return kindDef(kind).color;
+}
+
+/** Polygon points for a non-rect footprint inside the box (x,y,w,h). */
+function footprintPoints(
+  shape: ShapeKind,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): string {
+  if (shape === "diamond") {
+    return `${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`;
+  }
+  // flat-top hexagon: corners inset horizontally by w/4
+  const i = w / 4;
+  return `${x + i},${y} ${x + w - i},${y} ${x + w},${y + h / 2} ${x + w - i},${y + h} ${x + i},${y + h} ${x},${y + h / 2}`;
+}
+
+/** Small legend/icon swatch showing a kind's footprint shape. */
+function ShapeSwatch({ kind }: { kind: Kind }) {
+  const s = 16;
+  return (
+    <svg
+      width={s}
+      height={s}
+      viewBox={`0 0 ${s} ${s}`}
+      style={{ display: "block", flex: "0 0 auto" }}
+      aria-hidden="true"
+    >
+      {kind.shape === "rect" ? (
+        <rect
+          x={2}
+          y={2}
+          width={s - 4}
+          height={s - 4}
+          rx={2}
+          fill={kind.color}
+        />
+      ) : (
+        <polygon
+          points={footprintPoints(kind.shape, 1, 1, s - 2, s - 2)}
+          fill={kind.color}
+        />
+      )}
+    </svg>
+  );
 }
 
 type ObjRow = {
@@ -380,7 +543,7 @@ function Legend() {
               userSelect: "none",
             }}
           >
-            <ColorSwatch color={k.color} size={12} />
+            <ShapeSwatch kind={k} />
             <Text size="xs">{k.label}</Text>
           </Group>
         ))}
@@ -889,28 +1052,42 @@ function MapObjectShape({
   onResizeDown: (e: React.PointerEvent) => void;
   onRotateDown: (e: React.PointerEvent) => void;
 }) {
+  const def = kindDef(o.kind);
   const px = originX + o.x * ppf;
   const py = originY + o.y * ppf;
   const w = o.width * ppf;
   const h = o.height * ppf;
   const cx = px + w / 2;
   const cy = py + h / 2;
-  const fill = o.color ?? kindColor(o.kind);
+  const fill = o.color ?? def.color;
+  const bodyStyle = { cursor: canEdit ? "move" : "default" } as const;
   return (
     <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
-      <rect
-        x={px}
-        y={py}
-        width={w}
-        height={h}
-        rx={3}
-        fill={fill}
-        fillOpacity={0.78}
-        stroke={selected ? "#1c1c1c" : fill}
-        strokeWidth={selected ? 2 : 1}
-        style={{ cursor: canEdit ? "move" : "default" }}
-        onPointerDown={onBodyDown}
-      />
+      {def.shape === "rect" ? (
+        <rect
+          x={px}
+          y={py}
+          width={w}
+          height={h}
+          rx={3}
+          fill={fill}
+          fillOpacity={0.78}
+          stroke={selected ? "#1c1c1c" : fill}
+          strokeWidth={selected ? 2 : 1}
+          style={bodyStyle}
+          onPointerDown={onBodyDown}
+        />
+      ) : (
+        <polygon
+          points={footprintPoints(def.shape, px, py, w, h)}
+          fill={fill}
+          fillOpacity={0.78}
+          stroke={selected ? "#1c1c1c" : fill}
+          strokeWidth={selected ? 2 : 1}
+          style={bodyStyle}
+          onPointerDown={onBodyDown}
+        />
+      )}
       {o.name && w > 28 ? (
         <text
           x={cx}
@@ -944,17 +1121,19 @@ function MapObjectShape({
             style={{ cursor: "grab" }}
             onPointerDown={onRotateDown}
           />
-          <rect
-            x={px + w - 6}
-            y={py + h - 6}
-            width={12}
-            height={12}
-            fill="#fff"
-            stroke="#1c1c1c"
-            strokeWidth={1.5}
-            style={{ cursor: "nwse-resize" }}
-            onPointerDown={onResizeDown}
-          />
+          {def.vehicle ? null : (
+            <rect
+              x={px + w - 6}
+              y={py + h - 6}
+              width={12}
+              height={12}
+              fill="#fff"
+              stroke="#1c1c1c"
+              strokeWidth={1.5}
+              style={{ cursor: "nwse-resize" }}
+              onPointerDown={onResizeDown}
+            />
+          )}
         </>
       ) : null}
     </g>
@@ -986,6 +1165,12 @@ function SidePanel({
   function commitField(id: string, key: string, value: string | number) {
     fetcher.submit(
       { intent: "updateObject", id, [key]: value },
+      { method: "post" },
+    );
+  }
+  function commitMany(id: string, fields: Record<string, string | number>) {
+    fetcher.submit(
+      { intent: "updateObject", id, ...fields },
       { method: "post" },
     );
   }
@@ -1040,34 +1225,79 @@ function SidePanel({
               allowDeselect={false}
               onChange={(v) => {
                 if (!v) return;
-                patch(selected.id, { kind: v });
-                commitField(selected.id, "kind", v);
+                const d = kindDef(v);
+                const fields: Partial<ObjRow> = { kind: v };
+                const out: Record<string, string | number> = { kind: v };
+                if (d.vehicle) {
+                  fields.width = d.w;
+                  out.width = d.w;
+                }
+                if (d.rigid) {
+                  fields.height = d.h;
+                  out.height = d.h;
+                }
+                patch(selected.id, fields);
+                commitMany(selected.id, out);
               }}
             />
-            <Group grow>
-              <NumberInput
-                size="xs"
-                label="Width (ft)"
-                value={Math.round(selected.width)}
-                min={2}
-                disabled={!canEdit}
-                onChange={(v) => patch(selected.id, { width: Number(v) || 2 })}
-                onBlur={() =>
-                  commitField(selected.id, "width", round(selected.width))
-                }
-              />
-              <NumberInput
-                size="xs"
-                label="Depth (ft)"
-                value={Math.round(selected.height)}
-                min={2}
-                disabled={!canEdit}
-                onChange={(v) => patch(selected.id, { height: Number(v) || 2 })}
-                onBlur={() =>
-                  commitField(selected.id, "height", round(selected.height))
-                }
-              />
-            </Group>
+            {kindDef(selected.kind).rigid ? (
+              <Text size="xs" c="dimmed">
+                Fixed footprint: {round(selected.width)}′ ×{" "}
+                {round(selected.height)}′
+              </Text>
+            ) : kindDef(selected.kind).vehicle ? (
+              <Group grow>
+                <NumberInput
+                  size="xs"
+                  label="Width (ft)"
+                  description="fixed"
+                  value={Math.round(selected.width)}
+                  disabled
+                />
+                <NumberInput
+                  size="xs"
+                  label="Length (ft)"
+                  value={Math.round(selected.height)}
+                  min={6}
+                  disabled={!canEdit}
+                  onChange={(v) =>
+                    patch(selected.id, { height: Number(v) || 6 })
+                  }
+                  onBlur={() =>
+                    commitField(selected.id, "height", round(selected.height))
+                  }
+                />
+              </Group>
+            ) : (
+              <Group grow>
+                <NumberInput
+                  size="xs"
+                  label="Width (ft)"
+                  value={Math.round(selected.width)}
+                  min={2}
+                  disabled={!canEdit}
+                  onChange={(v) =>
+                    patch(selected.id, { width: Number(v) || 2 })
+                  }
+                  onBlur={() =>
+                    commitField(selected.id, "width", round(selected.width))
+                  }
+                />
+                <NumberInput
+                  size="xs"
+                  label="Depth (ft)"
+                  value={Math.round(selected.height)}
+                  min={2}
+                  disabled={!canEdit}
+                  onChange={(v) =>
+                    patch(selected.id, { height: Number(v) || 2 })
+                  }
+                  onBlur={() =>
+                    commitField(selected.id, "height", round(selected.height))
+                  }
+                />
+              </Group>
+            )}
             <NumberInput
               size="xs"
               label="Rotation (°)"
