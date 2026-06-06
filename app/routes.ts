@@ -10,6 +10,7 @@ export default [
     route("members", "routes/dashboard/members.tsx"),
     route("map", "routes/dashboard/map.tsx"),
     route("bringing", "routes/dashboard/bringing.tsx"),
+    route("inventory", "routes/dashboard/inventory.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
   ]),
