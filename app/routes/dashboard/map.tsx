@@ -321,7 +321,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const objects = await db
     .select()
     .from(mapObject)
-    .where(eq(mapObject.campId, campId));
+    .where(and(eq(mapObject.campId, campId), eq(mapObject.placed, true)));
 
   return {
     canEdit: hasAtLeast(active.membership.role, "member"),
@@ -412,6 +412,8 @@ export async function action({ request }: Route.ActionArgs) {
       campId,
       name: str("name"),
       kind,
+      // Dropping from the legend = an officer placing a camp/shared item.
+      placed: true,
       x: num("x", 0),
       y: num("y", 0),
       width: Math.max(1, num("width", def.w)),

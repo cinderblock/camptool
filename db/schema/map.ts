@@ -24,7 +24,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { user } from "./auth";
-import { camp } from "./camp";
+import { camp, membership } from "./camp";
 
 const now = sql`(unixepoch() * 1000)`;
 
@@ -65,7 +65,15 @@ export const mapObject = sqliteTable(
       .references(() => camp.id, { onDelete: "cascade" }),
     name: text("name"),
     kind: text("kind").notNull().default("structure"),
-    // Plot-local feet (see file header).
+    // The camper bringing this item; NULL = a camp/shared/communal item.
+    ownerMembershipId: text("owner_membership_id").references(
+      () => membership.id,
+      { onDelete: "set null" },
+    ),
+    // Declared-but-unplaced items sit in the officer queue (placed = false);
+    // placed items have a position on the map.
+    placed: integer("placed", { mode: "boolean" }).notNull().default(false),
+    // Plot-local feet (see file header). Meaningful only when placed.
     x: real("x").notNull().default(0),
     y: real("y").notNull().default(0),
     width: real("width").notNull().default(10),
@@ -84,4 +92,29 @@ export const mapObject = sqliteTable(
       .default(now),
   },
   (t) => [index("map_object_camp").on(t.campId)],
+);
+
+/** Occupants of a structure/vehicle — lets a camper add a second+ person to
+ * their tent / car / RV. The owner is also an occupant. */
+export const mapObjectOccupant = sqliteTable(
+  "map_object_occupant",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    objectId: text("object_id")
+      .notNull()
+      .references(() => mapObject.id, { onDelete: "cascade" }),
+    membershipId: text("membership_id")
+      .notNull()
+      .references(() => membership.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [
+    uniqueIndex("map_object_occupant_unique").on(t.objectId, t.membershipId),
+    index("map_object_occupant_object").on(t.objectId),
+  ],
 );

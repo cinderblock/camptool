@@ -165,16 +165,29 @@ art, generator, container. Members+ edit; recruits view-only.
   source app ships only the generic palette; custom kinds live in the self-
   hoster's own package so they never bloat or fork the shared codebase. Needs a
   small refactor: move `KINDS` behind a registry the camp package can extend.
-- **Camper relationships replace "assign campers to objects."** Instead of
-  tagging each structure with members, ask campers at join/onboarding **what
-  they're bringing** (their structures/vehicles) and **who they want to be near**
-  (proximity preferences). The map then visualizes the relationship graph
-  (lines/clusters between campers who want to be close). This is a data model
-  (camper "bringing" items + proximity-preference edges) + a relationship overlay
-  — a meatier feature; scope before building.
+**Phase 3.5 — Inventory-driven placement (locked direction).** Supersedes the
+earlier "assign campers to objects" / "relationship graph" idea.
+- **Registration collects an inventory.** Each camper declares what they're
+  *bringing* — car / tent (with door) / shade / RV / etc., each at real size, with
+  **no location**. A camper can add a second+ person (occupant) to their
+  tent/car/RV.
+- **`map_object` is the unit for both states.** Add `ownerMembershipId` (NULL =
+  camp/shared item) and `placed` (boolean). Declared items start *unplaced* (no
+  position, in an officer queue); placed items have x/y/rotation on the map.
+  Occupants → a `map_object_occupant` join (objectId × membershipId).
+- **Officers place everything** — members' items + communal items (kitchen,
+  communal shade, generators, fuel area, …) — and arrange orientations. Officers
+  add shared items (ownerMembershipId NULL).
+- **List/accounting view:** every declared item (owner, kind, size, occupants,
+  placed-or-not) so nothing is missed.
+- **Mini-maps = scoped views** of the one shared map; objects carry absolute lot
+  coords, so group/sub-views compose for free (no separate coordinate systems).
+- **Group membership = self-request + officer-confirm** (captures "who do you want
+  to be near").
 
-Still TODO: "highlight my spot", RV pop-outs, premade/shared blocks, Borg outline
-import, fire-lane/marker overlays, true radial placement of objects, 3D/sun-shade.
+Still TODO: "highlight my spot", RV pop-outs (+ generator/cleanout markers),
+off-center doors, premade/shared blocks, Borg outline import, fire-lane/marker
+overlays, true radial placement of objects, 3D/sun-shade.
 
 **Phase 4 — Operations**
 - Dues/financials with per-field view/edit permissions (#3).
