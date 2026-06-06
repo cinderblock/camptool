@@ -17,181 +17,21 @@ import { memo, useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveCamp } from "~/lib/session.server";
+import {
+  KINDS,
+  ShapeSwatch,
+  hexPoints,
+  hexVertices,
+  isKind,
+  kindColor,
+  kindDef,
+} from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { mapObject, placement } from "../../../db/schema";
 import type { Route } from "./+types/map";
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Camp map · CampTool" }];
-}
-
-// Structure palette. Each kind carries a footprint `shape`, default size (feet),
-// and vehicle rules: `vehicle` = fixed width + length-only; `rigid` = no resize.
-type ShapeKind = "rect" | "hexagon" | "hypar";
-type Kind = {
-  value: string;
-  label: string;
-  color: string;
-  w: number;
-  h: number;
-  shape: ShapeKind;
-  vehicle: boolean;
-  rigid: boolean;
-};
-const KINDS = [
-  {
-    value: "tent",
-    label: "Tent",
-    color: "#12b886",
-    w: 10,
-    h: 10,
-    shape: "rect",
-    vehicle: false,
-    rigid: false,
-  },
-  {
-    // Regular hexagon, 8ft edges → 16ft point-to-point, 8√3 ≈ 13.86ft flat-to-flat.
-    value: "hexayurt",
-    label: "Hexayurt",
-    color: "#0ca678",
-    w: 16,
-    h: 13.86,
-    shape: "hexagon",
-    vehicle: false,
-    rigid: true,
-  },
-  {
-    // 8ft square base; the roof is a hypar with one high corner (diagonal gradient).
-    value: "hyparhut",
-    label: "Hyparhut",
-    color: "#15aabf",
-    w: 8,
-    h: 8,
-    shape: "hypar",
-    vehicle: false,
-    rigid: true,
-  },
-  {
-    value: "rv",
-    label: "RV / trailer",
-    color: "#228be6",
-    w: 8,
-    h: 24,
-    shape: "rect",
-    vehicle: true,
-    rigid: false,
-  },
-  {
-    value: "car",
-    label: "Car",
-    color: "#4263eb",
-    w: 6,
-    h: 14,
-    shape: "rect",
-    vehicle: true,
-    rigid: true,
-  },
-  {
-    value: "truck",
-    label: "Truck",
-    color: "#3b5bdb",
-    w: 7,
-    h: 19,
-    shape: "rect",
-    vehicle: true,
-    rigid: true,
-  },
-  {
-    value: "shade",
-    label: "Shade",
-    color: "#f59f00",
-    w: 20,
-    h: 20,
-    shape: "rect",
-    vehicle: false,
-    rigid: false,
-  },
-  {
-    value: "kitchen",
-    label: "Kitchen",
-    color: "#fd7e14",
-    w: 16,
-    h: 16,
-    shape: "rect",
-    vehicle: false,
-    rigid: false,
-  },
-  {
-    value: "art",
-    label: "Art",
-    color: "#ae3ec9",
-    w: 15,
-    h: 15,
-    shape: "rect",
-    vehicle: false,
-    rigid: false,
-  },
-  {
-    value: "power",
-    label: "Generator",
-    color: "#e03131",
-    w: 6,
-    h: 8,
-    shape: "rect",
-    vehicle: false,
-    rigid: false,
-  },
-  {
-    value: "container",
-    label: "Container",
-    color: "#868e96",
-    w: 8,
-    h: 20,
-    shape: "rect",
-    vehicle: false,
-    rigid: false,
-  },
-  {
-    value: "structure",
-    label: "Other",
-    color: "#7048e8",
-    w: 10,
-    h: 10,
-    shape: "rect",
-    vehicle: false,
-    rigid: false,
-  },
-] as const;
-
-const KIND_MAP: Record<string, (typeof KINDS)[number]> = Object.fromEntries(
-  KINDS.map((k) => [k.value, k]),
-);
-const FALLBACK_KIND = KINDS.find((k) => k.value === "structure") ?? KINDS[0];
-function kindDef(kind: string): (typeof KINDS)[number] {
-  return KIND_MAP[kind] ?? FALLBACK_KIND;
-}
-function kindColor(kind: string) {
-  return kindDef(kind).color;
-}
-
-/** Flat-top hexagon vertices (corners inset horizontally by w/4). */
-function hexVertices(x: number, y: number, w: number, h: number) {
-  const i = w / 4;
-  return [
-    { x: x + i, y },
-    { x: x + w - i, y },
-    { x: x + w, y: y + h / 2 },
-    { x: x + w - i, y: y + h },
-    { x: x + i, y: y + h },
-    { x, y: y + h / 2 },
-  ];
-}
-
-/** Hexagon footprint points inside the box (x,y,w,h). */
-function hexPoints(x: number, y: number, w: number, h: number): string {
-  return hexVertices(x, y, w, h)
-    .map((p) => `${p.x},${p.y}`)
-    .join(" ");
 }
 
 /** Door symbol: opening gap + leaf + swing arc, centered on an edge. Swings
@@ -246,52 +86,6 @@ function Door({
         fill="none"
       />
     </g>
-  );
-}
-
-/** Small legend/icon swatch showing a kind's footprint shape. */
-function ShapeSwatch({ kind }: { kind: Kind }) {
-  const s = 16;
-  return (
-    <svg
-      width={s}
-      height={s}
-      viewBox={`0 0 ${s} ${s}`}
-      style={{ display: "block", flex: "0 0 auto" }}
-      aria-hidden="true"
-    >
-      {kind.shape === "hexagon" ? (
-        <polygon points={hexPoints(1, 1, s - 2, s - 2)} fill={kind.color} />
-      ) : kind.shape === "hypar" ? (
-        <>
-          <rect
-            x={2}
-            y={2}
-            width={s - 4}
-            height={s - 4}
-            rx={2}
-            fill={kind.color}
-          />
-          <line
-            x1={2}
-            y1={2}
-            x2={s - 2}
-            y2={s - 2}
-            stroke="#1c1c1c"
-            strokeOpacity={0.4}
-          />
-        </>
-      ) : (
-        <rect
-          x={2}
-          y={2}
-          width={s - 4}
-          height={s - 4}
-          rx={2}
-          fill={kind.color}
-        />
-      )}
-    </svg>
   );
 }
 
@@ -871,7 +665,7 @@ function Editor({
     const kind =
       e.dataTransfer.getData("application/camptool-kind") ||
       e.dataTransfer.getData("text/plain");
-    if (!kind || !KIND_MAP[kind]) return;
+    if (!kind || !isKind(kind)) return;
     const p = svgPoint(e);
     addObjectAt(kind, fx(p.x), fy(p.y));
   }

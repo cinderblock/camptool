@@ -36,6 +36,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     { to: "/dashboard", label: "Overview", end: true },
     { to: "/dashboard/members", label: "Members", end: false },
     { to: "/dashboard/map", label: "Map", end: false },
+    { to: "/dashboard/bringing", label: "Bringing", end: false },
     ...(activeRole && hasAtLeast(activeRole, "officer")
       ? [{ to: "/dashboard/recruits", label: "Recruits", end: false }]
       : []),
