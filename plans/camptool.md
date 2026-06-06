@@ -409,6 +409,22 @@ placement page.)
       updateObject move/rotate → deleteObject all persist; SSR renders clean).
       Client-side pointer drag/resize/rotate implemented but not yet exercised in
       a real browser — needs in-browser testing.
+- [x] Phase 3 map editor — many refinements landed and browser-verified:
+      drag-drop legend, skewed 10ft grid (50ft emphasis), rotated-resize fix,
+      keyboard shortcuts, orientation compass (true north + daylight wedge + Man
+      glyph; 3:00 frontage faces NE), side-rail layout with size-capped map,
+      footprint shapes (hexayurt hexagon w/ ridge gradient, hyparhut hypar roof,
+      cars/trucks/RV vehicle sizing), doors (swing-out 180° on RV/huts) + tent
+      porch, and memoized shapes for drag perf.
+- [x] Phase 3.5 inventory-driven placement (declare → place → account):
+      schema `map_object.owner_membership_id` + `placed` + `map_object_occupant`
+      (migration 0004). `/dashboard/bringing` lets a camper declare items (unplaced,
+      owned); officers get an "Unplaced" tray on the map to drag items onto the lot
+      (placeObject) plus the legend for shared items; `/dashboard/inventory`
+      (officer) accounts for every item (owner, size, placed/unplaced). Shared
+      palette extracted to `~/lib/structures`. typecheck+build+biome green; declare
+      → place → list validated over HTTP. TODO: occupants UI, RV pop-outs +
+      generator/cleanout markers, custom-structure registry, groups, off-center doors.
 
 ## Resolved (formerly open) questions
 

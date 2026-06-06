@@ -28,9 +28,14 @@ checklists), the dashboard now has a **Map** tab: a visual, database-backed
 editor for laying out camp. Set your lot (street, address, frontage × depth, and
 an optional Man→street radius that draws the real wedge taper), then add
 structures from a palette (tent, RV, shade, kitchen, art, generator, container)
-and drag/resize/rotate them into place. Members and up can edit; recruits view.
-Next in Phase 3: "highlight my spot", saved/shared block templates, Borg outline
-import, and fire-lane/marker overlays.
+and drag/resize/rotate them into place, with an orientation compass (true north,
+sun, the Man) and footprint shapes for tents, hexayurts, hyparhuts, cars/RVs.
+
+It's also **inventory-driven**: campers declare what they're *bringing* on a
+**Bringing** page (each item sized, unplaced); officers drag those items from an
+**Unplaced** tray onto the lot to place them and add shared camp items; an
+**Inventory** view accounts for everything (owner, size, placed-or-not). Next:
+occupants, RV pop-outs, custom per-camp structures, and group sub-maps.
 
 ## Develop
 
