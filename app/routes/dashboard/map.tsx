@@ -235,19 +235,11 @@ export async function action({ request }: Route.ActionArgs) {
 const VIEW_W = 920;
 const MARGIN = 28;
 
-function rotatePoint(
-  px: number,
-  py: number,
-  cx: number,
-  cy: number,
-  deg: number,
-) {
+function rotateVec(vx: number, vy: number, deg: number) {
   const r = (deg * Math.PI) / 180;
   const cos = Math.cos(r);
   const sin = Math.sin(r);
-  const dx = px - cx;
-  const dy = py - cy;
-  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+  return { x: vx * cos - vy * sin, y: vx * sin + vy * cos };
 }
 
 type Lot = NonNullable<Route.ComponentProps["loaderData"]["lot"]>;
@@ -257,7 +249,6 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const fetcher = useFetcher();
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [addKind, setAddKind] = useState<string>("tent");
 
   // Append server-created objects (with their real id) once the add resolves.
   const lastCreated = useRef<string | null>(null);
@@ -311,8 +302,6 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           setSelectedId={setSelectedId}
           canEdit={canEdit}
           fetcher={fetcher}
-          addKind={addKind}
-          setAddKind={setAddKind}
         />
         <SidePanel
           lot={lot}
@@ -343,8 +332,6 @@ function Editor({
   setSelectedId,
   canEdit,
   fetcher,
-  addKind,
-  setAddKind,
 }: {
   lot: Lot;
   objects: ObjRow[];
@@ -353,8 +340,6 @@ function Editor({
   setSelectedId: (id: string | null) => void;
   canEdit: boolean;
   fetcher: ReturnType<typeof useFetcher>;
-  addKind: string;
-  setAddKind: (k: string) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<DragState | null>(null);
@@ -388,6 +373,10 @@ function Editor({
   // Plot-local (0,0) = front-left corner of the frontage edge, in screen px.
   const originX = MARGIN + ((maxWidthFt - lot.frontageFt) / 2) * ppf;
   const originY = MARGIN;
+  const rearCenterX = MARGIN + (maxWidthFt / 2) * ppf;
+  const yBot = originY + lot.depthFt * ppf;
+  // Trapezoid outline (front edge, then rear edge wider when tapered).
+  const lotPoints = `${originX},${originY} ${originX + lot.frontageFt * ppf},${originY} ${rearCenterX + (rear / 2) * ppf},${yBot} ${rearCenterX - (rear / 2) * ppf},${yBot}`;
 
   const fx = (sx: number) => (sx - originX) / ppf;
   const fy = (sy: number) => (sy - originY) / ppf;
@@ -414,13 +403,18 @@ function Editor({
     const cxFt = s.x + s.width / 2;
     const cyFt = s.y + s.height / 2;
     if (d.mode === "resize") {
-      // Resize in the object's own (rotated) frame so the handle tracks.
-      const local = rotatePoint(curFx, curFy, cxFt, cyFt, -s.rotation);
-      return {
-        ...s,
-        width: Math.max(2, local.x - s.x),
-        height: Math.max(2, local.y - s.y),
-      };
+      // Keep the opposite (top-left) corner pinned in world space while the
+      // bottom-right handle follows the pointer — correct even when rotated.
+      const tl = rotateVec(-s.width / 2, -s.height / 2, s.rotation);
+      const ax = cxFt + tl.x;
+      const ay = cyFt + tl.y;
+      const loc = rotateVec(curFx - ax, curFy - ay, -s.rotation);
+      const width = Math.max(2, loc.x);
+      const height = Math.max(2, loc.y);
+      const half = rotateVec(width / 2, height / 2, s.rotation);
+      const cx = ax + half.x;
+      const cy = ay + half.y;
+      return { ...s, width, height, x: cx - width / 2, y: cy - height / 2 };
     }
     const ang = (Math.atan2(curFy - cyFt, curFx - cxFt) * 180) / Math.PI;
     return { ...s, rotation: ang + 90 };
@@ -480,14 +474,18 @@ function Editor({
     if (d && o) commit(o);
   }
 
-  function addObject() {
-    const def = kindDef(addKind);
+  function addObjectAt(kind: string, fxFeet: number, fyFeet: number) {
+    const def = kindDef(kind);
     fetcher.submit(
       {
         intent: "addObject",
-        kind: addKind,
-        x: round(clamp(lot.frontageFt / 2 - def.w / 2, 0, lot.frontageFt)),
-        y: round(Math.min(10, lot.depthFt / 4)),
+        kind,
+        x: round(
+          clamp(fxFeet - def.w / 2, 0, Math.max(0, lot.frontageFt - def.w)),
+        ),
+        y: round(
+          clamp(fyFeet - def.h / 2, 0, Math.max(0, lot.depthFt - def.h)),
+        ),
         width: def.w,
         height: def.h,
       },
@@ -495,27 +493,19 @@ function Editor({
     );
   }
 
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const kind =
+      e.dataTransfer.getData("application/camptool-kind") ||
+      e.dataTransfer.getData("text/plain");
+    if (!kind || !KIND_MAP[kind]) return;
+    const p = svgPoint(e);
+    addObjectAt(kind, fx(p.x), fy(p.y));
+  }
+
+  const clipId = "lot-clip";
   return (
     <Stack gap="xs" style={{ flex: "1 1 560px", minWidth: 320 }}>
-      {canEdit ? (
-        <Group gap="xs">
-          <Select
-            size="xs"
-            value={addKind}
-            onChange={(v) => v && setAddKind(v)}
-            data={KINDS.map((k) => ({ value: k.value, label: k.label }))}
-            w={190}
-            allowDeselect={false}
-          />
-          <Button size="xs" onClick={addObject}>
-            Add structure
-          </Button>
-          <Text size="xs" c="dimmed">
-            Click to select · drag to move · corner = resize · top dot = rotate
-          </Text>
-        </Group>
-      ) : null}
-
       <Paper withBorder radius="md" p={0} style={{ overflow: "hidden" }}>
         <svg
           ref={svgRef}
@@ -527,22 +517,31 @@ function Editor({
             touchAction: "none",
           }}
           onPointerDown={() => setSelectedId(null)}
+          onDragOver={canEdit ? (e) => e.preventDefault() : undefined}
+          onDrop={canEdit ? onDrop : undefined}
           role="img"
           aria-label="Camp layout"
         >
-          <Grid
-            originY={originY}
-            ppf={ppf}
-            widthFt={maxWidthFt}
-            depthFt={lot.depthFt}
-          />
-          <Lot
-            lot={lot}
-            originX={originX}
-            originY={originY}
-            ppf={ppf}
-            rear={rear}
-            maxWidthFt={maxWidthFt}
+          <title>Camp layout</title>
+          <clipPath id={clipId}>
+            <polygon points={lotPoints} />
+          </clipPath>
+          <g clipPath={`url(#${clipId})`}>
+            <Grid
+              frontageFt={lot.frontageFt}
+              depthFt={lot.depthFt}
+              rear={rear}
+              originX={originX}
+              originY={originY}
+              rearCenterX={rearCenterX}
+              ppf={ppf}
+            />
+          </g>
+          <polygon
+            points={lotPoints}
+            fill="none"
+            stroke="#adb5bd"
+            strokeWidth={2}
           />
           {objects.map((o) => (
             <MapObjectShape
@@ -560,91 +559,103 @@ function Editor({
           ))}
         </svg>
       </Paper>
-      <Group gap="md">
-        {KINDS.map((k) => (
-          <Group key={k.value} gap={4} wrap="nowrap">
-            <ColorSwatch color={k.color} size={12} />
-            <Text size="xs" c="dimmed">
-              {k.label}
-            </Text>
-          </Group>
-        ))}
-      </Group>
+
+      <div>
+        <Text size="xs" c="dimmed" mb={4}>
+          {canEdit ? "Legend — drag onto the map to add" : "Legend"}
+        </Text>
+        <Group gap="xs">
+          {KINDS.map((k) => (
+            <Group
+              key={k.value}
+              gap={6}
+              wrap="nowrap"
+              draggable={canEdit}
+              onDragStart={
+                canEdit
+                  ? (e) => {
+                      e.dataTransfer.setData(
+                        "application/camptool-kind",
+                        k.value,
+                      );
+                      e.dataTransfer.setData("text/plain", k.value);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }
+                  : undefined
+              }
+              style={{
+                cursor: canEdit ? "grab" : "default",
+                border: "1px solid var(--mantine-color-gray-3)",
+                borderRadius: 6,
+                padding: "2px 8px",
+                userSelect: "none",
+              }}
+            >
+              <ColorSwatch color={k.color} size={12} />
+              <Text size="xs">{k.label}</Text>
+            </Group>
+          ))}
+        </Group>
+      </div>
     </Stack>
   );
 }
 
 function Grid({
-  originY,
-  ppf,
-  widthFt,
+  frontageFt,
   depthFt,
+  rear,
+  originX,
+  originY,
+  rearCenterX,
+  ppf,
 }: {
-  originY: number;
-  ppf: number;
-  widthFt: number;
+  frontageFt: number;
   depthFt: number;
+  rear: number;
+  originX: number;
+  originY: number;
+  rearCenterX: number;
+  ppf: number;
 }) {
   const lines = [];
-  const step = 10;
-  for (let f = 0; f <= widthFt; f += step) {
+  const yTop = originY;
+  const yBot = originY + depthFt * ppf;
+  // Radial lines every 10ft of frontage; they fan out to the wider rear edge.
+  for (let f = 0; f <= frontageFt + 0.01; f += 10) {
+    const p = frontageFt > 0 ? f / frontageFt : 0;
+    const major = Math.round(f) % 50 === 0;
     lines.push(
       <line
         key={`v${f}`}
-        x1={MARGIN + f * ppf}
-        y1={originY}
-        x2={MARGIN + f * ppf}
-        y2={originY + depthFt * ppf}
-        stroke="#f1f3f5"
-        strokeWidth={1}
+        x1={originX + f * ppf}
+        y1={yTop}
+        x2={rearCenterX + (p - 0.5) * rear * ppf}
+        y2={yBot}
+        stroke={major ? "#dee2e6" : "#f1f3f5"}
+        strokeWidth={major ? 1.5 : 1}
       />,
     );
   }
-  for (let f = 0; f <= depthFt; f += step) {
+  // Concentric lines every 10ft of depth; width grows with the taper.
+  for (let d = 0; d <= depthFt + 0.01; d += 10) {
+    const t = depthFt > 0 ? d / depthFt : 0;
+    const w = frontageFt + (rear - frontageFt) * t;
+    const y = originY + d * ppf;
+    const major = Math.round(d) % 50 === 0;
     lines.push(
       <line
-        key={`h${f}`}
-        x1={MARGIN}
-        y1={originY + f * ppf}
-        x2={MARGIN + widthFt * ppf}
-        y2={originY + f * ppf}
-        stroke="#f1f3f5"
-        strokeWidth={1}
+        key={`h${d}`}
+        x1={rearCenterX - (w / 2) * ppf}
+        y1={y}
+        x2={rearCenterX + (w / 2) * ppf}
+        y2={y}
+        stroke={major ? "#dee2e6" : "#f1f3f5"}
+        strokeWidth={major ? 1.5 : 1}
       />,
     );
   }
   return <g>{lines}</g>;
-}
-
-function Lot({
-  lot,
-  originX,
-  originY,
-  ppf,
-  rear,
-  maxWidthFt,
-}: {
-  lot: Lot;
-  originX: number;
-  originY: number;
-  ppf: number;
-  rear: number;
-  maxWidthFt: number;
-}) {
-  const frontLeft = `${originX},${originY}`;
-  const frontRight = `${originX + lot.frontageFt * ppf},${originY}`;
-  const rearCenterX = MARGIN + (maxWidthFt / 2) * ppf;
-  const rearLeft = `${rearCenterX - (rear / 2) * ppf},${originY + lot.depthFt * ppf}`;
-  const rearRight = `${rearCenterX + (rear / 2) * ppf},${originY + lot.depthFt * ppf}`;
-  return (
-    <polygon
-      points={`${frontLeft} ${frontRight} ${rearRight} ${rearLeft}`}
-      fill="#ffffff"
-      stroke="#adb5bd"
-      strokeWidth={2}
-      strokeDasharray="6 4"
-    />
-  );
 }
 
 function MapObjectShape({
