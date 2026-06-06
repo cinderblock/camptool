@@ -145,13 +145,36 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
 - Stretch: cross-camp neighborhood map sharing; 3D + sun/shade render.
 
 *MVP increment shipped:* `placement` (one BRC lot per camp) + `map_object`
-(structures in plot-local feet) schema; `/dashboard/map` SVG editor — add from a
-kind palette, drag to move, corner-handle resize, top-dot rotate, side panel for
-name/kind/size/rotation/notes + delete, and a lot-setup form (street, address,
-frontage, depth, optional inner-radius → wedge taper). Members+ edit; recruits
-view-only. Still TODO: "highlight my spot", premade/shared blocks, Borg outline
-import, fire-lane/marker overlays, true radial placement of objects (see taper
-note below), 3D/sun-shade.
+(structures in plot-local feet) schema; `/dashboard/map` SVG editor — drag-drop
+legend palette, drag to move, corner-handle resize, top-dot rotate, keyboard
+shortcuts (R rotate, arrows nudge, Del, Esc), side panel for name/kind/size/
+rotation/notes + delete, lot-setup form (street, address, frontage, depth,
+optional inner-radius → wedge taper). Skewed 10ft grid (50ft emphasis). Side-rail
+layout with size-capped map. Orientation compass (true north + daylight wedge +
+Man glyph, from clock address). Predefined footprint shapes: tent, **hexayurt**
+(fixed regular hexagon, 8ft edges), **hyparhut** (fixed 8ft square, hypar roof
+gradient), car/truck (rigid), RV (fixed width + numeric length), shade, kitchen,
+art, generator, container. Members+ edit; recruits view-only.
+
+*Two locked design directions (not yet built):*
+- **Custom per-camp structures = camp package, NOT the shared app.** A camp's
+  bespoke footprints (their specific shade structure, art car, etc.) are
+  registered by the per-deployment **camp package** from Phase 2.5 (`CAMP_THEME`/
+  camp-theme workspace package), which contributes extra `kinds` (value/label/
+  color/shape/size/rigid) into the palette registry the core reads. The open-
+  source app ships only the generic palette; custom kinds live in the self-
+  hoster's own package so they never bloat or fork the shared codebase. Needs a
+  small refactor: move `KINDS` behind a registry the camp package can extend.
+- **Camper relationships replace "assign campers to objects."** Instead of
+  tagging each structure with members, ask campers at join/onboarding **what
+  they're bringing** (their structures/vehicles) and **who they want to be near**
+  (proximity preferences). The map then visualizes the relationship graph
+  (lines/clusters between campers who want to be close). This is a data model
+  (camper "bringing" items + proximity-preference edges) + a relationship overlay
+  — a meatier feature; scope before building.
+
+Still TODO: "highlight my spot", RV pop-outs, premade/shared blocks, Borg outline
+import, fire-lane/marker overlays, true radial placement of objects, 3D/sun-shade.
 
 **Phase 4 — Operations**
 - Dues/financials with per-field view/edit permissions (#3).
