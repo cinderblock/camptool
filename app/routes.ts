@@ -8,6 +8,7 @@ export default [
   route("dashboard", "routes/dashboard/layout.tsx", [
     index("routes/dashboard/index.tsx"),
     route("members", "routes/dashboard/members.tsx"),
+    route("map", "routes/dashboard/map.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
   ]),

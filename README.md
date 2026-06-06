@@ -20,12 +20,17 @@ other camps to self-host.
 
 ## Status
 
-Phase 2 — recruiting & onboarding. On top of the Phase 1 foundation (multi-camp
-data model; auth via email/password, magic link, passkeys, optional Discord;
-member directory with role management) the app now has a public application page
-at `/c/:slug`, an officer review queue that accepts applicants into the camp
-(membership if they have an account, otherwise an invitation), and a per-member
-onboarding checklist camps define themselves. Next: the camp map editor (Phase 3).
+Phase 3 — camp map editor (in progress). On top of the Phase 1 foundation
+(multi-camp data model; auth via email/password, magic link, passkeys, optional
+Discord; member directory with role management) and Phase 2 recruiting (public
+`/c/:slug` application page, officer review queue, per-member onboarding
+checklists), the dashboard now has a **Map** tab: a visual, database-backed
+editor for laying out camp. Set your lot (street, address, frontage × depth, and
+an optional Man→street radius that draws the real wedge taper), then add
+structures from a palette (tent, RV, shade, kitchen, art, generator, container)
+and drag/resize/rotate them into place. Members and up can edit; recruits view.
+Next in Phase 3: "highlight my spot", saved/shared block templates, Borg outline
+import, and fire-lane/marker overlays.
 
 ## Develop
 
