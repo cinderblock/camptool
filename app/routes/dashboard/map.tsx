@@ -358,6 +358,25 @@ function Editor({
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<DragState | null>(null);
+  const liveObj = useRef<ObjRow | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  // While dragging, listen on window so the pointer can leave the SVG without
+  // dropping the gesture. (Pointer capture + an svg `pointerleave` handler ends
+  // the drag on the very first move, so we avoid both.)
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: PointerEvent) => onMove(e);
+    const up = () => endDrag();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [dragging]);
 
   // Trapezoid taper: rear edge widens with depth when the inner radius is known.
   const rear = lot.innerRadiusFt
@@ -373,7 +392,7 @@ function Editor({
   const fx = (sx: number) => (sx - originX) / ppf;
   const fy = (sy: number) => (sy - originY) / ppf;
 
-  function svgPoint(e: React.PointerEvent) {
+  function svgPoint(e: { clientX: number; clientY: number }) {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
@@ -381,6 +400,30 @@ function Editor({
       x: ((e.clientX - rect.left) * VIEW_W) / rect.width,
       y: ((e.clientY - rect.top) * viewH) / rect.height,
     };
+  }
+
+  function applyDrag(d: DragState, curFx: number, curFy: number): ObjRow {
+    const s = d.start;
+    if (d.mode === "move") {
+      return {
+        ...s,
+        x: clamp(s.x + (curFx - d.startFx), 0, lot.frontageFt),
+        y: clamp(s.y + (curFy - d.startFy), 0, lot.depthFt),
+      };
+    }
+    const cxFt = s.x + s.width / 2;
+    const cyFt = s.y + s.height / 2;
+    if (d.mode === "resize") {
+      // Resize in the object's own (rotated) frame so the handle tracks.
+      const local = rotatePoint(curFx, curFy, cxFt, cyFt, -s.rotation);
+      return {
+        ...s,
+        width: Math.max(2, local.x - s.x),
+        height: Math.max(2, local.y - s.y),
+      };
+    }
+    const ang = (Math.atan2(curFy - cyFt, curFx - cxFt) * 180) / Math.PI;
+    return { ...s, rotation: ang + 90 };
   }
 
   function commit(o: ObjRow) {
@@ -405,7 +448,7 @@ function Editor({
   ) {
     if (!canEdit) return;
     e.stopPropagation();
-    (e.target as Element).setPointerCapture?.(e.pointerId);
+    e.preventDefault();
     const p = svgPoint(e);
     drag.current = {
       mode,
@@ -414,57 +457,27 @@ function Editor({
       startFy: fy(p.y),
       start: o,
     };
+    liveObj.current = o;
     setSelectedId(o.id);
+    setDragging(true);
   }
 
-  function onMove(e: React.PointerEvent) {
+  function onMove(e: { clientX: number; clientY: number }) {
     const d = drag.current;
     if (!d) return;
     const p = svgPoint(e);
-    const curFx = fx(p.x);
-    const curFy = fy(p.y);
-    setObjects((prev) =>
-      prev.map((o) => {
-        if (o.id !== d.id) return o;
-        if (d.mode === "move") {
-          return {
-            ...o,
-            x: clamp(d.start.x + (curFx - d.startFx), 0, lot.frontageFt),
-            y: clamp(d.start.y + (curFy - d.startFy), 0, lot.depthFt),
-          };
-        }
-        if (d.mode === "resize") {
-          // Resize in the object's own (rotated) frame so the handle tracks.
-          const cxFt = d.start.x + d.start.width / 2;
-          const cyFt = d.start.y + d.start.height / 2;
-          const local = rotatePoint(
-            curFx,
-            curFy,
-            cxFt,
-            cyFt,
-            -d.start.rotation,
-          );
-          return {
-            ...o,
-            width: Math.max(2, local.x - d.start.x),
-            height: Math.max(2, local.y - d.start.y),
-          };
-        }
-        // rotate
-        const cxFt = d.start.x + d.start.width / 2;
-        const cyFt = d.start.y + d.start.height / 2;
-        const ang = (Math.atan2(curFy - cyFt, curFx - cxFt) * 180) / Math.PI;
-        return { ...o, rotation: ang + 90 };
-      }),
-    );
+    const next = applyDrag(d, fx(p.x), fy(p.y));
+    liveObj.current = next;
+    setObjects((prev) => prev.map((o) => (o.id === d.id ? next : o)));
   }
 
   function endDrag() {
     const d = drag.current;
+    const o = liveObj.current;
     drag.current = null;
-    if (!d) return;
-    const o = objects.find((x) => x.id === d.id);
-    if (o) commit(o);
+    liveObj.current = null;
+    setDragging(false);
+    if (d && o) commit(o);
   }
 
   function addObject() {
@@ -513,9 +526,6 @@ function Editor({
             display: "block",
             touchAction: "none",
           }}
-          onPointerMove={onMove}
-          onPointerUp={endDrag}
-          onPointerLeave={endDrag}
           onPointerDown={() => setSelectedId(null)}
           role="img"
           aria-label="Camp layout"

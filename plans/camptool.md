@@ -302,6 +302,23 @@ placement page.)
   `MISSING_OR_NULL_ORIGIN` without `-H "Origin: <baseURL>"`. The browser sends
   Origin automatically; smoke-test scripts must add it. The origin must be in
   `trustedOrigins` (we set it to `baseURL`). GET/session endpoints don't need it.
+- **SVG drag must be window-driven, not pointer-capture + svg `pointerleave`.**
+  First in-browser test: the map editor selected objects fine but drag/resize/
+  rotate never moved them. Root cause: `setPointerCapture` on the shape retargets
+  the pointer to it, so the `<svg onPointerLeave={endDrag}>` fired on the first
+  move and killed the gesture before anything updated. Fix: drop capture + the svg
+  pointer handlers; on pointerdown set a `dragging` state whose effect binds
+  `pointermove`/`pointerup`/`pointercancel` on `window`, so the pointer can roam
+  outside the svg without dropping the drag. Verified in Chrome: move, resize, and
+  rotate all update and persist.
+- **`left_click_drag` (claude-in-chrome) doesn't emit pointerdown/up.** During the
+  above, the browser tool's drag fired only `pointermove` (instrumented: down 0,
+  move 4, up 0), so a pointerdown-initiated gesture never starts and the object
+  looks "stuck." A plain `left_click` does fire pointerdown/up. To test real drag
+  logic, dispatch a synthetic `PointerEvent` sequence (pointerdown on the target →
+  `await` a tick so React's effect attaches the window listeners → pointermove(s)
+  on window → pointerup), then assert on DOM attrs + the DB. Don't conclude drag is
+  broken from `left_click_drag` alone.
 - **Map coordinate model = plot-local feet.** `map_object.x/y/width/height` are
   feet with origin at the lot's front-left corner, +x along the frontage, +y into
   the lot. This keeps a camp's internal layout stable even if its city lot moves
