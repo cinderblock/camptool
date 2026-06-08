@@ -185,9 +185,146 @@ earlier "assign campers to objects" / "relationship graph" idea.
 - **Group membership = self-request + officer-confirm** (captures "who do you want
   to be near").
 
+**City-geometry automation (landed).** The lot setup is now BRC-aware instead of
+free-text. `app/lib/brc.ts` models city geometry **per year** (2025 seeded): a
+street's *letter* is stable across years (Atwood = A …) while its *name* and exact
+radii shift, so you pick **year + street letter** and the frontage radius is
+derived (2025 table reconstructed parametrically from BMorg block depths + street
+widths; reproduces every validated radius + the Kilgore checksum). Clock address
+is an autocomplete that suggests 15-min marks but accepts off-grid values (3:14
+for Math Camp). A **Man-vs-mountain frontage** checkbox flips the taper direction
+(widen outward vs narrow inward) and the compass (+180°). `placement` gained
+`street_letter` / `placement_year` / `fronts_to_man` (migration 0006);
+`inner_radius_ft` is now a manual *override* of the derived radius. Add later
+years' geometry to `CITY_GEOMETRY` as BMorg publishes each doc.
+
 Still TODO: "highlight my spot", RV pop-outs (+ generator/cleanout markers),
 off-center doors, premade/shared blocks, Borg outline import, fire-lane/marker
 overlays, true radial placement of objects, 3D/sun-shade.
+
+**Irregular / non-rectilinear plots (deferred sub-phase).** Camps near keyholes,
+plazas, Center Camp, and other odd spots aren't a frontage×depth rectangle — they
+need a real **polygon** lot model (an editable vertex list) instead of (frontage,
+depth, taper). **Locked requirement: when drawing/editing an irregular plot's
+outline, vertices snap to the 10ft grid** (same grid objects use). Not built yet;
+the current rectangle+taper model stays the default.
+
+**Per-year "edition" is a PRIMARY axis (locked direction; foundational, not a map
+sub-feature).** Per the user: per-year configuration *permeates everything* — e.g.
+a camper brings a van one year, a van + tent the next. So alongside `camp_id`,
+most tenant-scoped data carries an **edition** scope = (camp, event year). The map
+versioning notes below are just one instance of this larger axis. Model sketch
+(forks still open — see below): a first-class `camp_edition` row (id, camp_id,
+year, label, lock/status, optional theme/dates/dues, optional `forked_from_id`),
+and edition-scoped tables (map/placement, the "bringing" inventory =
+`map_object` + occupants, dues, onboarding, recruit applications) carry
+`edition_id`. The "active edition" joins "active camp" in session context, with an
+edition switcher + lock indicator in the UI. Import across editions/years =
+**copy** rows (snapshot, never a live link). Lock = freeze read-only.
+
+Open forks to settle before building (don't pre-lock):
+1. **Year axis = global BRC year, or per-camp `camp_edition`?** Lean per-camp
+   edition, since lock state / theme / dues / "who's coming" are per-camp-per-year;
+   the BRC year is then just an attribute (and the key into `brc.ts` geometry).
+2. **Does membership/role become year-scoped, or stay camp-stable with a separate
+   per-year participation record?** Lean: identity+role stays camp-scoped (you're a
+   Math Camp officer), and a per-year *participation* row carries attendance / dues
+   / what-they're-bringing.
+3. **First-cut scope:** which tables get editioned now vs later.
+
+What stays global (NOT edition-scoped): `user` (a human), `camp` (the org + slug),
+`brc.ts` city geometry (reference data, already per-year).
+
+This is a foundational refactor (touches session context + the core map/inventory
+tables + every loader/action that reads them), so it gets a dedicated design pass
+before code. Best done NOW while there's almost no real data to migrate.
+
+**Locked decisions (from the user):** (a) per-camp `camp_edition` entity, NOT a
+global year; (b) membership/role stays camp-scoped, a separate per-year
+*participation* row will carry attendance/dues/bringing (participation table
+deferred until a feature needs it); (c) build incrementally now.
+
+**Build status — foundation landed (NOT yet wired or applied):**
+- [x] `camp_edition` table (camp_id, year, label, locked, forked_from_id, unique
+      camp+year) in `db/schema/camp.ts`. Nullable `edition_id` FK added to
+      `placement` / `map_object` / `map_object_occupant`; placement unique index
+      moved camp_id → edition_id. **Migration 0007** + appended backfill DML (one
+      edition per existing camp, year = its placement_year else **2026** — the
+      current event year; links all existing map rows). Verified on a VACUUM copy
+      of the live DB: 1 edition/camp @ 2026, every placement (2) + map_object (30)
+      linked, zero dangling FKs.
+- [x] `brc.ts` is now event-year aware: `CURRENT_EVENT_YEAR = 2026`, year pickers
+      offer 2023–2027 (not just geometry years), and `radiusForStreet` /
+      `streetLabel` **fall back to the latest year we have measurements for** (2025)
+      when the selected year's BMorg doc isn't loaded — the lot form flags when it's
+      using a fallback layout. Add real 2026 measurements to `CITY_GEOMETRY` when
+      BMorg publishes them (or the user provides the doc).
+- [x] Active-edition session context: `resolveActiveCamp` now also returns
+      `editions` + `activeEdition` (from a `camptool_edition` cookie, default =
+      newest; cookie validated against the active camp). Helpers
+      `loadCampEditions`, `setEditionCookie`.
+- [x] **Wiring (done).** `/dashboard/editions` page (loader + action) handles
+      set-active (any member), create (+ optional copy-from = deep-copy lot +
+      objects + occupants into the new year), and lock/unlock (officer+).
+      `requireActiveEdition` helper redirects to the editions page when a camp has
+      no edition. Dashboard header gained a **year switcher** (fetcher → setActive,
+      revalidates in place) + a **locked** badge, and a "Years" nav link.
+      `map.tsx` / `bringing.tsx` / `inventory.tsx` loaders + actions now filter and
+      insert by `activeEdition.id`, and **a locked edition is read-only** (member
+      edit + officer actions gated on `!locked`). typecheck + build + biome green.
+
+**APPLIED + BROWSER-TESTED (2026-06-07).** Restarted the dev server → migration
+0007 applied to the live DB (camp_edition populated, every camp backfilled @ 2026,
+placements + map_objects linked, no dangling FKs). Full E2E on
+`https://camptool.isozilla.com` as a fresh admin (Ed Admin / Edition Test Camp):
+fresh camp had no edition → Years page; created 2026 (auto-active, header switcher
++ LOCKED badge appeared); added a Van to 2026; created 2027 **copy-from 2026** →
+Van deep-copied in; added a Tent to 2027; switched header to 2026 → showed **only
+the Van** (per-year independence + snapshot-not-link confirmed); locked 2026 →
+add blocked server-side AND the Bringing page now shows a read-only notice with
+controls hidden. Also confirmed: **6-char password** accepted (new minPasswordLength),
+and the dynamic **current-year default** (2026).
+
+Dev-server dep-optimizer error — FIXED. Root cause: kysely 0.29.2 dropped the
+`DEFAULT_MIGRATION_LOCK_TABLE` / `DEFAULT_MIGRATION_TABLE` exports that the
+optional `@better-auth/kysely-adapter` still imports; Vite tried to prebundle it
+even though we use the Drizzle adapter and never touch Kysely. Fix:
+`optimizeDeps.exclude: ["@better-auth/kysely-adapter", "kysely"]` in
+`vite.config.ts`. After clearing `node_modules/.vite` and restarting, the error is
+gone (verified: server log clean, login + dashboard render/hydrate with no console
+errors). Note: clearing the dep cache causes a one-time transient React
+"useContext null" on the very first cold load that self-heals on the auto-reload.
+
+Test-data cleanup (2026-06-07) — DONE. Backed up the live DB to
+`data/camptool.pre-cleanup.db` (VACUUM INTO), then deleted every camp except
+**Math Camp @ Group W** and every user except **cameron@tacklind.com** (FK
+cascades cleared their memberships/editions/map rows). End state: 1 camp, 1 user,
+its 2026 edition, 0 placements/objects (Math Camp's map was never set up). The
+pre-cleanup backup can be deleted once you're satisfied.
+
+### Map versioning — year scope + tags + lock (an instance of the edition axis)
+
+The map is not a single living document; it's a series of versions:
+- **Per-year, with past years locked.** A year's map is independent — editing the
+  current year must NOT mutate last year's. Past years are **read-only** but
+  remain a **source to import from** (copy a previous version's objects/lot into a
+  new working version as a starting point).
+- **Tagged versions within a year.** At minimum a *planned* version (what we lay
+  out before leaving for playa) and an *as-built* version (what actually happened
+  on site), plus the reality that people move once there — so multiple snapshots
+  over time, each labeled.
+- **Unifying model:** introduce a `map_version` entity (camp_id, year, label, a
+  lock/status flag, created_at, optional `forked_from_id`). `placement` and
+  `map_object`/occupants move from camp-scoped to **version-scoped**
+  (`map_version_id`). "The map you edit" = the camp's current *unlocked* version
+  for the active year. **Import = copy** rows from a source version into a new one
+  (never a live link). **Lock = freeze** a version read-only (e.g. lock "planned"
+  once you leave, lock the whole year when it's over).
+- **Schema impact is real:** today `placement` is one-row-per-camp
+  (`uniqueIndex(camp_id)`) and `map_object` is camp-scoped with no year. This is a
+  core map-table migration, so it's its own sub-phase — capture now, design before
+  building. Open question for that sub-phase: does locking happen automatically
+  (e.g. auto-snapshot "planned" on a date) or only manually?
 
 **Phase 4 — Operations**
 - Dues/financials with per-field view/edit permissions (#3).
@@ -425,6 +562,100 @@ placement page.)
       palette extracted to `~/lib/structures`. typecheck+build+biome green; declare
       → place → list validated over HTTP. TODO: occupants UI, RV pop-outs +
       generator/cleanout markers, custom-structure registry, groups, off-center doors.
+
+## Recruit funnel rework + invite tree (in progress)
+
+Reworking how people enter a camp. The Phase 2 funnel (anonymous application →
+account created only at accept time, via better-auth invitation/magic-link) is
+being replaced. **None of this was ever a "locked decision" (those are items 1–5
+above) — it was just the Phase 2 implementation, and it's being revised.**
+
+New model, built in three shippable stages:
+
+1. **Password-at-apply (this stage).** The public `/c/:slug` page (open, NO secret
+   token — confirmed correct) now creates a real better-auth account as part of
+   applying, so the applicant has a password and can log in to track status. An
+   application is always tied to a `userId`; accept therefore always just
+   `addMember` (no invitation/magic-link branch for applicants). Existing-account
+   users sign in first, then apply.
+2. **Tokenized friend-invites (this stage).** Members+ generate secret-bearing
+   invite links (`camp_invite.token`). Redeeming joins the camp as a recruit and
+   records who invited whom. (Secrets live ONLY here, never on the public apply
+   URL.) The self-referential `membership.invited_by_membership_id` edge landed
+   here too (migration 0005), since redemption is when the edge is first known.
+3. **Invite tree (last).** Now just the *view* + backfill: the edge column already
+   exists. Public applicants / existing members have null inviter (roots); invited
+   campers hang off their inviter. **Backfill decision: root all existing campers
+   at the camp founder/admin**, re-parentable later by officers.
+
+### Progress
+
+- [x] Stage 1 — password-at-apply. `/c/:slug` now: logged-out → account section
+      (signup with password / sign in / magic-link / passkey / Discord) that
+      revalidates into the apply form; logged-in → short apply form (playa name +
+      message) tied to the account. Application always carries `userId`; name/email
+      taken from the session (not spoofable). Dupe-guards for already-member /
+      already-applied. Accept flow unchanged (addMember when account exists — now
+      always true; legacy null-userId rows still handled). typecheck + build green;
+      validated over HTTP (signup → apply → row persisted with userId; re-apply →
+      "already applied").
+- [x] Stage 2 — tokenized friend-invites. Schema: `camp_invite` (token/role/
+      maxUses/useCount/expiresAt/revokedAt) + `membership.invited_by_membership_id`
+      self-ref edge (migration 0005). `/dashboard/invite` (members+) creates/copies/
+      revokes personal links; `/i/:token` redeems — logged-out → shared `AuthInline`
+      account gate, logged-in → "Join {camp}". Redemption inserts the membership
+      directly (bypassing `auth.api.addMember`, which checks the *caller's* perms —
+      the token is the authorization), sets the inviter edge, bumps useCount.
+      Invites grant **recruit only** (a leaked link must not self-grant elevation).
+      Extracted the auth card to `app/components/AuthInline.tsx` (shared with
+      `/c/:slug`). typecheck + build + biome green. Validated over HTTP: create →
+      loader renders link; signup → redeem → membership(recruit) with invitedBy set
+      + useCount++; bad token 404; expired/revoked/used-up states handled.
+- [ ] Stage 3 — invite tree view + founder-rooted backfill (edge column already exists).
+
+## Admin "Work as" (impersonation)
+
+A per-camp impersonation feature so an officer+ can view/use the app as a
+lower-ranked member (debugging "why can't this recruit see X", and a trivial
+dev account-switcher). **Deliberately NOT better-auth's admin plugin** — that
+gates impersonation on a *global* `user.role` super-admin and adds `role`/`banned`
+columns to the `user` table, which contradicts the multi-camp / per-camp-role
+model (decision #1, and a camp admin must never reach into other camps). Instead
+a thin custom layer over better-auth:
+
+- Signed, HttpOnly `camptool_actas` cookie (HMAC-SHA256 over `{u: targetUserId,
+  c: campId}` with `BETTER_AUTH_SECRET`) — server-only pointer to who we're
+  acting as. `app/lib/session.server.ts`.
+- `getSession()` resolves the *real* better-auth session, then — only when the
+  cookie is present — swaps in the target's identity (sets `activeOrganizationId
+  = campId`) and attaches an `impersonatedBy` marker. Zero extra queries on
+  normal requests. `getRealSession()` always returns the unimpersonated session.
+- `canImpersonate(realUserId, targetUserId, campId)`: real user must be
+  **officer+ in that camp and strictly out-rank** the target, and the target must
+  belong to the camp. Re-checked on *every* request, so a demotion or removal ends
+  impersonation immediately. De-escalation only — you can never gain privileges.
+- `/impersonate` resource route (start/stop). Start authorizes via
+  `getRealSession` (never the effective session, so an impersonated session can't
+  re-escalate). UI: a "Work as" button on `/dashboard/members` for rows the viewer
+  out-ranks, and a grape banner + Stop control in the dashboard layout while
+  impersonating.
+- Note: better-auth's own privileged API calls (`auth.api.*` with
+  `request.headers`) still act as the *real* user — the act-as swap only affects
+  our app's loaders/actions that route through `getSession`. Fine for the
+  view/use-as-them use case; revisit if a flow needs better-auth to see the target.
+
+typecheck + build + biome green. Not yet browser-tested end-to-end.
+
+## Map lot: per-year BRC geometry (landed)
+
+See the Phase 3 "City-geometry automation" note above for the feature. Files:
+`app/lib/brc.ts` (geometry + clock/bearing helpers, client-safe), `db/schema/map.ts`
++ migration 0006 (`street_letter`, `placement_year`, `fronts_to_man`),
+`app/routes/dashboard/map.tsx` (lot form rebuilt: street/year selects auto-fill
+radius, clock autocomplete with off-grid entry, man/mountain toggle; render
+taper + compass honor facing and derived radius). Also dropped this session: min
+password length 6 (server + both client validators). typecheck + build + biome
+green. Not yet browser-tested.
 
 ## Resolved (formerly open) questions
 

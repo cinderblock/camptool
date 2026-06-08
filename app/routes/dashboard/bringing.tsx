@@ -13,7 +13,7 @@ import {
 } from "@mantine/core";
 import { and, eq } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
-import { requireActiveCamp } from "~/lib/session.server";
+import { requireActiveEdition } from "~/lib/session.server";
 import { KINDS, ShapeSwatch, kindDef } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { mapObject } from "../../../db/schema";
@@ -33,17 +33,18 @@ type Item = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active } = await requireActiveCamp(request);
+  const { active, activeEdition } = await requireActiveEdition(request);
   const rows = await db
     .select()
     .from(mapObject)
     .where(
       and(
-        eq(mapObject.campId, active.camp.id),
+        eq(mapObject.editionId, activeEdition.id),
         eq(mapObject.ownerMembershipId, active.membership.id),
       ),
     );
   return {
+    locked: activeEdition.locked,
     items: rows.map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -56,9 +57,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const { user, active } = await requireActiveCamp(request);
+  const { user, active, activeEdition } = await requireActiveEdition(request);
   const campId = active.camp.id;
+  const editionId = activeEdition.id;
   const mid = active.membership.id;
+  if (activeEdition.locked) {
+    return data({ error: "This year is locked." }, { status: 403 });
+  }
   const form = await request.formData();
   const intent = String(form.get("intent"));
   const num = (k: string, fallback = 0) => {
@@ -68,11 +73,11 @@ export async function action({ request }: Route.ActionArgs) {
     return Number.isFinite(n) ? n : fallback;
   };
 
-  // All intents act only on the caller's own items.
+  // All intents act only on the caller's own items, within the active edition.
   const ownItem = (id: string) =>
     and(
       eq(mapObject.id, id),
-      eq(mapObject.campId, campId),
+      eq(mapObject.editionId, editionId),
       eq(mapObject.ownerMembershipId, mid),
     );
 
@@ -82,6 +87,7 @@ export async function action({ request }: Route.ActionArgs) {
     await db.insert(mapObject).values({
       id: crypto.randomUUID(),
       campId,
+      editionId,
       ownerMembershipId: mid,
       kind,
       placed: false,
@@ -114,7 +120,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Bringing({ loaderData }: Route.ComponentProps) {
-  const { items } = loaderData;
+  const { items, locked } = loaderData;
   const fetcher = useFetcher();
 
   function add(kind: string) {
@@ -132,33 +138,49 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
           </Text>
         </div>
 
-        <Paper withBorder p="md" radius="md">
-          <Text fw={600} size="sm" mb="xs">
-            Add an item
-          </Text>
-          <Group gap="xs">
-            {KINDS.map((k) => (
-              <Button
-                key={k.value}
-                size="xs"
-                variant="default"
-                leftSection={<ShapeSwatch kind={k} size={14} />}
-                onClick={() => add(k.value)}
-              >
-                {k.label}
-              </Button>
-            ))}
-          </Group>
-        </Paper>
+        {locked ? (
+          <Paper withBorder p="md" radius="md" bg="var(--mantine-color-gray-0)">
+            <Text size="sm" c="dimmed">
+              This year is locked — your inventory is read-only. Switch to an
+              open year to make changes.
+            </Text>
+          </Paper>
+        ) : (
+          <Paper withBorder p="md" radius="md">
+            <Text fw={600} size="sm" mb="xs">
+              Add an item
+            </Text>
+            <Group gap="xs">
+              {KINDS.map((k) => (
+                <Button
+                  key={k.value}
+                  size="xs"
+                  variant="default"
+                  leftSection={<ShapeSwatch kind={k} size={14} />}
+                  onClick={() => add(k.value)}
+                >
+                  {k.label}
+                </Button>
+              ))}
+            </Group>
+          </Paper>
+        )}
 
         {items.length === 0 ? (
           <Text c="dimmed">
-            Nothing yet. Add what you're bringing using the buttons above.
+            {locked
+              ? "Nothing was declared for this year."
+              : "Nothing yet. Add what you're bringing using the buttons above."}
           </Text>
         ) : (
           <Stack gap="sm">
             {items.map((item) => (
-              <ItemRow key={item.id} item={item} fetcher={fetcher} />
+              <ItemRow
+                key={item.id}
+                item={item}
+                fetcher={fetcher}
+                locked={locked}
+              />
             ))}
           </Stack>
         )}
@@ -170,9 +192,11 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
 function ItemRow({
   item,
   fetcher,
+  locked,
 }: {
   item: Item;
   fetcher: ReturnType<typeof useFetcher>;
+  locked: boolean;
 }) {
   const def = kindDef(item.kind);
   function commit(fields: Record<string, string | number>) {
@@ -219,6 +243,7 @@ function ItemRow({
               label="Length (ft)"
               w={110}
               min={6}
+              disabled={locked}
               defaultValue={Math.round(item.height)}
               onBlur={(e) =>
                 commit({
@@ -233,6 +258,7 @@ function ItemRow({
                 label="Width (ft)"
                 w={90}
                 min={1}
+                disabled={locked}
                 defaultValue={Math.round(item.width)}
                 onBlur={(e) =>
                   commit({
@@ -245,6 +271,7 @@ function ItemRow({
                 label="Depth (ft)"
                 w={90}
                 min={1}
+                disabled={locked}
                 defaultValue={Math.round(item.height)}
                 onBlur={(e) =>
                   commit({
@@ -254,21 +281,23 @@ function ItemRow({
               />
             </>
           )}
-          <Tooltip label="Remove">
-            <ActionIcon
-              variant="subtle"
-              color="red"
-              mb={4}
-              onClick={() =>
-                fetcher.submit(
-                  { intent: "removeItem", id: item.id },
-                  { method: "post" },
-                )
-              }
-            >
-              ✕
-            </ActionIcon>
-          </Tooltip>
+          {locked ? null : (
+            <Tooltip label="Remove">
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                mb={4}
+                onClick={() =>
+                  fetcher.submit(
+                    { intent: "removeItem", id: item.id },
+                    { method: "post" },
+                  )
+                }
+              >
+                ✕
+              </ActionIcon>
+            </Tooltip>
+          )}
         </Group>
       </Group>
     </Paper>

@@ -14,7 +14,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useRef } from "react";
-import { data, useFetcher } from "react-router";
+import { Form, data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
 import {
@@ -76,6 +76,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const assignableRoles = ROLES.filter((r) => rankOf(r) <= rankOf(actorRole));
 
   return {
+    campId,
     campName: active.camp.name,
     actorUserId: actor.id,
     actorRole,
@@ -184,8 +185,14 @@ export async function action({ request }: Route.ActionArgs) {
 type FetcherData = { ok?: string; error?: string };
 
 export default function Members({ loaderData }: Route.ComponentProps) {
-  const { members, canManage, assignableRoles, actorUserId, actorRole } =
-    loaderData;
+  const {
+    members,
+    canManage,
+    assignableRoles,
+    actorUserId,
+    actorRole,
+    campId,
+  } = loaderData;
   const roleFetcher = useFetcher<FetcherData>();
   const addFetcher = useFetcher<FetcherData>();
   const addFormRef = useRef<HTMLFormElement>(null);
@@ -233,6 +240,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 <Table.Th>Discord</Table.Th>
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Role</Table.Th>
+                {canManage ? <Table.Th>Actions</Table.Th> : null}
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -309,6 +317,29 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                         </Badge>
                       )}
                     </Table.Td>
+                    {canManage ? (
+                      <Table.Td>
+                        {editable ? (
+                          <Form method="post" action="/impersonate">
+                            <input type="hidden" name="intent" value="start" />
+                            <input
+                              type="hidden"
+                              name="targetUserId"
+                              value={m.userId}
+                            />
+                            <input type="hidden" name="campId" value={campId} />
+                            <Button
+                              type="submit"
+                              size="xs"
+                              variant="light"
+                              color="grape"
+                            >
+                              Work as
+                            </Button>
+                          </Form>
+                        ) : null}
+                      </Table.Td>
+                    ) : null}
                   </Table.Tr>
                 );
               })}

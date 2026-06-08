@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d3f4aa99-a127-4122-bc38-9e7b8d31700e",
-  "prevId": "335bac3b-3c02-4adf-a32c-4cd8815c0e76",
+  "id": "53fcda8b-f39f-4888-b52e-0a4f6fbd2450",
+  "prevId": "d3f4aa99-a127-4122-bc38-9e7b8d31700e",
   "tables": {
     "account": {
       "name": "account",
@@ -621,6 +621,13 @@
           "autoincrement": false,
           "default": "'active'"
         },
+        "invited_by_membership_id": {
+          "name": "invited_by_membership_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "joined_at": {
           "name": "joined_at",
           "type": "integer",
@@ -656,6 +663,15 @@
           "columnsFrom": ["user_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "membership_invited_by_membership_id_membership_id_fk": {
+          "name": "membership_invited_by_membership_id_membership_id_fk",
+          "tableFrom": "membership",
+          "tableTo": "membership",
+          "columnsFrom": ["invited_by_membership_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1105,6 +1121,114 @@
           "tableFrom": "placement",
           "tableTo": "camp",
           "columnsFrom": ["camp_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "camp_invite": {
+      "name": "camp_invite",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "camp_id": {
+          "name": "camp_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "inviter_membership_id": {
+          "name": "inviter_membership_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'recruit'"
+        },
+        "max_uses": {
+          "name": "max_uses",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "use_count": {
+          "name": "use_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch() * 1000)"
+        }
+      },
+      "indexes": {
+        "camp_invite_token_unique": {
+          "name": "camp_invite_token_unique",
+          "columns": ["token"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "camp_invite_camp_id_camp_id_fk": {
+          "name": "camp_invite_camp_id_camp_id_fk",
+          "tableFrom": "camp_invite",
+          "tableTo": "camp",
+          "columnsFrom": ["camp_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "camp_invite_inviter_membership_id_membership_id_fk": {
+          "name": "camp_invite_inviter_membership_id_membership_id_fk",
+          "tableFrom": "camp_invite",
+          "tableTo": "membership",
+          "columnsFrom": ["inviter_membership_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"

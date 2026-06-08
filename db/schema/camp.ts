@@ -7,7 +7,13 @@
  * unmodified; only the SQL column name is ours.
  */
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  type AnySQLiteColumn,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { user } from "./auth";
 
 const now = sql`(unixepoch() * 1000)`;
@@ -23,6 +29,35 @@ export const camp = sqliteTable("camp", {
     .default(now),
 });
 
+/**
+ * A camp's per-year **edition** — the second tenancy axis alongside `camp_id`.
+ * Per-year data (the map/placement, the "bringing" inventory, …) is scoped to an
+ * edition, so editing this year never mutates last year's, and a past edition can
+ * be locked read-only yet still copied from. One edition per (camp, year).
+ */
+export const campEdition = sqliteTable(
+  "camp_edition",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    year: integer("year").notNull(),
+    label: text("label"),
+    // Locked editions are read-only (e.g. last year, or "planned" once on playa).
+    locked: integer("locked", { mode: "boolean" }).notNull().default(false),
+    // Which edition this one was copied from (import = snapshot, not a live link).
+    forkedFromId: text("forked_from_id").references(
+      (): AnySQLiteColumn => campEdition.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [uniqueIndex("camp_edition_camp_year").on(t.campId, t.year)],
+);
+
 export const membership = sqliteTable("membership", {
   id: text("id").primaryKey(),
   organizationId: text("camp_id")
@@ -35,6 +70,12 @@ export const membership = sqliteTable("membership", {
   // Our additional fields (registered via the plugin's additionalFields).
   playaName: text("playa_name"),
   status: text("status").notNull().default("active"),
+  // Invite-tree edge: the membership that invited this one (null = joined via
+  // public application or is a root, e.g. the founder). Self-referential.
+  invitedByMembershipId: text("invited_by_membership_id").references(
+    (): AnySQLiteColumn => membership.id,
+    { onDelete: "set null" },
+  ),
   joinedAt: integer("joined_at", { mode: "timestamp_ms" })
     .notNull()
     .default(now),

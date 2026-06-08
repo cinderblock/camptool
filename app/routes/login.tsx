@@ -38,7 +38,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     initialValues: { name: "", email: "", password: "" },
     validate: {
       email: (v) => (/^\S+@\S+$/.test(v) ? null : "Invalid email"),
-      password: (v) => (v.length >= 8 ? null : "At least 8 characters"),
+      password: (v) => (v.length >= 6 ? null : "At least 6 characters"),
     },
   });
 

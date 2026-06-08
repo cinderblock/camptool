@@ -11,10 +11,13 @@ import {
   Textarea,
   Title,
 } from "@mantine/core";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
+import { AuthInline } from "~/components/AuthInline";
+import { discordEnabled } from "~/lib/auth.server";
+import { getSession } from "~/lib/session.server";
 import { db } from "../../db/client.server";
-import { camp, recruitApplication, user } from "../../db/schema";
+import { camp, membership, recruitApplication } from "../../db/schema";
 import type { Route } from "./+types/c.$slug";
 
 export function meta({ data: d }: Route.MetaArgs) {
@@ -22,17 +25,70 @@ export function meta({ data: d }: Route.MetaArgs) {
   return [{ title: `Join ${name} · CampTool` }];
 }
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ request, params }: Route.LoaderArgs) {
   const [found] = await db
     .select({ id: camp.id, name: camp.name, logo: camp.logo })
     .from(camp)
     .where(eq(camp.slug, params.slug))
     .limit(1);
   if (!found) throw data("Camp not found", { status: 404 });
-  return { campName: found.name, logo: found.logo, slug: params.slug };
+
+  const session = await getSession(request);
+  if (!session) {
+    return {
+      campName: found.name,
+      logo: found.logo,
+      slug: params.slug,
+      viewer: null,
+      alreadyMember: false,
+      alreadyApplied: false,
+      discordEnabled,
+    };
+  }
+
+  const [member] = await db
+    .select({ id: membership.id })
+    .from(membership)
+    .where(
+      and(
+        eq(membership.userId, session.user.id),
+        eq(membership.organizationId, found.id),
+      ),
+    )
+    .limit(1);
+
+  const [pending] = await db
+    .select({ id: recruitApplication.id })
+    .from(recruitApplication)
+    .where(
+      and(
+        eq(recruitApplication.campId, found.id),
+        eq(recruitApplication.status, "pending"),
+        or(
+          eq(recruitApplication.userId, session.user.id),
+          eq(recruitApplication.email, session.user.email),
+        ),
+      ),
+    )
+    .limit(1);
+
+  return {
+    campName: found.name,
+    logo: found.logo,
+    slug: params.slug,
+    viewer: { name: session.user.name, email: session.user.email },
+    alreadyMember: Boolean(member),
+    alreadyApplied: Boolean(pending),
+    discordEnabled,
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
+  const session = await getSession(request);
+  if (!session) {
+    return data({ error: "Please sign in to apply." }, { status: 401 });
+  }
+
   const [found] = await db
     .select({ id: camp.id })
     .from(camp)
@@ -40,62 +96,62 @@ export async function action({ request, params }: Route.ActionArgs) {
     .limit(1);
   if (!found) throw data("Camp not found", { status: 404 });
 
-  const form = await request.formData();
-  const name = String(form.get("name") ?? "").trim();
-  const email = String(form.get("email") ?? "")
-    .trim()
-    .toLowerCase();
-  const playaName = String(form.get("playaName") ?? "").trim() || null;
-  const message = String(form.get("message") ?? "").trim() || null;
-
-  if (!name) return data({ error: "Please enter your name." }, { status: 400 });
-  if (!email || !email.includes("@")) {
-    return data({ error: "Please enter a valid email." }, { status: 400 });
+  const [member] = await db
+    .select({ id: membership.id })
+    .from(membership)
+    .where(
+      and(
+        eq(membership.userId, session.user.id),
+        eq(membership.organizationId, found.id),
+      ),
+    )
+    .limit(1);
+  if (member) {
+    return data({ error: "You're already a member of this camp." });
   }
 
-  const [existing] = await db
-    .select({ id: recruitApplication.id, status: recruitApplication.status })
+  const [pending] = await db
+    .select({ id: recruitApplication.id })
     .from(recruitApplication)
     .where(
       and(
         eq(recruitApplication.campId, found.id),
-        eq(recruitApplication.email, email),
+        eq(recruitApplication.status, "pending"),
+        or(
+          eq(recruitApplication.userId, session.user.id),
+          eq(recruitApplication.email, session.user.email),
+        ),
       ),
     )
     .limit(1);
-  if (existing && existing.status === "pending") {
+  if (pending) {
     return data({
       ok: "You've already applied — the camp will be in touch. Hang tight!",
     });
   }
 
-  const [matchedUser] = await db
-    .select({ id: user.id })
-    .from(user)
-    .where(eq(user.email, email))
-    .limit(1);
+  const form = await request.formData();
+  const playaName = String(form.get("playaName") ?? "").trim() || null;
+  const message = String(form.get("message") ?? "").trim() || null;
 
   await db.insert(recruitApplication).values({
     id: crypto.randomUUID(),
     campId: found.id,
-    name,
-    email,
+    name: session.user.name,
+    email: session.user.email,
     playaName,
     message,
     status: "pending",
-    userId: matchedUser?.id ?? null,
+    userId: session.user.id,
   });
 
-  return data({ ok: `Thanks, ${name}! Your application has been sent.` });
+  return data({ ok: `Thanks, ${session.user.name}! Your application is in.` });
 }
 
 type FetcherData = { ok?: string; error?: string };
 
 export default function PublicCamp({ loaderData }: Route.ComponentProps) {
   const { campName, logo } = loaderData;
-  const fetcher = useFetcher<FetcherData>();
-  const result = fetcher.data;
-  const submitting = fetcher.state !== "idle";
 
   return (
     <Container size="sm" py="xl">
@@ -114,54 +170,81 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
         </Stack>
 
         <Paper withBorder radius="md" p="lg">
-          {result?.ok ? (
-            <Alert color="green" title="Application received">
-              {result.ok}
-            </Alert>
+          {loaderData.viewer ? (
+            <ApplySection {...loaderData} viewer={loaderData.viewer} />
           ) : (
-            <fetcher.Form method="post">
-              <Stack gap="md">
-                {result?.error ? (
-                  <Alert color="red" title="Check your application">
-                    {result.error}
-                  </Alert>
-                ) : null}
-                <TextInput
-                  name="name"
-                  label="Your name"
-                  placeholder="Jane Doe"
-                  required
-                />
-                <TextInput
-                  name="email"
-                  type="email"
-                  label="Email"
-                  placeholder="jane@example.com"
-                  required
-                />
-                <TextInput
-                  name="playaName"
-                  label="Playa name"
-                  description="Optional — what folks call you on playa."
-                  placeholder="Dusty"
-                />
-                <Textarea
-                  name="message"
-                  label="Why do you want to join?"
-                  placeholder="A sentence or two about you and what you're looking for."
-                  autosize
-                  minRows={3}
-                />
-                <Group justify="flex-end">
-                  <Button type="submit" loading={submitting}>
-                    Apply to join
-                  </Button>
-                </Group>
-              </Stack>
-            </fetcher.Form>
+            <AuthInline
+              intro="Create an account to apply — it lets you set a password and check on your application later."
+              discordEnabled={loaderData.discordEnabled}
+            />
           )}
         </Paper>
       </Stack>
     </Container>
+  );
+}
+
+function ApplySection({
+  campName,
+  viewer,
+  alreadyMember,
+  alreadyApplied,
+}: {
+  campName: string;
+  viewer: { name: string; email: string };
+  alreadyMember: boolean;
+  alreadyApplied: boolean;
+}) {
+  const fetcher = useFetcher<FetcherData>();
+  const result = fetcher.data;
+  const submitting = fetcher.state !== "idle";
+
+  if (alreadyMember) {
+    return (
+      <Alert color="green" title="You're in">
+        You're already a member of {campName}.
+      </Alert>
+    );
+  }
+  if (alreadyApplied || result?.ok) {
+    return (
+      <Alert color="green" title="Application received">
+        {result?.ok ??
+          "You've already applied — the camp will be in touch. Hang tight!"}
+      </Alert>
+    );
+  }
+
+  return (
+    <fetcher.Form method="post">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Applying as <b>{viewer.name}</b> ({viewer.email}).
+        </Text>
+        {result?.error ? (
+          <Alert color="red" title="Check your application">
+            {result.error}
+          </Alert>
+        ) : null}
+        <TextInput
+          name="playaName"
+          label="Playa name"
+          description="Optional — what folks call you on playa."
+          placeholder="Dusty"
+        />
+        <Textarea
+          name="message"
+          label="Why do you want to join?"
+          placeholder="A sentence or two about you and what you're looking for."
+          autosize
+          minRows={3}
+        />
+        <Group justify="flex-end">
+          <Button type="submit" loading={submitting}>
+            Apply to join
+          </Button>
+        </Group>
+      </Stack>
+    </fetcher.Form>
   );
 }

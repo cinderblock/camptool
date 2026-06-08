@@ -1,6 +1,8 @@
 import {
   ActionIcon,
+  Autocomplete,
   Button,
+  Checkbox,
   Group,
   NumberInput,
   Paper,
@@ -15,8 +17,18 @@ import {
 import { and, eq } from "drizzle-orm";
 import { memo, useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
+import {
+  CURRENT_EVENT_YEAR,
+  clockOptions,
+  eventYearOptions,
+  hasGeometry,
+  mapUpBearingFor,
+  radiusForStreet,
+  streetLabel,
+  streetOptions,
+} from "~/lib/brc";
 import { hasAtLeast } from "~/lib/permissions";
-import { requireActiveCamp } from "~/lib/session.server";
+import { requireActiveEdition } from "~/lib/session.server";
 import {
   KINDS,
   ShapeSwatch,
@@ -89,6 +101,163 @@ function Door({
   );
 }
 
+/** Schematic top-down detailing drawn over a vehicle/tent footprint so kinds
+ * read at a glance (front = top edge). Local coords — rotates with the object —
+ * and never intercepts pointer events so the body underneath stays draggable. */
+function KindGlyph({
+  kind,
+  px,
+  py,
+  w,
+  h,
+}: {
+  kind: string;
+  px: number;
+  py: number;
+  w: number;
+  h: number;
+}) {
+  const dark = "#1c1c1c";
+  const glass = "#cfe0ff";
+  const X = (f: number) => px + w * f;
+  const Y = (f: number) => py + h * f;
+  const line = { stroke: dark, strokeOpacity: 0.55, fill: "none" } as const;
+  const pane = { fill: glass, fillOpacity: 0.55, stroke: "none" } as const;
+
+  // Two wheels (flush to each side) at each given length-fraction.
+  const wheels = (fracs: number[]) => {
+    const ww = Math.max(2, w * 0.12);
+    const wl = Math.max(3, h * 0.1);
+    return fracs.flatMap((f) =>
+      [px, px + w - ww].map((wx) => (
+        <rect
+          key={`w${f}-${wx}`}
+          x={wx}
+          y={py + h * f - wl / 2}
+          width={ww}
+          height={wl}
+          rx={Math.min(ww, wl) * 0.35}
+          fill={dark}
+          fillOpacity={0.6}
+        />
+      )),
+    );
+  };
+
+  if (kind === "tent") {
+    if (Math.min(w, h) < 8) return null;
+    return (
+      <g pointerEvents="none" stroke={dark} strokeOpacity={0.4} fill="none">
+        <line x1={px} y1={py} x2={px + w} y2={py + h} />
+        <line x1={px + w} y1={py} x2={px} y2={py + h} />
+        <circle
+          cx={px + w / 2}
+          cy={py + h / 2}
+          r={Math.min(w, h) * 0.08}
+          fill={dark}
+          fillOpacity={0.3}
+          stroke="none"
+        />
+      </g>
+    );
+  }
+
+  // Vehicles get cluttered when tiny; skip detailing below a threshold.
+  if (w < 10 || h < 16) return null;
+
+  if (kind === "car") {
+    return (
+      <g pointerEvents="none">
+        {wheels([0.16, 0.8])}
+        <polygon
+          points={`${X(0.38)},${Y(0.16)} ${X(0.62)},${Y(0.16)} ${X(0.72)},${Y(0.3)} ${X(0.28)},${Y(0.3)}`}
+          {...pane}
+        />
+        <rect
+          x={X(0.2)}
+          y={Y(0.3)}
+          width={w * 0.6}
+          height={h * 0.42}
+          rx={Math.min(w, h) * 0.12}
+          {...line}
+        />
+        <polygon
+          points={`${X(0.3)},${Y(0.72)} ${X(0.7)},${Y(0.72)} ${X(0.6)},${Y(0.85)} ${X(0.4)},${Y(0.85)}`}
+          {...pane}
+          fillOpacity={0.4}
+        />
+      </g>
+    );
+  }
+
+  if (kind === "truck") {
+    return (
+      <g pointerEvents="none">
+        {wheels([0.18, 0.82])}
+        <rect
+          x={X(0.14)}
+          y={Y(0.07)}
+          width={w * 0.72}
+          height={h * 0.27}
+          rx={Math.min(w, h) * 0.08}
+          {...line}
+        />
+        <line x1={X(0.2)} y1={Y(0.15)} x2={X(0.8)} y2={Y(0.15)} {...line} />
+        <rect
+          x={X(0.1)}
+          y={Y(0.4)}
+          width={w * 0.8}
+          height={h * 0.52}
+          rx={2}
+          {...line}
+        />
+      </g>
+    );
+  }
+
+  if (kind === "van") {
+    return (
+      <g pointerEvents="none">
+        {wheels([0.16, 0.84])}
+        <polygon
+          points={`${X(0.26)},${Y(0.07)} ${X(0.74)},${Y(0.07)} ${X(0.84)},${Y(0.22)} ${X(0.16)},${Y(0.22)}`}
+          {...pane}
+        />
+        <line x1={X(0.08)} y1={Y(0.28)} x2={X(0.92)} y2={Y(0.28)} {...line} />
+        <line x1={X(0.62)} y1={Y(0.36)} x2={X(0.62)} y2={Y(0.74)} {...line} />
+      </g>
+    );
+  }
+
+  if (kind === "rv") {
+    return (
+      <g pointerEvents="none">
+        {wheels([0.12, 0.72])}
+        <polygon
+          points={`${X(0.22)},${Y(0.02)} ${X(0.78)},${Y(0.02)} ${X(0.88)},${Y(0.13)} ${X(0.12)},${Y(0.13)}`}
+          {...pane}
+          fillOpacity={0.5}
+        />
+        <line x1={X(0.06)} y1={Y(0.16)} x2={X(0.94)} y2={Y(0.16)} {...line} />
+        {[0.28, 0.42, 0.56].map((f) => (
+          <rect
+            key={f}
+            x={X(0.04)}
+            y={Y(f)}
+            width={w * 0.06}
+            height={h * 0.08}
+            rx={1}
+            {...pane}
+            fillOpacity={0.5}
+          />
+        ))}
+      </g>
+    );
+  }
+
+  return null;
+}
+
 type ObjRow = {
   id: string;
   name: string | null;
@@ -103,19 +272,19 @@ type ObjRow = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active } = await requireActiveCamp(request);
-  const campId = active.camp.id;
+  const { active, activeEdition } = await requireActiveEdition(request);
+  const editionId = activeEdition.id;
 
   const [lot] = await db
     .select()
     .from(placement)
-    .where(eq(placement.campId, campId))
+    .where(eq(placement.editionId, editionId))
     .limit(1);
 
   const objects = await db
     .select()
     .from(mapObject)
-    .where(and(eq(mapObject.campId, campId), eq(mapObject.placed, true)));
+    .where(and(eq(mapObject.editionId, editionId), eq(mapObject.placed, true)));
 
   const canManage = hasAtLeast(active.membership.role, "officer");
   // Declared-but-unplaced items (the officer placement queue), with owner names.
@@ -131,12 +300,16 @@ export async function loader({ request }: Route.LoaderArgs) {
         .from(mapObject)
         .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
         .leftJoin(user, eq(membership.userId, user.id))
-        .where(and(eq(mapObject.campId, campId), eq(mapObject.placed, false)))
+        .where(
+          and(eq(mapObject.editionId, editionId), eq(mapObject.placed, false)),
+        )
     : [];
 
   return {
-    canEdit: hasAtLeast(active.membership.role, "member"),
-    canManage,
+    canEdit:
+      hasAtLeast(active.membership.role, "member") && !activeEdition.locked,
+    locked: activeEdition.locked,
+    canManage: canManage && !activeEdition.locked,
     unplaced: unplacedRows.map((u) => ({
       id: u.id,
       kind: u.kind,
@@ -147,6 +320,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     campName: active.camp.name,
     lot: lot
       ? {
+          streetLetter: lot.streetLetter,
+          year: lot.year,
+          frontsToMan: lot.frontsToMan,
           street: lot.street,
           address: lot.address,
           frontageFt: lot.frontageFt,
@@ -171,14 +347,21 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const { user, active } = await requireActiveCamp(request);
+  const { user, active, activeEdition } = await requireActiveEdition(request);
   const campId = active.camp.id;
+  const editionId = activeEdition.id;
   if (!hasAtLeast(active.membership.role, "member")) {
     return data(
       { error: "You don't have permission to edit the map." },
       {
         status: 403,
       },
+    );
+  }
+  if (activeEdition.locked) {
+    return data(
+      { error: "This year is locked. Unlock it to make changes." },
+      { status: 403 },
     );
   }
 
@@ -197,6 +380,9 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "savePlacement") {
     const values = {
+      streetLetter: str("streetLetter"),
+      year: form.get("year") ? Math.round(num("year")) : null,
+      frontsToMan: form.get("frontsToMan") === "on",
       street: str("street"),
       address: str("address"),
       frontageFt: Math.max(1, num("frontageFt", 100)),
@@ -208,7 +394,7 @@ export async function action({ request }: Route.ActionArgs) {
     const [existing] = await db
       .select({ id: placement.id })
       .from(placement)
-      .where(eq(placement.campId, campId))
+      .where(eq(placement.editionId, editionId))
       .limit(1);
     if (existing) {
       await db
@@ -218,7 +404,7 @@ export async function action({ request }: Route.ActionArgs) {
     } else {
       await db
         .insert(placement)
-        .values({ id: crypto.randomUUID(), campId, ...values });
+        .values({ id: crypto.randomUUID(), campId, editionId, ...values });
     }
     return data({ ok: true });
   }
@@ -229,6 +415,7 @@ export async function action({ request }: Route.ActionArgs) {
     const row = {
       id: crypto.randomUUID(),
       campId,
+      editionId,
       name: str("name"),
       kind,
       // Dropping from the legend = an officer placing a camp/shared item.
@@ -264,7 +451,7 @@ export async function action({ request }: Route.ActionArgs) {
     const [owned] = await db
       .select({ id: mapObject.id })
       .from(mapObject)
-      .where(and(eq(mapObject.id, id), eq(mapObject.campId, campId)))
+      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
       .limit(1);
     if (!owned) return data({ error: "Object not found." }, { status: 404 });
 
@@ -289,7 +476,7 @@ export async function action({ request }: Route.ActionArgs) {
     const [row] = await db
       .update(mapObject)
       .set({ placed: true, x: num("x"), y: num("y"), updatedAt: new Date() })
-      .where(and(eq(mapObject.id, id), eq(mapObject.campId, campId)))
+      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
       .returning();
     if (!row) return data({ error: "Item not found." }, { status: 404 });
     return data({
@@ -312,7 +499,7 @@ export async function action({ request }: Route.ActionArgs) {
     const id = String(form.get("id"));
     await db
       .delete(mapObject)
-      .where(and(eq(mapObject.id, id), eq(mapObject.campId, campId)));
+      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
     return data({ ok: true });
   }
 
@@ -331,6 +518,14 @@ function rotateVec(vx: number, vy: number, deg: number) {
   return { x: vx * cos - vy * sin, y: vx * sin + vy * cos };
 }
 
+/** Is the feet-space point (fxp,fyp) inside the object's rotated footprint? */
+function containsPoint(o: ObjRow, fxp: number, fyp: number) {
+  const cx = o.x + o.width / 2;
+  const cy = o.y + o.height / 2;
+  const local = rotateVec(fxp - cx, fyp - cy, -o.rotation);
+  return Math.abs(local.x) <= o.width / 2 && Math.abs(local.y) <= o.height / 2;
+}
+
 // Black Rock City orientation, anchored to ground truth: a 3:00 camp's frontage
 // faces NE toward the Man. So the bearing the map's "up" (toward the Man, across
 // the frontage) points to, for a clock address H, is (135 - 30·H) mod 360
@@ -340,26 +535,28 @@ function rotateVec(vx: number, vy: number, deg: number) {
 const SUNRISE_AZ = 73;
 const SUNSET_AZ = 287;
 
-/** Parse a clock address like "3:00" or "4:30" to decimal hours (1–12), else null. */
-function parseClock(addr: string | null): number | null {
-  if (!addr) return null;
-  const m = addr.match(/^\s*(\d{1,2})(?::(\d{1,2}))?/);
-  if (!m) return null;
-  const h = Number(m[1]);
-  const mm = m[2] ? Number(m[2]) : 0;
-  if (h < 1 || h > 12 || mm > 59) return null;
-  return h + mm / 60;
-}
-
-/** Compass bearing (deg from true north) the map's "up" points to, from the
- * clock address. Map-up faces the Man across the frontage. */
-function mapUpBearingFor(addr: string | null): number | null {
-  const h = parseClock(addr);
-  if (h == null) return null;
-  return (((135 - 30 * h) % 360) + 360) % 360;
-}
-
 type Lot = NonNullable<Route.ComponentProps["loaderData"]["lot"]>;
+
+/** Effective frontage radius (ft from the Man): the manual override if set,
+ * else derived from the lot's street letter + year. Null → no taper. */
+function frontageRadiusOf(lot: {
+  innerRadiusFt: number | null;
+  streetLetter: string | null;
+  year: number | null;
+}): number | null {
+  return lot.innerRadiusFt ?? radiusForStreet(lot.year, lot.streetLetter);
+}
+
+/** Rear (service-alley) edge width in feet. A Man-facing lot widens outward;
+ * a mountain-facing lot narrows toward the Man. */
+function rearWidthOf(lot: Lot, radius: number | null): number {
+  if (!radius) return lot.frontageFt;
+  const rearRadius = lot.frontsToMan
+    ? radius + lot.depthFt
+    : radius - lot.depthFt;
+  if (rearRadius <= 0) return lot.frontageFt;
+  return (lot.frontageFt * rearRadius) / radius;
+}
 
 export default function CampMap({ loaderData }: Route.ComponentProps) {
   const { canEdit, canManage, unplaced, lot } = loaderData;
@@ -404,8 +601,13 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           <Title order={2}>Camp map</Title>
           <Text c="dimmed" size="sm">
             {lot.frontageFt}′ frontage × {lot.depthFt}′ deep
-            {lot.street ? ` · ${lot.street}` : ""}
+            {lot.street
+              ? ` · ${lot.street}`
+              : lot.streetLetter && lot.year
+                ? ` · ${streetLabel(lot.year, lot.streetLetter)}`
+                : ""}
             {lot.address ? ` @ ${lot.address}` : ""}
+            {lot.frontsToMan ? "" : " · mountain-facing"}
           </Text>
         </div>
       </Group>
@@ -426,7 +628,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           gap="md"
           style={{ flex: "1 1 240px", minWidth: 240, maxWidth: 340 }}
         >
-          <Compass mapUpBearing={mapUpBearingFor(lot.address)} />
+          <Compass
+            mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
+          />
           {canManage ? <UnplacedTray unplaced={unplaced} /> : null}
           {canEdit ? <Legend /> : null}
           <SidePanel
@@ -649,10 +853,9 @@ function Editor({
     return () => window.removeEventListener("keydown", onKey);
   }, [canEdit, selectedId, objects, lot.frontageFt, lot.depthFt]);
 
-  // Trapezoid taper: rear edge widens with depth when the inner radius is known.
-  const rear = lot.innerRadiusFt
-    ? lot.frontageFt + (lot.frontageFt * lot.depthFt) / lot.innerRadiusFt
-    : lot.frontageFt;
+  // Trapezoid taper: rear edge widens (Man-facing) or narrows (mountain-facing)
+  // with depth, from the derived/overridden frontage radius.
+  const rear = rearWidthOf(lot, frontageRadiusOf(lot));
   const maxWidthFt = Math.max(lot.frontageFt, rear);
   const ppf = (VIEW_W - 2 * MARGIN) / maxWidthFt;
   const viewH = Math.round(MARGIN * 2 + lot.depthFt * ppf);
@@ -742,6 +945,24 @@ function Editor({
     setDragging(true);
   }
 
+  // Pointer-down on the bare canvas. Because shade bodies are click-through, a
+  // press on an empty part of a shade lands here — hit-test shades (topmost
+  // first) and select/drag that shade; otherwise it's a real empty click, so
+  // deselect. (Presses on solid objects never reach here — they stop bubbling.)
+  function onCanvasDown(e: React.PointerEvent) {
+    const p = svgPoint(e);
+    const fxp = fx(p.x);
+    const fyp = fy(p.y);
+    const shade = [...objects]
+      .reverse()
+      .find((o) => o.kind === "shade" && containsPoint(o, fxp, fyp));
+    if (shade && canEdit) {
+      startDrag(e, shade, "move");
+      return;
+    }
+    setSelectedId(null);
+  }
+
   function onMove(e: { clientX: number; clientY: number }) {
     const d = drag.current;
     if (!d) return;
@@ -829,7 +1050,7 @@ function Editor({
           height: "auto",
           touchAction: "none",
         }}
-        onPointerDown={() => setSelectedId(null)}
+        onPointerDown={onCanvasDown}
         onDragOver={canEdit ? (e) => e.preventDefault() : undefined}
         onDrop={canEdit ? onDrop : undefined}
         role="img"
@@ -869,20 +1090,25 @@ function Editor({
           stroke="#adb5bd"
           strokeWidth={2}
         />
-        {objects.map((o) => (
-          <MapObjectShape
-            key={o.id}
-            o={o}
-            originX={originX}
-            originY={originY}
-            ppf={ppf}
-            selected={o.id === selectedId}
-            canEdit={canEdit}
-            onBodyDown={(e) => startDrag(e, o, "move")}
-            onResizeDown={(e) => startDrag(e, o, "resize")}
-            onRotateDown={(e) => startDrag(e, o, "rotate")}
-          />
-        ))}
+        {/* Shade is a canopy: render it last so it sits over the items beneath. */}
+        {[...objects]
+          .sort(
+            (a, b) => Number(a.kind === "shade") - Number(b.kind === "shade"),
+          )
+          .map((o) => (
+            <MapObjectShape
+              key={o.id}
+              o={o}
+              originX={originX}
+              originY={originY}
+              ppf={ppf}
+              selected={o.id === selectedId}
+              canEdit={canEdit}
+              onBodyDown={(e) => startDrag(e, o, "move")}
+              onResizeDown={(e) => startDrag(e, o, "resize")}
+              onRotateDown={(e) => startDrag(e, o, "rotate")}
+            />
+          ))}
       </svg>
     </Paper>
   );
@@ -1090,9 +1316,28 @@ const MapObjectShape = memo(
     const cy = py + h / 2;
     const fill = o.color ?? def.color;
     const bodyStyle = { cursor: canEdit ? "move" : "default" } as const;
+    // Shade is a translucent canopy drawn over the items beneath it. Its body is
+    // click-through (pointer-events none) so clicking a block under it grabs the
+    // block; clicking an empty part of the shade falls through to the canvas,
+    // which hit-tests shades and selects this one (see onCanvasDown).
+    const isShade = o.kind === "shade";
     return (
       <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
-        {def.shape === "rect" ? (
+        {isShade ? (
+          <rect
+            x={px}
+            y={py}
+            width={w}
+            height={h}
+            rx={3}
+            fill={fill}
+            fillOpacity={0.18}
+            stroke={selected ? "#1c1c1c" : fill}
+            strokeWidth={selected ? 2.5 : 2}
+            strokeDasharray="6 4"
+            pointerEvents="none"
+          />
+        ) : def.shape === "rect" ? (
           <rect
             x={px}
             y={py}
@@ -1179,6 +1424,7 @@ const MapObjectShape = memo(
             onPointerDown={onBodyDown}
           />
         )}
+        <KindGlyph kind={o.kind} px={px} py={py} w={w} h={h} />
         {o.kind === "rv" ? (
           <Door
             mx={px + w}
@@ -1492,26 +1738,67 @@ function PlacementForm({
   lot: Lot | null;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
+  const [year, setYear] = useState<string>(
+    lot?.year ? String(lot.year) : String(CURRENT_EVENT_YEAR),
+  );
+  const [streetLetter, setStreetLetter] = useState<string | null>(
+    lot?.streetLetter ?? null,
+  );
+  const derivedRadius = radiusForStreet(Number(year), streetLetter);
+  const usingFallbackGeometry = !hasGeometry(Number(year));
+
   return (
     <fetcher.Form method="post">
       <input type="hidden" name="intent" value="savePlacement" />
+      {/* Mantine Select isn't a native form control, so mirror it into hidden
+          inputs the action can read. */}
+      <input type="hidden" name="streetLetter" value={streetLetter ?? ""} />
+      <input type="hidden" name="year" value={year} />
       <Stack gap="sm">
         <Group grow>
-          <TextInput
+          <Select
+            size="xs"
+            label="BRC year"
+            data={eventYearOptions}
+            value={year}
+            onChange={(v) => v && setYear(v)}
+            allowDeselect={false}
+            comboboxProps={{ withinPortal: true }}
+          />
+          <Select
             size="xs"
             label="Street"
-            name="street"
-            defaultValue={lot?.street ?? ""}
-            placeholder="Ellison"
+            placeholder="Pick a street"
+            data={streetOptions(Number(year))}
+            value={streetLetter}
+            onChange={setStreetLetter}
+            clearable
+            comboboxProps={{ withinPortal: true }}
+          />
+        </Group>
+        <Group grow>
+          <Autocomplete
+            size="xs"
+            label="Address (clock)"
+            name="address"
+            defaultValue={lot?.address ?? ""}
+            data={clockOptions()}
+            placeholder="3:00 (or 3:14)"
           />
           <TextInput
             size="xs"
-            label="Address"
-            name="address"
-            defaultValue={lot?.address ?? ""}
-            placeholder="3:00"
+            label="Street name (optional)"
+            name="street"
+            defaultValue={lot?.street ?? ""}
+            placeholder="overrides the year's name"
           />
         </Group>
+        <Checkbox
+          size="xs"
+          name="frontsToMan"
+          defaultChecked={lot?.frontsToMan ?? true}
+          label="Frontage faces the Man (uncheck for mountain-facing)"
+        />
         <Group grow>
           <NumberInput
             size="xs"
@@ -1530,8 +1817,12 @@ function PlacementForm({
         </Group>
         <NumberInput
           size="xs"
-          label="Inner radius (ft, optional)"
-          description="Man→street distance; draws the wedge taper"
+          label="Frontage radius override (ft, optional)"
+          description={
+            derivedRadius
+              ? `Auto from street: ${Math.round(derivedRadius)}′ from the Man${usingFallbackGeometry ? " (latest BRC layout — this year's measurements not loaded)" : ""}. Set only to override.`
+              : "Man→frontage distance; draws the wedge taper. Set if no street is picked."
+          }
           name="innerRadiusFt"
           defaultValue={lot?.innerRadiusFt ?? undefined}
           min={1}

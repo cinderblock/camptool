@@ -2,7 +2,7 @@ import { Badge, Container, Stack, Table, Text, Title } from "@mantine/core";
 import { eq } from "drizzle-orm";
 import { data } from "react-router";
 import { hasAtLeast } from "~/lib/permissions";
-import { requireActiveCamp } from "~/lib/session.server";
+import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, kindDef } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { mapObject, membership, user } from "../../../db/schema";
@@ -22,7 +22,7 @@ type Row = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active } = await requireActiveCamp(request);
+  const { active, activeEdition } = await requireActiveEdition(request);
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
   }
@@ -38,7 +38,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from(mapObject)
     .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
     .leftJoin(user, eq(membership.userId, user.id))
-    .where(eq(mapObject.campId, active.camp.id));
+    .where(eq(mapObject.editionId, activeEdition.id));
 
   // Unplaced first (these still need an officer to place them).
   const items = rows

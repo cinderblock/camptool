@@ -24,7 +24,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { user } from "./auth";
-import { camp, membership } from "./camp";
+import { camp, campEdition, membership } from "./camp";
 
 const now = sql`(unixepoch() * 1000)`;
 
@@ -35,15 +35,29 @@ export const placement = sqliteTable(
     campId: text("camp_id")
       .notNull()
       .references(() => camp.id, { onDelete: "cascade" }),
-    // City anchoring (free-text for now; the map editor reads `innerRadiusFt`
-    // to draw the wedge taper). e.g. street "Ellison", address "3:00".
+    // Per-year edition this lot belongs to (the operative scope; campId kept for
+    // the multi-camp invariant + convenience). Nullable only for legacy rows.
+    editionId: text("edition_id").references(() => campEdition.id, {
+      onDelete: "cascade",
+    }),
+    // City anchoring. `streetLetter` (A..K / "esplanade") is the stable identity;
+    // `year` selects which year's BRC geometry derives the frontage radius;
+    // `street` is the optional per-year display name. e.g. letter "E"/"Ellison",
+    // address "3:00" (free clock, off-grid like "3:14" allowed).
+    streetLetter: text("street_letter"),
+    year: integer("placement_year"),
     street: text("street"),
     address: text("address"),
+    // Frontage faces the Man (inner street, lot widens outward) vs the mountains
+    // (outer street, lot narrows inward). Flips the taper direction + compass.
+    frontsToMan: integer("fronts_to_man", { mode: "boolean" })
+      .notNull()
+      .default(true),
     frontageFt: real("frontage_ft").notNull().default(100),
     depthFt: real("depth_ft").notNull().default(100),
-    // Distance from the Man to the frontage street center. Drives the trapezoid
-    // taper (rear edge = frontage + frontage*depth/innerRadius). Null → render
-    // the lot as a plain rectangle (no taper).
+    // Manual override of the frontage street radius (ft from the Man). Normally
+    // derived from streetLetter+year; set this only for odd lots. Drives the
+    // trapezoid taper. Null + no derivable street → plain rectangle (no taper).
     innerRadiusFt: real("inner_radius_ft"),
     notes: text("notes"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
@@ -53,7 +67,7 @@ export const placement = sqliteTable(
       .notNull()
       .default(now),
   },
-  (t) => [uniqueIndex("placement_camp").on(t.campId)],
+  (t) => [uniqueIndex("placement_edition").on(t.editionId)],
 );
 
 export const mapObject = sqliteTable(
@@ -63,6 +77,9 @@ export const mapObject = sqliteTable(
     campId: text("camp_id")
       .notNull()
       .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id").references(() => campEdition.id, {
+      onDelete: "cascade",
+    }),
     name: text("name"),
     kind: text("kind").notNull().default("structure"),
     // The camper bringing this item; NULL = a camp/shared/communal item.
@@ -103,6 +120,9 @@ export const mapObjectOccupant = sqliteTable(
     campId: text("camp_id")
       .notNull()
       .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id").references(() => campEdition.id, {
+      onDelete: "cascade",
+    }),
     objectId: text("object_id")
       .notNull()
       .references(() => mapObject.id, { onDelete: "cascade" }),

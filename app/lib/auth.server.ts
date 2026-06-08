@@ -32,7 +32,7 @@ export const auth = betterAuth({
 
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
 
-  emailAndPassword: { enabled: true },
+  emailAndPassword: { enabled: true, minPasswordLength: 6 },
 
   socialProviders: discordConfigured
     ? {
@@ -58,6 +58,11 @@ export const auth = betterAuth({
             status: { type: "string", required: false, input: true },
             // Server-set, not client-writable.
             joinedAt: { type: "date", required: false, input: false },
+            invitedByMembershipId: {
+              type: "string",
+              required: false,
+              input: false,
+            },
           },
         },
       },

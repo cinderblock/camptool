@@ -83,6 +83,16 @@ export const KINDS = [
     rigid: true,
   },
   {
+    value: "van",
+    label: "Van",
+    color: "#4c6ef5",
+    w: 7,
+    h: 17,
+    shape: "rect",
+    vehicle: true,
+    rigid: true,
+  },
+  {
     value: "shade",
     label: "Shade",
     color: "#f59f00",

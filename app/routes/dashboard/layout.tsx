@@ -1,6 +1,8 @@
 import {
   AppShell,
+  Badge,
   Burger,
+  Button,
   Group,
   NavLink as MantineNavLink,
   Menu,
@@ -10,18 +12,33 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import {
+  Form,
+  NavLink,
+  Outlet,
+  useFetcher,
+  useLocation,
+  useNavigate,
+} from "react-router";
 import { authClient, signOut } from "~/lib/auth-client";
 import { hasAtLeast } from "~/lib/permissions";
 import { resolveActiveCamp } from "~/lib/session.server";
 import type { Route } from "./+types/layout";
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { user, camps, active } = await resolveActiveCamp(request);
+  const { user, camps, active, impersonatedBy, editions, activeEdition } =
+    await resolveActiveCamp(request);
   return {
     user,
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
+    impersonatedBy,
+    activeEditionId: activeEdition?.id ?? null,
+    activeEditionLocked: activeEdition?.locked ?? false,
+    editions: editions.map((e) => ({
+      id: e.id,
+      label: e.label ? `${e.year} · ${e.label}` : String(e.year),
+    })),
     camps: camps.map((c) => ({
       id: c.camp.id,
       name: c.camp.name,
@@ -31,10 +48,24 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
-  const { user, camps, activeCampId, activeRole } = loaderData;
+  const {
+    user,
+    camps,
+    activeCampId,
+    activeRole,
+    impersonatedBy,
+    editions,
+    activeEditionId,
+    activeEditionLocked,
+  } = loaderData;
+  const editionFetcher = useFetcher();
   const nav = [
     { to: "/dashboard", label: "Overview", end: true },
     { to: "/dashboard/members", label: "Members", end: false },
+    ...(activeRole && hasAtLeast(activeRole, "member")
+      ? [{ to: "/dashboard/invite", label: "Invite friends", end: false }]
+      : []),
+    { to: "/dashboard/editions", label: "Years", end: false },
     { to: "/dashboard/map", label: "Map", end: false },
     { to: "/dashboard/bringing", label: "Bringing", end: false },
     ...(activeRole && hasAtLeast(activeRole, "officer")
@@ -92,6 +123,31 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                 w={180}
               />
             ) : null}
+            {editions.length > 0 ? (
+              <Group gap={6} wrap="nowrap">
+                <Select
+                  size="xs"
+                  aria-label="Year"
+                  value={activeEditionId}
+                  onChange={(id) =>
+                    id &&
+                    id !== activeEditionId &&
+                    editionFetcher.submit(
+                      { intent: "setActive", editionId: id },
+                      { method: "post", action: "/dashboard/editions" },
+                    )
+                  }
+                  data={editions.map((e) => ({ value: e.id, label: e.label }))}
+                  allowDeselect={false}
+                  w={130}
+                />
+                {activeEditionLocked ? (
+                  <Badge size="sm" color="gray" variant="light">
+                    locked
+                  </Badge>
+                ) : null}
+              </Group>
+            ) : null}
             <Menu position="bottom-end" withinPortal>
               <Menu.Target>
                 <UnstyledButton>
@@ -123,6 +179,30 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        {impersonatedBy ? (
+          <Group
+            justify="space-between"
+            wrap="nowrap"
+            mb="md"
+            px="md"
+            py="xs"
+            style={{
+              background: "var(--mantine-color-grape-light)",
+              borderRadius: "var(--mantine-radius-sm)",
+            }}
+          >
+            <Text size="sm">
+              Working as <b>{user.name}</b> — impersonated by{" "}
+              {impersonatedBy.name}.
+            </Text>
+            <Form method="post" action="/impersonate">
+              <input type="hidden" name="intent" value="stop" />
+              <Button type="submit" size="xs" variant="filled" color="grape">
+                Stop
+              </Button>
+            </Form>
+          </Group>
+        ) : null}
         <Outlet />
       </AppShell.Main>
     </AppShell>
