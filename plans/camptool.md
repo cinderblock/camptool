@@ -588,8 +588,24 @@ placement page.)
         under structures; select to edit name/type/color or delete.
       Verified the approval loop end-to-end via admin impersonation (member move →
       pending; reject reverts; approve keeps; member add → 403) and zones (draw →
-      render → rename → delete). TODO unchanged: occupants UI, RV pop-outs,
+      render → rename → delete). TODO unchanged: RV pop-outs,
       custom-structure registry, groups, off-center doors, zone vertex-editing.
+- [x] Map object names: a named structure/RV shows its name as the prominent
+      center label, with the owner's first name smaller/dimmer beneath it
+      (commit 178b809). Item name is now editable on the Bringing page too.
+- [x] Camper onboarding wizard at `/start` (commit 56732e5, browser-verified via
+      impersonation): a focused full-screen Mantine Stepper — profile (playa
+      name) → bringing (declare items, with a name field) → sharing (add other
+      members as `map_object_occupant` of your tent/RV — the first occupant UI) →
+      camp checklist → done. Bringing/checklist steps reuse the existing
+      `/dashboard/bringing` + `/dashboard/onboarding` actions via cross-route
+      fetchers; profile/occupant/progress use the route's own actions. Migration
+      0010 adds `membership.wizard_step` + `wizard_completed_at`. New non-officer
+      members are auto-redirected to `/start` once (any step/skip bumps off step
+      0; completion stops it; a "Finish setup" nav link offers re-entry until
+      done). Verified: auto-redirect, per-step persistence + resume, occupant add,
+      finish → dashboard with no loop. TODO: occupant who isn't yet a member
+      (invite flow), richer profile questions.
 
 ## Recruit funnel rework + invite tree (in progress)
 

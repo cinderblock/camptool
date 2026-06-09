@@ -42,8 +42,13 @@ vehicles / structures), a grid scale-and-skew caption in real feet-and-inches,
 and **free-polygon zones** (fire lane, public/private areas). Editing is
 ownership-aware: officers arrange the lot, while a camper can move/resize their
 own item — those changes apply live but stay **pending** until an officer
-approves or rejects them. Next: occupants, RV pop-outs, custom per-camp
-structures, and group sub-maps.
+approves or rejects them.
+
+New campers get a guided, resumable **onboarding wizard** at `/start`: a
+full-screen walkthrough to set a playa name, declare what they're bringing, add
+who's sharing their tent/RV, and tick the camp's checklist — one step at a time,
+with the regular dashboard pages remaining the "advanced" way to do the same
+things. Next: RV pop-outs, custom per-camp structures, and group sub-maps.
 
 ## Develop
 
