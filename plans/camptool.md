@@ -562,6 +562,34 @@ placement page.)
       palette extracted to `~/lib/structures`. typecheck+build+biome green; declare
       → place → list validated over HTTP. TODO: occupants UI, RV pop-outs +
       generator/cleanout markers, custom-structure registry, groups, off-center doors.
+- [x] Phase 3.6 map editor round (commits dfdac92 → a18c1fa, all browser-verified):
+      - Recognizable top-down line-art icons per kind (wheels/windshields, tent &
+        hexayurt ridges, hypar diagonal, kitchen burners, generator bolt, …) + a
+        Van kind; legend grouped (Domiciles/Vehicles/Structures/Power) with name
+        tooltips; same icons in the unplaced tray. Selected-structure panel hides
+        when nothing is selected.
+      - Translucent click-through **shade canopy** (drawn over the items beneath;
+        empty-area click selects it, clicks over a block pass through).
+      - **Ownership + approval workflow** (migration 0008: `map_object.pending_*`).
+        Only officers add/place/delete and edit anything directly; a member may
+        move/resize/rotate **their own** placed item, applied live but flagged
+        **pending** until an officer **approves** (locks in) or **rejects**
+        (reverts to `pending_prev`). Anyone can select any item for read-only
+        details. Side-panel diff + Approve/Reject, a rail "Pending approvals"
+        queue, and an amber dot on pending items.
+      - Owner **first name shown on domiciles** (upright, rotation-invariant).
+      - **Highlight filter** (All / Mine / Domiciles / Vehicles / Structures) dims
+        non-matching objects — kinds carry `group` + `tags` in `~/lib/structures`.
+      - **Grid scale/skew caption** with real feet-inches (front vs rear edge
+        width + per-10′-column splay).
+      - **Free-polygon zones** (migration 0009: `map_zone`) — fire lane / public /
+        private / custom. Officers draw by clicking vertices (Finish/Enter close,
+        Escape cancels); translucent dashed regions with a centroid label, drawn
+        under structures; select to edit name/type/color or delete.
+      Verified the approval loop end-to-end via admin impersonation (member move →
+      pending; reject reverts; approve keeps; member add → 403) and zones (draw →
+      render → rename → delete). TODO unchanged: occupants UI, RV pop-outs,
+      custom-structure registry, groups, off-center doors, zone vertex-editing.
 
 ## Recruit funnel rework + invite tree (in progress)
 

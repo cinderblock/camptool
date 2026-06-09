@@ -34,8 +34,16 @@ sun, the Man) and footprint shapes for tents, hexayurts, hyparhuts, cars/RVs.
 It's also **inventory-driven**: campers declare what they're *bringing* on a
 **Bringing** page (each item sized, unplaced); officers drag those items from an
 **Unplaced** tray onto the lot to place them and add shared camp items; an
-**Inventory** view accounts for everything (owner, size, placed-or-not). Next:
-occupants, RV pop-outs, custom per-camp structures, and group sub-maps.
+**Inventory** view accounts for everything (owner, size, placed-or-not).
+
+The map carries a few more touches: recognizable top-down icons per kind, an
+owner's first name on each domicile, a highlight filter (mine / domiciles /
+vehicles / structures), a grid scale-and-skew caption in real feet-and-inches,
+and **free-polygon zones** (fire lane, public/private areas). Editing is
+ownership-aware: officers arrange the lot, while a camper can move/resize their
+own item — those changes apply live but stay **pending** until an officer
+approves or rejects them. Next: occupants, RV pop-outs, custom per-camp
+structures, and group sub-maps.
 
 ## Develop
 
