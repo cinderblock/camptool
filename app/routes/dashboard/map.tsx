@@ -1605,44 +1605,35 @@ const MapObjectShape = memo(
     // block; clicking an empty part of the shade falls through to the canvas,
     // which hit-tests shades and selects this one (see onCanvasDown).
     const isShade = o.kind === "shade";
+    // Show the owner's first name on sleeping structures (domiciles), drawn
+    // upright outside the rotated group (the center cx,cy is rotation-invariant).
+    const isDomicile = (def.tags as readonly string[]).includes("domicile");
+    const ownerFirst = o.ownerName?.split(" ")[0] ?? null;
+    const showOwner = isDomicile && ownerFirst && w > 22 && h > 16;
     return (
-      <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
-        {isShade ? (
-          <rect
-            x={px}
-            y={py}
-            width={w}
-            height={h}
-            rx={3}
-            fill={fill}
-            fillOpacity={0.18}
-            stroke={selected ? "#1c1c1c" : fill}
-            strokeWidth={selected ? 2.5 : 2}
-            strokeDasharray="6 4"
-            pointerEvents="none"
-          />
-        ) : def.shape === "rect" ? (
-          <rect
-            x={px}
-            y={py}
-            width={w}
-            height={h}
-            rx={3}
-            fill={fill}
-            fillOpacity={0.78}
-            stroke={selected ? "#1c1c1c" : fill}
-            strokeWidth={selected ? 2 : 1}
-            style={bodyStyle}
-            onPointerDown={onBodyDown}
-          />
-        ) : def.shape === "hypar" ? (
-          <>
+      <>
+        <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
+          {isShade ? (
             <rect
               x={px}
               y={py}
               width={w}
               height={h}
-              rx={2}
+              rx={3}
+              fill={fill}
+              fillOpacity={0.18}
+              stroke={selected ? "#1c1c1c" : fill}
+              strokeWidth={selected ? 2.5 : 2}
+              strokeDasharray="6 4"
+              pointerEvents="none"
+            />
+          ) : def.shape === "rect" ? (
+            <rect
+              x={px}
+              y={py}
+              width={w}
+              height={h}
+              rx={3}
               fill={fill}
               fillOpacity={0.78}
               stroke={selected ? "#1c1c1c" : fill}
@@ -1650,160 +1641,190 @@ const MapObjectShape = memo(
               style={bodyStyle}
               onPointerDown={onBodyDown}
             />
-            {/* Roof shading: high corner light → low corner dark (tilted). */}
-            <rect
-              x={px}
-              y={py}
-              width={w}
-              height={h}
-              rx={2}
-              fill="url(#hypar-roof)"
-              pointerEvents="none"
-            />
-          </>
-        ) : def.shape === "hexagon" ? (
-          <>
-            <polygon
-              points={hexPoints(px, py, w, h)}
-              fill={fill}
-              fillOpacity={0.78}
-              stroke={selected ? "#1c1c1c" : fill}
-              strokeWidth={selected ? 2 : 1}
-              style={bodyStyle}
-              onPointerDown={onBodyDown}
-            />
-            {/* Pyramidal roof: bright apex at center → dark eaves. */}
-            <polygon
-              points={hexPoints(px, py, w, h)}
-              fill="url(#hexayurt-roof)"
-              pointerEvents="none"
-            />
-            {/* Ridge lines from each vertex to the center apex. */}
-            {hexVertices(px, py, w, h).map((v) => (
-              <line
-                key={`${v.x},${v.y}`}
-                x1={cx}
-                y1={cy}
-                x2={v.x}
-                y2={v.y}
-                stroke="#1c1c1c"
-                strokeOpacity={0.35}
-                strokeWidth={0.75}
+          ) : def.shape === "hypar" ? (
+            <>
+              <rect
+                x={px}
+                y={py}
+                width={w}
+                height={h}
+                rx={2}
+                fill={fill}
+                fillOpacity={0.78}
+                stroke={selected ? "#1c1c1c" : fill}
+                strokeWidth={selected ? 2 : 1}
+                style={bodyStyle}
+                onPointerDown={onBodyDown}
+              />
+              {/* Roof shading: high corner light → low corner dark (tilted). */}
+              <rect
+                x={px}
+                y={py}
+                width={w}
+                height={h}
+                rx={2}
+                fill="url(#hypar-roof)"
                 pointerEvents="none"
               />
-            ))}
-          </>
-        ) : (
-          <rect
-            x={px}
-            y={py}
-            width={w}
-            height={h}
-            rx={3}
-            fill={fill}
-            fillOpacity={0.78}
-            stroke={selected ? "#1c1c1c" : fill}
-            strokeWidth={selected ? 2 : 1}
-            style={bodyStyle}
-            onPointerDown={onBodyDown}
-          />
-        )}
-        <KindGlyph kind={o.kind} px={px} py={py} w={w} h={h} />
-        {o.kind === "rv" ? (
-          <Door
-            mx={px + w}
-            my={cy}
-            ex={0}
-            ey={1}
-            nx={-1}
-            ny={0}
-            len={Math.min(3 * ppf, h * 0.4)}
-          />
-        ) : o.kind === "hexayurt" || o.kind === "hyparhut" ? (
-          <Door
-            mx={cx}
-            my={py + h}
-            ex={1}
-            ey={0}
-            nx={0}
-            ny={-1}
-            len={Math.min(3 * ppf, w * 0.5)}
-          />
-        ) : null}
-        {o.kind === "tent" ? (
-          <rect
-            x={cx - Math.min(6 * ppf, w * 0.7) / 2}
-            y={py + h}
-            width={Math.min(6 * ppf, w * 0.7)}
-            height={3 * ppf}
-            rx={1}
-            fill={fill}
-            fillOpacity={0.28}
-            stroke={fill}
-            strokeWidth={1}
-            pointerEvents="none"
-          />
-        ) : null}
-        {o.name && w > 28 ? (
+            </>
+          ) : def.shape === "hexagon" ? (
+            <>
+              <polygon
+                points={hexPoints(px, py, w, h)}
+                fill={fill}
+                fillOpacity={0.78}
+                stroke={selected ? "#1c1c1c" : fill}
+                strokeWidth={selected ? 2 : 1}
+                style={bodyStyle}
+                onPointerDown={onBodyDown}
+              />
+              {/* Pyramidal roof: bright apex at center → dark eaves. */}
+              <polygon
+                points={hexPoints(px, py, w, h)}
+                fill="url(#hexayurt-roof)"
+                pointerEvents="none"
+              />
+              {/* Ridge lines from each vertex to the center apex. */}
+              {hexVertices(px, py, w, h).map((v) => (
+                <line
+                  key={`${v.x},${v.y}`}
+                  x1={cx}
+                  y1={cy}
+                  x2={v.x}
+                  y2={v.y}
+                  stroke="#1c1c1c"
+                  strokeOpacity={0.35}
+                  strokeWidth={0.75}
+                  pointerEvents="none"
+                />
+              ))}
+            </>
+          ) : (
+            <rect
+              x={px}
+              y={py}
+              width={w}
+              height={h}
+              rx={3}
+              fill={fill}
+              fillOpacity={0.78}
+              stroke={selected ? "#1c1c1c" : fill}
+              strokeWidth={selected ? 2 : 1}
+              style={bodyStyle}
+              onPointerDown={onBodyDown}
+            />
+          )}
+          <KindGlyph kind={o.kind} px={px} py={py} w={w} h={h} />
+          {o.kind === "rv" ? (
+            <Door
+              mx={px + w}
+              my={cy}
+              ex={0}
+              ey={1}
+              nx={-1}
+              ny={0}
+              len={Math.min(3 * ppf, h * 0.4)}
+            />
+          ) : o.kind === "hexayurt" || o.kind === "hyparhut" ? (
+            <Door
+              mx={cx}
+              my={py + h}
+              ex={1}
+              ey={0}
+              nx={0}
+              ny={-1}
+              len={Math.min(3 * ppf, w * 0.5)}
+            />
+          ) : null}
+          {o.kind === "tent" ? (
+            <rect
+              x={cx - Math.min(6 * ppf, w * 0.7) / 2}
+              y={py + h}
+              width={Math.min(6 * ppf, w * 0.7)}
+              height={3 * ppf}
+              rx={1}
+              fill={fill}
+              fillOpacity={0.28}
+              stroke={fill}
+              strokeWidth={1}
+              pointerEvents="none"
+            />
+          ) : null}
+          {o.name && w > 28 && !showOwner ? (
+            <text
+              x={cx}
+              y={cy}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={11}
+              fill="#1c1c1c"
+              style={{ pointerEvents: "none", userSelect: "none" }}
+            >
+              {o.name}
+            </text>
+          ) : null}
+          {o.pending ? (
+            <circle
+              cx={px + w}
+              cy={py}
+              r={4}
+              fill="#f08c00"
+              stroke="#fff"
+              strokeWidth={1}
+              pointerEvents="none"
+            />
+          ) : null}
+          {selected && editable ? (
+            <>
+              <line
+                x1={cx}
+                y1={py}
+                x2={cx}
+                y2={py - 22}
+                stroke="#1c1c1c"
+                strokeWidth={1}
+              />
+              <circle
+                cx={cx}
+                cy={py - 22}
+                r={6}
+                fill="#fff"
+                stroke="#1c1c1c"
+                strokeWidth={1.5}
+                style={{ cursor: "grab" }}
+                onPointerDown={onRotateDown}
+              />
+              {def.vehicle || def.rigid ? null : (
+                <rect
+                  x={px + w - 6}
+                  y={py + h - 6}
+                  width={12}
+                  height={12}
+                  fill="#fff"
+                  stroke="#1c1c1c"
+                  strokeWidth={1.5}
+                  style={{ cursor: "nwse-resize" }}
+                  onPointerDown={onResizeDown}
+                />
+              )}
+            </>
+          ) : null}
+        </g>
+        {showOwner ? (
           <text
             x={cx}
             y={cy}
             textAnchor="middle"
             dominantBaseline="central"
-            fontSize={11}
+            fontSize={10}
+            fontWeight={600}
             fill="#1c1c1c"
             style={{ pointerEvents: "none", userSelect: "none" }}
           >
-            {o.name}
+            {ownerFirst}
           </text>
         ) : null}
-        {o.pending ? (
-          <circle
-            cx={px + w}
-            cy={py}
-            r={4}
-            fill="#f08c00"
-            stroke="#fff"
-            strokeWidth={1}
-            pointerEvents="none"
-          />
-        ) : null}
-        {selected && editable ? (
-          <>
-            <line
-              x1={cx}
-              y1={py}
-              x2={cx}
-              y2={py - 22}
-              stroke="#1c1c1c"
-              strokeWidth={1}
-            />
-            <circle
-              cx={cx}
-              cy={py - 22}
-              r={6}
-              fill="#fff"
-              stroke="#1c1c1c"
-              strokeWidth={1.5}
-              style={{ cursor: "grab" }}
-              onPointerDown={onRotateDown}
-            />
-            {def.vehicle || def.rigid ? null : (
-              <rect
-                x={px + w - 6}
-                y={py + h - 6}
-                width={12}
-                height={12}
-                fill="#fff"
-                stroke="#1c1c1c"
-                strokeWidth={1.5}
-                style={{ cursor: "nwse-resize" }}
-                onPointerDown={onResizeDown}
-              />
-            )}
-          </>
-        ) : null}
-      </g>
+      </>
     );
   },
   (prev, next) =>
