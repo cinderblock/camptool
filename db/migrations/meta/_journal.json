@@ -57,6 +57,13 @@
       "when": 1780863218753,
       "tag": "0007_certain_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1780963662881,
+      "tag": "0008_shallow_wolfpack",
+      "breakpoints": true
     }
   ]
 }

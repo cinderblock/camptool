@@ -259,6 +259,15 @@ function KindGlyph({
   return null;
 }
 
+/** Last-approved geometry an officer can revert a pending change back to. */
+type PendingPrev = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+};
+
 type ObjRow = {
   id: string;
   name: string | null;
@@ -270,7 +279,104 @@ type ObjRow = {
   rotation: number;
   color: string | null;
   notes: string | null;
+  // The camper who brought this (NULL = shared/communal camp item).
+  ownerMembershipId: string | null;
+  ownerName: string | null;
+  // Set when the owner has an unapproved move/resize/rotate (the live geometry
+  // is the proposed state; `prev` is what Reject restores). Only the owner can
+  // propose, so the proposer is always the owner.
+  pending: { prev: PendingPrev } | null;
 };
+
+/** Build the `pending` field from the raw columns. */
+function parsePending(
+  pendingAt: Date | null,
+  prevJson: string | null,
+): { prev: PendingPrev } | null {
+  if (!pendingAt || !prevJson) return null;
+  try {
+    const p = JSON.parse(prevJson);
+    return {
+      prev: {
+        x: Number(p.x) || 0,
+        y: Number(p.y) || 0,
+        width: Number(p.width) || 0,
+        height: Number(p.height) || 0,
+        rotation: Number(p.rotation) || 0,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Columns + joins to read a placed object with its owner name. */
+const objSelect = {
+  id: mapObject.id,
+  name: mapObject.name,
+  kind: mapObject.kind,
+  x: mapObject.x,
+  y: mapObject.y,
+  width: mapObject.width,
+  height: mapObject.height,
+  rotation: mapObject.rotation,
+  color: mapObject.color,
+  notes: mapObject.notes,
+  ownerMembershipId: mapObject.ownerMembershipId,
+  ownerName: user.name,
+  pendingAt: mapObject.pendingAt,
+  pendingPrev: mapObject.pendingPrev,
+} as const;
+
+type ObjSelectRow = {
+  id: string;
+  name: string | null;
+  kind: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  color: string | null;
+  notes: string | null;
+  ownerMembershipId: string | null;
+  ownerName: string | null;
+  pendingAt: Date | null;
+  pendingPrev: string | null;
+};
+
+function toObjRow(r: ObjSelectRow): ObjRow {
+  return {
+    id: r.id,
+    name: r.name,
+    kind: r.kind,
+    x: r.x,
+    y: r.y,
+    width: r.width,
+    height: r.height,
+    rotation: r.rotation,
+    color: r.color,
+    notes: r.notes,
+    ownerMembershipId: r.ownerMembershipId,
+    ownerName: r.ownerName,
+    pending: parsePending(r.pendingAt, r.pendingPrev),
+  };
+}
+
+/** Read one placed object (with owner name) as an ObjRow, scoped to the edition. */
+async function loadObjRow(
+  editionId: string,
+  id: string,
+): Promise<ObjRow | null> {
+  const [r] = await db
+    .select(objSelect)
+    .from(mapObject)
+    .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+    .limit(1);
+  return r ? toObjRow(r) : null;
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
@@ -282,9 +388,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     .where(eq(placement.editionId, editionId))
     .limit(1);
 
-  const objects = await db
-    .select()
+  const objectRows = await db
+    .select(objSelect)
     .from(mapObject)
+    .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
+    .leftJoin(user, eq(membership.userId, user.id))
     .where(and(eq(mapObject.editionId, editionId), eq(mapObject.placed, true)));
 
   const canManage = hasAtLeast(active.membership.role, "officer");
@@ -311,6 +419,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       hasAtLeast(active.membership.role, "member") && !activeEdition.locked,
     locked: activeEdition.locked,
     canManage: canManage && !activeEdition.locked,
+    // The viewer's own membership — used to decide which items they may adjust
+    // (their own) and to drive the "My items" highlight.
+    myMembershipId: active.membership.id,
     unplaced: unplacedRows.map((u) => ({
       id: u.id,
       kind: u.kind,
@@ -332,18 +443,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           notes: lot.notes,
         }
       : null,
-    objects: objects.map((o) => ({
-      id: o.id,
-      name: o.name,
-      kind: o.kind,
-      x: o.x,
-      y: o.y,
-      width: o.width,
-      height: o.height,
-      rotation: o.rotation,
-      color: o.color,
-      notes: o.notes,
-    })) satisfies ObjRow[],
+    objects: objectRows.map(toObjRow) satisfies ObjRow[],
   };
 }
 
@@ -366,6 +466,8 @@ export async function action({ request }: Route.ActionArgs) {
     );
   }
 
+  const canManage = hasAtLeast(active.membership.role, "officer");
+  const myMembershipId = active.membership.id;
   const form = await request.formData();
   const intent = String(form.get("intent"));
   const num = (k: string, fallback = 0) => {
@@ -378,6 +480,21 @@ export async function action({ request }: Route.ActionArgs) {
     const v = form.get(k);
     return v == null || v === "" ? null : String(v);
   };
+  const GEOM = ["x", "y", "width", "height", "rotation"] as const;
+
+  // Adding/placing/removing objects and lot setup are officer-only; members may
+  // only adjust their own already-placed items (handled in updateObject).
+  const officerOnly = new Set([
+    "savePlacement",
+    "addObject",
+    "placeObject",
+    "deleteObject",
+    "approveChange",
+    "rejectChange",
+  ]);
+  if (officerOnly.has(intent) && !canManage) {
+    return data({ error: "Officers manage the map." }, { status: 403 });
+  }
 
   if (intent === "savePlacement") {
     const values = {
@@ -432,7 +549,7 @@ export async function action({ request }: Route.ActionArgs) {
     };
     await db.insert(mapObject).values(row);
     return data({
-      created: {
+      object: {
         id: row.id,
         name: row.name,
         kind: row.kind,
@@ -443,36 +560,116 @@ export async function action({ request }: Route.ActionArgs) {
         rotation: row.rotation,
         color: row.color,
         notes: row.notes,
+        ownerMembershipId: null,
+        ownerName: null,
+        pending: null,
       } satisfies ObjRow,
     });
   }
 
   if (intent === "updateObject") {
     const id = String(form.get("id"));
-    const [owned] = await db
-      .select({ id: mapObject.id })
+    const [obj] = await db
+      .select({
+        ownerMembershipId: mapObject.ownerMembershipId,
+        x: mapObject.x,
+        y: mapObject.y,
+        width: mapObject.width,
+        height: mapObject.height,
+        rotation: mapObject.rotation,
+        pendingAt: mapObject.pendingAt,
+      })
       .from(mapObject)
       .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
       .limit(1);
-    if (!owned) return data({ error: "Object not found." }, { status: 404 });
+    if (!obj) return data({ error: "Object not found." }, { status: 404 });
 
     const set: Record<string, unknown> = { updatedAt: new Date() };
-    for (const key of ["x", "y", "width", "height", "rotation"] as const) {
+    for (const key of GEOM) {
       if (form.get(key) != null) set[key] = num(key);
     }
-    if (form.has("name")) set.name = str("name");
-    if (form.has("kind")) set.kind = String(form.get("kind"));
-    if (form.has("color")) set.color = str("color");
-    if (form.has("notes")) set.notes = str("notes");
+
+    if (canManage) {
+      // Officers edit anything directly; an officer edit accepts (clears) any
+      // pending proposal on the item.
+      if (form.has("name")) set.name = str("name");
+      if (form.has("kind")) set.kind = String(form.get("kind"));
+      if (form.has("color")) set.color = str("color");
+      if (form.has("notes")) set.notes = str("notes");
+      set.pendingByMembershipId = null;
+      set.pendingAt = null;
+      set.pendingPrev = null;
+    } else {
+      // Members may only move/resize/rotate their OWN item; the change applies
+      // live but is flagged pending until an officer approves. Non-geometry
+      // fields are ignored for members.
+      if (obj.ownerMembershipId !== myMembershipId) {
+        return data(
+          { error: "You can only adjust your own items." },
+          {
+            status: 403,
+          },
+        );
+      }
+      if (!obj.pendingAt) {
+        set.pendingByMembershipId = myMembershipId;
+        set.pendingAt = new Date();
+        set.pendingPrev = JSON.stringify({
+          x: obj.x,
+          y: obj.y,
+          width: obj.width,
+          height: obj.height,
+          rotation: obj.rotation,
+        });
+      } else {
+        set.pendingAt = new Date();
+      }
+    }
     await db.update(mapObject).set(set).where(eq(mapObject.id, id));
-    return data({ ok: true });
+    const object = await loadObjRow(editionId, id);
+    return data({ object });
+  }
+
+  if (intent === "approveChange") {
+    const id = String(form.get("id"));
+    await db
+      .update(mapObject)
+      .set({
+        pendingByMembershipId: null,
+        pendingAt: null,
+        pendingPrev: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+    const object = await loadObjRow(editionId, id);
+    if (!object) return data({ error: "Item not found." }, { status: 404 });
+    return data({ object });
+  }
+
+  if (intent === "rejectChange") {
+    const id = String(form.get("id"));
+    const [obj] = await db
+      .select({ pendingPrev: mapObject.pendingPrev })
+      .from(mapObject)
+      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+      .limit(1);
+    if (!obj) return data({ error: "Item not found." }, { status: 404 });
+    const prev = parsePending(new Date(), obj.pendingPrev)?.prev;
+    await db
+      .update(mapObject)
+      .set({
+        ...(prev ?? {}),
+        pendingByMembershipId: null,
+        pendingAt: null,
+        pendingPrev: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+    const object = await loadObjRow(editionId, id);
+    return data({ object });
   }
 
   if (intent === "placeObject") {
-    // Officer drops a declared (unplaced) item onto the lot.
-    if (!hasAtLeast(active.membership.role, "officer")) {
-      return data({ error: "Officers place items." }, { status: 403 });
-    }
     const id = String(form.get("id"));
     const [row] = await db
       .update(mapObject)
@@ -480,20 +677,8 @@ export async function action({ request }: Route.ActionArgs) {
       .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
       .returning();
     if (!row) return data({ error: "Item not found." }, { status: 404 });
-    return data({
-      created: {
-        id: row.id,
-        name: row.name,
-        kind: row.kind,
-        x: row.x,
-        y: row.y,
-        width: row.width,
-        height: row.height,
-        rotation: row.rotation,
-        color: row.color,
-        notes: row.notes,
-      } satisfies ObjRow,
-    });
+    const object = await loadObjRow(editionId, id);
+    return data({ object });
   }
 
   if (intent === "deleteObject") {
@@ -501,7 +686,7 @@ export async function action({ request }: Route.ActionArgs) {
     await db
       .delete(mapObject)
       .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
-    return data({ ok: true });
+    return data({ deletedId: id });
   }
 
   return data({ error: "Unknown action." }, { status: 400 });
@@ -598,21 +783,36 @@ function GridScaleNote({ lot }: { lot: Lot }) {
 }
 
 export default function CampMap({ loaderData }: Route.ComponentProps) {
-  const { canEdit, canManage, unplaced, lot } = loaderData;
+  const { canEdit, canManage, unplaced, lot, myMembershipId } = loaderData;
   const fetcher = useFetcher();
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Append server-created objects (with their real id) once the add resolves.
-  const lastCreated = useRef<string | null>(null);
+  // Reconcile the authoritative object the server returns after each mutation:
+  // upsert it (a newly added/placed one gets appended + selected; an updated one
+  // is replaced in place, picking up any pending-approval flag), and drop deleted
+  // ones. Guarded so the same response is only applied once.
+  const lastSynced = useRef<unknown>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only react to new fetcher.data
   useEffect(() => {
-    const created = (fetcher.data as { created?: ObjRow } | undefined)?.created;
-    if (created && created.id !== lastCreated.current) {
-      lastCreated.current = created.id;
+    const d = fetcher.data as
+      | { object?: ObjRow; deletedId?: string }
+      | undefined;
+    if (!d || d === lastSynced.current) return;
+    lastSynced.current = d;
+    if (d.deletedId) {
+      const gone = d.deletedId;
+      setObjects((prev) => prev.filter((o) => o.id !== gone));
+      setSelectedId((s) => (s === gone ? null : s));
+      return;
+    }
+    if (d.object) {
+      const obj = d.object;
+      const isNew = !objects.some((o) => o.id === obj.id);
       setObjects((prev) =>
-        prev.some((o) => o.id === created.id) ? prev : [...prev, created],
+        isNew ? [...prev, obj] : prev.map((o) => (o.id === obj.id ? obj : o)),
       );
-      setSelectedId(created.id);
+      if (isNew) setSelectedId(obj.id);
     }
   }, [fetcher.data]);
 
@@ -660,6 +860,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             selectedId={selectedId}
             setSelectedId={setSelectedId}
             canEdit={canEdit}
+            canManage={canManage}
+            myMembershipId={myMembershipId}
             fetcher={fetcher}
           />
           <GridScaleNote lot={lot} />
@@ -671,14 +873,23 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           <Compass
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
           />
+          {canManage ? (
+            <PendingPanel
+              objects={objects}
+              setSelectedId={setSelectedId}
+              fetcher={fetcher}
+            />
+          ) : null}
           {canManage ? <UnplacedTray unplaced={unplaced} /> : null}
-          {canEdit ? <Legend /> : null}
+          {canManage ? <Legend /> : null}
           <SidePanel
             lot={lot}
             objects={objects}
             setObjects={setObjects}
             selectedId={selectedId}
             canEdit={canEdit}
+            canManage={canManage}
+            myMembershipId={myMembershipId}
             fetcher={fetcher}
           />
         </Stack>
@@ -820,6 +1031,8 @@ function Editor({
   selectedId,
   setSelectedId,
   canEdit,
+  canManage,
+  myMembershipId,
   fetcher,
 }: {
   lot: Lot;
@@ -828,12 +1041,19 @@ function Editor({
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
   canEdit: boolean;
+  canManage: boolean;
+  myMembershipId: string;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<DragState | null>(null);
   const liveObj = useRef<ObjRow | null>(null);
   const [dragging, setDragging] = useState(false);
+
+  // Officers edit anything; a member may move/resize/rotate only their own
+  // items (those edits become pending approval, handled server-side).
+  const editable = (o: ObjRow) =>
+    canManage || (canEdit && o.ownerMembershipId === myMembershipId);
 
   // While dragging, listen on window so the pointer can leave the SVG without
   // dropping the gesture. (Pointer capture + an svg `pointerleave` handler ends
@@ -856,7 +1076,6 @@ function Editor({
   // way), arrows nudge (Shift = 10ft), Delete removes, Escape deselects.
   // biome-ignore lint/correctness/useExhaustiveDependencies: commit/fetcher are stable
   useEffect(() => {
-    if (!canEdit) return;
     function onKey(e: KeyboardEvent) {
       if (!selectedId) return;
       const t = e.target as HTMLElement | null;
@@ -868,7 +1087,13 @@ function Editor({
         return;
       const obj = objects.find((o) => o.id === selectedId);
       if (!obj) return;
+      if (e.key === "Escape") {
+        setSelectedId(null);
+        return;
+      }
+      // Delete is officer-only; geometry nudges require edit rights on the item.
       if (e.key === "Delete" || e.key === "Backspace") {
+        if (!canManage) return;
         e.preventDefault();
         setObjects((prev) => prev.filter((o) => o.id !== selectedId));
         fetcher.submit(
@@ -878,10 +1103,7 @@ function Editor({
         setSelectedId(null);
         return;
       }
-      if (e.key === "Escape") {
-        setSelectedId(null);
-        return;
-      }
+      if (!editable(obj)) return;
       const step = e.shiftKey ? 10 : 1;
       let next: ObjRow | null = null;
       if (e.key === "r" || e.key === "R") {
@@ -908,7 +1130,7 @@ function Editor({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canEdit, selectedId, objects, lot.frontageFt, lot.depthFt]);
+  }, [canEdit, canManage, selectedId, objects, lot.frontageFt, lot.depthFt]);
 
   // Trapezoid taper: rear edge widens (Man-facing) or narrows (mountain-facing)
   // with depth, from the derived/overridden frontage radius.
@@ -986,8 +1208,11 @@ function Editor({
     o: ObjRow,
     mode: DragState["mode"],
   ) {
-    if (!canEdit) return;
+    // A press always selects (so anyone can open read-only details); it only
+    // starts a drag when the viewer may edit this item.
     e.stopPropagation();
+    setSelectedId(o.id);
+    if (!editable(o)) return;
     e.preventDefault();
     const p = svgPoint(e);
     drag.current = {
@@ -998,7 +1223,6 @@ function Editor({
       start: o,
     };
     liveObj.current = o;
-    setSelectedId(o.id);
     setDragging(true);
   }
 
@@ -1013,7 +1237,8 @@ function Editor({
     const shade = [...objects]
       .reverse()
       .find((o) => o.kind === "shade" && containsPoint(o, fxp, fyp));
-    if (shade && canEdit) {
+    if (shade) {
+      // startDrag selects it (and only drags if this viewer may edit it).
       startDrag(e, shade, "move");
       return;
     }
@@ -1108,8 +1333,8 @@ function Editor({
           touchAction: "none",
         }}
         onPointerDown={onCanvasDown}
-        onDragOver={canEdit ? (e) => e.preventDefault() : undefined}
-        onDrop={canEdit ? onDrop : undefined}
+        onDragOver={canManage ? (e) => e.preventDefault() : undefined}
+        onDrop={canManage ? onDrop : undefined}
         role="img"
         aria-label="Camp layout"
       >
@@ -1160,7 +1385,7 @@ function Editor({
               originY={originY}
               ppf={ppf}
               selected={o.id === selectedId}
-              canEdit={canEdit}
+              editable={editable(o)}
               onBodyDown={(e) => startDrag(e, o, "move")}
               onResizeDown={(e) => startDrag(e, o, "resize")}
               onRotateDown={(e) => startDrag(e, o, "rotate")}
@@ -1349,7 +1574,7 @@ const MapObjectShape = memo(
     originY,
     ppf,
     selected,
-    canEdit,
+    editable,
     onBodyDown,
     onResizeDown,
     onRotateDown,
@@ -1359,7 +1584,7 @@ const MapObjectShape = memo(
     originY: number;
     ppf: number;
     selected: boolean;
-    canEdit: boolean;
+    editable: boolean;
     onBodyDown: (e: React.PointerEvent) => void;
     onResizeDown: (e: React.PointerEvent) => void;
     onRotateDown: (e: React.PointerEvent) => void;
@@ -1372,7 +1597,9 @@ const MapObjectShape = memo(
     const cx = px + w / 2;
     const cy = py + h / 2;
     const fill = o.color ?? def.color;
-    const bodyStyle = { cursor: canEdit ? "move" : "default" } as const;
+    // Editable items drag (move cursor); everything else is still selectable for
+    // read-only details (pointer cursor).
+    const bodyStyle = { cursor: editable ? "move" : "pointer" } as const;
     // Shade is a translucent canopy drawn over the items beneath it. Its body is
     // click-through (pointer-events none) so clicking a block under it grabs the
     // block; clicking an empty part of the shade falls through to the canvas,
@@ -1530,7 +1757,18 @@ const MapObjectShape = memo(
             {o.name}
           </text>
         ) : null}
-        {selected && canEdit ? (
+        {o.pending ? (
+          <circle
+            cx={px + w}
+            cy={py}
+            r={4}
+            fill="#f08c00"
+            stroke="#fff"
+            strokeWidth={1}
+            pointerEvents="none"
+          />
+        ) : null}
+        {selected && editable ? (
           <>
             <line
               x1={cx}
@@ -1571,11 +1809,35 @@ const MapObjectShape = memo(
   (prev, next) =>
     prev.o === next.o &&
     prev.selected === next.selected &&
-    prev.canEdit === next.canEdit &&
+    prev.editable === next.editable &&
     prev.originX === next.originX &&
     prev.originY === next.originY &&
     prev.ppf === next.ppf,
 );
+
+/** Human-readable lines describing how the live geometry differs from `prev`. */
+function describeChange(o: ObjRow, prev: PendingPrev): string[] {
+  const out: string[] = [];
+  if (round(prev.x) !== round(o.x) || round(prev.y) !== round(o.y)) {
+    out.push(
+      `Moved (${round(prev.x)},${round(prev.y)}) → (${round(o.x)},${round(o.y)})`,
+    );
+  }
+  if (
+    round(prev.width) !== round(o.width) ||
+    round(prev.height) !== round(o.height)
+  ) {
+    out.push(
+      `Resized ${round(prev.width)}×${round(prev.height)} → ${round(o.width)}×${round(o.height)}′`,
+    );
+  }
+  if (Math.round(prev.rotation) !== Math.round(o.rotation)) {
+    out.push(
+      `Rotated ${Math.round(prev.rotation)}° → ${Math.round(o.rotation)}°`,
+    );
+  }
+  return out;
+}
 
 function SidePanel({
   lot,
@@ -1583,6 +1845,8 @@ function SidePanel({
   setObjects,
   selectedId,
   canEdit,
+  canManage,
+  myMembershipId,
   fetcher,
 }: {
   lot: Lot;
@@ -1590,9 +1854,19 @@ function SidePanel({
   setObjects: React.Dispatch<React.SetStateAction<ObjRow[]>>;
   selectedId: string | null;
   canEdit: boolean;
+  canManage: boolean;
+  myMembershipId: string;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const selected = objects.find((o) => o.id === selectedId) ?? null;
+  // Officers edit anything (incl. name/kind/notes + delete). An owner-member may
+  // adjust their own item's geometry (those edits become pending). Anyone else
+  // sees read-only details.
+  const isOfficer = canManage;
+  const isOwnerMember =
+    !canManage && canEdit && selected?.ownerMembershipId === myMembershipId;
+  const canGeom = isOfficer || isOwnerMember;
+  const canMeta = isOfficer;
 
   function patch(id: string, fields: Partial<ObjRow>) {
     setObjects((prev) =>
@@ -1618,10 +1892,15 @@ function SidePanel({
         <Paper withBorder p="md" radius="md">
           <Stack gap="sm">
             <Group justify="space-between">
-              <Text fw={600} size="sm">
-                Selected structure
-              </Text>
-              {canEdit ? (
+              <div>
+                <Text fw={600} size="sm">
+                  Selected structure
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {selected.ownerName ?? "Camp / shared"}
+                </Text>
+              </div>
+              {canMeta ? (
                 <Tooltip label="Delete">
                   <ActionIcon
                     variant="subtle"
@@ -1641,11 +1920,58 @@ function SidePanel({
                 </Tooltip>
               ) : null}
             </Group>
+
+            {selected.pending ? (
+              isOfficer ? (
+                <Paper bg="orange.0" p="xs" radius="sm">
+                  <Text size="xs" fw={600} mb={2}>
+                    Pending change{" "}
+                    {selected.ownerName ? `by ${selected.ownerName}` : ""}
+                  </Text>
+                  {describeChange(selected, selected.pending.prev).map((l) => (
+                    <Text key={l} size="xs" c="dimmed">
+                      {l}
+                    </Text>
+                  ))}
+                  <Group gap="xs" mt={6}>
+                    <Button
+                      size="compact-xs"
+                      color="green"
+                      onClick={() =>
+                        fetcher.submit(
+                          { intent: "approveChange", id: selected.id },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="compact-xs"
+                      variant="default"
+                      onClick={() =>
+                        fetcher.submit(
+                          { intent: "rejectChange", id: selected.id },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Reject
+                    </Button>
+                  </Group>
+                </Paper>
+              ) : (
+                <Text size="xs" c="orange.7">
+                  Your change is pending officer approval.
+                </Text>
+              )
+            ) : null}
+
             <TextInput
               size="xs"
               label="Name"
               value={selected.name ?? ""}
-              disabled={!canEdit}
+              disabled={!canMeta}
               onChange={(e) =>
                 patch(selected.id, { name: e.currentTarget.value })
               }
@@ -1657,7 +1983,7 @@ function SidePanel({
               size="xs"
               label="Kind"
               value={selected.kind}
-              disabled={!canEdit}
+              disabled={!canMeta}
               data={KINDS.map((k) => ({ value: k.value, label: k.label }))}
               allowDeselect={false}
               onChange={(v) => {
@@ -1697,7 +2023,7 @@ function SidePanel({
                   label="Length (ft)"
                   value={Math.round(selected.height)}
                   min={6}
-                  disabled={!canEdit}
+                  disabled={!canGeom}
                   onChange={(v) =>
                     patch(selected.id, { height: Number(v) || 6 })
                   }
@@ -1713,7 +2039,7 @@ function SidePanel({
                   label="Width (ft)"
                   value={Math.round(selected.width)}
                   min={2}
-                  disabled={!canEdit}
+                  disabled={!canGeom}
                   onChange={(v) =>
                     patch(selected.id, { width: Number(v) || 2 })
                   }
@@ -1726,7 +2052,7 @@ function SidePanel({
                   label="Depth (ft)"
                   value={Math.round(selected.height)}
                   min={2}
-                  disabled={!canEdit}
+                  disabled={!canGeom}
                   onChange={(v) =>
                     patch(selected.id, { height: Number(v) || 2 })
                   }
@@ -1740,7 +2066,7 @@ function SidePanel({
               size="xs"
               label="Rotation (°)"
               value={Math.round(selected.rotation)}
-              disabled={!canEdit}
+              disabled={!canGeom}
               onChange={(v) => patch(selected.id, { rotation: Number(v) || 0 })}
               onBlur={() =>
                 commitField(
@@ -1756,7 +2082,7 @@ function SidePanel({
               autosize
               minRows={2}
               value={selected.notes ?? ""}
-              disabled={!canEdit}
+              disabled={!canMeta}
               onChange={(e) =>
                 patch(selected.id, { notes: e.currentTarget.value })
               }
@@ -1768,7 +2094,7 @@ function SidePanel({
         </Paper>
       ) : null}
 
-      {canEdit ? (
+      {canManage ? (
         <Paper withBorder p="md" radius="md">
           <Text fw={600} size="sm" mb="sm">
             Lot
@@ -1777,6 +2103,91 @@ function SidePanel({
         </Paper>
       ) : null}
     </Stack>
+  );
+}
+
+/** Officer queue of items with an unapproved member change — click to select,
+ * or approve/reject inline. */
+function PendingPanel({
+  objects,
+  setSelectedId,
+  fetcher,
+}: {
+  objects: ObjRow[];
+  setSelectedId: (id: string | null) => void;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const pending = objects.filter((o) => o.pending);
+  if (pending.length === 0) return null;
+  return (
+    <Paper withBorder p="sm" radius="md" bg="orange.0">
+      <Text size="xs" fw={600} mb={6}>
+        Pending approvals ({pending.length})
+      </Text>
+      <Stack gap={6}>
+        {pending.map((o) => (
+          <div key={o.id}>
+            <Group gap={6} wrap="nowrap" justify="space-between">
+              <button
+                type="button"
+                onClick={() => setSelectedId(o.id)}
+                style={{
+                  flex: 1,
+                  textAlign: "left",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                <Text size="xs" fw={500}>
+                  {kindDef(o.kind).label}
+                  {o.ownerName ? (
+                    <Text span c="dimmed">
+                      {" "}
+                      · {o.ownerName}
+                    </Text>
+                  ) : null}
+                </Text>
+              </button>
+              <Group gap={4} wrap="nowrap">
+                <Button
+                  size="compact-xs"
+                  color="green"
+                  onClick={() =>
+                    fetcher.submit(
+                      { intent: "approveChange", id: o.id },
+                      { method: "post" },
+                    )
+                  }
+                >
+                  ✓
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  onClick={() =>
+                    fetcher.submit(
+                      { intent: "rejectChange", id: o.id },
+                      { method: "post" },
+                    )
+                  }
+                >
+                  ✕
+                </Button>
+              </Group>
+            </Group>
+            {o.pending
+              ? describeChange(o, o.pending.prev).map((l) => (
+                  <Text key={l} size="xs" c="dimmed" ml={2}>
+                    {l}
+                  </Text>
+                ))
+              : null}
+          </div>
+        ))}
+      </Stack>
+    </Paper>
   );
 }
 

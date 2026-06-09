@@ -98,6 +98,17 @@ export const mapObject = sqliteTable(
     rotation: real("rotation").notNull().default(0),
     color: text("color"),
     notes: text("notes"),
+    // Pending-approval workflow: an owner-member may move/resize/rotate their own
+    // item; the change applies live but is flagged pending until an officer
+    // approves (clears these) or rejects (restores `pendingPrev`). `pendingAt`
+    // NULL = no pending change. `pendingPrev` is a JSON snapshot of the last
+    // approved {x,y,width,height,rotation} for revert.
+    pendingByMembershipId: text("pending_by_membership_id").references(
+      () => membership.id,
+      { onDelete: "set null" },
+    ),
+    pendingAt: integer("pending_at", { mode: "timestamp_ms" }),
+    pendingPrev: text("pending_prev"),
     createdById: text("created_by_id").references(() => user.id, {
       onDelete: "set null",
     }),
