@@ -20,18 +20,43 @@ import {
   useLocation,
   useNavigate,
 } from "react-router";
+import { eq } from "drizzle-orm";
+import { redirect } from "react-router";
 import { authClient, signOut } from "~/lib/auth-client";
 import { hasAtLeast } from "~/lib/permissions";
 import { resolveActiveCamp } from "~/lib/session.server";
+import { db } from "../../../db/client.server";
+import { membership } from "../../../db/schema";
 import type { Route } from "./+types/layout";
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { user, camps, active, impersonatedBy, editions, activeEdition } =
     await resolveActiveCamp(request);
+
+  // Guide brand-new campers (non-officers) through the onboarding wizard once.
+  // wizardStep stays 0 only until they take any step or skip, so this fires at
+  // most once; officers/admins are never force-redirected.
+  let wizardCompleted = true;
+  if (active && !hasAtLeast(active.membership.role, "officer")) {
+    const [me] = await db
+      .select({
+        wizardStep: membership.wizardStep,
+        wizardCompletedAt: membership.wizardCompletedAt,
+      })
+      .from(membership)
+      .where(eq(membership.id, active.membership.id))
+      .limit(1);
+    wizardCompleted = Boolean(me?.wizardCompletedAt);
+    if (me && me.wizardStep === 0 && !me.wizardCompletedAt) {
+      throw redirect("/start");
+    }
+  }
+
   return {
     user,
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
+    wizardCompleted,
     impersonatedBy,
     activeEditionId: activeEdition?.id ?? null,
     activeEditionLocked: activeEdition?.locked ?? false,
@@ -53,6 +78,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     camps,
     activeCampId,
     activeRole,
+    wizardCompleted,
     impersonatedBy,
     editions,
     activeEditionId,
@@ -61,6 +87,9 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const editionFetcher = useFetcher();
   const nav = [
     { to: "/dashboard", label: "Overview", end: true },
+    ...(!wizardCompleted
+      ? [{ to: "/start", label: "Finish setup", end: false }]
+      : []),
     { to: "/dashboard/members", label: "Members", end: false },
     ...(activeRole && hasAtLeast(activeRole, "member")
       ? [{ to: "/dashboard/invite", label: "Invite friends", end: false }]

@@ -71,6 +71,13 @@
       "when": 1780965364412,
       "tag": "0009_cuddly_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1780990601613,
+      "tag": "0010_bent_madame_web",
+      "breakpoints": true
     }
   ]
 }

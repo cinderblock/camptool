@@ -76,6 +76,10 @@ export const membership = sqliteTable("membership", {
     (): AnySQLiteColumn => membership.id,
     { onDelete: "set null" },
   ),
+  // Onboarding-wizard progress (app-managed, not a better-auth field): the
+  // furthest step entered (0 = never started) and when it was finished.
+  wizardStep: integer("wizard_step").notNull().default(0),
+  wizardCompletedAt: integer("wizard_completed_at", { mode: "timestamp_ms" }),
   joinedAt: integer("joined_at", { mode: "timestamp_ms" })
     .notNull()
     .default(now),

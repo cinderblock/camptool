@@ -6,6 +6,7 @@ export default [
   route("c/:slug", "routes/c.$slug.tsx"),
   route("i/:token", "routes/i.$token.tsx"),
   route("impersonate", "routes/impersonate.tsx"),
+  route("start", "routes/start.tsx"),
   route("api/auth/*", "routes/api.auth.$.tsx"),
   route("dashboard", "routes/dashboard/layout.tsx", [
     index("routes/dashboard/index.tsx"),

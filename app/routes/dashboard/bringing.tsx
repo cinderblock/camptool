@@ -8,6 +8,7 @@ import {
   Paper,
   Stack,
   Text,
+  TextInput,
   Title,
   Tooltip,
 } from "@mantine/core";
@@ -237,6 +238,15 @@ function ItemRow({
         </Group>
 
         <Group gap="sm" wrap="nowrap" align="flex-end">
+          <TextInput
+            size="xs"
+            label="Name"
+            w={130}
+            placeholder="optional"
+            disabled={locked}
+            defaultValue={item.name ?? ""}
+            onBlur={(e) => commit({ name: e.currentTarget.value })}
+          />
           {def.rigid ? null : def.vehicle ? (
             <NumberInput
               size="xs"
