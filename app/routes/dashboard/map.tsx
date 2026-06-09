@@ -31,7 +31,8 @@ import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import {
   KINDS,
-  ShapeSwatch,
+  KIND_GROUPS,
+  KindIcon,
   hexPoints,
   hexVertices,
   isKind,
@@ -558,6 +559,44 @@ function rearWidthOf(lot: Lot, radius: number | null): number {
   return (lot.frontageFt * rearRadius) / radius;
 }
 
+/** Format feet as feet-and-inches, e.g. 104.93 → 104′11″. */
+function feetInches(ft: number): string {
+  const neg = ft < 0;
+  const a = Math.abs(ft);
+  let whole = Math.floor(a);
+  let inch = Math.round((a - whole) * 12);
+  if (inch === 12) {
+    whole += 1;
+    inch = 0;
+  }
+  return `${neg ? "−" : ""}${whole}′${inch}″`;
+}
+
+/** Caption under the map: real measured grid scale + how much the wedge skews
+ * the lot, in feet-and-inches (not a percentage). */
+function GridScaleNote({ lot }: { lot: Lot }) {
+  const radius = frontageRadiusOf(lot);
+  const rear = rearWidthOf(lot, radius);
+  const front = lot.frontageFt;
+  const delta = rear - front;
+  const tapered = Math.abs(delta) >= 0.05;
+  const cellRear = front > 0 ? 10 * (rear / front) : 10;
+  return (
+    <Text size="xs" c="dimmed" mt={6}>
+      {tapered ? (
+        <>
+          10′ grid · plot {delta > 0 ? "widens" : "narrows"} {feetInches(front)}{" "}
+          → {feetInches(rear)} (rear {delta > 0 ? "+" : "−"}
+          {feetInches(Math.abs(delta))}) · a 10′ column is 10′0″ at the front,{" "}
+          {feetInches(cellRear)} at the rear · rows 10′0″ deep
+        </>
+      ) : (
+        <>10′ grid · square cells, no skew</>
+      )}
+    </Text>
+  );
+}
+
 export default function CampMap({ loaderData }: Route.ComponentProps) {
   const { canEdit, canManage, unplaced, lot } = loaderData;
   const fetcher = useFetcher();
@@ -623,6 +662,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             canEdit={canEdit}
             fetcher={fetcher}
           />
+          <GridScaleNote lot={lot} />
         </div>
         <Stack
           gap="md"
@@ -690,13 +730,13 @@ function UnplacedTray({ unplaced }: { unplaced: Unplaced[] }) {
                   userSelect: "none",
                 }}
               >
-                <ShapeSwatch kind={def} size={14} />
+                <Tooltip label={def.label} withArrow openDelay={150}>
+                  <span style={{ display: "flex" }}>
+                    <KindIcon kind={def} size={22} />
+                  </span>
+                </Tooltip>
                 <Text size="xs" style={{ flex: 1 }}>
-                  {def.label}
-                  <Text span c="dimmed">
-                    {" "}
-                    · {round(u.width)}×{round(u.height)}′
-                  </Text>
+                  {round(u.width)}×{round(u.height)}′
                 </Text>
                 {u.ownerName ? (
                   <Text size="xs" c="dimmed" truncate maw={90}>
@@ -712,38 +752,55 @@ function UnplacedTray({ unplaced }: { unplaced: Unplaced[] }) {
   );
 }
 
-/** Draggable palette — drag a chip onto the map to place that kind. */
+/** Draggable palette — icons grouped by category; drag one onto the map to
+ * place that kind. Names show as tooltips so the grid of icons stays compact. */
 function Legend() {
   return (
     <Paper withBorder p="sm" radius="md">
-      <Text size="xs" fw={600} mb={6}>
+      <Text size="xs" fw={600} mb={8}>
         Legend — drag onto the map
       </Text>
-      <Group gap="xs">
-        {KINDS.map((k) => (
-          <Group
-            key={k.value}
-            gap={6}
-            wrap="nowrap"
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData("application/camptool-kind", k.value);
-              e.dataTransfer.setData("text/plain", k.value);
-              e.dataTransfer.effectAllowed = "copy";
-            }}
-            style={{
-              cursor: "grab",
-              border: "1px solid var(--mantine-color-gray-3)",
-              borderRadius: 6,
-              padding: "2px 8px",
-              userSelect: "none",
-            }}
-          >
-            <ShapeSwatch kind={k} />
-            <Text size="xs">{k.label}</Text>
-          </Group>
+      <Stack gap={8}>
+        {KIND_GROUPS.map((grp) => (
+          <div key={grp.group}>
+            <Text size="xs" c="dimmed" fw={600} tt="uppercase" mb={4}>
+              {grp.group}
+            </Text>
+            <Group gap={6}>
+              {grp.kinds.map((k) => (
+                <Tooltip
+                  key={k.value}
+                  label={k.label}
+                  withArrow
+                  openDelay={150}
+                >
+                  <div
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(
+                        "application/camptool-kind",
+                        k.value,
+                      );
+                      e.dataTransfer.setData("text/plain", k.value);
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    style={{
+                      cursor: "grab",
+                      border: "1px solid var(--mantine-color-gray-3)",
+                      borderRadius: 6,
+                      padding: 4,
+                      userSelect: "none",
+                      display: "flex",
+                    }}
+                  >
+                    <KindIcon kind={k} size={30} />
+                  </div>
+                </Tooltip>
+              ))}
+            </Group>
+          </div>
         ))}
-      </Group>
+      </Stack>
     </Paper>
   );
 }
@@ -1709,15 +1766,7 @@ function SidePanel({
             />
           </Stack>
         </Paper>
-      ) : (
-        <Paper withBorder p="md" radius="md">
-          <Text size="sm" c="dimmed">
-            {objects.length === 0
-              ? "No structures yet. Add one to begin."
-              : "Select a structure to edit it."}
-          </Text>
-        </Paper>
-      )}
+      ) : null}
 
       {canEdit ? (
         <Paper withBorder p="md" radius="md">
