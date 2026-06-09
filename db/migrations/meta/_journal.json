@@ -64,6 +64,13 @@
       "when": 1780963662881,
       "tag": "0008_shallow_wolfpack",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1780965364412,
+      "tag": "0009_cuddly_caretaker",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import {
   Autocomplete,
   Button,
   Checkbox,
+  ColorInput,
   Group,
   NumberInput,
   Paper,
@@ -42,7 +43,13 @@ import {
   kindDef,
 } from "~/lib/structures";
 import { db } from "../../../db/client.server";
-import { mapObject, membership, placement, user } from "../../../db/schema";
+import {
+  mapObject,
+  mapZone,
+  membership,
+  placement,
+  user,
+} from "../../../db/schema";
 import type { Route } from "./+types/map";
 
 export function meta(_: Route.MetaArgs) {
@@ -290,6 +297,29 @@ type ObjRow = {
   pending: { prev: PendingPrev } | null;
 };
 
+type ZonePt = { x: number; y: number };
+type ZoneRow = {
+  id: string;
+  name: string | null;
+  kind: string;
+  color: string;
+  points: ZonePt[];
+  notes: string | null;
+};
+
+/** Parse the stored points JSON into a clean {x,y}[] (bad data → []). */
+function parseZonePoints(json: string): ZonePt[] {
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((p) => ({ x: Number(p?.x), y: Number(p?.y) }))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  } catch {
+    return [];
+  }
+}
+
 /** Build the `pending` field from the raw columns. */
 function parsePending(
   pendingAt: Date | null,
@@ -397,6 +427,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     .leftJoin(user, eq(membership.userId, user.id))
     .where(and(eq(mapObject.editionId, editionId), eq(mapObject.placed, true)));
 
+  const zoneRows = await db
+    .select()
+    .from(mapZone)
+    .where(eq(mapZone.editionId, editionId));
+
   const canManage = hasAtLeast(active.membership.role, "officer");
   // Declared-but-unplaced items (the officer placement queue), with owner names.
   const unplacedRows = canManage
@@ -446,6 +481,14 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
       : null,
     objects: objectRows.map(toObjRow) satisfies ObjRow[],
+    zones: zoneRows.map((z) => ({
+      id: z.id,
+      name: z.name,
+      kind: z.kind,
+      color: z.color,
+      points: parseZonePoints(z.points),
+      notes: z.notes,
+    })) satisfies ZoneRow[],
   };
 }
 
@@ -493,6 +536,9 @@ export async function action({ request }: Route.ActionArgs) {
     "deleteObject",
     "approveChange",
     "rejectChange",
+    "addZone",
+    "updateZone",
+    "deleteZone",
   ]);
   if (officerOnly.has(intent) && !canManage) {
     return data({ error: "Officers manage the map." }, { status: 403 });
@@ -691,6 +737,70 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ deletedId: id });
   }
 
+  if (intent === "addZone") {
+    const id = crypto.randomUUID();
+    const row = {
+      id,
+      campId,
+      editionId,
+      name: str("name"),
+      kind: String(form.get("kind") ?? "custom"),
+      color: String(form.get("color") ?? "#fa5252"),
+      points: String(form.get("points") ?? "[]"),
+      notes: str("notes"),
+      createdById: user.id,
+    };
+    await db.insert(mapZone).values(row);
+    return data({
+      zone: {
+        id,
+        name: row.name,
+        kind: row.kind,
+        color: row.color,
+        points: parseZonePoints(row.points),
+        notes: row.notes,
+      } satisfies ZoneRow,
+    });
+  }
+
+  if (intent === "updateZone") {
+    const id = String(form.get("id"));
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+    if (form.has("name")) set.name = str("name");
+    if (form.has("kind")) set.kind = String(form.get("kind"));
+    if (form.has("color")) set.color = String(form.get("color"));
+    if (form.has("points")) set.points = String(form.get("points"));
+    if (form.has("notes")) set.notes = str("notes");
+    await db
+      .update(mapZone)
+      .set(set)
+      .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)));
+    const [z] = await db
+      .select()
+      .from(mapZone)
+      .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)))
+      .limit(1);
+    if (!z) return data({ error: "Zone not found." }, { status: 404 });
+    return data({
+      zone: {
+        id: z.id,
+        name: z.name,
+        kind: z.kind,
+        color: z.color,
+        points: parseZonePoints(z.points),
+        notes: z.notes,
+      } satisfies ZoneRow,
+    });
+  }
+
+  if (intent === "deleteZone") {
+    const id = String(form.get("id"));
+    await db
+      .delete(mapZone)
+      .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)));
+    return data({ deletedZoneId: id });
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
@@ -789,6 +899,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const fetcher = useFetcher();
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [zones, setZones] = useState<ZoneRow[]>(loaderData.zones);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   // Highlight filter: dims everything that doesn't match the chosen category.
   const [highlight, setHighlight] = useState<string>("none");
 
@@ -800,7 +912,12 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: only react to new fetcher.data
   useEffect(() => {
     const d = fetcher.data as
-      | { object?: ObjRow; deletedId?: string }
+      | {
+          object?: ObjRow;
+          deletedId?: string;
+          zone?: ZoneRow;
+          deletedZoneId?: string;
+        }
       | undefined;
     if (!d || d === lastSynced.current) return;
     lastSynced.current = d;
@@ -817,6 +934,23 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         isNew ? [...prev, obj] : prev.map((o) => (o.id === obj.id ? obj : o)),
       );
       if (isNew) setSelectedId(obj.id);
+      return;
+    }
+    if (d.deletedZoneId) {
+      const gone = d.deletedZoneId;
+      setZones((prev) => prev.filter((z) => z.id !== gone));
+      setSelectedZoneId((s) => (s === gone ? null : s));
+      return;
+    }
+    if (d.zone) {
+      const zone = d.zone;
+      const isNew = !zones.some((z) => z.id === zone.id);
+      setZones((prev) =>
+        isNew
+          ? [...prev, zone]
+          : prev.map((z) => (z.id === zone.id ? zone : z)),
+      );
+      if (isNew) setSelectedZoneId(zone.id);
     }
   }, [fetcher.data]);
 
@@ -863,6 +997,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setObjects={setObjects}
             selectedId={selectedId}
             setSelectedId={setSelectedId}
+            zones={zones}
+            selectedZoneId={selectedZoneId}
+            setSelectedZoneId={setSelectedZoneId}
             canEdit={canEdit}
             canManage={canManage}
             myMembershipId={myMembershipId}
@@ -905,6 +1042,15 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           ) : null}
           {canManage ? <UnplacedTray unplaced={unplaced} /> : null}
           {canManage ? <Legend /> : null}
+          {selectedZoneId ? (
+            <ZonePanel
+              zones={zones}
+              selectedZoneId={selectedZoneId}
+              setZones={setZones}
+              canManage={canManage}
+              fetcher={fetcher}
+            />
+          ) : null}
           <SidePanel
             lot={lot}
             objects={objects}
@@ -1053,6 +1199,9 @@ function Editor({
   setObjects,
   selectedId,
   setSelectedId,
+  zones,
+  selectedZoneId,
+  setSelectedZoneId,
   canEdit,
   canManage,
   myMembershipId,
@@ -1064,6 +1213,9 @@ function Editor({
   setObjects: React.Dispatch<React.SetStateAction<ObjRow[]>>;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
+  zones: ZoneRow[];
+  selectedZoneId: string | null;
+  setSelectedZoneId: (id: string | null) => void;
   canEdit: boolean;
   canManage: boolean;
   myMembershipId: string;
@@ -1074,6 +1226,9 @@ function Editor({
   const drag = useRef<DragState | null>(null);
   const liveObj = useRef<ObjRow | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Zone drawing: collect plot-local feet vertices; Finish creates the zone.
+  const [drawing, setDrawing] = useState(false);
+  const [draftPoints, setDraftPoints] = useState<ZonePt[]>([]);
 
   // Officers edit anything; a member may move/resize/rotate only their own
   // items (those edits become pending approval, handled server-side).
@@ -1164,6 +1319,23 @@ function Editor({
     return () => window.removeEventListener("keydown", onKey);
   }, [canEdit, canManage, selectedId, objects, lot.frontageFt, lot.depthFt]);
 
+  // While drawing a zone: Enter finishes (≥3 points), Escape cancels.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: finish/cancel are stable closures
+  useEffect(() => {
+    if (!drawing) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        finishZone();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        cancelDraw();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawing, draftPoints]);
+
   // Trapezoid taper: rear edge widens (Man-facing) or narrows (mountain-facing)
   // with depth, from the derived/overridden frontage radius.
   const rear = rearWidthOf(lot, frontageRadiusOf(lot));
@@ -1244,6 +1416,7 @@ function Editor({
     // starts a drag when the viewer may edit this item.
     e.stopPropagation();
     setSelectedId(o.id);
+    setSelectedZoneId(null);
     if (!editable(o)) return;
     e.preventDefault();
     const p = svgPoint(e);
@@ -1275,6 +1448,41 @@ function Editor({
       return;
     }
     setSelectedId(null);
+    setSelectedZoneId(null);
+  }
+
+  // ---- Zones --------------------------------------------------------------
+  function addDraftPoint(e: React.PointerEvent) {
+    const p = svgPoint(e);
+    setDraftPoints((prev) => [
+      ...prev,
+      {
+        x: round(clamp(fx(p.x), 0, lot.frontageFt)),
+        y: round(clamp(fy(p.y), 0, lot.depthFt)),
+      },
+    ]);
+  }
+  function cancelDraw() {
+    setDrawing(false);
+    setDraftPoints([]);
+  }
+  function finishZone() {
+    if (draftPoints.length < 3) return;
+    fetcher.submit(
+      {
+        intent: "addZone",
+        kind: "custom",
+        color: "#fa5252",
+        points: JSON.stringify(draftPoints),
+      },
+      { method: "post" },
+    );
+    setDrawing(false);
+    setDraftPoints([]);
+  }
+  function selectZone(id: string) {
+    setSelectedId(null);
+    setSelectedZoneId(id);
   }
 
   function onMove(e: { clientX: number; clientY: number }) {
@@ -1351,6 +1559,44 @@ function Editor({
       p={0}
       style={{ overflow: "hidden", display: "inline-block", maxWidth: "100%" }}
     >
+      {canManage ? (
+        <Group
+          gap="xs"
+          p={6}
+          style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}
+        >
+          {drawing ? (
+            <>
+              <Text size="xs" c="dimmed">
+                Click the lot to add points
+              </Text>
+              <Button
+                size="compact-xs"
+                onClick={finishZone}
+                disabled={draftPoints.length < 3}
+              >
+                Finish ({draftPoints.length})
+              </Button>
+              <Button size="compact-xs" variant="default" onClick={cancelDraw}>
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="compact-xs"
+              variant="light"
+              onClick={() => {
+                setSelectedId(null);
+                setSelectedZoneId(null);
+                setDraftPoints([]);
+                setDrawing(true);
+              }}
+            >
+              + Draw zone
+            </Button>
+          )}
+        </Group>
+      ) : null}
       <svg
         ref={svgRef}
         viewBox={`0 0 ${VIEW_W} ${viewH}`}
@@ -1404,6 +1650,45 @@ function Editor({
           stroke="#adb5bd"
           strokeWidth={2}
         />
+        {/* Zones: labeled regions drawn under the structures. */}
+        {zones.map((z) => {
+          if (z.points.length < 2) return null;
+          const pts = z.points
+            .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+            .join(" ");
+          const cxFt = z.points.reduce((s, p) => s + p.x, 0) / z.points.length;
+          const cyFt = z.points.reduce((s, p) => s + p.y, 0) / z.points.length;
+          const sel = z.id === selectedZoneId;
+          return (
+            <g key={z.id}>
+              <polygon
+                points={pts}
+                fill={z.color}
+                fillOpacity={sel ? 0.22 : 0.12}
+                stroke={z.color}
+                strokeWidth={sel ? 2.5 : 1.5}
+                strokeDasharray="6 4"
+                style={{ cursor: "pointer" }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  selectZone(z.id);
+                }}
+              />
+              <text
+                x={originX + cxFt * ppf}
+                y={originY + cyFt * ppf}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={11}
+                fontWeight={600}
+                fill={z.color}
+                style={{ pointerEvents: "none", userSelect: "none" }}
+              >
+                {z.name ?? zoneKindLabel(z.kind)}
+              </text>
+            </g>
+          );
+        })}
         {/* Shade is a canopy: render it last so it sits over the items beneath. */}
         {[...objects]
           .sort(
@@ -1424,6 +1709,46 @@ function Editor({
               onRotateDown={(e) => startDrag(e, o, "rotate")}
             />
           ))}
+        {/* Zone-draw mode: a full overlay captures every click as a vertex. */}
+        {drawing ? (
+          <>
+            <rect
+              x={0}
+              y={0}
+              width={VIEW_W}
+              height={viewH}
+              fill="transparent"
+              style={{ cursor: "crosshair" }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                addDraftPoint(e);
+              }}
+            />
+            {draftPoints.length > 1 ? (
+              <polyline
+                points={draftPoints
+                  .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                  .join(" ")}
+                fill="#fa5252"
+                fillOpacity={0.1}
+                stroke="#fa5252"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                pointerEvents="none"
+              />
+            ) : null}
+            {draftPoints.map((p, i) => (
+              <circle
+                key={`${p.x}-${p.y}-${i}`}
+                cx={originX + p.x * ppf}
+                cy={originY + p.y * ppf}
+                r={3}
+                fill="#fa5252"
+                pointerEvents="none"
+              />
+            ))}
+          </>
+        ) : null}
       </svg>
     </Paper>
   );
@@ -2243,6 +2568,104 @@ function PendingPanel({
               : null}
           </div>
         ))}
+      </Stack>
+    </Paper>
+  );
+}
+
+const ZONE_KINDS = [
+  { value: "fire", label: "Fire lane" },
+  { value: "public", label: "Public area" },
+  { value: "private", label: "Private area" },
+  { value: "custom", label: "Custom" },
+] as const;
+
+function zoneKindLabel(kind: string): string {
+  return ZONE_KINDS.find((k) => k.value === kind)?.label ?? kind;
+}
+
+/** Edit a selected zone's name / type / color (officers), else read-only. */
+function ZonePanel({
+  zones,
+  selectedZoneId,
+  setZones,
+  canManage,
+  fetcher,
+}: {
+  zones: ZoneRow[];
+  selectedZoneId: string;
+  setZones: React.Dispatch<React.SetStateAction<ZoneRow[]>>;
+  canManage: boolean;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const zone = zones.find((z) => z.id === selectedZoneId) ?? null;
+  if (!zone) return null;
+  const patch = (fields: Partial<ZoneRow>) =>
+    setZones((prev) =>
+      prev.map((z) => (z.id === zone.id ? { ...z, ...fields } : z)),
+    );
+  const commit = (fields: Record<string, string>) =>
+    fetcher.submit(
+      { intent: "updateZone", id: zone.id, ...fields },
+      { method: "post" },
+    );
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Group justify="space-between" mb="xs">
+        <Text fw={600} size="sm">
+          Zone
+        </Text>
+        {canManage ? (
+          <Tooltip label="Delete">
+            <ActionIcon
+              variant="subtle"
+              color="red"
+              onClick={() => {
+                setZones((prev) => prev.filter((z) => z.id !== zone.id));
+                fetcher.submit(
+                  { intent: "deleteZone", id: zone.id },
+                  { method: "post" },
+                );
+              }}
+            >
+              ✕
+            </ActionIcon>
+          </Tooltip>
+        ) : null}
+      </Group>
+      <Stack gap="sm">
+        <TextInput
+          size="xs"
+          label="Name"
+          value={zone.name ?? ""}
+          disabled={!canManage}
+          onChange={(e) => patch({ name: e.currentTarget.value })}
+          onBlur={(e) => commit({ name: e.currentTarget.value })}
+        />
+        <Select
+          size="xs"
+          label="Type"
+          value={zone.kind}
+          disabled={!canManage}
+          data={ZONE_KINDS.map((k) => ({ value: k.value, label: k.label }))}
+          allowDeselect={false}
+          onChange={(v) => {
+            if (!v) return;
+            patch({ kind: v });
+            commit({ kind: v });
+          }}
+        />
+        <ColorInput
+          size="xs"
+          label="Color"
+          value={zone.color}
+          disabled={!canManage}
+          onChange={(v) => patch({ color: v })}
+          onChangeEnd={(v) => commit({ color: v })}
+        />
+        <Text size="xs" c="dimmed">
+          {zone.points.length} points
+        </Text>
       </Stack>
     </Paper>
   );

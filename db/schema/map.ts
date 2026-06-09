@@ -149,3 +149,35 @@ export const mapObjectOccupant = sqliteTable(
     index("map_object_occupant_object").on(t.objectId),
   ],
 );
+
+/** A labeled region drawn on the lot (fire lane, public area, private zone, …).
+ * Free polygon stored as a JSON array of plot-local feet points: [{x,y},…]. */
+export const mapZone = sqliteTable(
+  "map_zone",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id").references(() => campEdition.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name"),
+    // Free category label: "fire", "public", "private", "custom", …
+    kind: text("kind").notNull().default("custom"),
+    color: text("color").notNull().default("#fa5252"),
+    // JSON: array of plot-local feet points, e.g. [{"x":10,"y":20},…].
+    points: text("points").notNull().default("[]"),
+    notes: text("notes"),
+    createdById: text("created_by_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [index("map_zone_edition").on(t.editionId)],
+);
