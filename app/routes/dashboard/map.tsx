@@ -6,6 +6,7 @@ import {
   Group,
   NumberInput,
   Paper,
+  SegmentedControl,
   Select,
   Stack,
   Text,
@@ -33,6 +34,7 @@ import {
   KINDS,
   KIND_GROUPS,
   KindIcon,
+  hasTag,
   hexPoints,
   hexVertices,
   isKind,
@@ -787,6 +789,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const fetcher = useFetcher();
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Highlight filter: dims everything that doesn't match the chosen category.
+  const [highlight, setHighlight] = useState<string>("none");
 
   // Reconcile the authoritative object the server returns after each mutation:
   // upsert it (a newly added/placed one gets appended + selected; an updated one
@@ -862,6 +866,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             canEdit={canEdit}
             canManage={canManage}
             myMembershipId={myMembershipId}
+            highlight={highlight}
             fetcher={fetcher}
           />
           <GridScaleNote lot={lot} />
@@ -870,6 +875,24 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           gap="md"
           style={{ flex: "1 1 240px", minWidth: 240, maxWidth: 340 }}
         >
+          <Paper withBorder p="sm" radius="md">
+            <Text size="xs" fw={600} mb={6}>
+              Highlight
+            </Text>
+            <SegmentedControl
+              size="xs"
+              fullWidth
+              value={highlight}
+              onChange={setHighlight}
+              data={[
+                { label: "All", value: "none" },
+                { label: "Mine", value: "mine" },
+                { label: "Homes", value: "domicile" },
+                { label: "Vehicles", value: "vehicle" },
+                { label: "Builds", value: "structure" },
+              ]}
+            />
+          </Paper>
           <Compass
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
           />
@@ -1033,6 +1056,7 @@ function Editor({
   canEdit,
   canManage,
   myMembershipId,
+  highlight,
   fetcher,
 }: {
   lot: Lot;
@@ -1043,6 +1067,7 @@ function Editor({
   canEdit: boolean;
   canManage: boolean;
   myMembershipId: string;
+  highlight: string;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -1054,6 +1079,13 @@ function Editor({
   // items (those edits become pending approval, handled server-side).
   const editable = (o: ObjRow) =>
     canManage || (canEdit && o.ownerMembershipId === myMembershipId);
+
+  // Highlight filter: an object matches the active category (or all when "none").
+  const matches = (o: ObjRow) => {
+    if (highlight === "none") return true;
+    if (highlight === "mine") return o.ownerMembershipId === myMembershipId;
+    return hasTag(o.kind, highlight as "domicile" | "vehicle" | "structure");
+  };
 
   // While dragging, listen on window so the pointer can leave the SVG without
   // dropping the gesture. (Pointer capture + an svg `pointerleave` handler ends
@@ -1386,6 +1418,7 @@ function Editor({
               ppf={ppf}
               selected={o.id === selectedId}
               editable={editable(o)}
+              dim={highlight !== "none" && !matches(o)}
               onBodyDown={(e) => startDrag(e, o, "move")}
               onResizeDown={(e) => startDrag(e, o, "resize")}
               onRotateDown={(e) => startDrag(e, o, "rotate")}
@@ -1575,6 +1608,7 @@ const MapObjectShape = memo(
     ppf,
     selected,
     editable,
+    dim,
     onBodyDown,
     onResizeDown,
     onRotateDown,
@@ -1585,6 +1619,7 @@ const MapObjectShape = memo(
     ppf: number;
     selected: boolean;
     editable: boolean;
+    dim: boolean;
     onBodyDown: (e: React.PointerEvent) => void;
     onResizeDown: (e: React.PointerEvent) => void;
     onRotateDown: (e: React.PointerEvent) => void;
@@ -1607,11 +1642,11 @@ const MapObjectShape = memo(
     const isShade = o.kind === "shade";
     // Show the owner's first name on sleeping structures (domiciles), drawn
     // upright outside the rotated group (the center cx,cy is rotation-invariant).
-    const isDomicile = (def.tags as readonly string[]).includes("domicile");
+    const isDomicile = hasTag(o.kind, "domicile");
     const ownerFirst = o.ownerName?.split(" ")[0] ?? null;
     const showOwner = isDomicile && ownerFirst && w > 22 && h > 16;
     return (
-      <>
+      <g opacity={dim ? 0.28 : undefined}>
         <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
           {isShade ? (
             <rect
@@ -1824,13 +1859,14 @@ const MapObjectShape = memo(
             {ownerFirst}
           </text>
         ) : null}
-      </>
+      </g>
     );
   },
   (prev, next) =>
     prev.o === next.o &&
     prev.selected === next.selected &&
     prev.editable === next.editable &&
+    prev.dim === next.dim &&
     prev.originX === next.originX &&
     prev.originY === next.originY &&
     prev.ppf === next.ppf,

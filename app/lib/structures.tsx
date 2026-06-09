@@ -232,6 +232,10 @@ export function isKind(value: string): boolean {
 export function kindColor(kind: string) {
   return kindDef(kind).color;
 }
+/** Does this kind carry the given highlight tag (domicile/vehicle/structure)? */
+export function hasTag(kind: string, tag: KindTag): boolean {
+  return (kindDef(kind).tags as readonly string[]).includes(tag);
+}
 
 /** Flat-top hexagon vertices (corners inset horizontally by w/4). */
 export function hexVertices(x: number, y: number, w: number, h: number) {
