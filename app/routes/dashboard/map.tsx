@@ -1969,7 +1969,11 @@ const MapObjectShape = memo(
     // upright outside the rotated group (the center cx,cy is rotation-invariant).
     const isDomicile = hasTag(o.kind, "domicile");
     const ownerFirst = o.ownerName?.split(" ")[0] ?? null;
-    const showOwner = isDomicile && ownerFirst && w > 22 && h > 16;
+    const bigEnough = w > 22 && h > 16;
+    // A given name (e.g. a named RV) is the prominent label; the owner's first
+    // name (domiciles) is shown secondarily beneath it.
+    const showName = !!o.name && bigEnough;
+    const showOwner = isDomicile && !!ownerFirst && bigEnough;
     return (
       <g opacity={dim ? 0.28 : undefined}>
         <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
@@ -2110,19 +2114,6 @@ const MapObjectShape = memo(
               pointerEvents="none"
             />
           ) : null}
-          {o.name && w > 28 && !showOwner ? (
-            <text
-              x={cx}
-              y={cy}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontSize={11}
-              fill="#1c1c1c"
-              style={{ pointerEvents: "none", userSelect: "none" }}
-            >
-              {o.name}
-            </text>
-          ) : null}
           {o.pending ? (
             <circle
               cx={px + w}
@@ -2170,19 +2161,36 @@ const MapObjectShape = memo(
             </>
           ) : null}
         </g>
-        {showOwner ? (
-          <text
-            x={cx}
-            y={cy}
-            textAnchor="middle"
-            dominantBaseline="central"
-            fontSize={10}
-            fontWeight={600}
-            fill="#1c1c1c"
+        {showName || showOwner ? (
+          <g
             style={{ pointerEvents: "none", userSelect: "none" }}
+            textAnchor="middle"
           >
-            {ownerFirst}
-          </text>
+            {showName ? (
+              <text
+                x={cx}
+                y={showOwner ? cy - 5 : cy}
+                dominantBaseline="central"
+                fontSize={11}
+                fontWeight={700}
+                fill="#1c1c1c"
+              >
+                {o.name}
+              </text>
+            ) : null}
+            {showOwner ? (
+              <text
+                x={cx}
+                y={showName ? cy + 8 : cy}
+                dominantBaseline="central"
+                fontSize={showName ? 9 : 10}
+                fontWeight={showName ? 400 : 600}
+                fill={showName ? "#868e96" : "#1c1c1c"}
+              >
+                {ownerFirst}
+              </text>
+            ) : null}
+          </g>
         ) : null}
       </g>
     );
