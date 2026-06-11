@@ -17,11 +17,15 @@ env:
 jobs:
   deploy:
     runs-on: [self-hosted, firefly]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
       - name: Build (Bun)
         run: |
+          set -euo pipefail
           bun install --frozen-lockfile
           bun run build
 
@@ -46,28 +50,32 @@ jobs:
           touch "$APP_ROOT/restart"
 
       - name: Wait for healthy socket
+        # Use Bun (guaranteed present in the image) so we don't depend on
+        # curl/seq being installed in the runner container.
         run: |
-          set -euo pipefail
-          for i in $(seq 1 60); do
-            if [ -S "$SOCKET" ]; then
-              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-                --unix-socket "$SOCKET" http://localhost/ || true)
-              if [ "$code" = "200" ]; then
-                echo "healthy: GET / -> 200"
-                exit 0
-              fi
-              echo "socket up, GET / -> $code (retry $i)"
-            else
-              echo "waiting for socket (retry $i)"
-            fi
-            sleep 1
-          done
-          echo "::error::app did not become healthy on $SOCKET"
-          exit 1
+          bun -e '
+            const sock = process.env.SOCKET;
+            for (let i = 1; i <= 60; i++) {
+              try {
+                const r = await fetch("http://localhost/", { unix: sock });
+                if (r.status === 200) { console.log("healthy: GET / -> 200"); process.exit(0); }
+                console.log(`GET / -> ${r.status} (retry ${i})`);
+              } catch (e) {
+                console.log(`socket not ready (retry ${i}): ${e?.code ?? e?.message ?? e}`);
+              }
+              await new Promise((res) => setTimeout(res, 1000));
+            }
+            console.error(`::error::app did not become healthy on ${sock}`);
+            process.exit(1);
+          '
 
       - name: Prune old releases (keep last 5)
         if: always()
         run: |
-          set -euo pipefail
-          cd "$APP_ROOT/releases" || exit 0
-          ls -1dt */ 2>/dev/null | tail -n +6 | xargs -r rm -rf
+          cd "$APP_ROOT/releases" 2>/dev/null || exit 0
+          n=0
+          for d in $(ls -1dt -- */ 2>/dev/null); do
+            n=$((n + 1))
+            [ "$n" -gt 5 ] && rm -rf -- "$d"
+          done
+          true
