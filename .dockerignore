@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+build
+.react-router
+data
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+plans
+docs
+*.md

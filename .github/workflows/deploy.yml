@@ -1,0 +1,49 @@
+name: Deploy to firefly
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Never let two deploys race on the same host.
+concurrency:
+  group: firefly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, firefly]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare socket dir
+        run: |
+          mkdir -p /run/camptool
+          rm -f /run/camptool/camptool.sock
+
+      - name: Build and (re)start
+        run: docker compose up -d --build --remove-orphans
+
+      - name: Wait for the socket
+        run: |
+          for i in $(seq 1 60); do
+            if [ -S /run/camptool/camptool.sock ]; then
+              echo "socket is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::camptool.sock never appeared" >&2
+          docker compose logs --tail=100 camptool
+          exit 1
+
+      - name: Health check (200 on the socket)
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+            --unix-socket /run/camptool/camptool.sock http://localhost/ || true)
+          echo "GET / -> $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::health check failed (got $code)" >&2
+            docker compose logs --tail=100 camptool
+            exit 1
+          fi

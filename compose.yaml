@@ -1,0 +1,25 @@
+services:
+  camptool:
+    build: .
+    image: camptool:latest
+    container_name: camptool
+    restart: unless-stopped
+    # Run as root so the socket lands in the root-owned /run/camptool bind mount
+    # and Caddy (root) can connect to it.
+    user: "0:0"
+    # Secrets + deployment config live on the host, never in git. Required keys:
+    # PUBLIC_BASE_URL, BETTER_AUTH_SECRET (see docs/firefly-deploy.md).
+    env_file:
+      - /etc/camptool/camptool.env
+    environment:
+      SOCKET_PATH: /run/camptool/camptool.sock
+      DATABASE_PATH: /data/camptool.db
+      NODE_ENV: production
+    volumes:
+      # Host /run/camptool (also mounted into Caddy) is where the socket is created.
+      - /run/camptool:/run/camptool
+      # Persist the SQLite database across redeploys.
+      - camptool-data:/data
+
+volumes:
+  camptool-data:

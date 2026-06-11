@@ -701,6 +701,65 @@ taper + compass honor facing and derived radius). Also dropped this session: min
 password length 6 (server + both client validators). typecheck + build + biome
 green. Not yet browser-tested.
 
+## Deployment — firefly + auto-deploy (landed)
+
+Goal: build + auto-deploy to the **firefly** host (`firefly.isozilla.com`),
+served at **https://camptool.mathcamp.us/**. Ops repo owns the runner, Caddy, DNS,
+TLS; this repo only builds the app and makes it listen on a unix socket.
+
+**Deployment contract (from ops):** the app MUST listen on the unix socket
+`/run/camptool/camptool.sock`. Ops-managed Caddy reverse-proxies the public URL →
+that socket (adds X-Real-IP / X-Forwarded-Proto: https / X-Forwarded-For). `/run`
+is tmpfs and `/run/camptool` is bind-mounted into the Caddy container. A
+self-hosted Actions runner (`firefly-camptool`, labels `firefly,self-hosted`,
+root) is auto-provisioned by ops; deploy workflow targets `runs-on:
+[self-hosted, firefly]`. Health: `GET /` must return 200 (502 until first deploy
+is expected).
+
+**What landed:**
+- **`server.ts`** — custom Bun production server. The stock `react-router-serve`
+  is **port-only** (`app.listen(port)`, no socket option), so it can't satisfy the
+  contract; `server.ts` replaces it and binds `createRequestHandler(build)`
+  DIRECTLY to `$SOCKET_PATH` via `Bun.serve({ unix })`. No port, no proxy/sidecar
+  — it *is* the app's server. Serves `build/client` static assets (immutable cache
+  for `/assets/*`), honors `x-forwarded-proto` so SSR/auth URLs resolve to https,
+  mkdir+unlink stale socket on boot (tmpfs), chmod 0666 so root Caddy can connect.
+  `package.json` `start` repointed to `bun server.ts`.
+- **`app/entry.server.tsx`** — web-streams SSR entry using
+  `renderToReadableStream`. **Gotcha that bit us:** the default RR entry uses
+  Node's `renderToPipeableStream`, which Bun's `react-dom/server` (resolves to
+  `server.bun.js`) does NOT export — so the built server crashed under Bun with
+  `Export named 'renderToPipeableStream' not found`. The web-streams entry is the
+  officially-supported Bun/web variant and fits the fetch-based socket server.
+  (This means the OLD `bun run start` was already broken under `--bun`; only `dev`
+  had ever been exercised.)
+- **`Dockerfile`** (multi-stage oven/bun 1.3: build → prod-only runtime, ships
+  `build/` + `db/` migrations + `server.ts`), **`compose.yaml`** (runs as root so
+  the socket lands in the root-owned `/run/camptool` bind mount; `env_file:
+  /etc/camptool/camptool.env`; `camptool-data` volume for the SQLite db;
+  `SOCKET_PATH`/`DATABASE_PATH` set here), **`.dockerignore`**.
+- **`.github/workflows/deploy.yml`** — on push to `master` (+ manual dispatch),
+  `runs-on: [self-hosted, firefly]`: checkout → mkdir `/run/camptool` + rm stale
+  sock → `docker compose up -d --build --remove-orphans` → wait for the socket →
+  health-check 200 directly on the socket (`curl --unix-socket`). `concurrency`
+  group serializes deploys.
+- **`docs/firefly-deploy.md`** — how it works + the one-time host env-file setup
+  (`/etc/camptool/camptool.env` with PUBLIC_BASE_URL + BETTER_AUTH_SECRET, Discord
+  optional). README gained a Deploy section.
+
+**Verified locally (Windows, Bun 1.3):** typecheck + build green; booted
+`server.ts` on a temp socket and fetched via `fetch(..., {unix})` — `GET /` → 200
+text/html (full `<html>`), a hashed asset → 200 with `immutable` cache header,
+`/login` with `x-forwarded-proto: https` → 200. Biome clean on the new files (3
+pre-existing import-order lint errors in dashboard routes are untouched + unrelated;
+CI deploy doesn't run lint).
+
+**Not yet done / needs the host:** first real deploy is blocked until the ops
+owner adds the `CAMPTOOL_RUNNER_PAT` + `camptool-runner` environment and an ops
+deploy brings the runner online, AND `/etc/camptool/camptool.env` exists on
+firefly. Pushing to `master` before the runner exists just queues the job. Left
+unused dep `@react-router/serve` in `package.json` (harmless; optional cleanup).
+
 ## Resolved (formerly open) questions
 
 1. **Repo visibility:** public, MIT-licensed. Work in the open from now.

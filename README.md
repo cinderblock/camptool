@@ -67,6 +67,16 @@ Other scripts: `bun run typecheck`, `bun run build`, `bun run start`,
 `bun run lint`, `bun run format`. Database: `bun run db:generate` (new
 migration from schema changes), `bun run db:migrate`, `bun run db:studio`.
 
+## Deploy
+
+Production runs under Bun and serves over a **unix socket** (no TCP port) so a
+reverse proxy can terminate TLS in front of it. `bun run start` boots
+`server.ts`, which binds the React Router handler to `$SOCKET_PATH` (default
+`/run/camptool/camptool.sock`); a `Dockerfile` + `compose.yaml` package this for
+container hosts. The canonical deployment (auto-deploy on push to `master` via a
+self-hosted runner + Caddy) is documented in
+[`docs/firefly-deploy.md`](docs/firefly-deploy.md).
+
 ## Design notes
 
 - **Multi-camp aware from day one:** every tenant-scoped table carries a
