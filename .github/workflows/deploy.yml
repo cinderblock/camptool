@@ -5,10 +5,14 @@ on:
     branches: [master]
   workflow_dispatch:
 
-# Never let two deploys race on the same host.
+# Never let two deploys race on the host.
 concurrency:
   group: firefly-deploy
   cancel-in-progress: false
+
+env:
+  APP_ROOT: /srv/camptool
+  SOCKET: /run/camptool/camptool.sock
 
 jobs:
   deploy:
@@ -16,34 +20,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare socket dir
+      - name: Build (Bun)
         run: |
-          mkdir -p /run/camptool
-          rm -f /run/camptool/camptool.sock
+          bun install --frozen-lockfile
+          bun run build
 
-      - name: Build and (re)start
-        run: docker compose up -d --build --remove-orphans
-
-      - name: Wait for the socket
+      - name: Stage release tree
         run: |
+          set -euo pipefail
+          REL="$APP_ROOT/releases/$GITHUB_SHA"
+          rm -rf "$REL"
+          mkdir -p "$REL"
+          # Ready-to-run tree: build output, server entry, the run wrapper, and
+          # db/migrations (the app auto-migrates on boot from cwd).
+          cp -r build db server.ts run package.json bun.lock "$REL"/
+          chmod +x "$REL/run"
+          # Prune to production dependencies inside the release dir.
+          ( cd "$REL" && bun install --frozen-lockfile --production )
+
+      - name: Activate + restart
+        run: |
+          set -euo pipefail
+          # Atomic flip, then poke the supervisor's restart sentinel.
+          ln -sfn "releases/$GITHUB_SHA" "$APP_ROOT/current"
+          touch "$APP_ROOT/restart"
+
+      - name: Wait for healthy socket
+        run: |
+          set -euo pipefail
           for i in $(seq 1 60); do
-            if [ -S /run/camptool/camptool.sock ]; then
-              echo "socket is up"
-              exit 0
+            if [ -S "$SOCKET" ]; then
+              code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                --unix-socket "$SOCKET" http://localhost/ || true)
+              if [ "$code" = "200" ]; then
+                echo "healthy: GET / -> 200"
+                exit 0
+              fi
+              echo "socket up, GET / -> $code (retry $i)"
+            else
+              echo "waiting for socket (retry $i)"
             fi
             sleep 1
           done
-          echo "::error::camptool.sock never appeared" >&2
-          docker compose logs --tail=100 camptool
+          echo "::error::app did not become healthy on $SOCKET"
           exit 1
 
-      - name: Health check (200 on the socket)
+      - name: Prune old releases (keep last 5)
+        if: always()
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
-            --unix-socket /run/camptool/camptool.sock http://localhost/ || true)
-          echo "GET / -> $code"
-          if [ "$code" != "200" ]; then
-            echo "::error::health check failed (got $code)" >&2
-            docker compose logs --tail=100 camptool
-            exit 1
-          fi
+          set -euo pipefail
+          cd "$APP_ROOT/releases" || exit 0
+          ls -1dt */ 2>/dev/null | tail -n +6 | xargs -r rm -rf

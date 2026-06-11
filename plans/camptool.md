@@ -754,11 +754,42 @@ text/html (full `<html>`), a hashed asset → 200 with `immutable` cache header,
 pre-existing import-order lint errors in dashboard routes are untouched + unrelated;
 CI deploy doesn't run lint).
 
+**Firefly model finalized with the ops agent (frozen contract).** After
+coordinating (see `C:\Users\camer\AppData\Local\Temp\camptool-ops-comms.md`), the
+firefly path is NOT my standalone docker-compose container. Instead the app runs
+**inside** the isolated self-hosted-runner container; its PID1 **supervisor** owns
+the app process (an Actions job can't, since Actions kills the job's process tree
+at job end). Key correction that drove the design: ops first speced a **Node** app
+(`node dist/server.js`); CampTool is **Bun** (`bun:sqlite`, `Bun.serve`), so the
+runner image bakes **Bun 1.3.x** and the app entrypoint is `exec bun server.ts`.
+
+Frozen contract my CI codes against:
+- `runs-on: [self-hosted, firefly]`; build `bun install --frozen-lockfile` +
+  `bun run build`.
+- Stage a self-contained tree (build + `server.ts` + `run` + prod `node_modules` +
+  **`db/migrations/`**) to `/srv/camptool/releases/$GITHUB_SHA/`.
+- Ship executable **`run`** (`cd "$(dirname "$0")"; exec bun server.ts`).
+- Activate atomically: `ln -sfn releases/$SHA /srv/camptool/current` then
+  `touch /srv/camptool/restart` (sentinel the supervisor watches — CI never
+  touches supervisord's socket).
+- App binds `/run/camptool/camptool.sock` (default `SOCKET_PATH`), 200 at `/`.
+- **CI writes no secrets**; ops injects an env-file: `PUBLIC_BASE_URL`,
+  `BETTER_AUTH_SECRET`, `DATABASE_PATH=/srv/camptool/data/camptool.db`
+  (persistent, OUTSIDE the per-SHA release dir), optional Discord, `NODE_ENV`.
+- Caddy's `/run/camptool` switches from host-bind to a shared `camptool_sock`
+  named volume; persistent `camptool_app` volume = `/srv/camptool`.
+
+`deploy.yml` rewritten to this (release tree → symlink → sentinel → socket health
+check + prune-old-releases), and a `run` entrypoint added. The `Dockerfile` +
+`compose.yaml` are **repurposed as the generic self-host path** (any host with a
+reverse proxy), documented separately in `docs/firefly-deploy.md`.
+
 **Not yet done / needs the host:** first real deploy is blocked until the ops
-owner adds the `CAMPTOOL_RUNNER_PAT` + `camptool-runner` environment and an ops
-deploy brings the runner online, AND `/etc/camptool/camptool.env` exists on
-firefly. Pushing to `master` before the runner exists just queues the job. Left
-unused dep `@react-router/serve` in `package.json` (harmless; optional cleanup).
+owner lands the runner container stack (the `firefly-camptool` runner doesn't
+exist yet) and the env-file is wired. Pushing to `master` before then just queues
+the job. The currently-failing ops `install-camptool-runner` job is being flipped
+to a no-op so Server Deploys stay green meanwhile. Left unused dep
+`@react-router/serve` in `package.json` (harmless; optional cleanup).
 
 ## Resolved (formerly open) questions
 

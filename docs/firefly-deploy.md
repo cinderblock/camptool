@@ -1,65 +1,76 @@
-# Deploying CampTool to firefly
+# Deploying CampTool
 
-CampTool auto-deploys to the **firefly** host (`firefly.isozilla.com`) and is
-served at **https://camptool.mathcamp.us/**. DNS + TLS (Cloudflare proxied, Full
-strict) and the reverse proxy are managed by the ops repo — this repo only
-builds the app and makes it listen on a unix socket.
+CampTool serves over a **unix socket** (no TCP port) so a reverse proxy can
+terminate TLS in front of it. `bun run start` boots `server.ts`, which binds the
+React Router handler to `$SOCKET_PATH` (default `/run/camptool/camptool.sock`).
+There are two deployment paths.
 
-## How it works
+## firefly (the canonical auto-deploy)
 
-- A self-hosted GitHub Actions runner (`firefly-camptool`, labels
-  `firefly,self-hosted`) is provisioned on the repo by the ops repo. It runs as
-  **root** on the host.
+CampTool auto-deploys to the **firefly** host and is served at
+**https://camptool.mathcamp.us/**. DNS, TLS (Cloudflare proxied, Full strict),
+the reverse proxy, the runner container, and the app supervisor are all owned by
+the **ops repo**. This repo only builds the app and stages a ready-to-run release
+for the supervisor to launch.
+
+How it works (frozen contract — see also the coordination notes in the ops repo):
+
+- The app runs **inside** an isolated self-hosted-runner container on firefly
+  (`firefly-camptool`, labels `firefly,self-hosted`, root). The container's PID1
+  supervisor owns the app process; a GitHub Actions job can't own it directly
+  because Actions kills the job's process tree when the job ends.
 - On every push to `master`, `.github/workflows/deploy.yml` runs **on that
-  runner** and does `docker compose up -d --build`.
-- The app runs as a Docker container (`camptool`) that binds a unix socket at
-  **`/run/camptool/camptool.sock`** (see `server.ts` — no TCP port is opened).
-- The ops-managed Caddy reverse-proxies `https://camptool.mathcamp.us/` → that
-  socket. `/run/camptool` is bind-mounted into both the Caddy container and this
-  app's container, so the socket the app creates is the one Caddy connects to.
-- The SQLite database lives in the `camptool-data` Docker volume
-  (`/data/camptool.db` inside the container) and survives redeploys. Migrations
-  apply automatically on container start.
+  runner** and:
+  1. `bun install --frozen-lockfile` + `bun run build`,
+  2. stages a self-contained tree (build output, `server.ts`, `run`, prod
+     `node_modules`, and `db/migrations/`) to `/srv/camptool/releases/$GITHUB_SHA/`,
+  3. atomically flips `/srv/camptool/current` → that release,
+  4. `touch /srv/camptool/restart` — the supervisor watches this sentinel and
+     restarts the app (CI never touches supervisord's control socket).
+- The supervisor launches `/srv/camptool/current/run` with the release dir as
+  cwd; `run` does `exec bun server.ts`. The app binds
+  `/run/camptool/camptool.sock`, `chmod 0666`s it, and unlinks a stale socket on
+  boot. Caddy shares that socket via a named volume and proxies the public URL to
+  it. The SQLite DB lives at `/srv/camptool/data/camptool.db` (persistent volume,
+  outside the per-SHA release dir) and migrations apply on boot.
 
-Until the first successful deploy the site returns **502** — that's expected,
-not a misconfiguration.
+Until the first successful deploy the site returns **502** — expected.
 
-## One-time host setup (ops owner)
+### Runtime config (ops-managed env-file)
 
-The deploy reads secrets + deployment config from a root-owned env file on the
-host. **It is not in git.** Create it once:
+CI writes **no** secrets. The ops stack injects an env-file into the app process
+with these keys:
+
+| Key | Required | Notes |
+|---|---|---|
+| `PUBLIC_BASE_URL` | yes | `https://camptool.mathcamp.us` — auth callbacks + links |
+| `BETTER_AUTH_SECRET` | yes | 32+ random chars (`openssl rand -base64 32`) |
+| `DATABASE_PATH` | yes | `/srv/camptool/data/camptool.db` (persistent, outside releases) |
+| `DISCORD_CLIENT_ID` / `_SECRET` | no | enables Discord login/link |
+| `DISCORD_BOT_TOKEN` / `_GUILD_ID` | no | enables DM/guild features |
+| `NODE_ENV` | no | `production` (conventional) |
+
+`SOCKET_PATH` defaults to `/run/camptool/camptool.sock` — leave it unset.
+
+### Health
+
+The uptime monitor checks `GET https://camptool.mathcamp.us/` and expects `200`;
+the public landing (`/`) serves it. The deploy job also self-checks `200`
+directly on the socket before finishing.
+
+## Generic self-host (any host with a reverse proxy)
+
+For self-hosting outside firefly, a `Dockerfile` + `compose.yaml` are included.
+They build the same `server.ts` socket server into an `oven/bun` image, bind-mount
+`/run/camptool` for the socket, and read runtime config from
+`/etc/camptool/camptool.env` (same keys as the table above). Point your own
+reverse proxy at `/run/camptool/camptool.sock`:
 
 ```bash
 sudo mkdir -p /etc/camptool
 sudo install -m 600 /dev/stdin /etc/camptool/camptool.env <<'EOF'
-# Public-facing base URL — drives auth callbacks and absolute links.
-PUBLIC_BASE_URL=https://camptool.mathcamp.us
-
-# Long random secret. Generate with: openssl rand -base64 32
+PUBLIC_BASE_URL=https://camp.example.org
 BETTER_AUTH_SECRET=__REPLACE_ME__
-
-# Optional Discord integration (leave blank to disable).
-DISCORD_CLIENT_ID=
-DISCORD_CLIENT_SECRET=
-DISCORD_BOT_TOKEN=
-DISCORD_GUILD_ID=
 EOF
-```
-
-`DATABASE_PATH`, `SOCKET_PATH`, and `NODE_ENV` are set by `compose.yaml`; don't
-put them in the env file.
-
-## Health
-
-The ops uptime monitor checks `GET https://camptool.mathcamp.us/` and expects
-`200`. The app's public landing page (`/`) serves that. The deploy workflow also
-self-checks `200` directly on the socket before finishing.
-
-## Manual operations on the host
-
-```bash
-cd /root/actions-runner-camptool/_work/camptool/camptool   # latest checkout
-docker compose logs -f camptool        # tail logs
-docker compose restart camptool        # restart without rebuilding
-docker compose up -d --build           # rebuild + restart (what CI runs)
+docker compose up -d --build
 ```

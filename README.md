@@ -72,9 +72,11 @@ migration from schema changes), `bun run db:migrate`, `bun run db:studio`.
 Production runs under Bun and serves over a **unix socket** (no TCP port) so a
 reverse proxy can terminate TLS in front of it. `bun run start` boots
 `server.ts`, which binds the React Router handler to `$SOCKET_PATH` (default
-`/run/camptool/camptool.sock`); a `Dockerfile` + `compose.yaml` package this for
-container hosts. The canonical deployment (auto-deploy on push to `master` via a
-self-hosted runner + Caddy) is documented in
+`/run/camptool/camptool.sock`). The canonical deployment auto-deploys to firefly
+on push to `master` (a self-hosted runner stages a release tree that an
+in-container supervisor launches; Caddy proxies the public URL to the socket);
+for self-hosting elsewhere, a `Dockerfile` + `compose.yaml` build the same socket
+server into a container. Both are documented in
 [`docs/firefly-deploy.md`](docs/firefly-deploy.md).
 
 ## Design notes
