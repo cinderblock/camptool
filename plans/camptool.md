@@ -657,6 +657,78 @@ New model, built in three shippable stages:
       + useCount++; bad token 404; expired/revoked/used-up states handled.
 - [ ] Stage 3 — invite tree view + founder-rooted backfill (edge column already exists).
 
+## Instance admin: super admin + signup/camp lockdowns (landed, browser-tested 2026-06-11)
+
+The deployment owner needed two switches: **lock down new camp creation** and
+**lock down new-account creation to invite-only**. There was no instance-level
+concept before this (all roles are per-camp by design), so this introduces the
+first deployment-wide layer. **User-locked decisions:** (a) super admin = the
+**first account to register** (promoted automatically), with more grantable
+in-app — NOT an env var, NOT a `user.role` column; (b) invite-only still lets new
+accounts be created from **camp invite links AND a camp's public apply page**,
+only the bare `/login` signup is blocked.
+
+**Schema (`db/schema/instance.ts`, migration 0011).** Two instance-global tables
+(the only non-`camp_id` tables, intentionally):
+- `instance_setting` — singleton row (`id='singleton'`) with `allow_camp_creation`
+  + `allow_open_signups` booleans (default true) + `updated_at`.
+- `super_admin` — `user_id` PK FK→user (cascade). A side table, NOT a column on
+  `user`, to keep identity free of global roles. Migration **seeds** the singleton
+  row and **promotes the earliest existing account** (`ORDER BY created_at ASC
+  LIMIT 1`) so an already-seeded deployment isn't left ownerless; fresh installs
+  promote the first signup at runtime. Verified on a VACUUM copy of the live DB +
+  after live apply: cameron@tacklind.com (earliest) became super admin.
+
+**Helpers (`app/lib/instance.server.ts`, server-only).** `getInstanceSettings`/
+`setInstanceSettings` (upsert), `isSuperAdmin`/`listSuperAdmins`/
+`grantSuperAdminByEmail`/`revokeSuperAdmin` (refuses to remove the last one),
+`ensureFirstUserSuperAdmin` (no-op once any exists), and the signed
+**signup-unlock cookie** (`camptool_signup_ok`, HMAC over an expiry, 1h TTL,
+HttpOnly). MUST NOT import auth.server.ts (auth.server imports this — cycle).
+
+**Enforcement (`app/lib/auth.server.ts`).**
+- *Camp creation:* organization plugin `allowUserToCreateOrganization` → super
+  admin always true, else `allowCampCreation`. Server-side, so it holds even if
+  the client tries directly. Dashboard index also hides the create form when not
+  allowed (`canCreateCamp` from the loader).
+- *Signups:* `databaseHooks.user.create.before` is the one choke point that
+  covers EVERY method (email/pw, magic link, Discord) — passkey never creates a
+  user so it's exempt. When `allowOpenSignups` is false it throws `APIError
+  FORBIDDEN` unless the request carries a valid unlock cookie. `after` promotes
+  the first user. `/login` hides the Create-account tab when open signups are off;
+  the apply (`c.$slug`) and invite (`i.$token`) loaders set the unlock cookie
+  **only in invite-only mode** (open mode is byte-identical to before — no cookie).
+
+**GOTCHA that bit this (the big one).** better-auth runs its origin/CSRF check
+**only on cookie-bearing requests** (`origin-check.mjs`: `useCookies =
+headers.has("cookie")`; skips the check entirely otherwise). Logged-out signups
+historically carried no cookie, so the check was always skipped — which is why it
+"worked" even though dev's `PUBLIC_BASE_URL=https://camptool.isozilla.com` ≠ the
+`localhost:3000` you actually browse, so `trustedOrigins` never matched the
+browser Origin. The instant the unlock cookie rides along, the origin check
+activates and **rejects with `INVALID_ORIGIN`** on localhost. Fix: (1) set the
+cookie only in invite-only mode (zero change to the common path), and (2) add
+`http://localhost:3000`/`127.0.0.1:3000`/`localhost:5173` to `trustedOrigins`
+when `NODE_ENV !== "production"`. In production the browser Origin equals
+`PUBLIC_BASE_URL` so the check passes naturally; the firefly env-file already sets
+`NODE_ENV=production`. **Don't conclude signup is broken from a localhost test
+where PUBLIC_BASE_URL points elsewhere** — confirm whether a cookie is present.
+
+**UI.** New `/dashboard/admin` (super-admin only; redirects others) with two
+Mantine `Switch`es + a super-admin list (add by email / remove, last-one
+guarded). A "Site admin" nav link shows only for super admins.
+
+**Verified end-to-end in Chrome (invite-only ON):** `/login` hid the
+Create-account tab + showed the invite-only note; a bare POST to
+`/api/auth/sign-up/email` returned 403 with our message and created no user;
+signing up via `/c/:slug` (apply page) **succeeded** (page revalidated to
+"Applying as …"); DB confirmed only that one user created, all blocked attempts
+created nothing, and super_admin = only the earliest user. `/dashboard/admin`
+redirects to `/login` when logged out. typecheck + build + biome green. NOT yet
+click-tested: the admin page's own toggle/grant UI (no login credentials on hand
+for the super-admin account) — the route loader/action are typed + the helpers
+are exercised by the enforcement tests.
+
 ## Admin "Work as" (impersonation)
 
 A per-camp impersonation feature so an officer+ can view/use the app as a

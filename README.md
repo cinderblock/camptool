@@ -50,6 +50,13 @@ who's sharing their tent/RV, and tick the camp's checklist — one step at a tim
 with the regular dashboard pages remaining the "advanced" way to do the same
 things. Next: RV pop-outs, custom per-camp structures, and group sub-maps.
 
+The deployment owner is a **super admin** (the first account to register; more
+can be granted in-app) with a **Site admin** page that controls two
+instance-wide lockdowns: turning off **new camp creation** (only super admins can
+then create camps) and switching sign-ups to **invite-only** (new accounts can
+then be created only by following a camp invite link or a camp's public apply
+page — the bare login page won't offer signup). Super admins always bypass both.
+
 ## Develop
 
 ```sh
@@ -88,3 +95,11 @@ server into a container. Both are documented in
   REST API and slash commands use the interactions webhook — both live inside
   this web server, so the deployment stays a single "little webserver." A
   separate gateway process is only added if a feature needs live events.
+- **Instance admin vs. camp admin:** super admin is the only deployment-wide
+  role (stored in a `super_admin` side table, not on `user`, so per-camp identity
+  stays clean). Its two toggles live in a singleton `instance_setting` row. The
+  invite-only gate runs at better-auth's `user.create` hook so it covers every
+  signup method; sanctioned pages (apply/invite) carry a short-lived signed
+  cookie that the hook accepts. Note: because better-auth only runs its origin
+  check on cookie-bearing requests, production must set `NODE_ENV=production` and
+  a `PUBLIC_BASE_URL` matching the browser origin (the deploy env-file does).

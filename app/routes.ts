@@ -18,5 +18,6 @@ export default [
     route("inventory", "routes/dashboard/inventory.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
+    route("admin", "routes/dashboard/admin.tsx"),
   ]),
 ] satisfies RouteConfig;

@@ -12,6 +12,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
+import { eq } from "drizzle-orm";
 import {
   Form,
   NavLink,
@@ -20,9 +21,9 @@ import {
   useLocation,
   useNavigate,
 } from "react-router";
-import { eq } from "drizzle-orm";
 import { redirect } from "react-router";
 import { authClient, signOut } from "~/lib/auth-client";
+import { isSuperAdmin } from "~/lib/instance.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -52,10 +53,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
+  const superAdmin = await isSuperAdmin(user.id);
+
   return {
     user,
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
+    superAdmin,
     wizardCompleted,
     impersonatedBy,
     activeEditionId: activeEdition?.id ?? null,
@@ -78,6 +82,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     camps,
     activeCampId,
     activeRole,
+    superAdmin,
     wizardCompleted,
     impersonatedBy,
     editions,
@@ -104,6 +109,9 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ]
       : []),
     { to: "/dashboard/onboarding", label: "Onboarding", end: false },
+    ...(superAdmin
+      ? [{ to: "/dashboard/admin", label: "Site admin", end: false }]
+      : []),
   ];
   const [opened, { toggle }] = useDisclosure();
   const navigate = useNavigate();

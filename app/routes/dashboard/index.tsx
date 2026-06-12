@@ -16,6 +16,7 @@ import { useState } from "react";
 import { useNavigate, useRevalidator } from "react-router";
 import { authClient } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
+import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
 import type { Role } from "~/lib/permissions";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -57,11 +58,21 @@ export async function loader({ request }: Route.LoaderArgs) {
     memberCount = row?.value ?? 0;
   }
 
+  // Only compute the camp-creation gate when the user has no camp yet (the only
+  // time the create form shows).
+  let canCreateCamp = true;
+  if (!active) {
+    canCreateCamp =
+      (await isSuperAdmin(user.id)) ||
+      (await getInstanceSettings()).allowCampCreation;
+  }
+
   return {
     userName: user.name,
     discordEnabled,
     hasDiscord,
     memberCount,
+    canCreateCamp,
     active: active
       ? { campName: active.camp.name, role: active.membership.role }
       : null,
@@ -69,7 +80,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export default function DashboardIndex({ loaderData }: Route.ComponentProps) {
-  if (!loaderData.active) return <CreateCamp />;
+  if (!loaderData.active)
+    return <CreateCamp canCreateCamp={loaderData.canCreateCamp} />;
   return <CampOverview loaderData={loaderData} />;
 }
 
@@ -175,11 +187,26 @@ function CampOverview({
   );
 }
 
-function CreateCamp() {
+function CreateCamp({ canCreateCamp }: { canCreateCamp: boolean }) {
   const navigate = useNavigate();
   const revalidator = useRevalidator();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+
+  if (!canCreateCamp) {
+    return (
+      <Container size="sm">
+        <Stack gap="md">
+          <Title order={2}>No camp yet</Title>
+          <Text c="dimmed">
+            New camp creation is currently turned off on this deployment. Ask a
+            site administrator to create your camp or to re-enable camp
+            creation.
+          </Text>
+        </Stack>
+      </Container>
+    );
+  }
 
   function slugify(value: string) {
     return value

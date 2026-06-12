@@ -15,6 +15,10 @@ import { Form, data, redirect } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { discordEnabled } from "~/lib/auth.server";
 import {
+  getInstanceSettings,
+  setSignupUnlockCookie,
+} from "~/lib/instance.server";
+import {
   INVITE_STATE_MESSAGE,
   type InviteState,
   inviteState,
@@ -75,7 +79,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     alreadyMember = Boolean(m);
   }
 
-  return {
+  const payload = {
     campName: invite.campName,
     logo: invite.logo,
     inviterName: invite.inviterName,
@@ -84,6 +88,19 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     alreadyMember,
     discordEnabled,
   };
+
+  // A valid invite is a sanctioned signup entry point. Only in invite-only mode
+  // do we drop the signup-unlock cookie that lets a logged-out invitee create an
+  // account; in open mode nothing is set so behavior is unchanged.
+  if (!session && state === "ok") {
+    const { allowOpenSignups } = await getInstanceSettings();
+    if (!allowOpenSignups) {
+      return data(payload, {
+        headers: { "Set-Cookie": setSignupUnlockCookie() },
+      });
+    }
+  }
+  return payload;
 }
 
 export async function action({ request, params }: Route.ActionArgs) {

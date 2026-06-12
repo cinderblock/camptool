@@ -17,6 +17,7 @@ import { useState } from "react";
 import { redirect, useNavigate } from "react-router";
 import { signIn, signUp } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
+import { getInstanceSettings } from "~/lib/instance.server";
 import { getSession } from "~/lib/session.server";
 import type { Route } from "./+types/login";
 
@@ -27,7 +28,8 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   const session = await getSession(request);
   if (session) throw redirect("/dashboard");
-  return { discordEnabled };
+  const { allowOpenSignups } = await getInstanceSettings();
+  return { discordEnabled, allowOpenSignups };
 }
 
 export default function Login({ loaderData }: Route.ComponentProps) {
@@ -114,7 +116,9 @@ export default function Login({ loaderData }: Route.ComponentProps) {
         <Tabs defaultValue="signin">
           <Tabs.List grow>
             <Tabs.Tab value="signin">Sign in</Tabs.Tab>
-            <Tabs.Tab value="signup">Create account</Tabs.Tab>
+            {loaderData.allowOpenSignups ? (
+              <Tabs.Tab value="signup">Create account</Tabs.Tab>
+            ) : null}
           </Tabs.List>
 
           <Tabs.Panel value="signin" pt="md">
@@ -145,30 +149,39 @@ export default function Login({ loaderData }: Route.ComponentProps) {
             </form>
           </Tabs.Panel>
 
-          <Tabs.Panel value="signup" pt="md">
-            <form onSubmit={form.onSubmit(handleSignUp)}>
-              <Stack>
-                <TextInput
-                  label="Name"
-                  placeholder="Your name"
-                  {...form.getInputProps("name")}
-                />
-                <TextInput
-                  label="Email"
-                  placeholder="you@example.com"
-                  {...form.getInputProps("email")}
-                />
-                <PasswordInput
-                  label="Password"
-                  {...form.getInputProps("password")}
-                />
-                <Button type="submit" loading={busy} fullWidth>
-                  Create account
-                </Button>
-              </Stack>
-            </form>
-          </Tabs.Panel>
+          {loaderData.allowOpenSignups ? (
+            <Tabs.Panel value="signup" pt="md">
+              <form onSubmit={form.onSubmit(handleSignUp)}>
+                <Stack>
+                  <TextInput
+                    label="Name"
+                    placeholder="Your name"
+                    {...form.getInputProps("name")}
+                  />
+                  <TextInput
+                    label="Email"
+                    placeholder="you@example.com"
+                    {...form.getInputProps("email")}
+                  />
+                  <PasswordInput
+                    label="Password"
+                    {...form.getInputProps("password")}
+                  />
+                  <Button type="submit" loading={busy} fullWidth>
+                    Create account
+                  </Button>
+                </Stack>
+              </form>
+            </Tabs.Panel>
+          ) : null}
         </Tabs>
+
+        {loaderData.allowOpenSignups ? null : (
+          <Text c="dimmed" size="sm" ta="center" mt="md">
+            New accounts are invite-only. Ask your camp for an invite link to
+            join.
+          </Text>
+        )}
 
         <Divider label="or" labelPosition="center" my="lg" />
 

@@ -15,6 +15,10 @@ import { and, eq, or } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { discordEnabled } from "~/lib/auth.server";
+import {
+  getInstanceSettings,
+  setSignupUnlockCookie,
+} from "~/lib/instance.server";
 import { getSession } from "~/lib/session.server";
 import { db } from "../../db/client.server";
 import { camp, membership, recruitApplication } from "../../db/schema";
@@ -35,7 +39,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const session = await getSession(request);
   if (!session) {
-    return {
+    const payload = {
       campName: found.name,
       logo: found.logo,
       slug: params.slug,
@@ -44,6 +48,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       alreadyApplied: false,
       discordEnabled,
     };
+    // The public apply page is a sanctioned signup entry point. Only when the
+    // instance is in invite-only mode do we drop the signup-unlock cookie that
+    // lets a new account be created; in open mode we set nothing so behavior is
+    // unchanged.
+    const { allowOpenSignups } = await getInstanceSettings();
+    if (allowOpenSignups) return payload;
+    return data(payload, {
+      headers: { "Set-Cookie": setSignupUnlockCookie() },
+    });
   }
 
   const [member] = await db
