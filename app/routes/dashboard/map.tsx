@@ -921,6 +921,10 @@ export async function action({ request }: Route.ActionArgs) {
 
 const VIEW_W = 920;
 const MARGIN = 28;
+// Annotation margin (feet) drawn around the lot so officers can mark things
+// outside the border — e.g. the rear service lane. Objects stay inside the lot;
+// zones and power lines may extend into this padded area.
+const PAD_FT = 30;
 
 function rotateVec(vx: number, vy: number, deg: number) {
   const r = (deg * Math.PI) / 180;
@@ -1681,15 +1685,26 @@ function Editor({
   // with depth, from the derived/overridden frontage radius.
   const rear = rearWidthOf(lot, frontageRadiusOf(lot));
   const maxWidthFt = Math.max(lot.frontageFt, rear);
-  const ppf = (VIEW_W - 2 * MARGIN) / maxWidthFt;
-  const viewH = Math.round(MARGIN * 2 + lot.depthFt * ppf);
+  // Fit the lot plus a PAD_FT annotation margin on every side into the view.
+  const ppf = (VIEW_W - 2 * MARGIN) / (maxWidthFt + 2 * PAD_FT);
+  const padPx = PAD_FT * ppf;
+  const viewH = Math.round(MARGIN * 2 + (lot.depthFt + 2 * PAD_FT) * ppf);
   // Plot-local (0,0) = front-left corner of the frontage edge, in screen px.
-  const originX = MARGIN + ((maxWidthFt - lot.frontageFt) / 2) * ppf;
-  const originY = MARGIN;
-  const rearCenterX = MARGIN + (maxWidthFt / 2) * ppf;
+  const originX = MARGIN + padPx + ((maxWidthFt - lot.frontageFt) / 2) * ppf;
+  const originY = MARGIN + padPx;
+  const rearCenterX = MARGIN + padPx + (maxWidthFt / 2) * ppf;
   const yBot = originY + lot.depthFt * ppf;
+  // Padded bounds (feet) for annotations that may sit outside the lot border.
+  const clampPadX = (v: number) => clamp(v, -PAD_FT, lot.frontageFt + PAD_FT);
+  const clampPadY = (v: number) => clamp(v, -PAD_FT, lot.depthFt + PAD_FT);
   // Trapezoid outline (front edge, then rear edge wider when tapered).
   const lotPoints = `${originX},${originY} ${originX + lot.frontageFt * ppf},${originY} ${rearCenterX + (rear / 2) * ppf},${yBot} ${rearCenterX - (rear / 2) * ppf},${yBot}`;
+  // The lettered street the camp fronts (override → per-year name → letter).
+  const frontageStreet =
+    lot.street ??
+    (lot.streetLetter && lot.year
+      ? streetLabel(lot.year, lot.streetLetter)
+      : lot.streetLetter);
 
   const fx = (sx: number) => (sx - originX) / ppf;
   const fy = (sy: number) => (sy - originY) / ppf;
@@ -1800,15 +1815,9 @@ function Editor({
   function placeCablePoint(fxp: number, fyp: number): ZonePt {
     const snap = snapToNode(fxp, fyp, objects);
     if (snap.snapped) {
-      return {
-        x: clamp(snap.x, 0, lot.frontageFt),
-        y: clamp(snap.y, 0, lot.depthFt),
-      };
+      return { x: clampPadX(snap.x), y: clampPadY(snap.y) };
     }
-    return {
-      x: snapGrid(clamp(fxp, 0, lot.frontageFt)),
-      y: snapGrid(clamp(fyp, 0, lot.depthFt)),
-    };
+    return { x: snapGrid(clampPadX(fxp)), y: snapGrid(clampPadY(fyp)) };
   }
   function addDraftPoint(e: React.PointerEvent) {
     const p = svgPoint(e);
@@ -1816,8 +1825,8 @@ function Editor({
       drawMode === "cable"
         ? placeCablePoint(fx(p.x), fy(p.y))
         : {
-            x: snapGrid(clamp(fx(p.x), 0, lot.frontageFt)),
-            y: snapGrid(clamp(fy(p.y), 0, lot.depthFt)),
+            x: snapGrid(clampPadX(fx(p.x))),
+            y: snapGrid(clampPadY(fy(p.y))),
           };
     setDraftPoints((prev) => [...prev, pt]);
   }
@@ -2050,7 +2059,7 @@ function Editor({
             ) : drawMode === "zone" ? (
               <>
                 <Text size="xs" c="dimmed">
-                  Click the lot to add points
+                  Click to add points · outside the border is OK
                 </Text>
                 <Button
                   size="compact-xs"
@@ -2185,6 +2194,33 @@ function Editor({
           stroke="#adb5bd"
           strokeWidth={2}
         />
+        {/* The street the camp fronts, labeled along the frontage edge; the clock
+            address marks the radial avenue. Drawn in the pad above the lot. */}
+        {frontageStreet ? (
+          <g pointerEvents="none">
+            <line
+              x1={originX}
+              y1={originY - 4}
+              x2={originX + lot.frontageFt * ppf}
+              y2={originY - 4}
+              stroke="#ced4da"
+              strokeWidth={3}
+              strokeLinecap="round"
+            />
+            <text
+              x={originX + (lot.frontageFt * ppf) / 2}
+              y={originY - 13}
+              textAnchor="middle"
+              fontSize={13}
+              fontWeight={700}
+              fill="#868e96"
+              style={{ userSelect: "none" }}
+            >
+              {frontageStreet}
+              {lot.address ? ` · ${lot.address}` : ""}
+            </text>
+          </g>
+        ) : null}
         {/* Shade simulation: each object casts a translucent shadow away from the
             sun, clipped to the lot. Overlaps darken naturally. */}
         {showShade && mapUpBearing != null && sun.altitude > 0.5 ? (
