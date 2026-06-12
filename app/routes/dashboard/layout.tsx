@@ -26,6 +26,7 @@ import { authClient, signOut } from "~/lib/auth-client";
 import { isSuperAdmin } from "~/lib/instance.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { resolveActiveCamp } from "~/lib/session.server";
+import { loadWizardState } from "~/lib/wizard.server";
 import { db } from "../../../db/client.server";
 import { membership } from "../../../db/schema";
 import type { Route } from "./+types/layout";
@@ -34,23 +35,31 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { user, camps, active, impersonatedBy, editions, activeEdition } =
     await resolveActiveCamp(request);
 
-  // Guide brand-new campers (non-officers) through the onboarding wizard once.
-  // wizardStep stays 0 only until they take any step or skip, so this fires at
-  // most once; officers/admins are never force-redirected.
-  let wizardCompleted = true;
-  if (active && !hasAtLeast(active.membership.role, "officer")) {
+  // Guide brand-new campers (non-officers) through the onboarding wizard. The
+  // forced redirect fires at most once (wizardStep flips to 1 the first time
+  // /start loads); after that, the "Finish setup" nav shows whenever the active
+  // edition still has season-relevant asks left to resolve. Officers are exempt.
+  let showFinishSetup = false;
+  if (
+    active &&
+    activeEdition &&
+    !hasAtLeast(active.membership.role, "officer")
+  ) {
     const [me] = await db
-      .select({
-        wizardStep: membership.wizardStep,
-        wizardCompletedAt: membership.wizardCompletedAt,
-      })
+      .select({ wizardStep: membership.wizardStep })
       .from(membership)
       .where(eq(membership.id, active.membership.id))
       .limit(1);
-    wizardCompleted = Boolean(me?.wizardCompletedAt);
-    if (me && me.wizardStep === 0 && !me.wizardCompletedAt) {
+    if (me && me.wizardStep === 0) {
       throw redirect("/start");
     }
+    const state = await loadWizardState({
+      editionId: activeEdition.id,
+      membershipId: active.membership.id,
+      role: active.membership.role,
+      year: activeEdition.year,
+    });
+    showFinishSetup = state.pending.length > 0;
   }
 
   const superAdmin = await isSuperAdmin(user.id);
@@ -60,7 +69,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
     superAdmin,
-    wizardCompleted,
+    showFinishSetup,
     impersonatedBy,
     activeEditionId: activeEdition?.id ?? null,
     activeEditionLocked: activeEdition?.locked ?? false,
@@ -83,7 +92,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     activeCampId,
     activeRole,
     superAdmin,
-    wizardCompleted,
+    showFinishSetup,
     impersonatedBy,
     editions,
     activeEditionId,
@@ -91,28 +100,28 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   } = loaderData;
   const editionFetcher = useFetcher();
   const nav = [
-    { to: "/dashboard", label: "Overview", end: true },
-    ...(!wizardCompleted
+    { to: "/", label: "Overview", end: true },
+    ...(showFinishSetup
       ? [{ to: "/start", label: "Finish setup", end: false }]
       : []),
-    { to: "/dashboard/members", label: "Members", end: false },
+    { to: "/members", label: "Members", end: false },
     ...(activeRole && hasAtLeast(activeRole, "member")
-      ? [{ to: "/dashboard/invite", label: "Invite friends", end: false }]
+      ? [{ to: "/invite", label: "Invite friends", end: false }]
       : []),
-    { to: "/dashboard/editions", label: "Years", end: false },
-    { to: "/dashboard/map", label: "Map", end: false },
-    { to: "/dashboard/bringing", label: "Bringing", end: false },
-    { to: "/dashboard/tickets", label: "Tickets", end: false },
-    { to: "/dashboard/passes", label: "Passes", end: false },
+    { to: "/editions", label: "Years", end: false },
+    { to: "/map", label: "Map", end: false },
+    { to: "/bringing", label: "Bringing", end: false },
+    { to: "/tickets", label: "Tickets", end: false },
+    { to: "/passes", label: "Passes", end: false },
     ...(activeRole && hasAtLeast(activeRole, "officer")
       ? [
-          { to: "/dashboard/recruits", label: "Recruits", end: false },
-          { to: "/dashboard/inventory", label: "Inventory", end: false },
+          { to: "/recruits", label: "Recruits", end: false },
+          { to: "/inventory", label: "Inventory", end: false },
         ]
       : []),
-    { to: "/dashboard/onboarding", label: "Onboarding", end: false },
+    { to: "/onboarding", label: "Onboarding", end: false },
     ...(superAdmin
-      ? [{ to: "/dashboard/admin", label: "Site admin", end: false }]
+      ? [{ to: "/admin", label: "Site admin", end: false }]
       : []),
   ];
   const [opened, { toggle }] = useDisclosure();
@@ -173,7 +182,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                     id !== activeEditionId &&
                     editionFetcher.submit(
                       { intent: "setActive", editionId: id },
-                      { method: "post", action: "/dashboard/editions" },
+                      { method: "post", action: "/editions" },
                     )
                   }
                   data={editions.map((e) => ({ value: e.id, label: e.label }))}

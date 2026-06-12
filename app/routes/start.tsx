@@ -12,14 +12,24 @@ import {
   Stepper,
   Text,
   TextInput,
+  Textarea,
   Title,
   Tooltip,
 } from "@mantine/core";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { useState } from "react";
-import { data, redirect, useFetcher, useNavigate } from "react-router";
+import { Link, data, useFetcher, useNavigate } from "react-router";
+import { weeksUntilEvent } from "~/lib/brc";
 import { requireActiveEdition } from "~/lib/session.server";
 import { KINDS, ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
+import type { AskKey } from "~/lib/wizard";
+import { audienceForRole } from "~/lib/wizard";
+import {
+  type ParticipationStatus,
+  loadWizardState,
+  resolveAsk,
+  setParticipation,
+} from "~/lib/wizard.server";
 import { db } from "../../db/client.server";
 import {
   mapObject,
@@ -35,9 +45,6 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Get started · CampTool" }];
 }
 
-// Wizard step indices (also the value persisted in membership.wizardStep).
-const STEP_COUNT = 5;
-
 export async function loader({ request }: Route.LoaderArgs) {
   const {
     user: authUser,
@@ -47,87 +54,138 @@ export async function loader({ request }: Route.LoaderArgs) {
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   const mid = active.membership.id;
+  const role = active.membership.role;
 
   const [me] = await db
     .select({
       playaName: membership.playaName,
       wizardStep: membership.wizardStep,
-      wizardCompletedAt: membership.wizardCompletedAt,
     })
     .from(membership)
     .where(eq(membership.id, mid))
     .limit(1);
 
-  const items = await db
-    .select({
-      id: mapObject.id,
-      kind: mapObject.kind,
-      name: mapObject.name,
-      width: mapObject.width,
-      height: mapObject.height,
-      placed: mapObject.placed,
-    })
-    .from(mapObject)
-    .where(
-      and(
-        eq(mapObject.editionId, editionId),
-        eq(mapObject.ownerMembershipId, mid),
-      ),
-    );
+  // Visiting the wizard once is enough to stop the layout's one-time forced
+  // redirect; per-ask resolution (below) drives everything after that.
+  if ((me?.wizardStep ?? 0) === 0) {
+    await db
+      .update(membership)
+      .set({ wizardStep: 1 })
+      .where(eq(membership.id, mid));
+  }
 
-  const occupants = await db
-    .select({
-      objectId: mapObjectOccupant.objectId,
-      membershipId: mapObjectOccupant.membershipId,
-      name: user.name,
-    })
-    .from(mapObjectOccupant)
-    .innerJoin(mapObject, eq(mapObjectOccupant.objectId, mapObject.id))
-    .leftJoin(membership, eq(mapObjectOccupant.membershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(
-      and(
-        eq(mapObject.ownerMembershipId, mid),
-        eq(mapObjectOccupant.editionId, editionId),
-      ),
-    );
+  const state = await loadWizardState({
+    editionId,
+    membershipId: mid,
+    role,
+    year: activeEdition.year,
+  });
+  const keys = new Set(state.scheduled.map((a) => a.key));
 
-  const rosterRows = await db
-    .select({ membershipId: membership.id, name: user.name })
-    .from(membership)
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(
-      and(
-        eq(membership.organizationId, campId),
-        eq(membership.status, "active"),
-      ),
-    );
+  // Load supporting data only for the steps that are actually in season.
+  let items: {
+    id: string;
+    kind: string;
+    name: string | null;
+    width: number;
+    height: number;
+    placed: boolean;
+  }[] = [];
+  let occupants: {
+    objectId: string;
+    membershipId: string;
+    name: string | null;
+  }[] = [];
+  let roster: { membershipId: string; name: string | null }[] = [];
+  let tasks: { id: string; title: string; done: boolean }[] = [];
 
-  const tasks = await db
-    .select()
-    .from(onboardingTask)
-    .where(eq(onboardingTask.campId, campId))
-    .orderBy(asc(onboardingTask.sortOrder), asc(onboardingTask.createdAt));
-  const doneRows = await db
-    .select({ taskId: onboardingCompletion.taskId })
-    .from(onboardingCompletion)
-    .where(eq(onboardingCompletion.membershipId, mid));
-  const doneSet = new Set(doneRows.map((d) => d.taskId));
+  if (keys.has("bringing") || keys.has("sharing")) {
+    items = await db
+      .select({
+        id: mapObject.id,
+        kind: mapObject.kind,
+        name: mapObject.name,
+        width: mapObject.width,
+        height: mapObject.height,
+        placed: mapObject.placed,
+      })
+      .from(mapObject)
+      .where(
+        and(
+          eq(mapObject.editionId, editionId),
+          eq(mapObject.ownerMembershipId, mid),
+        ),
+      );
+  }
+
+  if (keys.has("sharing")) {
+    occupants = await db
+      .select({
+        objectId: mapObjectOccupant.objectId,
+        membershipId: mapObjectOccupant.membershipId,
+        name: user.name,
+      })
+      .from(mapObjectOccupant)
+      .innerJoin(mapObject, eq(mapObjectOccupant.objectId, mapObject.id))
+      .leftJoin(membership, eq(mapObjectOccupant.membershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(
+        and(
+          eq(mapObject.ownerMembershipId, mid),
+          eq(mapObjectOccupant.editionId, editionId),
+        ),
+      );
+
+    const rosterRows = await db
+      .select({ membershipId: membership.id, name: user.name })
+      .from(membership)
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(
+        and(
+          eq(membership.organizationId, campId),
+          eq(membership.status, "active"),
+        ),
+      );
+    roster = rosterRows.filter((r) => r.membershipId !== mid);
+  }
+
+  if (keys.has("checklist")) {
+    const taskRows = await db
+      .select()
+      .from(onboardingTask)
+      .where(eq(onboardingTask.campId, campId))
+      .orderBy(asc(onboardingTask.sortOrder), asc(onboardingTask.createdAt));
+    const doneRows = await db
+      .select({ taskId: onboardingCompletion.taskId })
+      .from(onboardingCompletion)
+      .where(eq(onboardingCompletion.membershipId, mid));
+    const doneSet = new Set(doneRows.map((d) => d.taskId));
+    tasks = taskRows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      done: doneSet.has(t.id),
+    }));
+  }
 
   return {
     locked: activeEdition.locked,
     userName: authUser.name,
+    year: activeEdition.year,
+    weeksToEvent: weeksUntilEvent(activeEdition.year),
+    audience: audienceForRole(role),
+    scheduled: state.scheduled.map((a) => ({
+      key: a.key,
+      label: a.label,
+      hint: a.hint,
+      priority: a.priority,
+    })),
+    resolved: state.resolved,
+    participation: state.participation,
     playaName: me?.playaName ?? null,
-    wizardStep: me?.wizardStep ?? 0,
-    completed: Boolean(me?.wizardCompletedAt),
     items,
     occupants,
-    roster: rosterRows.filter((r) => r.membershipId !== mid),
-    tasks: tasks.map((t) => ({
-      id: t.id,
-      title: t.title,
-      done: doneSet.has(t.id),
-    })),
+    roster,
+    tasks,
   };
 }
 
@@ -149,29 +207,31 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
-  if (intent === "setStep") {
-    const step = Math.max(
-      0,
-      Math.min(STEP_COUNT - 1, Number(form.get("step"))),
-    );
-    // Persist the *furthest* step reached so a brand-new member is only
-    // auto-redirected here once (any forward move / skip bumps it off 0).
-    await db
-      .update(membership)
-      .set({ wizardStep: sql`max(${membership.wizardStep}, ${step})` })
-      .where(eq(membership.id, mid));
+  if (intent === "resolveAsk") {
+    const askKey = String(form.get("askKey")) as AskKey;
+    const status = form.get("status") === "skipped" ? "skipped" : "done";
+    await resolveAsk({ campId, editionId, membershipId: mid, askKey, status });
     return data({ ok: true });
   }
 
-  if (intent === "complete") {
-    await db
-      .update(membership)
-      .set({
-        wizardCompletedAt: new Date(),
-        wizardStep: sql`max(${membership.wizardStep}, ${STEP_COUNT - 1})`,
-      })
-      .where(eq(membership.id, mid));
-    return redirect("/dashboard");
+  // RSVP writes edition-scoped data, so a locked year is read-only.
+  if (intent === "rsvp") {
+    if (activeEdition.locked) {
+      return data({ error: "This year is locked." }, { status: 403 });
+    }
+    const status = String(form.get("status")) as ParticipationStatus;
+    if (!["unknown", "coming", "maybe", "not_coming"].includes(status)) {
+      return data({ error: "Bad status." }, { status: 400 });
+    }
+    const noteRaw = form.get("note");
+    await setParticipation({
+      campId,
+      editionId,
+      membershipId: mid,
+      status,
+      note: noteRaw == null ? undefined : String(noteRaw) || null,
+    });
+    return data({ ok: true });
   }
 
   // Occupant edits touch edition-scoped data, so they respect the lock.
@@ -234,28 +294,28 @@ export async function action({ request }: Route.ActionArgs) {
 type LoaderData = Route.ComponentProps["loaderData"];
 
 export default function StartWizard({ loaderData }: Route.ComponentProps) {
-  const { wizardStep, locked } = loaderData;
+  const { scheduled, resolved, locked, weeksToEvent } = loaderData;
   const navigate = useNavigate();
   const fetcher = useFetcher();
-  const [active, setActive] = useState(
-    Math.min(Math.max(0, wizardStep), STEP_COUNT - 1),
-  );
+  const steps = scheduled;
+  // Start at the first unresolved ask so returning campers land on what's left.
+  const firstPending = steps.findIndex((s) => !resolved[s.key]);
+  const [active, setActive] = useState(firstPending < 0 ? 0 : firstPending);
+  const last = steps.length - 1;
 
-  function goto(step: number) {
-    const next = Math.max(0, Math.min(STEP_COUNT - 1, step));
-    setActive(next);
+  function mark(key: string, status: "done" | "skipped") {
     fetcher.submit(
-      { intent: "setStep", step: String(next) },
+      { intent: "resolveAsk", askKey: key, status },
       { method: "post" },
     );
   }
-  function skip() {
-    // Mark as started so the dashboard won't auto-redirect here again.
-    fetcher.submit({ intent: "setStep", step: "1" }, { method: "post" });
-    navigate("/dashboard");
+  function next(status: "done" | "skipped" = "done") {
+    if (steps[active]) mark(steps[active].key, status);
+    setActive((a) => Math.min(last, a + 1));
   }
   function finish() {
-    fetcher.submit({ intent: "complete" }, { method: "post" });
+    if (steps[active]) mark(steps[active].key, "done");
+    navigate("/");
   }
 
   return (
@@ -264,11 +324,16 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Welcome — let's get you set up</Title>
           <Text c="dimmed" size="sm">
-            A few quick steps. You can stop anytime and pick up where you left
-            off, or do it all manually in the dashboard.
+            We only ask for what's relevant right now
+            {weeksToEvent > 0 ? ` (~${weeksToEvent} weeks to the event)` : ""}.
+            Stop anytime and pick up where you left off.
           </Text>
         </div>
-        <Button variant="subtle" size="xs" onClick={skip}>
+        <Button
+          variant="subtle"
+          size="xs"
+          onClick={() => navigate("/")}
+        >
           Skip / do it manually
         </Button>
       </Group>
@@ -282,24 +347,22 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
           bg="var(--mantine-color-gray-0)"
         >
           <Text size="sm" c="dimmed">
-            This year is locked — items and occupants are read-only.
+            This year is locked — items and RSVP are read-only.
           </Text>
         </Paper>
       ) : null}
 
-      <Stepper active={active} onStepClick={goto} size="sm">
-        <Stepper.Step label="Profile" description="Your name">
-          <ProfileStep data={loaderData} fetcher={fetcher} />
-        </Stepper.Step>
-        <Stepper.Step label="Bringing" description="Your stuff">
-          <BringingStep data={loaderData} />
-        </Stepper.Step>
-        <Stepper.Step label="Sharing" description="Who's with you">
-          <OccupantsStep data={loaderData} />
-        </Stepper.Step>
-        <Stepper.Step label="Checklist" description="Camp tasks">
-          <ChecklistStep data={loaderData} />
-        </Stepper.Step>
+      <Stepper active={active} onStepClick={setActive} size="sm">
+        {steps.map((s) => (
+          <Stepper.Step
+            key={s.key}
+            label={s.label}
+            description={s.hint}
+            color={resolved[s.key] ? "green" : undefined}
+          >
+            <AskBody askKey={s.key} data={loaderData} fetcher={fetcher} />
+          </Stepper.Step>
+        ))}
         <Stepper.Completed>
           <Paper withBorder p="lg" radius="md" mt="md">
             <Title order={4} mb="xs">
@@ -307,7 +370,7 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
             </Title>
             <Text size="sm" c="dimmed">
               Thanks for setting up. You can refine any of this anytime from the
-              dashboard — Bringing, the map, and the onboarding checklist.
+              dashboard — Bringing, the map, tickets, and the checklist.
             </Text>
           </Paper>
         </Stepper.Completed>
@@ -316,20 +379,148 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
       <Group justify="space-between" mt="xl">
         <Button
           variant="default"
-          onClick={() => goto(active - 1)}
+          onClick={() => setActive((a) => Math.max(0, a - 1))}
           disabled={active === 0}
         >
           Back
         </Button>
-        {active < STEP_COUNT - 1 ? (
-          <Button onClick={() => goto(active + 1)}>Next</Button>
-        ) : (
-          <Button color="green" onClick={finish}>
-            Finish
-          </Button>
-        )}
+        <Group gap="xs">
+          {active <= last ? (
+            <Button
+              variant="subtle"
+              color="gray"
+              onClick={() => next("skipped")}
+            >
+              Skip this
+            </Button>
+          ) : null}
+          {active < last ? (
+            <Button onClick={() => next("done")}>Next</Button>
+          ) : (
+            <Button color="green" onClick={finish}>
+              Finish
+            </Button>
+          )}
+        </Group>
       </Group>
     </Container>
+  );
+}
+
+function AskBody({
+  askKey,
+  data: d,
+  fetcher,
+}: {
+  askKey: AskKey;
+  data: LoaderData;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  switch (askKey) {
+    case "rsvp":
+      return <RsvpStep data={d} />;
+    case "profile":
+      return <ProfileStep data={d} fetcher={fetcher} />;
+    case "questionnaire":
+      return <QuestionnaireStep data={d} />;
+    case "tickets":
+      return <TicketsStep />;
+    case "bringing":
+      return <BringingStep data={d} />;
+    case "sharing":
+      return <OccupantsStep data={d} />;
+    case "checklist":
+      return <ChecklistStep data={d} />;
+    default:
+      return null;
+  }
+}
+
+function RsvpStep({ data: d }: { data: LoaderData }) {
+  const fetcher = useFetcher();
+  const current = d.participation.status;
+  const choices: {
+    value: ParticipationStatus;
+    label: string;
+    color: string;
+  }[] = [
+    { value: "coming", label: "I'm coming", color: "green" },
+    { value: "maybe", label: "Maybe", color: "yellow" },
+    { value: "not_coming", label: "Not this year", color: "gray" },
+  ];
+  const setStatus = (status: ParticipationStatus) =>
+    fetcher.submit({ intent: "rsvp", status }, { method: "post" });
+  return (
+    <Stack gap="md" mt="md" maw={460}>
+      <Text size="sm" c="dimmed">
+        Are you planning to camp with us for {d.year}? This helps us plan
+        tickets and space — you can change it anytime.
+      </Text>
+      <Group gap="xs">
+        {choices.map((c) => (
+          <Button
+            key={c.value}
+            variant={current === c.value ? "filled" : "default"}
+            color={c.color}
+            disabled={d.locked}
+            onClick={() => setStatus(c.value)}
+          >
+            {c.label}
+          </Button>
+        ))}
+      </Group>
+      <Textarea
+        label="Anything to add? (optional)"
+        placeholder="e.g. arriving late, bringing a friend…"
+        autosize
+        minRows={2}
+        disabled={d.locked}
+        defaultValue={d.participation.note ?? ""}
+        onBlur={(e) =>
+          fetcher.submit(
+            { intent: "rsvp", status: current, note: e.currentTarget.value },
+            { method: "post" },
+          )
+        }
+      />
+    </Stack>
+  );
+}
+
+function QuestionnaireStep({ data: d }: { data: LoaderData }) {
+  return (
+    <Stack gap="sm" mt="md" maw={460}>
+      <Text size="sm" c="dimmed">
+        We'll collect a few questions here to get to know you and plan the camp.
+      </Text>
+      <Paper withBorder p="md" radius="md" bg="var(--mantine-color-gray-0)">
+        <Text size="sm">
+          {d.audience === "recruit"
+            ? "As a prospective camper, you'll get a slightly longer set of questions so we can get to know you."
+            : "A short check-in for returning campers."}{" "}
+          The questionnaire isn't built yet — skip for now.
+        </Text>
+      </Paper>
+    </Stack>
+  );
+}
+
+function TicketsStep() {
+  return (
+    <Stack gap="sm" mt="md" maw={460}>
+      <Text size="sm" c="dimmed">
+        We coordinate Directed Group Sale (DGS) tickets through the camp. If you
+        need one, request it so an officer can allocate yours.
+      </Text>
+      <Button
+        component={Link}
+        to="/tickets"
+        variant="light"
+        w="fit-content"
+      >
+        Go to tickets
+      </Button>
+    </Stack>
   );
 }
 
@@ -367,17 +558,17 @@ function BringingStep({ data: d }: { data: LoaderData }) {
   const add = (kind: string) =>
     itemFetcher.submit(
       { intent: "addItem", kind },
-      { method: "post", action: "/dashboard/bringing" },
+      { method: "post", action: "/bringing" },
     );
   const update = (id: string, fields: Record<string, string>) =>
     itemFetcher.submit(
       { intent: "updateItem", id, ...fields },
-      { method: "post", action: "/dashboard/bringing" },
+      { method: "post", action: "/bringing" },
     );
   const remove = (id: string) =>
     itemFetcher.submit(
       { intent: "removeItem", id },
-      { method: "post", action: "/dashboard/bringing" },
+      { method: "post", action: "/bringing" },
     );
 
   return (
@@ -607,7 +798,7 @@ function ChecklistStep({ data: d }: { data: LoaderData }) {
             onChange={() =>
               fetcher.submit(
                 { intent: "toggle", taskId: t.id },
-                { method: "post", action: "/dashboard/onboarding" },
+                { method: "post", action: "/onboarding" },
               )
             }
           />

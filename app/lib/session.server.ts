@@ -240,12 +240,13 @@ export async function resolveActiveCamp(
   };
 }
 
-/** Like resolveActiveCamp but requires a camp; redirects to /dashboard if none. */
+/** Like resolveActiveCamp but requires a camp; redirects to the root (which shows
+ * the "create your camp" screen) if none. */
 export async function requireActiveCamp(
   request: Request,
 ): Promise<ActiveCampContext & { active: CampMembership }> {
   const ctx = await resolveActiveCamp(request);
-  if (!ctx.active) throw redirect("/dashboard");
+  if (!ctx.active) throw redirect("/");
   return { ...ctx, active: ctx.active };
 }
 
@@ -257,6 +258,6 @@ export async function requireActiveEdition(
   ActiveCampContext & { active: CampMembership; activeEdition: Edition }
 > {
   const ctx = await requireActiveCamp(request);
-  if (!ctx.activeEdition) throw redirect("/dashboard/editions");
+  if (!ctx.activeEdition) throw redirect("/editions");
   return { ...ctx, activeEdition: ctx.activeEdition };
 }

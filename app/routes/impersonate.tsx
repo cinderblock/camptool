@@ -17,7 +17,7 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = String(form.get("intent"));
 
   if (intent === "stop") {
-    return redirect("/dashboard", {
+    return redirect("/", {
       headers: { "Set-Cookie": clearActAsCookie() },
     });
   }
@@ -30,17 +30,17 @@ export async function action({ request }: Route.ActionArgs) {
     const campId = String(
       form.get("campId") || real.session.activeOrganizationId || "",
     );
-    if (!targetUserId || !campId) return redirect("/dashboard");
+    if (!targetUserId || !campId) return redirect("/");
 
     if (!(await canImpersonate(real.user.id, targetUserId, campId))) {
-      return redirect("/dashboard");
+      return redirect("/");
     }
-    return redirect("/dashboard", {
+    return redirect("/", {
       headers: {
         "Set-Cookie": setActAsCookie({ userId: targetUserId, campId }),
       },
     });
   }
 
-  return redirect("/dashboard");
+  return redirect("/");
 }

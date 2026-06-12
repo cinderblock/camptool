@@ -127,7 +127,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       ),
     )
     .limit(1);
-  if (existing) throw redirect("/dashboard");
+  if (existing) throw redirect("/");
 
   // Join directly. We bypass auth.api.addMember because that checks the
   // *caller's* camp permission, and the invitee has none yet — the valid token
@@ -147,7 +147,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     .set({ useCount: sql`${campInvite.useCount} + 1` })
     .where(eq(campInvite.id, invite.id));
 
-  throw redirect("/dashboard");
+  throw redirect("/");
 }
 
 export default function RedeemInvite({ loaderData }: Route.ComponentProps) {
@@ -208,7 +208,7 @@ function InviteBody({
     return (
       <Alert color="green" title="You're in">
         You're already a member of {campName}.{" "}
-        <Anchor href="/dashboard">Go to your dashboard.</Anchor>
+        <Anchor href="/">Go to your dashboard.</Anchor>
       </Alert>
     );
   }

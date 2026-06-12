@@ -113,7 +113,7 @@ function CampOverview({
   async function linkDiscord() {
     await authClient.linkSocial({
       provider: "discord",
-      callbackURL: "/dashboard",
+      callbackURL: "/",
     });
   }
 
@@ -236,7 +236,7 @@ function CreateCamp({ canCreateCamp }: { canCreateCamp: boolean }) {
     await authClient.organization.setActive({ organizationId: data.id });
     setBusy(false);
     revalidator.revalidate();
-    navigate("/dashboard");
+    navigate("/");
   }
 
   return (

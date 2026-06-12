@@ -162,7 +162,7 @@ export async function action({ request }: Route.ActionArgs) {
     if (forkedFromId) await copyEditionContents(forkedFromId, id);
 
     // Make the new year active.
-    return redirect("/dashboard/editions", {
+    return redirect("/editions", {
       headers: { "Set-Cookie": setEditionCookie(id) },
     });
   }
@@ -176,7 +176,7 @@ export async function action({ request }: Route.ActionArgs) {
       .where(
         and(eq(campEdition.id, editionId), eq(campEdition.campId, campId)),
       );
-    return redirect("/dashboard/editions");
+    return redirect("/editions");
   }
 
   return data({ error: "Unknown action." }, { status: 400 });

@@ -1,14 +1,17 @@
-import { type RouteConfig, index, route } from "@react-router/dev/routes";
+import { type RouteConfig, index, layout, route } from "@react-router/dev/routes";
 
 export default [
-  index("routes/_index.tsx"),
+  // Public / full-screen routes (no app shell).
   route("login", "routes/login.tsx"),
   route("c/:slug", "routes/c.$slug.tsx"),
   route("i/:token", "routes/i.$token.tsx"),
   route("impersonate", "routes/impersonate.tsx"),
   route("start", "routes/start.tsx"),
   route("api/auth/*", "routes/api.auth.$.tsx"),
-  route("dashboard", "routes/dashboard/layout.tsx", [
+  // The app itself lives at the root behind a pathless layout (the shell). The
+  // layout loader requires a logged-in user, so "/" is either the overview or a
+  // redirect to /login — there is no "/dashboard" segment.
+  layout("routes/dashboard/layout.tsx", [
     index("routes/dashboard/index.tsx"),
     route("members", "routes/dashboard/members.tsx"),
     route("invite", "routes/dashboard/invite.tsx"),

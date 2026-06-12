@@ -103,6 +103,25 @@ export const EVENT_YEARS = (() => {
 
 export const eventYearOptions = EVENT_YEARS.map(String);
 
+/** Approximate BRC event start (gates open) for a given year: the Sunday 8 days
+ * before Labor Day (the first Monday of September) — BRC runs that Sunday through
+ * Labor Day Monday. Day-granularity is plenty for the season-aware wizard, which
+ * only needs "how many weeks until the event" to decide which asks are in season.
+ * Replace with the published gate date if a year ever needs exactness. */
+export function eventStartFor(year: number): Date {
+  // First Monday of September. getDay(): 0=Sun..6=Sat.
+  const sept1Dow = new Date(year, 8, 1).getDay();
+  const firstMonday = 1 + ((8 - sept1Dow) % 7);
+  return new Date(year, 8, firstMonday - 8);
+}
+
+/** Whole weeks from `from` until that year's event start. Positive before the
+ * event, ~0 the week it begins, negative once it's underway/past. */
+export function weeksUntilEvent(year: number, from: Date = new Date()): number {
+  const ms = eventStartFor(year).getTime() - from.getTime();
+  return Math.floor(ms / (7 * 24 * 60 * 60 * 1000));
+}
+
 /** Which geometry year to use for a given event year: that year if we have its
  * measurements, else the newest year at/below it, else the newest we have. */
 export function geometryYearFor(

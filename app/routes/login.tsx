@@ -27,7 +27,7 @@ export function meta(_: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const session = await getSession(request);
-  if (session) throw redirect("/dashboard");
+  if (session) throw redirect("/");
   const { allowOpenSignups } = await getInstanceSettings();
   return { discordEnabled, allowOpenSignups };
 }
@@ -56,7 +56,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     });
     setBusy(false);
     if (error) return fail(error.message ?? "Sign in failed");
-    navigate("/dashboard");
+    navigate("/");
   }
 
   async function handleSignUp(values: typeof form.values) {
@@ -72,7 +72,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     });
     setBusy(false);
     if (error) return fail(error.message ?? "Sign up failed");
-    navigate("/dashboard");
+    navigate("/");
   }
 
   async function handleMagicLink() {
@@ -80,7 +80,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     setBusy(true);
     const { error } = await signIn.magicLink({
       email: form.values.email,
-      callbackURL: "/dashboard",
+      callbackURL: "/",
     });
     setBusy(false);
     if (error) return fail(error.message ?? "Could not send link");
@@ -96,11 +96,11 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     const res = await signIn.passkey();
     setBusy(false);
     if (res?.error) return fail(res.error.message ?? "Passkey sign in failed");
-    navigate("/dashboard");
+    navigate("/");
   }
 
   async function handleDiscord() {
-    await signIn.social({ provider: "discord", callbackURL: "/dashboard" });
+    await signIn.social({ provider: "discord", callbackURL: "/" });
   }
 
   return (

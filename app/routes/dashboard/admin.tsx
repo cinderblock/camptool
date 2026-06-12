@@ -31,7 +31,7 @@ export function meta(_: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const session = await requireUser(request);
-  if (!(await isSuperAdmin(session.user.id))) throw redirect("/dashboard");
+  if (!(await isSuperAdmin(session.user.id))) throw redirect("/");
 
   const [settings, admins] = await Promise.all([
     getInstanceSettings(),
@@ -51,7 +51,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const session = await requireUser(request);
-  if (!(await isSuperAdmin(session.user.id))) throw redirect("/dashboard");
+  if (!(await isSuperAdmin(session.user.id))) throw redirect("/");
 
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");

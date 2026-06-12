@@ -44,6 +44,22 @@ camps to self-host or (eventually) run as multi-camp SaaS.
 5. **Stack (from the user's other projects, not re-asked):** Bun runtime, React
    Router v7 framework mode (SSR), React 19, Mantine UI, Biome or oxfmt for
    format/lint, Playwright for E2E, TypeScript strict. lefthook for git hooks.
+6. **Addressing/map layout is a pluggable per-event provider** (analogous to the
+   `camp-theme` contract in Phase 2.5). BRC is the built-in default; the seam
+   exists so other events with different addressing schemes can slot in later.
+   **Build only BRC now, behind the interface — no speculative second scheme.**
+   The provider owns: (a) the enumerable address components (BRC = ordered annular
+   streets + radial-avenue clock positions) so the UI offers **dropdowns, never
+   free-text street entry**; (b) geometry (address ↔ world coords, the wedge/
+   trapezoid math); (c) canonical formatting/validation.
+7. **Street names are Borg-defined and rotate every year — never typed by a user.**
+   A **"BRC Year" selection** picks the correct per-year street-name set. Stored
+   camp addresses use the **structural key** (ring index + clock position, e.g.
+   `{ring: 5, clock: "7:30"}`), and the **display name is resolved from the
+   selected year's street table at render time**. Reason: the letter/ring position
+   is stable ("E" is always the 5th ring) but the name and exact radii change
+   yearly; storing the name as text would break every saved placement on a rename.
+   Switching BRC Year then re-labels all placements automatically.
 
 ## Discord architecture decision
 
@@ -138,11 +154,38 @@ Later phases add (all `camp_id`-scoped): `placement`/`map_object`,
   camps' *data*; the code-level theme is per-deployment. A shared/SaaS instance
   ships no `camp-theme` package and gets the data-driven default.
 
-**Phase 3 — Camp map editor (#2)** — the big one, sub-plan when we start
-- 2D SVG/canvas editor tied to DB placements; "highlight my spot."
-- Borg outline import; saved/premade blocks (shared + camp-private);
-  service/flammable/solar/etc markers.
-- Stretch: cross-camp neighborhood map sharing; 3D + sun/shade render.
+**Phase 3 — Camp map editor (#2)** — IN PROGRESS (built by a parallel thread;
+not yet independently verified end-to-end by this thread). What exists:
+
+- **BRC geometry/addressing layer** (`app/lib/brc.ts`) — realizes decisions
+  #6/#7: per-year `CityGeometry`, stable street `code`s, dropdown options (no
+  free text), clock parsing, derived frontage radius, map-up compass bearing.
+  Geometry math validated against the BMorg checkpoints (see reference section).
+  NOTE: the seam is BRC-specific in `brc.ts`, not yet a generalized
+  EventLayoutProvider interface — the "other events" abstraction (decision #6) is
+  still latent; extract the interface when a second event scheme actually lands.
+- **Map schema** (`db/schema/map.ts`, all `camp_id`- and `edition_id`-scoped):
+  - `placement` — the camp's lot wedge; one per edition. City anchoring via
+    `streetLetter`(stable) + `placement_year` + `street`(per-year name) +
+    `address`(free clock). `frontsToMan` flips taper + compass; `frontageFt`/
+    `depthFt`; `innerRadiusFt` is a manual radius override for odd lots
+    (null + no derivable street → plain rectangle, no taper).
+  - `map_object` — structures placed in **plot-local feet** (origin = front-left
+    of the lot, +x along frontage, +y into the lot), so internal layout is
+    independent of where the lot lands each year. Carries `kind`,
+    `ownerMembershipId` (null = communal), a `placed` flag (unplaced items sit in
+    an officer queue), and a **pending-approval workflow** (`pendingAt`/
+    `pendingByMembershipId`/`pendingPrev` JSON snapshot) so a member can move/
+    resize their own item live-but-flagged until an officer approves/reverts.
+  - `map_object_occupant` — second+ campers sharing a tent/RV/car.
+  - `map_zone` — labeled polygons (fire/public/private/custom) as plot-local
+    JSON point arrays.
+- **Editor UI** (`app/routes/dashboard/map.tsx`, ~2.9k lines) + **structures
+  palette** (`app/lib/structures.tsx`: `KINDS`/`KIND_GROUPS`, container sizes,
+  hex helpers, kind colors/icons/tags).
+- Still open / to verify: Borg outline import; saved/premade shared blocks;
+  "highlight my spot" share link; solar/shade + 3D render (stretch); cross-camp
+  neighborhood sharing (stretch). Confirm the editor runs + golden path works.
 
 *MVP increment shipped:* `placement` (one BRC lot per camp) + `map_object`
 (structures in plot-local feet) schema; `/dashboard/map` SVG editor — drag-drop
@@ -304,27 +347,103 @@ pre-cleanup backup can be deleted once you're satisfied.
 
 ### Map versioning — year scope + tags + lock (an instance of the edition axis)
 
-The map is not a single living document; it's a series of versions:
-- **Per-year, with past years locked.** A year's map is independent — editing the
-  current year must NOT mutate last year's. Past years are **read-only** but
-  remain a **source to import from** (copy a previous version's objects/lot into a
-  new working version as a starting point).
-- **Tagged versions within a year.** At minimum a *planned* version (what we lay
-  out before leaving for playa) and an *as-built* version (what actually happened
-  on site), plus the reality that people move once there — so multiple snapshots
-  over time, each labeled.
-- **Unifying model:** introduce a `map_version` entity (camp_id, year, label, a
-  lock/status flag, created_at, optional `forked_from_id`). `placement` and
-  `map_object`/occupants move from camp-scoped to **version-scoped**
-  (`map_version_id`). "The map you edit" = the camp's current *unlocked* version
-  for the active year. **Import = copy** rows from a source version into a new one
-  (never a live link). **Lock = freeze** a version read-only (e.g. lock "planned"
-  once you leave, lock the whole year when it's over).
-- **Schema impact is real:** today `placement` is one-row-per-camp
-  (`uniqueIndex(camp_id)`) and `map_object` is camp-scoped with no year. This is a
-  core map-table migration, so it's its own sub-phase — capture now, design before
-  building. Open question for that sub-phase: does locking happen automatically
-  (e.g. auto-snapshot "planned" on a date) or only manually?
+The map is not a single living document; it's a series of versions. **Naming:
+the entity that landed is `camp_edition` (NOT a separate `map_version`) — there is
+ONE versioning entity, the edition. Don't design a duplicate table.**
+
+**LANDED — per-year scope.** A year's map is independent; editing the current year
+does not mutate last year's. This shipped as `camp_edition` (`db/schema/camp.ts`)
+with `edition_id` on every map table (`db/schema/map.ts`): `placement` carries
+`edition_id` with `uniqueIndex("placement_edition").on(editionId)` (one lot per
+edition, NOT per camp), and `map_object` / `map_object_occupant` / `map_zone` /
+`map_cable` all carry `edition_id` alongside `camp_id`. Past editions can be
+**locked** (read-only) and remain an **import source** — creating an edition
+copy-from another deep-copies its lot + objects + occupants (snapshot, never a
+live link). See "Per-year edition is a PRIMARY axis" above for the full landed
+state. The earlier "`map_version` / `map_version_id`" proposal here is **superseded
+by `camp_edition` / `edition_id`** — same idea, the name that won.
+
+**STILL OPEN — tagged snapshots *within* one year.** The edition axis gives
+per-year independence, but not yet multiple labeled snapshots inside a single year:
+a *planned* version (laid out before playa) vs an *as-built* version (what actually
+happened), plus mid-event moves. Options when built: a `label`/`tag` on a
+finer-grained snapshot under an edition, or multiple editions per year distinguished
+by label. **Open question:** does locking a snapshot happen automatically
+(auto-snapshot "planned" on a departure date) or only manually? Design before building.
+
+## Ticketing — Directed Group Sale tickets + Setup Access Passes (LANDED + browser-tested 2026-06-11)
+
+Per-year allocations a camp distributes to members, scoped to `camp_edition`
+(both `camp_id` + `edition_id`, read-only when the edition is locked). Task plan:
+`C:\Users\camer\.claude\plans\cozy-singing-tulip.md`.
+
+**User-locked decisions (Q&A):** (a) tickets are **individual priced rows** (tier
+label + price-in-cents + assignee), bulk-added by officers — any mix of
+free/cheap/expensive, each uniquely assignable; (b) flow is **member-request →
+officer-approve** for both tickets and passes, and **recruits may request too**
+(requesting/viewing is recruit+, management is officer+); (c) tickets carry a
+status lifecycle `available → assigned → paid`; (d) passes use **real calendar
+dates + a per-date quota** the camp received.
+
+**Schema — `db/schema/ticket.ts`, migration 0013** (4 tables, all `camp_id` +
+`edition_id`; money = integer `price_cents`, nullable):
+- `ticket` — tier, priceCents, assignedMembershipId, status, notes. Index on edition.
+- `ticket_request` — membershipId, note, status (`pending|approved|denied`),
+  resolvedTicketId + resolvedBy/At. The member's ask, unbound to a specific ticket
+  until an officer assigns one.
+- `setup_pass_date` — date (`YYYY-MM-DD`) + optional label + quota cap. Unique
+  (edition, date).
+- `setup_pass` — passDateId + membershipId + status (`requested|granted|denied`);
+  **request + grant unified in one row** (quota counts only `granted`). Unique
+  (passDateId, membershipId) so a member can't double up on a date.
+- Migration 0013 verified to apply on a VACUUM-free copy of the live DB (all four
+  tables created); applied to the live DB on next dev-server restart (the migrator
+  in `db/client.server.ts` runs on startup — `db:migrate` still doesn't work here).
+
+**Routes/UI** (`app/routes/dashboard/tickets.tsx`, `passes.tsx`; wired in
+`routes.ts`; nav links added to `layout.tsx`, visible recruit+). Each route is one
+file split by role (member self-service card + officer management), matching
+`bringing.tsx`/`inventory.tsx`. Gating via `requireActiveEdition` +
+`hasAtLeast(role,"officer")`; every mutation 403s when `activeEdition.locked`.
+- **Tickets:** members see their assigned tickets + can request (one pending at a
+  time) / cancel. Officers: bulk-add (tier/price/count), inline edit price+tier,
+  assign via member Select (auto-resolves that member's pending request),
+  unassign, mark paid/unpay, delete; pending-requests queue (deny); summary
+  counts + $ collected/outstanding.
+- **Passes:** members request an open date / cancel; see their passes + status.
+  Officers: add dates (`@mantine/dates` DateInput) with quota, inline-edit quota,
+  grant to a member (quota-enforced), revoke, delete date (blocked while granted
+  passes exist); pending-requests queue (grant/deny, quota-enforced).
+
+typecheck + build + biome green.
+
+**BROWSER-TESTED end-to-end (2026-06-11)** in Chrome as a fresh admin (Tess
+Tickets / "Ticket Test Camp", 2026 edition). Tickets: bulk-added 3 Standard @
+$575; requested as a member → pending queue; assigned one via the member Select →
+**pending request auto-resolved**, "Your tickets" flipped to ASSIGNED, outstanding
+$575.00; marked paid → PAID, collected $575.00. Passes: added Mon Jun 8 via the
+DateInput calendar; requested it → pending; **set quota 0 then Grant → server 409
+"That date is at its quota"** (enforcement confirmed); raised quota → granted
+(remaining decremented); revoked → returned to pool. Locked 2026 on the Years page
+→ both pages went **read-only** (notice shown, all inputs/forms/actions hidden,
+table plain text); unlocked again. No console errors.
+
+**Two fixes made during testing:**
+1. Aggregate $ totals (collected/outstanding) used the per-ticket `usd()` which
+   renders 0 as "Free" — wrong for a money total. Added a plain `dollars()`
+   formatter for the summary stats (0 → "$0.00"); `usd()` still shows "Free" for an
+   individual free ticket.
+2. `@mantine/dates` DateInput crashed the first time its popover opened on a cold
+   dev dep-cache (`useMantineTheme` → `useContext` null: Vite optimized the dep
+   on-demand and briefly served it a second React instance). Fixed by adding
+   `@mantine/dates` + `dayjs` to `optimizeDeps.include` in `vite.config.ts` so it's
+   pre-bundled. Production builds were never affected (everything bundles together
+   at build time). Verified: cold-restarted the dev server and the calendar opens
+   with no crash. **Note:** editing `vite.config.ts` makes Vite restart the dev
+   server (brief downtime + dep re-optimization).
+
+Future: payment integration, reminder DMs for unpaid/upcoming (Phase 5), ticket
+transfer, first-class tier definitions.
 
 **Phase 4 — Operations**
 - Dues/financials with per-field view/edit permissions (#3).
@@ -371,6 +490,29 @@ validated against two independent doc data points):
 | Farmer (F) | 4,545′ |
 | Gibson (G) | 4,825′ ✓ (doc: mid-city plazas "centered 4,825′") |
 
+**Per-year dataset ("mini database" of street names) — IMPLEMENTED in
+`app/lib/brc.ts`** (client-safe; the single source of truth — don't duplicate the
+table here). It models geometry per year as `CityGeometry { year,
+esplanadeCenterFt, streets: StreetDef[] }`, where `StreetDef` carries a **stable
+`code`** ("esplanade" or letter "A".."K"/"L"), a per-year cosmetic `name` (""
+when unknown), `widthFt`, and `blockBeforeFt`. Street-center radii are computed
+parametrically (`centersOf`) from block depths + half street-widths, reproducing
+every validated checkpoint (A 2935, B 3215, E 4060, F 4545, G 4825, K 5755 →
+11,510′ dia). Helpers: `radiusForStreet`, `streetOptions`/`streetLabel` (dropdown
+source, no free text), `clockOptions`/`parseClock`, `mapUpBearingFor`, plus
+`geometryYearFor`/`hasGeometry` which fall back to the nearest year we have when a
+given year's doc isn't loaded.
+
+Only **2025** geometry is loaded (`CITY_2025`). **2026 street NAMES are now in**
+`STREET_NAMES_BY_YEAR` (user-provided: Ararat, Bodhi, Chomolungma, Delphi,
+Eternal, Fulcrum, Great Oak, Heiau, Iroko, Jiba, Kundalini = A–K). Names are
+**per-year** and announced before the measurements doc, so they live in a map
+**decoupled from `CITY_GEOMETRY`**: `streetLabel` prefers the requested year's
+names, while radii for 2026 still **fall back to 2025** (`hasGeometry(2026)` =
+false, so the lot form keeps flagging the provisional layout). When BMorg
+publishes 2026 measurements, add a `CityGeometry` to `CITY_GEOMETRY`. The 2025
+C/D/H/J names remain blank. Don't fabricate names/geometry we don't have.
+
 **Trapezoid formula.** For a camp fronting a street at inner radius `r` with
 frontage arc `f` and radial depth `d`, the far (service-alley) edge is longer by
 `Δ = d × f / r = (f·d)/r`. Side walls are radial lines toward the Man.
@@ -397,6 +539,16 @@ placement page.)
 
 ## Findings / gotchas
 
+- **Second tenancy axis: `camp_edition` (per camp, per year).** Introduced with
+  the map editor (`db/schema/camp.ts`). A camp has one edition per `(camp_id,
+  year)`; editions are independently editable, **lockable** (read-only once a year
+  is on playa / in the past), and carry a `copiedFromId` so a new edition can be
+  seeded from a prior one (import = snapshot, not a live link). Map rows
+  (`placement`, `map_object`, `map_zone`, occupants) scope to **both** `camp_id`
+  (the hard multi-camp invariant) AND `edition_id` (the operative year scope).
+  `requireActiveEdition` (session.server) resolves the working edition. Implication
+  for future work: anything year-scoped (dues, inventory, rosters) likely wants an
+  `edition_id`, not just `camp_id` — check before adding a new tenant table.
 - **better-auth 1.6.14** is the version we built Phase 1 on. Pin awareness: the
   passkey plugin is a SEPARATE package (`@better-auth/passkey` +
   `@better-auth/passkey/client`) in 1.6.x — it is NOT in `better-auth/plugins`.
@@ -538,6 +690,13 @@ placement page.)
       typecheck + build + biome green. Validated end-to-end over HTTP: apply →
       list → accept-as-invitation, apply-with-account → accept-as-membership,
       onboarding add/toggle on+off.
+- [~] Phase 3 map editor — IN PROGRESS in a parallel thread. BRC geometry/
+      addressing layer (`app/lib/brc.ts`), map schema (`db/schema/map.ts`:
+      placement/map_object/occupant/zone) + the `camp_edition` per-year axis, and
+      a large editor route (`app/routes/dashboard/map.tsx`) + structures palette
+      (`app/lib/structures.tsx`) all exist. Geometry math validated against BMorg
+      checkpoints by this thread; full editor golden-path run still to verify.
+      Not yet committed (lives in the shared working tree).
 - [x] Phase 3 (MVP increment) camp map editor — `placement` + `map_object`
       schema (migration 0003, plain CREATE TABLEs), `/dashboard/map` SVG editor
       with add/drag/resize/rotate/edit/delete + lot-setup form; members+ edit,
@@ -606,6 +765,133 @@ placement page.)
       done). Verified: auto-redirect, per-step persistence + resume, occupant add,
       finish → dashboard with no loop. TODO: occupant who isn't yet a member
       (invite flow), richer profile questions.
+- [x] Routing flattened — no `/dashboard` URL segment (2026-06-12). The app shell
+      is now a **pathless layout** (`layout("routes/dashboard/layout.tsx", …)` in
+      `routes.ts`) whose index serves `/`; former `/dashboard/X` pages are now `/X`
+      (`/members`, `/map`, `/tickets`, …). The old `_index.tsx` landing page (with
+      its "Enter dashboard" button) is **deleted** — `/` is the overview when logged
+      in, and the layout loader's `requireUser` redirects to `/login` otherwise.
+      Route files stay under `app/routes/dashboard/` (internal grouping under the
+      shared shell); only URLs changed. All in-app links/redirects/`callbackURL`s and
+      `session.server` redirects updated (`requireActiveCamp` → `/`,
+      `requireActiveEdition` → `/editions`). typecheck + build green. (Historical
+      `/dashboard/...` mentions elsewhere in this plan predate the flattening.)
+- [x] Season-aware wizard (first slice, 2026-06-12) — `/start` now schedules asks
+      by time-of-year + role instead of a fixed 5-step stepper. New `participation`
+      (per-year RSVP) + `wizard_ask` (per-ask completion) tables (migration 0015);
+      `eventStartFor`/`weeksUntilEvent` in `brc.ts`; pure ask catalog + scheduler in
+      `app/lib/wizard.ts`; `wizard.server.ts` state/upserts. RSVP is the concrete
+      new ask; tickets/questionnaire stubbed. Layout "Finish setup" nudge is now
+      per-edition pending-asks. typecheck/build/biome green; migration + scheduler
+      verified by script; NOT yet browser-tested. Details in the section below.
+
+## Season-aware wizard (design direction — first slice landed)
+
+**The ask (from the user).** `/start` should walk a camper through *whatever data
+is missing and relevant right now* — and what's relevant depends on (a) the **time
+of year** relative to the event and (b) the camper's **role/status**. The fixed
+linear 5-step stepper doesn't fit: the right asks change as the season progresses.
+
+Examples the user gave (BRC timeline; event = late Aug):
+- **Early / off-season:** "are you coming back?" (general interest from returning
+  campers) + **Directed Group Sale** ticket coordination (ties into the landed
+  ticketing feature) + *some* of the questionnaire.
+- **Recruits** get a **bigger questionnaire** than returning members.
+- **Camp items / things** (the "bringing" inventory) are **optional** generally…
+- **…but around now (June)** we **start collecting expected tents/vehicles/etc** —
+  the bringing inventory becomes an active ask as the event nears.
+
+**Proposed model (for discussion, not locked).** Replace the hardcoded
+`STEP_COUNT` stepper with a **data-driven list of "asks"**, where each ask carries:
+- an **audience** (returning member / recruit / everyone),
+- a **season window** (when it opens / is due, relative to the event date),
+- a **priority** (required vs optional).
+A scheduler computes, for `today` + this camper's role, the ordered set of asks
+that are *in season and relevant*, and the wizard walks only those. Each ask is a
+reusable step component; most reuse existing per-feature actions (bringing,
+tickets, onboarding) the way the current wizard already does via cross-route
+fetchers — the wizard orchestrates, it doesn't duplicate storage.
+
+**Key implications / forks to settle before building:**
+1. **Per-ask completion replaces the integer `wizardStep`.** A single "furthest
+   step" can't model a set that grows mid-season (new asks appear later and must
+   re-prompt). Need per-ask, per-edition completion tracking instead. This is the
+   main schema change. *(Leaning: this one's just correct, not really a fork.)*
+2. **Where do the season dates live?** Hardcoded relative-to-event defaults, vs
+   officer-configurable per-edition key dates (gate-open, DGS sale window, ticket
+   deadlines). `camp_edition` already anticipated carrying optional dates; the
+   ticketing feature already has real `setup_pass_date` calendar dates.
+3. **"Are you coming back?" = the per-year participation record.** The plan already
+   deferred a per-year *participation* row (decision under the edition axis) "until
+   a feature needs it." **This feature needs it** — general-interest / RSVP is
+   exactly that row. Likely the first concrete piece to build.
+4. **The questionnaire is net-new.** No question/answer schema exists yet.
+   "Returning members get part, recruits get a bigger one" implies a **question
+   bank** with audience tagging + per-membership answers. Decide whether to build
+   that now or stub it and ship the scheduling skeleton first.
+
+**LOCKED decisions (user, 2026-06-11):**
+- **Season dates = hardcoded relative-to-event defaults.** Asks open/close at fixed
+  offsets from the edition's event date; no per-camp date config yet (revisit later).
+  Need an `eventStartFor(year)` (BRC: ~the Sunday 8 days before Labor Day) so
+  "weeks until event" is computable from `today`.
+- **Build order = scheduling skeleton + RSVP first.** Smallest useful slice:
+  per-ask/per-edition completion model + the season scheduler + the
+  participation/"coming back?" row. Questionnaire is **stubbed** for now (net-new
+  question-bank deferred to a later slice).
+
+**First slice — LANDED (code-complete, NOT yet browser-tested), 2026-06-12.**
+typecheck + build + biome green (on the new/changed files; the only remaining lint
+errors are the pre-existing `map.tsx`/`entry.server.tsx` import-order + drizzle's
+auto-generated migration-snapshot JSON, same as before). Migration verified to
+apply on a VACUUM copy of the live DB (both tables + all 3 indexes created on top
+of the 0000→0015 chain). Scheduler verified by script (see "verified" below).
+
+- **Schema** `db/schema/season.ts`, **migration 0015** (both `camp_id` +
+  `edition_id` scoped, lock-respecting):
+  - `participation` — per (edition, membership) RSVP / general interest. `status`
+    unknown|coming|maybe|not_coming + optional `note`. Unique (edition, membership).
+    This is the long-deferred per-year **participation** row; "are you coming back?"
+    is its first consumer.
+  - `wizard_ask` — per (edition, membership, ask_key) completion: `status`
+    done|skipped. Presence = the ask is resolved. **Replaces** the single
+    `membership.wizard_step` integer for driving asks (the integer now only gates
+    the layout's one-time forced redirect — see below; the columns are kept, not
+    dropped).
+- **`brc.ts`** — `eventStartFor(year)` (the Sunday 8 days before Labor Day; 2025→
+  Aug 24, 2026→Aug 30, 2027→Aug 29) + `weeksUntilEvent(year, from?)`.
+- **`app/lib/wizard.ts`** (pure, client-safe) — `AskDef` + the `ASKS` catalog
+  (rsvp/profile/questionnaire/tickets always-open; bringing/sharing open 12 wks
+  out; checklist 8 wks), `audienceForRole` (recruit role → "recruit", member+ →
+  "returning"), `scheduleAsks({role, weeksUntilEvent})` → ordered in-season set.
+- **`app/lib/wizard.server.ts`** — `loadWizardState` (scheduled + resolved +
+  pending + participation), `resolveAsk` upsert, `setParticipation` upsert (also
+  resolves the rsvp ask).
+- **`/start`** rewritten from the fixed `STEP_COUNT` stepper to a **dynamic Stepper
+  over the scheduled asks**. New **RSVP** step writes `participation`. profile/
+  bringing/sharing/checklist are catalog entries reusing their existing actions;
+  **tickets** = link to `/dashboard/tickets`, **questionnaire** = stub (copy differs
+  for recruit vs returning; no inputs yet). Next/Finish mark the current ask `done`;
+  "Skip this" marks it `skipped`; both advance. Loader bumps `wizard_step`→1 on
+  first visit so the forced redirect fires once.
+- **`dashboard/layout.tsx`** — the "Finish setup" nav now shows whenever the active
+  edition has **pending** (scheduled-but-unresolved) asks — per-edition + dynamic,
+  so a new season re-surfaces it. Forced redirect still fires at most once
+  (`wizard_step === 0`). Officers exempt.
+
+**Verified by script:** off-season (~33 wks out) schedules `rsvp, profile,
+questionnaire, tickets` (general interest + DGS + part of questionnaire — matches
+the user's "early on"); ~now (11 wks out) adds `bringing, sharing` (collect tents/
+vehicles), checklist still closed; recruit vs member sets currently identical
+(all asks are audience "all" so far — the audience axis is wired for when the real
+questionnaire differs).
+
+**Still open / next slices:** the real **questionnaire / question-bank** (net-new:
+audience-tagged questions + per-membership answers; recruits get more); per-camp
+**configurable season dates** (currently hardcoded offsets); officer view of who's
+RSVP'd / pending (`participation` + `wizard_ask` already capture it); browser-test
+the rewritten `/start` end-to-end; consider dropping the now-vestigial
+`wizard_completed_at` column in a later cleanup migration.
 
 ## Recruit funnel rework + invite tree (in progress)
 
@@ -772,6 +1058,45 @@ radius, clock autocomplete with off-grid entry, man/mountain toggle; render
 taper + compass honor facing and derived radius). Also dropped this session: min
 password length 6 (server + both client validators). typecheck + build + biome
 green. Not yet browser-tested.
+
+## Map editor: power planning + container/lot UX (code complete 2026-06-11, NOT yet browser-tested)
+
+Three map-editor changes landed in `app/routes/dashboard/map.tsx` (+ supporting
+files). typecheck + build green; **not yet exercised in a browser** (next step).
+
+1. **Lot settings behind a gear.** The officer-only lot/PlacementForm in the map's
+   right-rail `SidePanel` is now collapsed by default behind a ⚙ toggle (Mantine
+   `Collapse` + `lotOpen` state) — it's a once-at-setup form, so it no longer takes
+   up rail space after the lot is configured.
+2. **Containers are a known size with doors.** `structures.tsx`: `container` is now
+   `rigid` (fixed **8′ width**; length is **full 40′ or half 20′**) with exported
+   `CONTAINER_WIDTH/FULL/HALF` + `AMP_OPTIONS`/`GAUGE_OPTIONS` consts. The
+   SidePanel shows a **Full/Half SegmentedControl** for containers instead of free
+   resize; the map draws **double cargo doors** on one short end (reuses the `Door`
+   component). Default footprint changed 8×20 → 8×40 (existing 20′ rows read as
+   "half").
+3. **Power planning — power lines, spider boxes, run-length measurement.**
+   - New **`spiderbox`** kind (Power group, fixed 3×3′, rigid) — a distribution
+     node placed/dragged like any object.
+   - New **`map_cable`** table (`db/schema/map.ts`, **migration 0012**) — an OPEN
+     polyline (mirrors `map_zone` but unclosed), carries `camp_id` **and**
+     `edition_id` (per the cross-cutting edition axis), `points` JSON, optional
+     `amps` (real) + `gauge` (text), color, notes. Loader/action add
+     `addCable`/`updateCable`/`deleteCable` (officer-only, in the `officerOnly` set).
+   - Editor: draw state generalized `drawing:boolean → drawMode:"zone"|"cable"|null`;
+     a **"+ Draw power line"** toolbar button; cable vertices **snap to nearby
+     spider boxes / generators** (`snapToNode`, 6′ threshold) so runs connect the
+     nodes. Cables render as a labeled overlay over structures; **run length** =
+     `pathLengthFt(points)` (Σ segment lengths in plot-local feet, shown via
+     `feetInches`), live while drawing and on the cable label + a new `CablePanel`.
+   - **Amps + gauge are industry-standard presets** (dropdowns): amps 15/20/30/50/100;
+     AWG 14(15A)/12(20A)/10(30A)/8(40A)/6(55A)/4(70A)/2(95A)/1-0(125A).
+
+   **Next:** restart dev server (applies migration 0012) → browser-test: place a
+   generator + two spider boxes, draw a power line snapping between them, confirm
+   length label + CablePanel length match, set amps/gauge, reload-persist, delete;
+   confirm zones still work and recruits stay read-only. Task plan:
+   `C:\Users\camer\.claude\plans\curious-splashing-teapot.md`.
 
 ## Deployment — firefly + auto-deploy (landed)
 
