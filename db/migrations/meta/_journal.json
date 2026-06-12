@@ -85,6 +85,13 @@
       "when": 1781224597317,
       "tag": "0011_flimsy_tomorrow_man",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1781227735649,
+      "tag": "0012_familiar_thundra",
+      "breakpoints": true
     }
   ]
 }

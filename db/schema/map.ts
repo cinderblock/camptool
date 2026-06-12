@@ -181,3 +181,38 @@ export const mapZone = sqliteTable(
   },
   (t) => [index("map_zone_edition").on(t.editionId)],
 );
+
+/** A power line / cable run drawn on the lot for power planning. An **open**
+ * polyline (vs map_zone's closed polygon) stored as JSON plot-local feet points;
+ * its summed segment length (feet) is the cable-run measurement. `amps`/`gauge`
+ * are optional industry-standard ratings for load planning. */
+export const mapCable = sqliteTable(
+  "map_cable",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id").references(() => campEdition.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name"),
+    color: text("color").notNull().default("#fab005"),
+    // JSON: array of plot-local feet points, e.g. [{"x":10,"y":20},…]. Open path.
+    points: text("points").notNull().default("[]"),
+    // Optional load rating (amps) + wire gauge (free-form but UI offers AWG presets).
+    amps: real("amps"),
+    gauge: text("gauge"),
+    notes: text("notes"),
+    createdById: text("created_by_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [index("map_cable_edition").on(t.editionId)],
+);

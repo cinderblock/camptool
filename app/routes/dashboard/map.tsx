@@ -3,6 +3,7 @@ import {
   Autocomplete,
   Button,
   Checkbox,
+  Collapse,
   ColorInput,
   Group,
   NumberInput,
@@ -32,6 +33,11 @@ import {
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import {
+  AMP_OPTIONS,
+  CONTAINER_FULL,
+  CONTAINER_HALF,
+  CONTAINER_WIDTH,
+  GAUGE_OPTIONS,
   KINDS,
   KIND_GROUPS,
   KindIcon,
@@ -44,6 +50,7 @@ import {
 } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import {
+  mapCable,
   mapObject,
   mapZone,
   membership,
@@ -307,6 +314,16 @@ type ZoneRow = {
   notes: string | null;
 };
 
+type CableRow = {
+  id: string;
+  name: string | null;
+  color: string;
+  points: ZonePt[];
+  amps: number | null;
+  gauge: string | null;
+  notes: string | null;
+};
+
 /** Parse the stored points JSON into a clean {x,y}[] (bad data → []). */
 function parseZonePoints(json: string): ZonePt[] {
   try {
@@ -432,6 +449,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from(mapZone)
     .where(eq(mapZone.editionId, editionId));
 
+  const cableRows = await db
+    .select()
+    .from(mapCable)
+    .where(eq(mapCable.editionId, editionId));
+
   const canManage = hasAtLeast(active.membership.role, "officer");
   // Declared-but-unplaced items (the officer placement queue), with owner names.
   const unplacedRows = canManage
@@ -489,6 +511,15 @@ export async function loader({ request }: Route.LoaderArgs) {
       points: parseZonePoints(z.points),
       notes: z.notes,
     })) satisfies ZoneRow[],
+    cables: cableRows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      color: c.color,
+      points: parseZonePoints(c.points),
+      amps: c.amps,
+      gauge: c.gauge,
+      notes: c.notes,
+    })) satisfies CableRow[],
   };
 }
 
@@ -539,6 +570,9 @@ export async function action({ request }: Route.ActionArgs) {
     "addZone",
     "updateZone",
     "deleteZone",
+    "addCable",
+    "updateCable",
+    "deleteCable",
   ]);
   if (officerOnly.has(intent) && !canManage) {
     return data({ error: "Officers manage the map." }, { status: 403 });
@@ -801,6 +835,74 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ deletedZoneId: id });
   }
 
+  if (intent === "addCable") {
+    const id = crypto.randomUUID();
+    const row = {
+      id,
+      campId,
+      editionId,
+      name: str("name"),
+      color: String(form.get("color") ?? "#fab005"),
+      points: String(form.get("points") ?? "[]"),
+      amps: form.get("amps") ? num("amps") : null,
+      gauge: str("gauge"),
+      notes: str("notes"),
+      createdById: user.id,
+    };
+    await db.insert(mapCable).values(row);
+    return data({
+      cable: {
+        id,
+        name: row.name,
+        color: row.color,
+        points: parseZonePoints(row.points),
+        amps: row.amps,
+        gauge: row.gauge,
+        notes: row.notes,
+      } satisfies CableRow,
+    });
+  }
+
+  if (intent === "updateCable") {
+    const id = String(form.get("id"));
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+    if (form.has("name")) set.name = str("name");
+    if (form.has("color")) set.color = String(form.get("color"));
+    if (form.has("points")) set.points = String(form.get("points"));
+    if (form.has("amps")) set.amps = form.get("amps") ? num("amps") : null;
+    if (form.has("gauge")) set.gauge = str("gauge");
+    if (form.has("notes")) set.notes = str("notes");
+    await db
+      .update(mapCable)
+      .set(set)
+      .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)));
+    const [c] = await db
+      .select()
+      .from(mapCable)
+      .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)))
+      .limit(1);
+    if (!c) return data({ error: "Cable not found." }, { status: 404 });
+    return data({
+      cable: {
+        id: c.id,
+        name: c.name,
+        color: c.color,
+        points: parseZonePoints(c.points),
+        amps: c.amps,
+        gauge: c.gauge,
+        notes: c.notes,
+      } satisfies CableRow,
+    });
+  }
+
+  if (intent === "deleteCable") {
+    const id = String(form.get("id"));
+    await db
+      .delete(mapCable)
+      .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)));
+    return data({ deletedCableId: id });
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
@@ -814,6 +916,42 @@ function rotateVec(vx: number, vy: number, deg: number) {
   const cos = Math.cos(r);
   const sin = Math.sin(r);
   return { x: vx * cos - vy * sin, y: vx * sin + vy * cos };
+}
+
+/** Total run length (feet) of an open polyline — Σ of segment lengths. Plot-local
+ * coords are already feet, so the sum is feet directly. */
+function pathLengthFt(pts: ZonePt[]): number {
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    if (a && b) total += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return total;
+}
+
+/** Snap a feet-space point to the center of the nearest power node (spider box
+ * or generator) within `threshold` ft, so cable runs visibly connect them.
+ * Returns the raw point when nothing is close. */
+function snapToNode(
+  fxp: number,
+  fyp: number,
+  objects: ObjRow[],
+  threshold = 6,
+): ZonePt {
+  let best: ZonePt | null = null;
+  let bestD = threshold;
+  for (const o of objects) {
+    if (o.kind !== "spiderbox" && o.kind !== "power") continue;
+    const cx = o.x + o.width / 2;
+    const cy = o.y + o.height / 2;
+    const d = Math.hypot(cx - fxp, cy - fyp);
+    if (d <= bestD) {
+      bestD = d;
+      best = { x: cx, y: cy };
+    }
+  }
+  return best ?? { x: fxp, y: fyp };
 }
 
 /** Is the feet-space point (fxp,fyp) inside the object's rotated footprint? */
@@ -901,6 +1039,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zones, setZones] = useState<ZoneRow[]>(loaderData.zones);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [cables, setCables] = useState<CableRow[]>(loaderData.cables);
+  const [selectedCableId, setSelectedCableId] = useState<string | null>(null);
   // Highlight filter: dims everything that doesn't match the chosen category.
   const [highlight, setHighlight] = useState<string>("none");
 
@@ -917,6 +1057,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           deletedId?: string;
           zone?: ZoneRow;
           deletedZoneId?: string;
+          cable?: CableRow;
+          deletedCableId?: string;
         }
       | undefined;
     if (!d || d === lastSynced.current) return;
@@ -951,6 +1093,23 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           : prev.map((z) => (z.id === zone.id ? zone : z)),
       );
       if (isNew) setSelectedZoneId(zone.id);
+      return;
+    }
+    if (d.deletedCableId) {
+      const gone = d.deletedCableId;
+      setCables((prev) => prev.filter((c) => c.id !== gone));
+      setSelectedCableId((s) => (s === gone ? null : s));
+      return;
+    }
+    if (d.cable) {
+      const cable = d.cable;
+      const isNew = !cables.some((c) => c.id === cable.id);
+      setCables((prev) =>
+        isNew
+          ? [...prev, cable]
+          : prev.map((c) => (c.id === cable.id ? cable : c)),
+      );
+      if (isNew) setSelectedCableId(cable.id);
     }
   }, [fetcher.data]);
 
@@ -1000,6 +1159,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             zones={zones}
             selectedZoneId={selectedZoneId}
             setSelectedZoneId={setSelectedZoneId}
+            cables={cables}
+            selectedCableId={selectedCableId}
+            setSelectedCableId={setSelectedCableId}
             canEdit={canEdit}
             canManage={canManage}
             myMembershipId={myMembershipId}
@@ -1047,6 +1209,15 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               zones={zones}
               selectedZoneId={selectedZoneId}
               setZones={setZones}
+              canManage={canManage}
+              fetcher={fetcher}
+            />
+          ) : null}
+          {selectedCableId ? (
+            <CablePanel
+              cables={cables}
+              selectedCableId={selectedCableId}
+              setCables={setCables}
               canManage={canManage}
               fetcher={fetcher}
             />
@@ -1202,6 +1373,9 @@ function Editor({
   zones,
   selectedZoneId,
   setSelectedZoneId,
+  cables,
+  selectedCableId,
+  setSelectedCableId,
   canEdit,
   canManage,
   myMembershipId,
@@ -1216,6 +1390,9 @@ function Editor({
   zones: ZoneRow[];
   selectedZoneId: string | null;
   setSelectedZoneId: (id: string | null) => void;
+  cables: CableRow[];
+  selectedCableId: string | null;
+  setSelectedCableId: (id: string | null) => void;
   canEdit: boolean;
   canManage: boolean;
   myMembershipId: string;
@@ -1226,8 +1403,9 @@ function Editor({
   const drag = useRef<DragState | null>(null);
   const liveObj = useRef<ObjRow | null>(null);
   const [dragging, setDragging] = useState(false);
-  // Zone drawing: collect plot-local feet vertices; Finish creates the zone.
-  const [drawing, setDrawing] = useState(false);
+  // Drawing collects plot-local feet vertices for a zone (closed polygon) or a
+  // power line (open polyline). `drawMode` is which, or null when not drawing.
+  const [drawMode, setDrawMode] = useState<"zone" | "cable" | null>(null);
   const [draftPoints, setDraftPoints] = useState<ZonePt[]>([]);
 
   // Officers edit anything; a member may move/resize/rotate only their own
@@ -1319,14 +1497,15 @@ function Editor({
     return () => window.removeEventListener("keydown", onKey);
   }, [canEdit, canManage, selectedId, objects, lot.frontageFt, lot.depthFt]);
 
-  // While drawing a zone: Enter finishes (≥3 points), Escape cancels.
+  // While drawing: Enter finishes (zone ≥3 pts, cable ≥2 pts), Escape cancels.
   // biome-ignore lint/correctness/useExhaustiveDependencies: finish/cancel are stable closures
   useEffect(() => {
-    if (!drawing) return;
+    if (!drawMode) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Enter") {
         e.preventDefault();
-        finishZone();
+        if (drawMode === "cable") finishCable();
+        else finishZone();
       } else if (e.key === "Escape") {
         e.preventDefault();
         cancelDraw();
@@ -1334,7 +1513,7 @@ function Editor({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [drawing, draftPoints]);
+  }, [drawMode, draftPoints]);
 
   // Trapezoid taper: rear edge widens (Man-facing) or narrows (mountain-facing)
   // with depth, from the derived/overridden frontage radius.
@@ -1417,6 +1596,7 @@ function Editor({
     e.stopPropagation();
     setSelectedId(o.id);
     setSelectedZoneId(null);
+    setSelectedCableId(null);
     if (!editable(o)) return;
     e.preventDefault();
     const p = svgPoint(e);
@@ -1449,21 +1629,28 @@ function Editor({
     }
     setSelectedId(null);
     setSelectedZoneId(null);
+    setSelectedCableId(null);
   }
 
-  // ---- Zones --------------------------------------------------------------
+  // ---- Zones & cables -----------------------------------------------------
   function addDraftPoint(e: React.PointerEvent) {
     const p = svgPoint(e);
+    // Power lines snap their vertices to nearby spider boxes / generators so the
+    // run visibly connects the nodes it measures between.
+    const raw =
+      drawMode === "cable"
+        ? snapToNode(fx(p.x), fy(p.y), objects)
+        : { x: fx(p.x), y: fy(p.y) };
     setDraftPoints((prev) => [
       ...prev,
       {
-        x: round(clamp(fx(p.x), 0, lot.frontageFt)),
-        y: round(clamp(fy(p.y), 0, lot.depthFt)),
+        x: round(clamp(raw.x, 0, lot.frontageFt)),
+        y: round(clamp(raw.y, 0, lot.depthFt)),
       },
     ]);
   }
   function cancelDraw() {
-    setDrawing(false);
+    setDrawMode(null);
     setDraftPoints([]);
   }
   function finishZone() {
@@ -1477,12 +1664,31 @@ function Editor({
       },
       { method: "post" },
     );
-    setDrawing(false);
+    setDrawMode(null);
+    setDraftPoints([]);
+  }
+  function finishCable() {
+    if (draftPoints.length < 2) return;
+    fetcher.submit(
+      {
+        intent: "addCable",
+        color: "#fab005",
+        points: JSON.stringify(draftPoints),
+      },
+      { method: "post" },
+    );
+    setDrawMode(null);
     setDraftPoints([]);
   }
   function selectZone(id: string) {
     setSelectedId(null);
+    setSelectedCableId(null);
     setSelectedZoneId(id);
+  }
+  function selectCable(id: string) {
+    setSelectedId(null);
+    setSelectedZoneId(null);
+    setSelectedCableId(id);
   }
 
   function onMove(e: { clientX: number; clientY: number }) {
@@ -1565,7 +1771,27 @@ function Editor({
           p={6}
           style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}
         >
-          {drawing ? (
+          {drawMode === "cable" ? (
+            <>
+              <Text size="xs" c="dimmed">
+                Click near nodes to route the line
+                {draftPoints.length >= 2
+                  ? ` · ${feetInches(pathLengthFt(draftPoints))}`
+                  : ""}
+              </Text>
+              <Button
+                size="compact-xs"
+                color="yellow"
+                onClick={finishCable}
+                disabled={draftPoints.length < 2}
+              >
+                Finish ({draftPoints.length})
+              </Button>
+              <Button size="compact-xs" variant="default" onClick={cancelDraw}>
+                Cancel
+              </Button>
+            </>
+          ) : drawMode === "zone" ? (
             <>
               <Text size="xs" c="dimmed">
                 Click the lot to add points
@@ -1582,18 +1808,35 @@ function Editor({
               </Button>
             </>
           ) : (
-            <Button
-              size="compact-xs"
-              variant="light"
-              onClick={() => {
-                setSelectedId(null);
-                setSelectedZoneId(null);
-                setDraftPoints([]);
-                setDrawing(true);
-              }}
-            >
-              + Draw zone
-            </Button>
+            <>
+              <Button
+                size="compact-xs"
+                variant="light"
+                onClick={() => {
+                  setSelectedId(null);
+                  setSelectedZoneId(null);
+                  setSelectedCableId(null);
+                  setDraftPoints([]);
+                  setDrawMode("zone");
+                }}
+              >
+                + Draw zone
+              </Button>
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="yellow"
+                onClick={() => {
+                  setSelectedId(null);
+                  setSelectedZoneId(null);
+                  setSelectedCableId(null);
+                  setDraftPoints([]);
+                  setDrawMode("cable");
+                }}
+              >
+                + Draw power line
+              </Button>
+            </>
           )}
         </Group>
       ) : null}
@@ -1709,8 +1952,71 @@ function Editor({
               onRotateDown={(e) => startDrag(e, o, "rotate")}
             />
           ))}
-        {/* Zone-draw mode: a full overlay captures every click as a vertex. */}
-        {drawing ? (
+        {/* Power lines: open polylines drawn over the structures (a planning
+            overlay), each labeled with its total run length. */}
+        {cables.map((c) => {
+          if (c.points.length < 2) return null;
+          const pts = c.points
+            .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+            .join(" ");
+          const mid =
+            c.points[Math.floor((c.points.length - 1) / 2)] ?? c.points[0];
+          if (!mid) return null;
+          const ends = [c.points[0], c.points[c.points.length - 1]].filter(
+            (p): p is ZonePt => p != null,
+          );
+          const sel = c.id === selectedCableId;
+          const lenFt = pathLengthFt(c.points);
+          return (
+            <g key={c.id}>
+              <polyline
+                points={pts}
+                fill="none"
+                stroke={c.color}
+                strokeWidth={sel ? 4 : 2.5}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                style={{ cursor: "pointer" }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  selectCable(c.id);
+                }}
+              />
+              {/* Endpoint dots mark the connected nodes. */}
+              {ends.map((p, i) => (
+                <circle
+                  key={`${c.id}-end-${i}`}
+                  cx={originX + p.x * ppf}
+                  cy={originY + p.y * ppf}
+                  r={sel ? 4 : 3}
+                  fill={c.color}
+                  stroke="#fff"
+                  strokeWidth={1}
+                  pointerEvents="none"
+                />
+              ))}
+              <text
+                x={originX + mid.x * ppf}
+                y={originY + mid.y * ppf - 6}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={10}
+                fontWeight={600}
+                fill={c.color}
+                stroke="#fff"
+                strokeWidth={2.5}
+                paintOrder="stroke"
+                style={{ pointerEvents: "none", userSelect: "none" }}
+              >
+                {c.name ? `${c.name} · ` : ""}
+                {feetInches(lenFt)}
+                {c.amps ? ` · ${c.amps}A` : ""}
+              </text>
+            </g>
+          );
+        })}
+        {/* Draw mode: a full overlay captures every click as a vertex. */}
+        {drawMode ? (
           <>
             <rect
               x={0}
@@ -1729,11 +2035,12 @@ function Editor({
                 points={draftPoints
                   .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
                   .join(" ")}
-                fill="#fa5252"
+                fill={drawMode === "cable" ? "none" : "#fa5252"}
                 fillOpacity={0.1}
-                stroke="#fa5252"
-                strokeWidth={2}
+                stroke={drawMode === "cable" ? "#fab005" : "#fa5252"}
+                strokeWidth={drawMode === "cable" ? 2.5 : 2}
                 strokeDasharray="4 3"
+                strokeLinejoin="round"
                 pointerEvents="none"
               />
             ) : null}
@@ -1743,7 +2050,7 @@ function Editor({
                 cx={originX + p.x * ppf}
                 cy={originY + p.y * ppf}
                 r={3}
-                fill="#fa5252"
+                fill={drawMode === "cable" ? "#fab005" : "#fa5252"}
                 pointerEvents="none"
               />
             ))}
@@ -2099,6 +2406,28 @@ const MapObjectShape = memo(
               ny={-1}
               len={Math.min(3 * ppf, w * 0.5)}
             />
+          ) : o.kind === "container" ? (
+            // Double cargo doors on one short end, each leaf half the width.
+            <>
+              <Door
+                mx={px + w * 0.25}
+                my={py + h}
+                ex={1}
+                ey={0}
+                nx={0}
+                ny={-1}
+                len={w * 0.45}
+              />
+              <Door
+                mx={px + w * 0.75}
+                my={py + h}
+                ex={-1}
+                ey={0}
+                nx={0}
+                ny={-1}
+                len={w * 0.45}
+              />
+            </>
           ) : null}
           {o.kind === "tent" ? (
             <rect
@@ -2249,6 +2578,9 @@ function SidePanel({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const selected = objects.find((o) => o.id === selectedId) ?? null;
+  // The lot is configured once at setup, so keep its form collapsed behind a
+  // gear by default and let officers expand it when they need to re-tune.
+  const [lotOpen, setLotOpen] = useState(false);
   // Officers edit anything (incl. name/kind/notes + delete). An owner-member may
   // adjust their own item's geometry (those edits become pending). Anyone else
   // sees read-only details.
@@ -2395,7 +2727,34 @@ function SidePanel({
                 commitMany(selected.id, out);
               }}
             />
-            {kindDef(selected.kind).rigid ? (
+            {selected.kind === "container" ? (
+              <div>
+                <Text size="xs" fw={500} mb={4}>
+                  Size — {CONTAINER_WIDTH}′ wide × {Math.round(selected.height)}
+                  ′
+                </Text>
+                <SegmentedControl
+                  size="xs"
+                  fullWidth
+                  disabled={!canGeom}
+                  value={
+                    Math.round(selected.height) <= CONTAINER_HALF
+                      ? "half"
+                      : "full"
+                  }
+                  onChange={(v) => {
+                    const height =
+                      v === "half" ? CONTAINER_HALF : CONTAINER_FULL;
+                    patch(selected.id, { width: CONTAINER_WIDTH, height });
+                    commitMany(selected.id, { width: CONTAINER_WIDTH, height });
+                  }}
+                  data={[
+                    { label: `Half (${CONTAINER_HALF}′)`, value: "half" },
+                    { label: `Full (${CONTAINER_FULL}′)`, value: "full" },
+                  ]}
+                />
+              </div>
+            ) : kindDef(selected.kind).rigid ? (
               <Text size="xs" c="dimmed">
                 {fixedSizeLabel(selected.kind, selected.width, selected.height)}
               </Text>
@@ -2486,10 +2845,25 @@ function SidePanel({
 
       {canManage ? (
         <Paper withBorder p="md" radius="md">
-          <Text fw={600} size="sm" mb="sm">
-            Lot
-          </Text>
-          <PlacementForm lot={lot} fetcher={fetcher} />
+          <Group justify="space-between" align="center" mb={lotOpen ? "sm" : 0}>
+            <Text fw={600} size="sm">
+              Lot
+            </Text>
+            <Tooltip label={lotOpen ? "Hide lot settings" : "Lot settings"}>
+              <ActionIcon
+                variant={lotOpen ? "light" : "subtle"}
+                color="gray"
+                aria-label="Toggle lot settings"
+                aria-expanded={lotOpen}
+                onClick={() => setLotOpen((v) => !v)}
+              >
+                ⚙
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+          <Collapse in={lotOpen}>
+            <PlacementForm lot={lot} fetcher={fetcher} />
+          </Collapse>
         </Paper>
       ) : null}
     </Stack>
@@ -2674,6 +3048,131 @@ function ZonePanel({
         <Text size="xs" c="dimmed">
           {zone.points.length} points
         </Text>
+      </Stack>
+    </Paper>
+  );
+}
+
+/** Edit a selected power line's name / rating / color + show its run length. */
+function CablePanel({
+  cables,
+  selectedCableId,
+  setCables,
+  canManage,
+  fetcher,
+}: {
+  cables: CableRow[];
+  selectedCableId: string;
+  setCables: React.Dispatch<React.SetStateAction<CableRow[]>>;
+  canManage: boolean;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const cable = cables.find((c) => c.id === selectedCableId) ?? null;
+  if (!cable) return null;
+  const patch = (fields: Partial<CableRow>) =>
+    setCables((prev) =>
+      prev.map((c) => (c.id === cable.id ? { ...c, ...fields } : c)),
+    );
+  const commit = (fields: Record<string, string>) =>
+    fetcher.submit(
+      { intent: "updateCable", id: cable.id, ...fields },
+      { method: "post" },
+    );
+  const lenFt = pathLengthFt(cable.points);
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Group justify="space-between" mb="xs">
+        <Text fw={600} size="sm">
+          Power line
+        </Text>
+        {canManage ? (
+          <Tooltip label="Delete">
+            <ActionIcon
+              variant="subtle"
+              color="red"
+              onClick={() => {
+                setCables((prev) => prev.filter((c) => c.id !== cable.id));
+                fetcher.submit(
+                  { intent: "deleteCable", id: cable.id },
+                  { method: "post" },
+                );
+              }}
+            >
+              ✕
+            </ActionIcon>
+          </Tooltip>
+        ) : null}
+      </Group>
+      <Stack gap="sm">
+        <Paper bg="yellow.0" p="xs" radius="sm">
+          <Text size="xs" c="dimmed">
+            Run length
+          </Text>
+          <Text fw={700} size="lg">
+            {feetInches(lenFt)}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {cable.points.length} points
+          </Text>
+        </Paper>
+        <TextInput
+          size="xs"
+          label="Name"
+          placeholder="e.g. Gen → Kitchen box"
+          value={cable.name ?? ""}
+          disabled={!canManage}
+          onChange={(e) => patch({ name: e.currentTarget.value })}
+          onBlur={(e) => commit({ name: e.currentTarget.value })}
+        />
+        <Group grow>
+          <Select
+            size="xs"
+            label="Amps"
+            placeholder="—"
+            value={cable.amps != null ? String(cable.amps) : null}
+            disabled={!canManage}
+            data={AMP_OPTIONS.map((a) => ({ value: a, label: `${a} A` }))}
+            clearable
+            onChange={(v) => {
+              patch({ amps: v ? Number(v) : null });
+              commit({ amps: v ?? "" });
+            }}
+          />
+          <Select
+            size="xs"
+            label="Gauge"
+            placeholder="—"
+            value={cable.gauge}
+            disabled={!canManage}
+            data={GAUGE_OPTIONS.map((g) => ({
+              value: g.value,
+              label: g.label,
+            }))}
+            clearable
+            onChange={(v) => {
+              patch({ gauge: v });
+              commit({ gauge: v ?? "" });
+            }}
+          />
+        </Group>
+        <ColorInput
+          size="xs"
+          label="Color"
+          value={cable.color}
+          disabled={!canManage}
+          onChange={(v) => patch({ color: v })}
+          onChangeEnd={(v) => commit({ color: v })}
+        />
+        <Textarea
+          size="xs"
+          label="Notes"
+          autosize
+          minRows={2}
+          value={cable.notes ?? ""}
+          disabled={!canManage}
+          onChange={(e) => patch({ notes: e.currentTarget.value })}
+          onBlur={(e) => commit({ notes: e.currentTarget.value })}
+        />
       </Stack>
     </Paper>
   );

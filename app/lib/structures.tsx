@@ -164,16 +164,32 @@ export const KINDS = [
     group: "Power",
     tags: ["structure"],
   },
+  // Shipping containers come in known sizes: fixed 8ft width, length is either
+  // full (40ft) or half (20ft). See CONTAINER_* + the map's Full/Half toggle.
   {
     value: "container",
     label: "Container",
     color: "#868e96",
     w: 8,
-    h: 20,
+    h: 40,
     shape: "rect",
     vehicle: false,
-    rigid: false,
+    rigid: true,
     group: "Structures",
+    tags: ["structure"],
+  },
+  // Power distribution node — small fixed footprint; cables (map_cable) run
+  // between these and the generator. See power-line drawing on the map.
+  {
+    value: "spiderbox",
+    label: "Spider box",
+    color: "#f59f00",
+    w: 3,
+    h: 3,
+    shape: "rect",
+    vehicle: false,
+    rigid: true,
+    group: "Power",
     tags: ["structure"],
   },
   {
@@ -189,6 +205,26 @@ export const KINDS = [
     tags: ["structure"],
   },
 ] as const;
+
+/** Industry-standard preset ratings a power line (map_cable) can carry. Both are
+ * optional; the map UI renders them as clearable dropdowns. */
+export const AMP_OPTIONS = ["15", "20", "30", "50", "100"] as const;
+/** Copper wire gauge (AWG) with its NEC ampacity, biggest wire = highest amps. */
+export const GAUGE_OPTIONS = [
+  { value: "14 AWG", label: "14 AWG (15A)" },
+  { value: "12 AWG", label: "12 AWG (20A)" },
+  { value: "10 AWG", label: "10 AWG (30A)" },
+  { value: "8 AWG", label: "8 AWG (40A)" },
+  { value: "6 AWG", label: "6 AWG (55A)" },
+  { value: "4 AWG", label: "4 AWG (70A)" },
+  { value: "2 AWG", label: "2 AWG (95A)" },
+  { value: "1/0 AWG", label: "1/0 AWG (125A)" },
+] as const;
+
+/** Shipping containers: fixed 8ft width; length is full (40ft) or half (20ft). */
+export const CONTAINER_WIDTH = 8;
+export const CONTAINER_FULL = 40;
+export const CONTAINER_HALF = 20;
 
 /** Legend groups in display order, each with its kinds. Derived from KINDS so
  * adding a kind only requires setting its `group`. */
@@ -479,6 +515,15 @@ export function KindIcon({ kind, size = 30 }: { kind: Kind; size?: number }) {
         strokeOpacity={0.4}
         strokeWidth={0.7}
       />
+    );
+  } else if (kind.value === "spiderbox") {
+    // Distribution box: a few outlet ticks across the face.
+    detail = (
+      <g stroke={dark} strokeOpacity={0.55} strokeWidth={0.7}>
+        {[0.32, 0.5, 0.68].map((f) => (
+          <line key={f} x1={X(f)} y1={Y(0.34)} x2={X(f)} y2={Y(0.66)} />
+        ))}
+      </g>
     );
   } else if (kind.value === "art") {
     detail = (
