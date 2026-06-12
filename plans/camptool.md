@@ -784,11 +784,25 @@ check + prune-old-releases), and a `run` entrypoint added. The `Dockerfile` +
 `compose.yaml` are **repurposed as the generic self-host path** (any host with a
 reverse proxy), documented separately in `docs/firefly-deploy.md`.
 
-**Not yet done / needs the host:** first real deploy is blocked until the ops
-owner lands the runner container stack (the `firefly-camptool` runner doesn't
-exist yet) and the env-file is wired. Pushing to `master` before then just queues
-the job. The currently-failing ops `install-camptool-runner` job is being flipped
-to a no-op so Server Deploys stay green meanwhile. Left unused dep
+**LIVE (2026-06-11).** First successful deploy is up:
+`https://camptool.mathcamp.us/` returns **200 via Caddy** serving the SSR app
+(`<title>CampTool</title>` + hydration bundle). Deploy run went green in 46s
+(checkout → bun build → stage release → flip `current` → touch restart →
+supervisor starts app → socket health-checked 200). Every push to `master` now
+auto-deploys.
+
+Gotcha that bit the first run (resolved by ops): the container runner executes
+**jobs as the non-root `runner` user** (uid 10001), not root. The first attempt
+failed in 7s at `actions/checkout@v4` with `EACCES ... stat '/root/.gitconfig'`
+because `HOME=/root` was unreadable. Ops fixed it by setting `HOME=/home/runner`;
+the `runner` user already owns `/srv/camptool` + `/run/camptool` +
+`/opt/actions-runner` via an entrypoint chown, so no root and no chowns were
+needed on our side — the workflow was correct as written. Runtime user/paths for
+future reference: job + app run as `runner`; socket `/run/camptool/camptool.sock`;
+DB `/srv/camptool/data/camptool.db` (persistent, outside per-SHA releases).
+
+Housekeeping left: ensure the ops env-file has a real `BETTER_AUTH_SECRET` (app
+serves 200 without it but sessions won't persist across restarts). Left unused dep
 `@react-router/serve` in `package.json` (harmless; optional cleanup).
 
 ## Resolved (formerly open) questions
