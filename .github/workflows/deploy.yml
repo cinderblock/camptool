@@ -23,6 +23,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify runtime secret is wired
+        # The job shares the app container's env, so fail fast (before build +
+        # restart) if the ops-managed env-file is missing the auth secret.
+        # Length-checked only — never printed.
+        run: |
+          if [ -z "${BETTER_AUTH_SECRET:-}" ]; then
+            echo "::error::BETTER_AUTH_SECRET is empty — check the ops env-file"
+            exit 1
+          fi
+          echo "BETTER_AUTH_SECRET present (${#BETTER_AUTH_SECRET} chars)"
+
       - name: Build (Bun)
         run: |
           set -euo pipefail
