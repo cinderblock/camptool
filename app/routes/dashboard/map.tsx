@@ -11,6 +11,7 @@ import {
   SegmentedControl,
   Select,
   Stack,
+  Switch,
   Text,
   TextInput,
   Textarea,
@@ -18,7 +19,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { and, eq } from "drizzle-orm";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import {
   CURRENT_EVENT_YEAR,
@@ -32,6 +33,7 @@ import {
 } from "~/lib/brc";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
+import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
 import {
   AMP_OPTIONS,
   CONTAINER_FULL,
@@ -47,6 +49,7 @@ import {
   isKind,
   kindColor,
   kindDef,
+  kindHeight,
 } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import {
@@ -293,6 +296,8 @@ type ObjRow = {
   width: number;
   height: number;
   rotation: number;
+  // Above-ground height (ft) for the shade sim; 0 = use the kind default.
+  tallFt: number;
   color: string | null;
   notes: string | null;
   // The camper who brought this (NULL = shared/communal camp item).
@@ -369,6 +374,7 @@ const objSelect = {
   width: mapObject.width,
   height: mapObject.height,
   rotation: mapObject.rotation,
+  tallFt: mapObject.tallFt,
   color: mapObject.color,
   notes: mapObject.notes,
   ownerMembershipId: mapObject.ownerMembershipId,
@@ -386,6 +392,7 @@ type ObjSelectRow = {
   width: number;
   height: number;
   rotation: number;
+  tallFt: number;
   color: string | null;
   notes: string | null;
   ownerMembershipId: string | null;
@@ -404,6 +411,7 @@ function toObjRow(r: ObjSelectRow): ObjRow {
     width: r.width,
     height: r.height,
     rotation: r.rotation,
+    tallFt: r.tallFt,
     color: r.color,
     notes: r.notes,
     ownerMembershipId: r.ownerMembershipId,
@@ -625,6 +633,7 @@ export async function action({ request }: Route.ActionArgs) {
       width: Math.max(1, num("width", def.w)),
       height: Math.max(1, num("height", def.h)),
       rotation: num("rotation", 0),
+      tallFt: num("tallFt", kindHeight(kind)),
       color: str("color"),
       notes: str("notes"),
       createdById: user.id,
@@ -640,6 +649,7 @@ export async function action({ request }: Route.ActionArgs) {
         width: row.width,
         height: row.height,
         rotation: row.rotation,
+        tallFt: row.tallFt,
         color: row.color,
         notes: row.notes,
         ownerMembershipId: null,
@@ -670,6 +680,7 @@ export async function action({ request }: Route.ActionArgs) {
     for (const key of GEOM) {
       if (form.get(key) != null) set[key] = num(key);
     }
+    if (form.has("tallFt")) set.tallFt = Math.max(0, num("tallFt"));
 
     if (canManage) {
       // Officers edit anything directly; an officer edit accepts (clears) any
@@ -932,14 +943,14 @@ function pathLengthFt(pts: ZonePt[]): number {
 
 /** Snap a feet-space point to the center of the nearest power node (spider box
  * or generator) within `threshold` ft, so cable runs visibly connect them.
- * Returns the raw point when nothing is close. */
+ * `snapped` is true when a node was found (then x/y is its exact center). */
 function snapToNode(
   fxp: number,
   fyp: number,
   objects: ObjRow[],
-  threshold = 6,
-): ZonePt {
-  let best: ZonePt | null = null;
+  threshold = 8,
+): { x: number; y: number; snapped: boolean } {
+  let best: ObjRow | null = null;
   let bestD = threshold;
   for (const o of objects) {
     if (o.kind !== "spiderbox" && o.kind !== "power") continue;
@@ -948,10 +959,17 @@ function snapToNode(
     const d = Math.hypot(cx - fxp, cy - fyp);
     if (d <= bestD) {
       bestD = d;
-      best = { x: cx, y: cy };
+      best = o;
     }
   }
-  return best ?? { x: fxp, y: fyp };
+  if (best) {
+    return {
+      x: best.x + best.width / 2,
+      y: best.y + best.height / 2,
+      snapped: true,
+    };
+  }
+  return { x: fxp, y: fyp, snapped: false };
 }
 
 /** Is the feet-space point (fxp,fyp) inside the object's rotated footprint? */
@@ -966,12 +984,77 @@ function containsPoint(o: ObjRow, fxp: number, fyp: number) {
 // faces NE toward the Man. So the bearing the map's "up" (toward the Man, across
 // the frontage) points to, for a clock address H, is (135 - 30·H) mod 360
 // — 3:00 → 45° (NE), 4:30 → 0° (N), 6:00 → 315° (NW), 12:00 → 135° (SE).
-// Sun azimuths are event-week approximations for ~40.8°N (late Aug / early Sep):
-// sunrise ENE, sunset WNW.
-const SUNRISE_AZ = 73;
-const SUNSET_AZ = 287;
+// Sun azimuths come from the real solar model in `~/lib/sun` (see Compass).
 
 type Lot = NonNullable<Route.ComponentProps["loaderData"]["lot"]>;
+
+/** Convert a compass bearing + distance (ft) into a plot-local feet delta. The
+ * plot's "up" (−y) points toward the Man = `mapUpBearing`, so a bearing B sits at
+ * dial angle (B − mapUpBearing): dx = sinθ, dy = −cosθ. Used to cast shadows. */
+function bearingToPlotDelta(
+  bearingDeg: number,
+  distFt: number,
+  mapUpBearing: number,
+): { dx: number; dy: number } {
+  const theta = ((bearingDeg - mapUpBearing) * Math.PI) / 180;
+  return { dx: Math.sin(theta) * distFt, dy: -Math.cos(theta) * distFt };
+}
+
+/** Convex hull (Andrew's monotone chain) of feet-space points → ordered polygon. */
+function convexHull(pts: ZonePt[]): ZonePt[] {
+  if (pts.length < 3) return pts;
+  const p = [...pts].sort((a, b) => a.x - b.x || a.y - b.y);
+  const cross = (o: ZonePt, a: ZonePt, b: ZonePt) =>
+    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const half = (src: ZonePt[]): ZonePt[] => {
+    const h: ZonePt[] = [];
+    for (const q of src) {
+      while (h.length >= 2) {
+        const a = h[h.length - 2];
+        const b = h[h.length - 1];
+        if (a && b && cross(a, b, q) <= 0) h.pop();
+        else break;
+      }
+      h.push(q);
+    }
+    h.pop();
+    return h;
+  };
+  return half(p).concat(half([...p].reverse()));
+}
+
+/** The cast-shadow polygon (plot-local feet) for a rotated-rectangle object at a
+ * given sun position, or null if it casts none (no height / sun at/below horizon).
+ * The shadow = convex hull of the footprint corners + those corners pushed away
+ * from the sun by height/tan(altitude). */
+function shadowPolygon(
+  o: ObjRow,
+  sun: { altitude: number; azimuth: number },
+  mapUpBearing: number,
+): ZonePt[] | null {
+  const tall = o.tallFt > 0 ? o.tallFt : kindHeight(o.kind);
+  if (tall <= 0) return null;
+  const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
+  if (sun.altitude <= 0.5) return null;
+  const lenFt = Math.min(tall / Math.tan((altDeg * Math.PI) / 180), 300);
+  const { dx, dy } = bearingToPlotDelta(sun.azimuth + 180, lenFt, mapUpBearing);
+  const cx = o.x + o.width / 2;
+  const cy = o.y + o.height / 2;
+  const local: Array<[number, number]> = [
+    [-o.width / 2, -o.height / 2],
+    [o.width / 2, -o.height / 2],
+    [o.width / 2, o.height / 2],
+    [-o.width / 2, o.height / 2],
+  ];
+  const corners: ZonePt[] = local.map(([lx, ly]) => {
+    const v = rotateVec(lx, ly, o.rotation);
+    return { x: cx + v.x, y: cy + v.y };
+  });
+  const all = corners.concat(
+    corners.map((c) => ({ x: c.x + dx, y: c.y + dy })),
+  );
+  return convexHull(all);
+}
 
 /** Effective frontage radius (ft from the Man): the manual override if set,
  * else derived from the lot's street letter + year. Null → no taper. */
@@ -1020,10 +1103,10 @@ function GridScaleNote({ lot }: { lot: Lot }) {
     <Text size="xs" c="dimmed" mt={6}>
       {tapered ? (
         <>
-          10′ grid · plot {delta > 0 ? "widens" : "narrows"} {feetInches(front)}{" "}
-          → {feetInches(rear)} (rear {delta > 0 ? "+" : "−"}
-          {feetInches(Math.abs(delta))}) · a 10′ column is 10′0″ at the front,{" "}
-          {feetInches(cellRear)} at the rear · rows 10′0″ deep
+          10′ grid · {delta > 0 ? "widens" : "narrows"} {feetInches(front)}→
+          {feetInches(rear)} ({delta > 0 ? "+" : "−"}
+          {feetInches(Math.abs(delta))}) · cols 10′0″→{feetInches(cellRear)} ·
+          rows 10′0″
         </>
       ) : (
         <>10′ grid · square cells, no skew</>
@@ -1043,6 +1126,34 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [selectedCableId, setSelectedCableId] = useState<string | null>(null);
   // Highlight filter: dims everything that doesn't match the chosen category.
   const [highlight, setHighlight] = useState<string>("none");
+  // Lot config form: hidden by default, revealed by the toolbar gear (it's a
+  // once-at-setup form). Lifted here so the gear (in the map toolbar) and the
+  // form (in the side rail) share one flag.
+  const [lotOpen, setLotOpen] = useState(false);
+
+  // ---- Shade simulation: time of day drives the sun, which casts shadows. ----
+  const sunYear = lot?.year ?? CURRENT_EVENT_YEAR;
+  const arc = useMemo(() => dayArc(sunYear), [sunYear]);
+  const [showShade, setShowShade] = useState(false);
+  // Local minute-of-day; start mid-afternoon for a clear shade demo.
+  const [timeMin, setTimeMin] = useState(() =>
+    Math.round((arc.noonMin + arc.sunsetMin) / 2),
+  );
+  // True while the user is dragging the compass sun (pauses the auto-drift).
+  const [sunDragging, setSunDragging] = useState(false);
+  const sun = useMemo(() => sunAt(sunYear, timeMin), [sunYear, timeMin]);
+  // Auto-drift the sun slowly across the daylight arc when not being dragged and
+  // the shade overlay is on; loop back to sunrise after sunset.
+  useEffect(() => {
+    if (!showShade || sunDragging) return;
+    const id = setInterval(() => {
+      setTimeMin((t) => {
+        const n = t + 3;
+        return n > arc.sunsetMin ? arc.sunriseMin : n;
+      });
+    }, 120);
+    return () => clearInterval(id);
+  }, [showShade, sunDragging, arc.sunriseMin, arc.sunsetMin]);
 
   // Reconcile the authoritative object the server returns after each mutation:
   // upsert it (a newly added/placed one gets appended + selected; an updated one
@@ -1160,12 +1271,18 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             selectedZoneId={selectedZoneId}
             setSelectedZoneId={setSelectedZoneId}
             cables={cables}
+            setCables={setCables}
             selectedCableId={selectedCableId}
             setSelectedCableId={setSelectedCableId}
             canEdit={canEdit}
             canManage={canManage}
             myMembershipId={myMembershipId}
             highlight={highlight}
+            lotOpen={lotOpen}
+            setLotOpen={setLotOpen}
+            mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
+            sun={sun}
+            showShade={showShade}
             fetcher={fetcher}
           />
           <GridScaleNote lot={lot} />
@@ -1194,6 +1311,14 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           </Paper>
           <Compass
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
+            sun={sun}
+            year={sunYear}
+            arc={arc}
+            timeMin={timeMin}
+            setTimeMin={setTimeMin}
+            setSunDragging={setSunDragging}
+            showShade={showShade}
+            setShowShade={setShowShade}
           />
           {canManage ? (
             <PendingPanel
@@ -1230,6 +1355,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             canEdit={canEdit}
             canManage={canManage}
             myMembershipId={myMembershipId}
+            lotOpen={lotOpen}
             fetcher={fetcher}
           />
         </Stack>
@@ -1374,12 +1500,18 @@ function Editor({
   selectedZoneId,
   setSelectedZoneId,
   cables,
+  setCables,
   selectedCableId,
   setSelectedCableId,
   canEdit,
   canManage,
   myMembershipId,
   highlight,
+  lotOpen,
+  setLotOpen,
+  mapUpBearing,
+  sun,
+  showShade,
   fetcher,
 }: {
   lot: Lot;
@@ -1391,22 +1523,37 @@ function Editor({
   selectedZoneId: string | null;
   setSelectedZoneId: (id: string | null) => void;
   cables: CableRow[];
+  setCables: React.Dispatch<React.SetStateAction<CableRow[]>>;
   selectedCableId: string | null;
   setSelectedCableId: (id: string | null) => void;
   canEdit: boolean;
   canManage: boolean;
   myMembershipId: string;
   highlight: string;
+  lotOpen: boolean;
+  setLotOpen: (v: boolean) => void;
+  mapUpBearing: number | null;
+  sun: { altitude: number; azimuth: number };
+  showShade: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<DragState | null>(null);
   const liveObj = useRef<ObjRow | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Editing a selected cable's vertices: which point is being dragged, and a
+  // live working copy committed on pointer-up.
+  const cableDrag = useRef<{ cableId: string; index: number } | null>(null);
+  const liveCable = useRef<CableRow | null>(null);
+  const [cableDragging, setCableDragging] = useState(false);
   // Drawing collects plot-local feet vertices for a zone (closed polygon) or a
   // power line (open polyline). `drawMode` is which, or null when not drawing.
   const [drawMode, setDrawMode] = useState<"zone" | "cable" | null>(null);
   const [draftPoints, setDraftPoints] = useState<ZonePt[]>([]);
+  // Grid snap (feet) for drawing/editing zone + cable vertices. Node snapping on
+  // power lines still wins over the grid.
+  const [gridSnap, setGridSnap] = useState<number>(1);
+  const snapGrid = (v: number) => Math.round(v / gridSnap) * gridSnap;
 
   // Officers edit anything; a member may move/resize/rotate only their own
   // items (those edits become pending approval, handled server-side).
@@ -1436,6 +1583,21 @@ function Editor({
       window.removeEventListener("pointercancel", up);
     };
   }, [dragging]);
+
+  // Same window-driven gesture, for dragging a selected cable's vertex handle.
+  useEffect(() => {
+    if (!cableDragging) return;
+    const move = (e: PointerEvent) => onCableVertexMove(e);
+    const up = () => endCableDrag();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [cableDragging]);
 
   // Keyboard shortcuts for the selected object: R rotates (Shift = the other
   // way), arrows nudge (Shift = 10ft), Delete removes, Escape deselects.
@@ -1633,21 +1795,31 @@ function Editor({
   }
 
   // ---- Zones & cables -----------------------------------------------------
+  // Place a power-line vertex: snap to a nearby spider box / generator (exact
+  // node center), else round to the 10ft grid. Always clamped to the lot.
+  function placeCablePoint(fxp: number, fyp: number): ZonePt {
+    const snap = snapToNode(fxp, fyp, objects);
+    if (snap.snapped) {
+      return {
+        x: clamp(snap.x, 0, lot.frontageFt),
+        y: clamp(snap.y, 0, lot.depthFt),
+      };
+    }
+    return {
+      x: snapGrid(clamp(fxp, 0, lot.frontageFt)),
+      y: snapGrid(clamp(fyp, 0, lot.depthFt)),
+    };
+  }
   function addDraftPoint(e: React.PointerEvent) {
     const p = svgPoint(e);
-    // Power lines snap their vertices to nearby spider boxes / generators so the
-    // run visibly connects the nodes it measures between.
-    const raw =
+    const pt =
       drawMode === "cable"
-        ? snapToNode(fx(p.x), fy(p.y), objects)
-        : { x: fx(p.x), y: fy(p.y) };
-    setDraftPoints((prev) => [
-      ...prev,
-      {
-        x: round(clamp(raw.x, 0, lot.frontageFt)),
-        y: round(clamp(raw.y, 0, lot.depthFt)),
-      },
-    ]);
+        ? placeCablePoint(fx(p.x), fy(p.y))
+        : {
+            x: snapGrid(clamp(fx(p.x), 0, lot.frontageFt)),
+            y: snapGrid(clamp(fy(p.y), 0, lot.depthFt)),
+          };
+    setDraftPoints((prev) => [...prev, pt]);
   }
   function cancelDraw() {
     setDrawMode(null);
@@ -1689,6 +1861,83 @@ function Editor({
     setSelectedId(null);
     setSelectedZoneId(null);
     setSelectedCableId(id);
+  }
+
+  function commitCable(c: CableRow) {
+    fetcher.submit(
+      {
+        intent: "updateCable",
+        id: c.id,
+        points: JSON.stringify(c.points),
+      },
+      { method: "post" },
+    );
+  }
+  // Begin dragging an existing vertex of the selected cable.
+  function startCableVertexDrag(
+    e: React.PointerEvent,
+    cable: CableRow,
+    index: number,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!canManage) return;
+    selectCable(cable.id);
+    cableDrag.current = { cableId: cable.id, index };
+    liveCable.current = cable;
+    setCableDragging(true);
+  }
+  // Insert a new vertex at a segment midpoint, then immediately drag it.
+  function startCableInsertDrag(
+    e: React.PointerEvent,
+    cable: CableRow,
+    segIndex: number,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!canManage) return;
+    const a = cable.points[segIndex];
+    const b = cable.points[segIndex + 1];
+    if (!a || !b) return;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const points = [
+      ...cable.points.slice(0, segIndex + 1),
+      mid,
+      ...cable.points.slice(segIndex + 1),
+    ];
+    const next = { ...cable, points };
+    selectCable(cable.id);
+    cableDrag.current = { cableId: cable.id, index: segIndex + 1 };
+    liveCable.current = next;
+    setCables((prev) => prev.map((c) => (c.id === cable.id ? next : c)));
+    setCableDragging(true);
+  }
+  function onCableVertexMove(e: { clientX: number; clientY: number }) {
+    const d = cableDrag.current;
+    const c = liveCable.current;
+    if (!d || !c) return;
+    const p = svgPoint(e);
+    const pt = placeCablePoint(fx(p.x), fy(p.y));
+    const points = c.points.map((q, i) => (i === d.index ? pt : q));
+    const next = { ...c, points };
+    liveCable.current = next;
+    setCables((prev) => prev.map((x) => (x.id === d.cableId ? next : x)));
+  }
+  function endCableDrag() {
+    const d = cableDrag.current;
+    const c = liveCable.current;
+    cableDrag.current = null;
+    liveCable.current = null;
+    setCableDragging(false);
+    if (d && c) commitCable(c);
+  }
+  // Remove a vertex (keep at least the two endpoints).
+  function deleteCableVertex(cable: CableRow, index: number) {
+    if (!canManage || cable.points.length <= 2) return;
+    const points = cable.points.filter((_, i) => i !== index);
+    const next = { ...cable, points };
+    setCables((prev) => prev.map((c) => (c.id === cable.id ? next : c)));
+    commitCable(next);
   }
 
   function onMove(e: { clientX: number; clientY: number }) {
@@ -1769,75 +2018,118 @@ function Editor({
         <Group
           gap="xs"
           p={6}
+          justify="space-between"
+          wrap="nowrap"
           style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}
         >
-          {drawMode === "cable" ? (
-            <>
-              <Text size="xs" c="dimmed">
-                Click near nodes to route the line
-                {draftPoints.length >= 2
-                  ? ` · ${feetInches(pathLengthFt(draftPoints))}`
-                  : ""}
-              </Text>
-              <Button
-                size="compact-xs"
-                color="yellow"
-                onClick={finishCable}
-                disabled={draftPoints.length < 2}
+          <Group gap="xs">
+            {drawMode === "cable" ? (
+              <>
+                <Text size="xs" c="dimmed">
+                  Click near nodes to route the line
+                  {draftPoints.length >= 2
+                    ? ` · ${feetInches(pathLengthFt(draftPoints))}`
+                    : ""}
+                </Text>
+                <Button
+                  size="compact-xs"
+                  color="yellow"
+                  onClick={finishCable}
+                  disabled={draftPoints.length < 2}
+                >
+                  Finish ({draftPoints.length})
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  onClick={cancelDraw}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : drawMode === "zone" ? (
+              <>
+                <Text size="xs" c="dimmed">
+                  Click the lot to add points
+                </Text>
+                <Button
+                  size="compact-xs"
+                  onClick={finishZone}
+                  disabled={draftPoints.length < 3}
+                >
+                  Finish ({draftPoints.length})
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  onClick={cancelDraw}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  onClick={() => {
+                    setSelectedId(null);
+                    setSelectedZoneId(null);
+                    setSelectedCableId(null);
+                    setDraftPoints([]);
+                    setDrawMode("zone");
+                  }}
+                >
+                  + Draw zone
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  color="yellow"
+                  onClick={() => {
+                    setSelectedId(null);
+                    setSelectedZoneId(null);
+                    setSelectedCableId(null);
+                    setDraftPoints([]);
+                    setDrawMode("cable");
+                  }}
+                >
+                  + Draw power line
+                </Button>
+              </>
+            )}
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            {drawMode !== null || selectedCableId ? (
+              <Tooltip label="Snap vertices to grid">
+                <Group gap={4} wrap="nowrap">
+                  <Text size="xs" c="dimmed">
+                    Snap
+                  </Text>
+                  <SegmentedControl
+                    size="xs"
+                    value={String(gridSnap)}
+                    onChange={(v) => setGridSnap(Number(v))}
+                    data={[
+                      { label: "1′", value: "1" },
+                      { label: "10′", value: "10" },
+                    ]}
+                  />
+                </Group>
+              </Tooltip>
+            ) : null}
+            <Tooltip label={lotOpen ? "Hide lot settings" : "Lot settings"}>
+              <ActionIcon
+                variant={lotOpen ? "light" : "subtle"}
+                color="gray"
+                aria-label="Toggle lot settings"
+                aria-expanded={lotOpen}
+                onClick={() => setLotOpen(!lotOpen)}
               >
-                Finish ({draftPoints.length})
-              </Button>
-              <Button size="compact-xs" variant="default" onClick={cancelDraw}>
-                Cancel
-              </Button>
-            </>
-          ) : drawMode === "zone" ? (
-            <>
-              <Text size="xs" c="dimmed">
-                Click the lot to add points
-              </Text>
-              <Button
-                size="compact-xs"
-                onClick={finishZone}
-                disabled={draftPoints.length < 3}
-              >
-                Finish ({draftPoints.length})
-              </Button>
-              <Button size="compact-xs" variant="default" onClick={cancelDraw}>
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                size="compact-xs"
-                variant="light"
-                onClick={() => {
-                  setSelectedId(null);
-                  setSelectedZoneId(null);
-                  setSelectedCableId(null);
-                  setDraftPoints([]);
-                  setDrawMode("zone");
-                }}
-              >
-                + Draw zone
-              </Button>
-              <Button
-                size="compact-xs"
-                variant="light"
-                color="yellow"
-                onClick={() => {
-                  setSelectedId(null);
-                  setSelectedZoneId(null);
-                  setSelectedCableId(null);
-                  setDraftPoints([]);
-                  setDrawMode("cable");
-                }}
-              >
-                + Draw power line
-              </Button>
-            </>
-          )}
+                ⚙
+              </ActionIcon>
+            </Tooltip>
+          </Group>
         </Group>
       ) : null}
       <svg
@@ -1893,6 +2185,27 @@ function Editor({
           stroke="#adb5bd"
           strokeWidth={2}
         />
+        {/* Shade simulation: each object casts a translucent shadow away from the
+            sun, clipped to the lot. Overlaps darken naturally. */}
+        {showShade && mapUpBearing != null && sun.altitude > 0.5 ? (
+          <g clipPath={`url(#${clipId})`} pointerEvents="none">
+            {objects.map((o) => {
+              const poly = shadowPolygon(o, sun, mapUpBearing);
+              if (!poly || poly.length < 3) return null;
+              const pts = poly
+                .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                .join(" ");
+              return (
+                <polygon
+                  key={`sh-${o.id}`}
+                  points={pts}
+                  fill="#1c1c1c"
+                  fillOpacity={0.16}
+                />
+              );
+            })}
+          </g>
+        ) : null}
         {/* Zones: labeled regions drawn under the structures. */}
         {zones.map((z) => {
           if (z.points.length < 2) return null;
@@ -1922,7 +2235,7 @@ function Editor({
                 y={originY + cyFt * ppf}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize={11}
+                fontSize={13}
                 fontWeight={600}
                 fill={z.color}
                 style={{ pointerEvents: "none", userSelect: "none" }}
@@ -2000,7 +2313,7 @@ function Editor({
                 y={originY + mid.y * ppf - 6}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize={10}
+                fontSize={12}
                 fontWeight={600}
                 fill={c.color}
                 stroke="#fff"
@@ -2012,6 +2325,54 @@ function Editor({
                 {feetInches(lenFt)}
                 {c.amps ? ` · ${c.amps}A` : ""}
               </text>
+              {/* Edit handles on the selected cable: midpoint "+" adds a point,
+                  vertex handles drag (snapping to nodes); double-click removes. */}
+              {sel && canManage && drawMode === null ? (
+                <>
+                  {c.points.slice(0, -1).map((p, i) => {
+                    const q = c.points[i + 1];
+                    if (!q) return null;
+                    return (
+                      <circle
+                        key={`${c.id}-add-${i}`}
+                        cx={originX + ((p.x + q.x) / 2) * ppf}
+                        cy={originY + ((p.y + q.y) / 2) * ppf}
+                        r={4}
+                        fill="#fff"
+                        stroke={c.color}
+                        strokeWidth={1.5}
+                        strokeDasharray="2 2"
+                        style={{ cursor: "copy" }}
+                        onPointerDown={(e) => startCableInsertDrag(e, c, i)}
+                      >
+                        <title>Drag to add a point</title>
+                      </circle>
+                    );
+                  })}
+                  {c.points.map((p, i) => (
+                    <circle
+                      key={`${c.id}-vtx-${i}`}
+                      cx={originX + p.x * ppf}
+                      cy={originY + p.y * ppf}
+                      r={5}
+                      fill="#fff"
+                      stroke={c.color}
+                      strokeWidth={2.5}
+                      style={{ cursor: "grab" }}
+                      onPointerDown={(e) => startCableVertexDrag(e, c, i)}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        deleteCableVertex(c, i);
+                      }}
+                    >
+                      <title>
+                        Drag to move (snaps to power nodes) · double-click to
+                        remove
+                      </title>
+                    </circle>
+                  ))}
+                </>
+              ) : null}
             </g>
           );
         })}
@@ -2118,12 +2479,36 @@ function Grid({
   return <g>{lines}</g>;
 }
 
-/** Standalone compass widget (its own SVG) so it never overlaps the map. */
-function Compass({ mapUpBearing }: { mapUpBearing: number | null }) {
+/** Standalone compass widget (its own SVG) so it never overlaps the map. Carries
+ * the draggable sun that scrubs time of day for the shade simulation. */
+function Compass({
+  mapUpBearing,
+  sun,
+  year,
+  arc,
+  timeMin,
+  setTimeMin,
+  setSunDragging,
+  showShade,
+  setShowShade,
+}: {
+  mapUpBearing: number | null;
+  sun: { altitude: number; azimuth: number };
+  year: number;
+  arc: { sunriseMin: number; sunsetMin: number; noonMin: number };
+  timeMin: number;
+  setTimeMin: (n: number) => void;
+  setSunDragging: (v: boolean) => void;
+  showShade: boolean;
+  setShowShade: (v: boolean) => void;
+}) {
   const S = 168;
   const cx = S / 2;
   const cy = S / 2 + 4;
   const r = 60;
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [draggingSun, setDraggingSun] = useState(false);
+  const oriented = mapUpBearing != null;
   const vec = (bearing: number) => {
     const phi = (((bearing - (mapUpBearing ?? 0)) % 360) * Math.PI) / 180;
     return { x: Math.sin(phi), y: -Math.cos(phi) };
@@ -2160,49 +2545,144 @@ function Compass({ mapUpBearing }: { mapUpBearing: number | null }) {
       </g>
     );
   };
-  // Daylight wedge: from sunrise clockwise through the south to sunset.
-  const dr = vec(SUNRISE_AZ);
-  const ds = vec(SUNSET_AZ);
+
+  // Pointer → compass bearing (inverse of vec): x=sinθ, y=−cosθ, θ=bearing−up.
+  function bearingFromPointer(clientX: number, clientY: number): number {
+    const svg = svgRef.current;
+    if (!svg) return 0;
+    const rect = svg.getBoundingClientRect();
+    const x = ((clientX - rect.left) * S) / rect.width - cx;
+    const y = ((clientY - rect.top) * S) / rect.height - cy;
+    const theta = (Math.atan2(x, -y) * 180) / Math.PI;
+    return (((theta + (mapUpBearing ?? 0)) % 360) + 360) % 360;
+  }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setters/arc/year are stable enough
+  useEffect(() => {
+    if (!draggingSun) return;
+    const move = (e: PointerEvent) => {
+      const b = bearingFromPointer(e.clientX, e.clientY);
+      setTimeMin(minuteForAzimuth(year, arc.sunriseMin, arc.sunsetMin, b));
+    };
+    const up = () => {
+      setDraggingSun(false);
+      setSunDragging(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [draggingSun]);
+
+  // Daylight wedge from the real sunrise/sunset azimuths.
+  const riseAz = sunAt(year, arc.sunriseMin).azimuth;
+  const setAz = sunAt(year, arc.sunsetMin).azimuth;
+  const dr = vec(riseAz);
+  const ds = vec(setAz);
   const daylight = `M ${cx} ${cy} L ${cx + dr.x * r} ${cy + dr.y * r} A ${r} ${r} 0 1 1 ${cx + ds.x * r} ${cy + ds.y * r} Z`;
+  const su = vec(sun.azimuth);
+  const sx = cx + su.x * (r - 6);
+  const sy = cy + su.y * (r - 6);
   return (
     <Paper withBorder p="sm" radius="md">
       <Text size="xs" fw={600} mb={4}>
         Orientation
       </Text>
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${S} ${S}`}
         style={{
           width: "100%",
           maxWidth: 190,
           height: "auto",
           display: "block",
+          touchAction: "none",
         }}
         role="img"
         aria-label="Compass"
       >
         <title>Compass</title>
         <circle cx={cx} cy={cy} r={r} fill="#ffffff" stroke="#dee2e6" />
-        {mapUpBearing != null ? (
+        {oriented ? (
           <path d={daylight} fill="#ffe066" fillOpacity={0.4} stroke="none" />
         ) : null}
         <line x1={cx} y1={cy} x2={cx} y2={cy - r + 20} stroke="#1c1c1c" />
         <ManGlyph x={cx} y={cy - r + 12} size={22} />
-        {mapUpBearing != null ? (
+        {oriented ? (
           <>
             {ray(0, "#e03131", "N", { lw: 2, weight: 700 })}
             {ray(90, "#adb5bd", "E", { lw: 0.6 })}
             {ray(180, "#adb5bd", "S", { lw: 0.6 })}
             {ray(270, "#adb5bd", "W", { lw: 0.6 })}
-            {ray(SUNRISE_AZ, "#f08c00", "rise", { len: r - 10 })}
-            {ray(SUNSET_AZ, "#5f3dc4", "set", { len: r - 10 })}
           </>
         ) : null}
+        {oriented && showShade ? (
+          <g
+            style={{ cursor: "grab" }}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              setDraggingSun(true);
+              setSunDragging(true);
+            }}
+          >
+            <line
+              x1={cx}
+              y1={cy}
+              x2={sx}
+              y2={sy}
+              stroke="#f59f00"
+              strokeWidth={1.5}
+              strokeOpacity={0.6}
+            />
+            {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
+              const a = (deg * Math.PI) / 180;
+              return (
+                <line
+                  key={deg}
+                  x1={sx + Math.cos(a) * 8}
+                  y1={sy + Math.sin(a) * 8}
+                  x2={sx + Math.cos(a) * 12}
+                  y2={sy + Math.sin(a) * 12}
+                  stroke="#f08c00"
+                  strokeWidth={1.5}
+                />
+              );
+            })}
+            <circle
+              cx={sx}
+              cy={sy}
+              r={7}
+              fill="#ffd43b"
+              stroke="#f08c00"
+              strokeWidth={1.5}
+            />
+          </g>
+        ) : null}
       </svg>
-      {mapUpBearing == null ? (
+      {oriented ? (
+        <>
+          <Switch
+            size="xs"
+            mt={8}
+            checked={showShade}
+            onChange={(e) => setShowShade(e.currentTarget.checked)}
+            label="Show shade"
+          />
+          {showShade ? (
+            <Text size="xs" c="dimmed" mt={4}>
+              {formatClock(timeMin)} · sun {Math.round(sun.altitude)}° up · drag
+              the sun to change time
+            </Text>
+          ) : null}
+        </>
+      ) : (
         <Text size="xs" c="dimmed" mt={4}>
           Set the lot address (e.g. 3:00) for true north & sun.
         </Text>
-      ) : null}
+      )}
     </Paper>
   );
 }
@@ -2498,9 +2978,9 @@ const MapObjectShape = memo(
             {showName ? (
               <text
                 x={cx}
-                y={showOwner ? cy - 5 : cy}
+                y={showOwner ? cy - 7 : cy}
                 dominantBaseline="central"
-                fontSize={11}
+                fontSize={14}
                 fontWeight={700}
                 fill="#1c1c1c"
               >
@@ -2510,9 +2990,9 @@ const MapObjectShape = memo(
             {showOwner ? (
               <text
                 x={cx}
-                y={showName ? cy + 8 : cy}
+                y={showName ? cy + 10 : cy}
                 dominantBaseline="central"
-                fontSize={showName ? 9 : 10}
+                fontSize={showName ? 11 : 13}
                 fontWeight={showName ? 400 : 600}
                 fill={showName ? "#868e96" : "#1c1c1c"}
               >
@@ -2566,6 +3046,7 @@ function SidePanel({
   canEdit,
   canManage,
   myMembershipId,
+  lotOpen,
   fetcher,
 }: {
   lot: Lot;
@@ -2575,12 +3056,11 @@ function SidePanel({
   canEdit: boolean;
   canManage: boolean;
   myMembershipId: string;
+  // Lot config visibility — toggled by the map toolbar gear (lifted to CampMap).
+  lotOpen: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const selected = objects.find((o) => o.id === selectedId) ?? null;
-  // The lot is configured once at setup, so keep its form collapsed behind a
-  // gear by default and let officers expand it when they need to re-tune.
-  const [lotOpen, setLotOpen] = useState(false);
   // Officers edit anything (incl. name/kind/notes + delete). An owner-member may
   // adjust their own item's geometry (those edits become pending). Anyone else
   // sees read-only details.
@@ -2811,20 +3291,37 @@ function SidePanel({
                 />
               </Group>
             )}
-            <NumberInput
-              size="xs"
-              label="Rotation (°)"
-              value={Math.round(selected.rotation)}
-              disabled={!canGeom}
-              onChange={(v) => patch(selected.id, { rotation: Number(v) || 0 })}
-              onBlur={() =>
-                commitField(
-                  selected.id,
-                  "rotation",
-                  Math.round(selected.rotation),
-                )
-              }
-            />
+            <Group grow>
+              <NumberInput
+                size="xs"
+                label="Rotation (°)"
+                value={Math.round(selected.rotation)}
+                disabled={!canGeom}
+                onChange={(v) =>
+                  patch(selected.id, { rotation: Number(v) || 0 })
+                }
+                onBlur={() =>
+                  commitField(
+                    selected.id,
+                    "rotation",
+                    Math.round(selected.rotation),
+                  )
+                }
+              />
+              <NumberInput
+                size="xs"
+                label="Height (ft)"
+                description="for shade"
+                placeholder={String(kindHeight(selected.kind))}
+                value={selected.tallFt > 0 ? selected.tallFt : ""}
+                min={0}
+                disabled={!canGeom}
+                onChange={(v) => patch(selected.id, { tallFt: Number(v) || 0 })}
+                onBlur={() =>
+                  commitField(selected.id, "tallFt", round(selected.tallFt))
+                }
+              />
+            </Group>
             <Textarea
               size="xs"
               label="Notes"
@@ -2844,27 +3341,14 @@ function SidePanel({
       ) : null}
 
       {canManage ? (
-        <Paper withBorder p="md" radius="md">
-          <Group justify="space-between" align="center" mb={lotOpen ? "sm" : 0}>
-            <Text fw={600} size="sm">
-              Lot
+        <Collapse in={lotOpen}>
+          <Paper withBorder p="md" radius="md">
+            <Text fw={600} size="sm" mb="sm">
+              Lot settings
             </Text>
-            <Tooltip label={lotOpen ? "Hide lot settings" : "Lot settings"}>
-              <ActionIcon
-                variant={lotOpen ? "light" : "subtle"}
-                color="gray"
-                aria-label="Toggle lot settings"
-                aria-expanded={lotOpen}
-                onClick={() => setLotOpen((v) => !v)}
-              >
-                ⚙
-              </ActionIcon>
-            </Tooltip>
-          </Group>
-          <Collapse in={lotOpen}>
             <PlacementForm lot={lot} fetcher={fetcher} />
-          </Collapse>
-        </Paper>
+          </Paper>
+        </Collapse>
       ) : null}
     </Stack>
   );
@@ -3115,6 +3599,12 @@ function CablePanel({
             {cable.points.length} points
           </Text>
         </Paper>
+        {canManage ? (
+          <Text size="xs" c="dimmed">
+            Drag a handle to move a point (snaps to spider boxes / generators),
+            drag a dashed + to add one, double-click a handle to remove it.
+          </Text>
+        ) : null}
         <TextInput
           size="xs"
           label="Name"

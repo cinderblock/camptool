@@ -96,6 +96,8 @@ export const mapObject = sqliteTable(
     width: real("width").notNull().default(10),
     height: real("height").notNull().default(10),
     rotation: real("rotation").notNull().default(0),
+    // Above-ground height (ft) for the 2D shade sim. 0 = use the kind's default.
+    tallFt: real("tall_ft").notNull().default(0),
     color: text("color"),
     notes: text("notes"),
     // Pending-approval workflow: an owner-member may move/resize/rotate their own

@@ -206,6 +206,28 @@ export const KINDS = [
   },
 ] as const;
 
+/** Default above-ground height (feet) per kind, used to seed a new object's
+ * height and as the fallback for the 2D shade simulation when height is unset. */
+const KIND_HEIGHTS: Record<string, number> = {
+  tent: 7,
+  hexayurt: 8,
+  hyparhut: 8,
+  rv: 10,
+  car: 5,
+  truck: 11,
+  van: 8,
+  shade: 10,
+  kitchen: 8,
+  art: 12,
+  power: 4,
+  container: 9.5,
+  spiderbox: 3,
+  structure: 8,
+};
+export function kindHeight(kind: string): number {
+  return KIND_HEIGHTS[kind] ?? 8;
+}
+
 /** Industry-standard preset ratings a power line (map_cable) can carry. Both are
  * optional; the map UI renders them as clearable dropdowns. */
 export const AMP_OPTIONS = ["15", "20", "30", "50", "100"] as const;

@@ -99,6 +99,13 @@
       "when": 1781231674562,
       "tag": "0013_mighty_green_goblin",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1781242641436,
+      "tag": "0014_plain_black_bolt",
+      "breakpoints": true
     }
   ]
 }

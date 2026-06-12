@@ -1,0 +1,1 @@
+ALTER TABLE `map_object` ADD `tall_ft` real DEFAULT 0 NOT NULL;
