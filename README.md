@@ -50,6 +50,15 @@ who's sharing their tent/RV, and tick the camp's checklist — one step at a tim
 with the regular dashboard pages remaining the "advanced" way to do the same
 things. Next: RV pop-outs, custom per-camp structures, and group sub-maps.
 
+The dashboard also tracks the camp's per-year ticket allocations. A **Tickets**
+page manages the camp's Direct Group Sale (guaranteed) allocation — individual
+priced tickets (tier + price, any mix of free/cheap/expensive) that officers
+assign to members and mark paid; members can request one. A **Passes** page
+handles early-arrival **Setup Access Passes**: officers define entry dates with a
+per-date quota (e.g. 2 Monday, 4 Tuesday, 8 Wednesday) and grant passes to
+members; members request a date, and the quota is enforced. Both are scoped to
+the active year and go read-only when that year is locked.
+
 The deployment owner is a **super admin** (the first account to register; more
 can be granted in-app) with a **Site admin** page that controls two
 instance-wide lockdowns: turning off **new camp creation** (only super admins can

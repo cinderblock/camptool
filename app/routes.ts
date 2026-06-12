@@ -16,6 +16,8 @@ export default [
     route("map", "routes/dashboard/map.tsx"),
     route("bringing", "routes/dashboard/bringing.tsx"),
     route("inventory", "routes/dashboard/inventory.tsx"),
+    route("tickets", "routes/dashboard/tickets.tsx"),
+    route("passes", "routes/dashboard/passes.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
     route("admin", "routes/dashboard/admin.tsx"),

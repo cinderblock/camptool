@@ -18,5 +18,10 @@ export default defineConfig({
   // never used at runtime, so keep it out of optimization entirely.
   optimizeDeps: {
     exclude: ["@better-auth/kysely-adapter", "kysely"],
+    // Pre-bundle @mantine/dates (+ its dayjs peer) up front. Otherwise Vite
+    // optimizes it on first interaction and momentarily serves it a second React
+    // instance, throwing "Cannot read properties of null (reading 'useContext')"
+    // in useMantineTheme the first time a DateInput popover opens.
+    include: ["@mantine/dates", "dayjs"],
   },
 });
