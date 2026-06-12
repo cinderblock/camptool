@@ -54,6 +54,35 @@ const CITY_2025: CityGeometry = {
 
 export const CITY_GEOMETRY: Record<number, CityGeometry> = { 2025: CITY_2025 };
 
+/**
+ * Per-year street display names by stable code. Names rotate every year and are
+ * announced before the full measurements doc (radii/block depths) is published,
+ * so they live here, decoupled from CITY_GEOMETRY. `streetLabel` prefers the
+ * requested year's names from this map; otherwise it falls back to the geometry
+ * year's StreetDef name. A year present here but absent from CITY_GEOMETRY (e.g.
+ * 2026) thus shows correct names while radii still fall back to the latest
+ * measured year — and `hasGeometry` stays false so the lot form keeps flagging
+ * the provisional layout. When BMorg publishes that year's measurements, add a
+ * CityGeometry to CITY_GEOMETRY.
+ */
+export const STREET_NAMES_BY_YEAR: Record<number, Record<string, string>> = {
+  // 2026 names (geometry doc not yet published — radii fall back to 2025).
+  2026: {
+    esplanade: "Esplanade",
+    A: "Ararat",
+    B: "Bodhi",
+    C: "Chomolungma",
+    D: "Delphi",
+    E: "Eternal",
+    F: "Fulcrum",
+    G: "Great Oak",
+    H: "Heiau",
+    I: "Iroko",
+    J: "Jiba",
+    K: "Kundalini",
+  },
+};
+
 /** Years we have actual BMorg measurements for, newest first. */
 export const BRC_YEARS = Object.keys(CITY_GEOMETRY)
   .map(Number)
@@ -124,11 +153,16 @@ export function radiusForStreet(
 }
 
 export function streetLabel(year: number, code: string): string {
-  const gy = geometryYearFor(year) ?? year;
-  const s = CITY_GEOMETRY[gy]?.streets.find((x) => x.code === code);
-  const base = code === "esplanade" ? "Esplanade" : code;
-  if (!s) return base;
-  return s.name ? `${base} · ${s.name}` : base;
+  // Esplanade's label already is its name — never "Esplanade · Esplanade".
+  if (code === "esplanade") return "Esplanade";
+  // Prefer the requested year's announced name (it may exist before that year's
+  // geometry doc); else fall back to the geometry year's StreetDef name.
+  let named = STREET_NAMES_BY_YEAR[year]?.[code];
+  if (!named) {
+    const gy = geometryYearFor(year) ?? year;
+    named = CITY_GEOMETRY[gy]?.streets.find((x) => x.code === code)?.name;
+  }
+  return named ? `${code} · ${named}` : code;
 }
 
 export function streetOptions(
