@@ -171,7 +171,7 @@ export const KINDS = [
     label: "Container",
     color: "#868e96",
     w: 8,
-    h: 40,
+    h: 20,
     shape: "rect",
     vehicle: false,
     rigid: true,
@@ -211,7 +211,9 @@ export const KINDS = [
 const KIND_HEIGHTS: Record<string, number> = {
   tent: 7,
   hexayurt: 8,
-  hyparhut: 8,
+  // Hyparhut roof peaks at 6' (front-right corner, by the door) and dips to 4';
+  // this is the peak. Per-corner heights for shade live in map.tsx cornerHeights.
+  hyparhut: 6,
   rv: 10,
   car: 5,
   truck: 11,
@@ -293,6 +295,13 @@ export function kindColor(kind: string) {
 /** Does this kind carry the given highlight tag (domicile/vehicle/structure)? */
 export function hasTag(kind: string, tag: KindTag): boolean {
   return (kindDef(kind).tags as readonly string[]).includes(tag);
+}
+
+/** Kinds the map draws a door for — the per-element "show door" toggle applies
+ * only to these. */
+const DOOR_KINDS = new Set(["rv", "hyparhut", "hexayurt", "container"]);
+export function kindHasDoor(kind: string): boolean {
+  return DOOR_KINDS.has(kind);
 }
 
 /** Flat-top hexagon vertices (corners inset horizontally by w/4). */
@@ -527,16 +536,39 @@ export function KindIcon({ kind, size = 30 }: { kind: Kind; size?: number }) {
       />
     );
   } else if (kind.value === "container") {
+    // Match the map: double cargo doors on one end, swinging 270° back against
+    // the side walls (radius = half-width, so they fit the icon box).
+    const L = w / 2;
+    const yb = py + h;
     detail = (
-      <line
-        x1={cx}
-        y1={py + 1.5}
-        x2={cx}
-        y2={py + h - 1.5}
-        stroke={dark}
-        strokeOpacity={0.4}
-        strokeWidth={0.7}
-      />
+      <g fill="none" stroke={dark}>
+        <line
+          x1={px}
+          y1={yb}
+          x2={px}
+          y2={yb - L}
+          strokeOpacity={0.6}
+          strokeWidth={1}
+        />
+        <line
+          x1={px + w}
+          y1={yb}
+          x2={px + w}
+          y2={yb - L}
+          strokeOpacity={0.6}
+          strokeWidth={1}
+        />
+        <path
+          d={`M ${px + L} ${yb} A ${L} ${L} 0 1 1 ${px} ${yb - L}`}
+          strokeOpacity={0.4}
+          strokeWidth={0.6}
+        />
+        <path
+          d={`M ${px + w - L} ${yb} A ${L} ${L} 0 1 0 ${px + w} ${yb - L}`}
+          strokeOpacity={0.4}
+          strokeWidth={0.6}
+        />
+      </g>
     );
   } else if (kind.value === "spiderbox") {
     // Distribution box: a few outlet ticks across the face.
