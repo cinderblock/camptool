@@ -8,7 +8,7 @@
  */
 import type { ReactNode } from "react";
 
-export type ShapeKind = "rect" | "hexagon" | "hypar";
+export type ShapeKind = "rect" | "hexagon" | "hypar" | "dome";
 
 /** Highlight categories an object can belong to (a kind can carry several —
  * an RV is both a domicile and a vehicle). Drives the map's highlight filter. */
@@ -65,6 +65,19 @@ export const KINDS = [
     shape: "hypar",
     vehicle: false,
     rigid: true,
+    group: "Domiciles",
+    tags: ["domicile"],
+  },
+  // Geodesic dome: circular footprint sized by a single diameter; optional height.
+  {
+    value: "dome",
+    label: "Geodesic dome",
+    color: "#3bc9db",
+    w: 20,
+    h: 20,
+    shape: "dome",
+    vehicle: false,
+    rigid: false,
     group: "Domiciles",
     tags: ["domicile"],
   },
@@ -214,6 +227,7 @@ const KIND_HEIGHTS: Record<string, number> = {
   // Hyparhut roof peaks at 6' (front-right corner, by the door) and dips to 4';
   // this is the peak. Per-corner heights for shade live in map.tsx cornerHeights.
   hyparhut: 6,
+  dome: 12,
   rv: 10,
   car: 5,
   truck: 11,
@@ -460,6 +474,45 @@ export function KindIcon({ kind, size = 30 }: { kind: Kind; size?: number }) {
           strokeOpacity={0.5}
           strokeWidth={0.7}
         />
+      </>
+    ) : kind.shape === "dome" ? (
+      <>
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={w / 2}
+          ry={h / 2}
+          fill={c}
+          fillOpacity={0.85}
+          stroke={dark}
+          strokeOpacity={0.45}
+          strokeWidth={0.75}
+        />
+        {/* Geodesic hint: an inner ring + radial struts. */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={minWH * 0.27}
+          fill="none"
+          stroke={dark}
+          strokeOpacity={0.4}
+          strokeWidth={0.5}
+        />
+        {[0, 60, 120, 180, 240, 300].map((a) => {
+          const rad = (a * Math.PI) / 180;
+          return (
+            <line
+              key={a}
+              x1={cx}
+              y1={cy}
+              x2={cx + Math.cos(rad) * (w / 2)}
+              y2={cy + Math.sin(rad) * (h / 2)}
+              stroke={dark}
+              strokeOpacity={0.3}
+              strokeWidth={0.4}
+            />
+          );
+        })}
       </>
     ) : (
       <rect
