@@ -49,6 +49,7 @@ import {
   isKind,
   kindColor,
   kindDef,
+  kindHasDoor,
   kindHeight,
 } from "~/lib/structures";
 import { db } from "../../../db/client.server";
@@ -115,6 +116,98 @@ function Door({
         stroke="#1c1c1c"
         strokeWidth={0.75}
         strokeOpacity={0.5}
+        fill="none"
+      />
+    </g>
+  );
+}
+
+/** Hyparhut door: an opening on the RIGHT of the front (+y) edge (right jamb by
+ * the 6' corner) that swings OUT — the closed leaf along the edge plus an
+ * outward (away from the hut) semicircle clearance, below the front edge.
+ * Matches the camp drawing. px,py,w,h are the body's local pixel rect. */
+function HyparDoor({
+  px,
+  py,
+  w,
+  h,
+}: {
+  px: number;
+  py: number;
+  w: number;
+  h: number;
+}) {
+  // Hut is a fixed 8' square, so width fractions are exact feet.
+  const doorW = w * (2.5 / 8); // 30" opening
+  const right = px + w * (7.5 / 8); // right jamb 6" from the corner
+  const left = right - doorW;
+  const y = py + h; // front edge
+  const r = doorW / 2; // semicircle clearance: chord = opening = diameter
+  return (
+    <g pointerEvents="none">
+      <line x1={left} y1={y} x2={right} y2={y} stroke="#fff" strokeWidth={2} />
+      {/* Sweep 0 bulges the arc outward — below the front edge, away from the hut. */}
+      <path
+        d={`M ${left} ${y} A ${r} ${r} 0 0 0 ${right} ${y}`}
+        stroke="#1c1c1c"
+        strokeOpacity={0.5}
+        strokeWidth={0.75}
+        fill="none"
+      />
+    </g>
+  );
+}
+
+/** Container cargo doors: two leaves on the short (+y) end, each half the 8' end,
+ * that swing OUT and fold 270° back flat against the side walls. px,py,w,h are
+ * the body's local pixel rect (doors on the bottom end). */
+function ContainerDoors({
+  px,
+  py,
+  w,
+  h,
+}: {
+  px: number;
+  py: number;
+  w: number;
+  h: number;
+}) {
+  const L = w / 2; // each leaf spans half the 8' door end
+  const yb = py + h; // door end
+  return (
+    <g pointerEvents="none">
+      {/* Open leaves folded back along the side walls. */}
+      <line
+        x1={px}
+        y1={yb}
+        x2={px}
+        y2={yb - L}
+        stroke="#1c1c1c"
+        strokeOpacity={0.6}
+        strokeWidth={1.5}
+      />
+      <line
+        x1={px + w}
+        y1={yb}
+        x2={px + w}
+        y2={yb - L}
+        stroke="#1c1c1c"
+        strokeOpacity={0.6}
+        strokeWidth={1.5}
+      />
+      {/* 270° swing arcs (large-arc): out, around, and back to the side wall. */}
+      <path
+        d={`M ${px + L} ${yb} A ${L} ${L} 0 1 1 ${px} ${yb - L}`}
+        stroke="#1c1c1c"
+        strokeOpacity={0.4}
+        strokeWidth={0.75}
+        fill="none"
+      />
+      <path
+        d={`M ${px + w - L} ${yb} A ${L} ${L} 0 1 0 ${px + w} ${yb - L}`}
+        stroke="#1c1c1c"
+        strokeOpacity={0.4}
+        strokeWidth={0.75}
         fill="none"
       />
     </g>
@@ -298,6 +391,8 @@ type ObjRow = {
   rotation: number;
   // Above-ground height (ft) for the shade sim; 0 = use the kind default.
   tallFt: number;
+  // Draw this object's door on the map (kinds that have one).
+  showDoor: boolean;
   color: string | null;
   notes: string | null;
   // The camper who brought this (NULL = shared/communal camp item).
@@ -375,6 +470,7 @@ const objSelect = {
   height: mapObject.height,
   rotation: mapObject.rotation,
   tallFt: mapObject.tallFt,
+  showDoor: mapObject.showDoor,
   color: mapObject.color,
   notes: mapObject.notes,
   ownerMembershipId: mapObject.ownerMembershipId,
@@ -393,6 +489,7 @@ type ObjSelectRow = {
   height: number;
   rotation: number;
   tallFt: number;
+  showDoor: boolean;
   color: string | null;
   notes: string | null;
   ownerMembershipId: string | null;
@@ -412,6 +509,7 @@ function toObjRow(r: ObjSelectRow): ObjRow {
     height: r.height,
     rotation: r.rotation,
     tallFt: r.tallFt,
+    showDoor: r.showDoor,
     color: r.color,
     notes: r.notes,
     ownerMembershipId: r.ownerMembershipId,
@@ -634,6 +732,7 @@ export async function action({ request }: Route.ActionArgs) {
       height: Math.max(1, num("height", def.h)),
       rotation: num("rotation", 0),
       tallFt: num("tallFt", kindHeight(kind)),
+      showDoor: true,
       color: str("color"),
       notes: str("notes"),
       createdById: user.id,
@@ -650,6 +749,7 @@ export async function action({ request }: Route.ActionArgs) {
         height: row.height,
         rotation: row.rotation,
         tallFt: row.tallFt,
+        showDoor: row.showDoor,
         color: row.color,
         notes: row.notes,
         ownerMembershipId: null,
@@ -689,6 +789,7 @@ export async function action({ request }: Route.ActionArgs) {
       if (form.has("kind")) set.kind = String(form.get("kind"));
       if (form.has("color")) set.color = str("color");
       if (form.has("notes")) set.notes = str("notes");
+      if (form.has("showDoor")) set.showDoor = form.get("showDoor") === "true";
       set.pendingByMembershipId = null;
       set.pendingAt = null;
       set.pendingPrev = null;
@@ -945,34 +1046,48 @@ function pathLengthFt(pts: ZonePt[]): number {
   return total;
 }
 
-/** Snap a feet-space point to the center of the nearest power node (spider box
- * or generator) within `threshold` ft, so cable runs visibly connect them.
- * `snapped` is true when a node was found (then x/y is its exact center). */
+/** Snap-grid steps (feet) for zone/cable vertices — cycled with the `g` key and
+ * shown in the snap SegmentedControl. */
+const SNAP_STEPS = [1, 10] as const;
+
+/** A hyparhut's roof-AC connection point in feet-space: on the back (-y) edge at
+ * ~0.69 of the width (by the high corner), rotated with the object. */
+function hyparAcPointFeet(o: ObjRow): { x: number; y: number } {
+  const v = rotateVec((0.69 - 0.5) * o.width, -0.5 * o.height, o.rotation);
+  return { x: o.x + o.width / 2 + v.x, y: o.y + o.height / 2 + v.y };
+}
+
+/** Snap a feet-space point to the nearest power connection node within
+ * `threshold` ft — a spider box / generator center, or a hyparhut's roof-AC — so
+ * cable runs visibly connect them. `snapped` is true when one was found. */
 function snapToNode(
   fxp: number,
   fyp: number,
   objects: ObjRow[],
   threshold = 8,
 ): { x: number; y: number; snapped: boolean } {
-  let best: ObjRow | null = null;
+  let best: { x: number; y: number } | null = null;
   let bestD = threshold;
   for (const o of objects) {
-    if (o.kind !== "spiderbox" && o.kind !== "power") continue;
-    const cx = o.x + o.width / 2;
-    const cy = o.y + o.height / 2;
-    const d = Math.hypot(cx - fxp, cy - fyp);
+    let nx: number;
+    let ny: number;
+    if (o.kind === "spiderbox" || o.kind === "power") {
+      nx = o.x + o.width / 2;
+      ny = o.y + o.height / 2;
+    } else if (o.kind === "hyparhut") {
+      const p = hyparAcPointFeet(o);
+      nx = p.x;
+      ny = p.y;
+    } else {
+      continue;
+    }
+    const d = Math.hypot(nx - fxp, ny - fyp);
     if (d <= bestD) {
       bestD = d;
-      best = o;
+      best = { x: nx, y: ny };
     }
   }
-  if (best) {
-    return {
-      x: best.x + best.width / 2,
-      y: best.y + best.height / 2,
-      snapped: true,
-    };
-  }
+  if (best) return { x: best.x, y: best.y, snapped: true };
   return { x: fxp, y: fyp, snapped: false };
 }
 
@@ -1027,37 +1142,77 @@ function convexHull(pts: ZonePt[]): ZonePt[] {
   return half(p).concat(half([...p].reverse()));
 }
 
-/** The cast-shadow polygon (plot-local feet) for a rotated-rectangle object at a
- * given sun position, or null if it casts none (no height / sun at/below horizon).
- * The shadow = convex hull of the footprint corners + those corners pushed away
- * from the sun by height/tan(altitude). */
-function shadowPolygon(
-  o: ObjRow,
-  sun: { altitude: number; azimuth: number },
-  mapUpBearing: number,
-): ZonePt[] | null {
-  const tall = o.tallFt > 0 ? o.tallFt : kindHeight(o.kind);
-  if (tall <= 0) return null;
-  const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
-  if (sun.altitude <= 0.5) return null;
-  const lenFt = Math.min(tall / Math.tan((altDeg * Math.PI) / 180), 300);
-  const { dx, dy } = bearingToPlotDelta(sun.azimuth + 180, lenFt, mapUpBearing);
-  const cx = o.x + o.width / 2;
-  const cy = o.y + o.height / 2;
-  const local: Array<[number, number]> = [
+/** The footprint outline (object-local feet, centered on the object) used to cast
+ * shade — the real shape, so a hexayurt throws a hexagonal shadow, not a box. */
+function footprintLocal(o: ObjRow): Array<[number, number]> {
+  const shape = kindDef(o.kind).shape;
+  if (shape === "hexagon") {
+    return hexVertices(0, 0, o.width, o.height).map(
+      (p) => [p.x - o.width / 2, p.y - o.height / 2] as [number, number],
+    );
+  }
+  if (shape === "dome") {
+    // Circle (ellipse if non-uniform) approximated as a 16-gon, so the dome
+    // casts a round/elongated shadow rather than a box.
+    const rx = o.width / 2;
+    const ry = o.height / 2;
+    const n = 16;
+    return Array.from({ length: n }, (_, i) => {
+      const a = (i / n) * 2 * Math.PI;
+      return [Math.cos(a) * rx, Math.sin(a) * ry] as [number, number];
+    });
+  }
+  return [
     [-o.width / 2, -o.height / 2],
     [o.width / 2, -o.height / 2],
     [o.width / 2, o.height / 2],
     [-o.width / 2, o.height / 2],
   ];
-  const corners: ZonePt[] = local.map(([lx, ly]) => {
+}
+
+/** Above-ground height (ft) at each footprint corner, aligned with
+ * footprintLocal, so a sloped roof casts a warped shadow. The hyparhut's roof is
+ * a hyperbolic paraboloid measured per corner; every other kind is a flat height. */
+function cornerHeights(o: ObjRow): number[] {
+  const tall = o.tallFt; // authoritative; 0 disables shade for this object
+  if (kindDef(o.kind).shape === "hypar") {
+    // footprintLocal order = [back-left, back-right, front-right, front-left];
+    // the door is on the front (+y) edge by the front-right corner. Measured
+    // corner heights 4' / 5' / 6' / 4' (front-right = 6' peak next to the door),
+    // scaled so the 6' peak tracks `tall`.
+    return [4, 5, 6, 4].map((h) => (h / 6) * tall);
+  }
+  return footprintLocal(o).map(() => tall);
+}
+
+/** The cast-shadow polygon (plot-local feet) for an object at a given sun
+ * position, or null if it casts none (no height / sun at/below horizon). The
+ * shadow = convex hull of the footprint outline + each corner pushed away from
+ * the sun by its own height/tan(altitude). Footprint + per-corner height follow
+ * the object's real shape (hexagon outline, hypar-warped heights, …). */
+function shadowPolygon(
+  o: ObjRow,
+  sun: { altitude: number; azimuth: number },
+  mapUpBearing: number,
+): ZonePt[] | null {
+  if (sun.altitude <= 0.5) return null;
+  const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
+  const tan = Math.tan((altDeg * Math.PI) / 180);
+  const heights = cornerHeights(o);
+  if (heights.every((h) => h <= 0)) return null;
+  // Unit shadow direction in plot-local feet (pointing away from the sun).
+  const dir = bearingToPlotDelta(sun.azimuth + 180, 1, mapUpBearing);
+  const cx = o.x + o.width / 2;
+  const cy = o.y + o.height / 2;
+  const corners: ZonePt[] = footprintLocal(o).map(([lx, ly]) => {
     const v = rotateVec(lx, ly, o.rotation);
     return { x: cx + v.x, y: cy + v.y };
   });
-  const all = corners.concat(
-    corners.map((c) => ({ x: c.x + dx, y: c.y + dy })),
-  );
-  return convexHull(all);
+  const tips = corners.map((c, i) => {
+    const len = Math.min((heights[i] ?? 0) / tan, 300);
+    return { x: c.x + dir.dx * len, y: c.y + dir.dy * len };
+  });
+  return convexHull(corners.concat(tips));
 }
 
 /** Effective frontage radius (ft from the Man): the manual override if set,
@@ -1130,6 +1285,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [selectedCableId, setSelectedCableId] = useState<string | null>(null);
   // Highlight filter: dims everything that doesn't match the chosen category.
   const [highlight, setHighlight] = useState<string>("none");
+  // Global door visibility — master switch over each object's own showDoor flag.
+  const [showDoors, setShowDoors] = useState(true);
   // Lot config form: hidden by default, revealed by the toolbar gear (it's a
   // once-at-setup form). Lifted here so the gear (in the map toolbar) and the
   // form (in the side rail) share one flag.
@@ -1138,7 +1295,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // ---- Shade simulation: time of day drives the sun, which casts shadows. ----
   const sunYear = lot?.year ?? CURRENT_EVENT_YEAR;
   const arc = useMemo(() => dayArc(sunYear), [sunYear]);
-  const [showShade, setShowShade] = useState(false);
+  const [showShade, setShowShade] = useState(true);
+  // Animation is opt-in: showing shade alone holds the sun at a fixed time; turn
+  // this on to auto-drift the sun across the day.
+  const [animateShade, setAnimateShade] = useState(false);
   // Local minute-of-day; start mid-afternoon for a clear shade demo.
   const [timeMin, setTimeMin] = useState(() =>
     Math.round((arc.noonMin + arc.sunsetMin) / 2),
@@ -1146,10 +1306,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // True while the user is dragging the compass sun (pauses the auto-drift).
   const [sunDragging, setSunDragging] = useState(false);
   const sun = useMemo(() => sunAt(sunYear, timeMin), [sunYear, timeMin]);
-  // Auto-drift the sun slowly across the daylight arc when not being dragged and
-  // the shade overlay is on; loop back to sunrise after sunset.
+  // Auto-drift the sun slowly across the daylight arc while animation is on (and
+  // the sun isn't being dragged); loop back to sunrise after sunset.
   useEffect(() => {
-    if (!showShade || sunDragging) return;
+    if (!showShade || !animateShade || sunDragging) return;
     const id = setInterval(() => {
       setTimeMin((t) => {
         const n = t + 3;
@@ -1157,7 +1317,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       });
     }, 120);
     return () => clearInterval(id);
-  }, [showShade, sunDragging, arc.sunriseMin, arc.sunsetMin]);
+  }, [showShade, animateShade, sunDragging, arc.sunriseMin, arc.sunsetMin]);
 
   // Reconcile the authoritative object the server returns after each mutation:
   // upsert it (a newly added/placed one gets appended + selected; an updated one
@@ -1287,6 +1447,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
             sun={sun}
             showShade={showShade}
+            showDoors={showDoors}
             fetcher={fetcher}
           />
           <GridScaleNote lot={lot} />
@@ -1312,6 +1473,13 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 { label: "Builds", value: "structure" },
               ]}
             />
+            <Checkbox
+              mt="sm"
+              size="xs"
+              label="Show doors"
+              checked={showDoors}
+              onChange={(e) => setShowDoors(e.currentTarget.checked)}
+            />
           </Paper>
           <Compass
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
@@ -1323,6 +1491,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setSunDragging={setSunDragging}
             showShade={showShade}
             setShowShade={setShowShade}
+            animateShade={animateShade}
+            setAnimateShade={setAnimateShade}
           />
           {canManage ? (
             <PendingPanel
@@ -1516,6 +1686,7 @@ function Editor({
   mapUpBearing,
   sun,
   showShade,
+  showDoors,
   fetcher,
 }: {
   lot: Lot;
@@ -1539,6 +1710,7 @@ function Editor({
   mapUpBearing: number | null;
   sun: { altitude: number; azimuth: number };
   showShade: boolean;
+  showDoors: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -1608,7 +1780,6 @@ function Editor({
   // biome-ignore lint/correctness/useExhaustiveDependencies: commit/fetcher are stable
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (!selectedId) return;
       const t = e.target as HTMLElement | null;
       if (
         t?.tagName === "INPUT" ||
@@ -1616,6 +1787,16 @@ function Editor({
         t?.isContentEditable
       )
         return;
+      // `g` cycles the active snap grid (no selection needed).
+      if (e.key === "g" || e.key === "G") {
+        e.preventDefault();
+        setGridSnap((g) => {
+          const i = SNAP_STEPS.indexOf(g as 1 | 10);
+          return SNAP_STEPS[(i + 1) % SNAP_STEPS.length] ?? SNAP_STEPS[0];
+        });
+        return;
+      }
+      if (!selectedId) return;
       const obj = objects.find((o) => o.id === selectedId);
       if (!obj) return;
       if (e.key === "Escape") {
@@ -1637,7 +1818,13 @@ function Editor({
       if (!editable(obj)) return;
       const step = e.shiftKey ? 10 : 1;
       let next: ObjRow | null = null;
-      if (e.key === "r" || e.key === "R") {
+      if (e.key === " " || e.code === "Space") {
+        // Space rotates 90° (Shift = the other way).
+        next = {
+          ...obj,
+          rotation: Math.round(obj.rotation + (e.shiftKey ? -90 : 90)),
+        };
+      } else if (e.key === "r" || e.key === "R") {
         next = {
           ...obj,
           rotation: Math.round(obj.rotation + (e.shiftKey ? -15 : 15)),
@@ -1705,6 +1892,10 @@ function Editor({
     (lot.streetLetter && lot.year
       ? streetLabel(lot.year, lot.streetLetter)
       : lot.streetLetter);
+  // Shade intensity tracks how strong the sun is (its altitude): faint near
+  // sunrise/sunset, darkest around midday. ~0.10 low → ~0.34 high.
+  const shadeOpacity =
+    0.08 + 0.28 * Math.sin((Math.max(sun.altitude, 0) * Math.PI) / 180);
 
   const fx = (sx: number) => (sx - originX) / ppf;
   const fy = (sy: number) => (sy - originY) / ppf;
@@ -2119,10 +2310,10 @@ function Editor({
                     size="xs"
                     value={String(gridSnap)}
                     onChange={(v) => setGridSnap(Number(v))}
-                    data={[
-                      { label: "1′", value: "1" },
-                      { label: "10′", value: "10" },
-                    ]}
+                    data={SNAP_STEPS.map((s) => ({
+                      label: `${s}′`,
+                      value: String(s),
+                    }))}
                   />
                 </Group>
               </Tooltip>
@@ -2162,9 +2353,9 @@ function Editor({
       >
         <title>Camp layout</title>
         <defs>
-          {/* Hypar roof: high corner light → low corner dark, tilted ~10° off
-              the diagonal so the high point reads off-axis. */}
-          <linearGradient id="hypar-roof" x1="0" y1="0" x2="0.72" y2="1">
+          {/* Hypar roof: bright at the high front-right corner (by the door) →
+              dark toward the low back-left, matching the per-corner heights. */}
+          <linearGradient id="hypar-roof" x1="1" y1="0.9" x2="0.05" y2="0.25">
             <stop offset="0" stopColor="#ffffff" stopOpacity={0.6} />
             <stop offset="1" stopColor="#000000" stopOpacity={0.38} />
           </linearGradient>
@@ -2211,7 +2402,7 @@ function Editor({
               x={originX + (lot.frontageFt * ppf) / 2}
               y={originY - 13}
               textAnchor="middle"
-              fontSize={13}
+              fontSize={15}
               fontWeight={700}
               fill="#868e96"
               style={{ userSelect: "none" }}
@@ -2221,24 +2412,23 @@ function Editor({
             </text>
           </g>
         ) : null}
-        {/* Shade simulation: each object casts a translucent shadow away from the
-            sun, clipped to the lot. Overlaps darken naturally. */}
+        {/* Shade simulation: each object casts a shadow away from the sun, clipped
+            to the lot. Overlaps UNION (OR) at one opacity rather than adding up —
+            the polygons are opaque inside a single group whose opacity flattens
+            them, so two overlapping shadows look the same as one. */}
         {showShade && mapUpBearing != null && sun.altitude > 0.5 ? (
-          <g clipPath={`url(#${clipId})`} pointerEvents="none">
+          <g
+            clipPath={`url(#${clipId})`}
+            pointerEvents="none"
+            opacity={shadeOpacity}
+          >
             {objects.map((o) => {
               const poly = shadowPolygon(o, sun, mapUpBearing);
               if (!poly || poly.length < 3) return null;
               const pts = poly
                 .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
                 .join(" ");
-              return (
-                <polygon
-                  key={`sh-${o.id}`}
-                  points={pts}
-                  fill="#1c1c1c"
-                  fillOpacity={0.16}
-                />
-              );
+              return <polygon key={`sh-${o.id}`} points={pts} fill="#1c1c1c" />;
             })}
           </g>
         ) : null}
@@ -2271,7 +2461,7 @@ function Editor({
                 y={originY + cyFt * ppf}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize={13}
+                fontSize={15}
                 fontWeight={600}
                 fill={z.color}
                 style={{ pointerEvents: "none", userSelect: "none" }}
@@ -2296,6 +2486,7 @@ function Editor({
               selected={o.id === selectedId}
               editable={editable(o)}
               dim={highlight !== "none" && !matches(o)}
+              showDoors={showDoors}
               onBodyDown={(e) => startDrag(e, o, "move")}
               onResizeDown={(e) => startDrag(e, o, "resize")}
               onRotateDown={(e) => startDrag(e, o, "rotate")}
@@ -2349,7 +2540,7 @@ function Editor({
                 y={originY + mid.y * ppf - 6}
                 textAnchor="middle"
                 dominantBaseline="central"
-                fontSize={12}
+                fontSize={14}
                 fontWeight={600}
                 fill={c.color}
                 stroke="#fff"
@@ -2527,6 +2718,8 @@ function Compass({
   setSunDragging,
   showShade,
   setShowShade,
+  animateShade,
+  setAnimateShade,
 }: {
   mapUpBearing: number | null;
   sun: { altitude: number; azimuth: number };
@@ -2537,6 +2730,8 @@ function Compass({
   setSunDragging: (v: boolean) => void;
   showShade: boolean;
   setShowShade: (v: boolean) => void;
+  animateShade: boolean;
+  setAnimateShade: (v: boolean) => void;
 }) {
   const S = 168;
   const cx = S / 2;
@@ -2570,7 +2765,7 @@ function Compass({
         <text
           x={cx + u.x * (r + 9)}
           y={cy + u.y * (r + 9)}
-          fontSize={10}
+          fontSize={12}
           fontWeight={opts?.weight ?? 400}
           fill={color}
           textAnchor="middle"
@@ -2708,6 +2903,15 @@ function Compass({
             label="Show shade"
           />
           {showShade ? (
+            <Switch
+              size="xs"
+              mt={6}
+              checked={animateShade}
+              onChange={(e) => setAnimateShade(e.currentTarget.checked)}
+              label="Animate"
+            />
+          ) : null}
+          {showShade ? (
             <Text size="xs" c="dimmed" mt={4}>
               {formatClock(timeMin)} · sun {Math.round(sun.altitude)}° up · drag
               the sun to change time
@@ -2757,6 +2961,7 @@ const MapObjectShape = memo(
     selected,
     editable,
     dim,
+    showDoors,
     onBodyDown,
     onResizeDown,
     onRotateDown,
@@ -2768,6 +2973,7 @@ const MapObjectShape = memo(
     selected: boolean;
     editable: boolean;
     dim: boolean;
+    showDoors: boolean;
     onBodyDown: (e: React.PointerEvent) => void;
     onResizeDown: (e: React.PointerEvent) => void;
     onRotateDown: (e: React.PointerEvent) => void;
@@ -2853,6 +3059,46 @@ const MapObjectShape = memo(
                 fill="url(#hypar-roof)"
                 pointerEvents="none"
               />
+              {/* A pair of roof solar panels. */}
+              {[0.17, 0.53].map((fy) => (
+                <rect
+                  key={fy}
+                  x={px + w * 0.24}
+                  y={py + h * fy}
+                  width={w * 0.52}
+                  height={h * 0.3}
+                  rx={0.5}
+                  fill="#4dabf7"
+                  fillOpacity={0.55}
+                  stroke="#1971c2"
+                  strokeWidth={0.7}
+                  pointerEvents="none"
+                />
+              ))}
+              {/* Roof fold (hypar ridge) down the middle, over the panels. */}
+              <line
+                x1={cx}
+                y1={py}
+                x2={cx}
+                y2={py + h}
+                stroke="#1c1c1c"
+                strokeOpacity={0.45}
+                strokeWidth={0.75}
+                pointerEvents="none"
+              />
+              {/* Roof AC unit on the back edge by the high corner — a power
+                  connection point cables snap to. */}
+              <rect
+                x={px + w * 0.58}
+                y={py - h * 0.16}
+                width={w * 0.22}
+                height={h * 0.18}
+                rx={0.5}
+                fill="#ced4da"
+                stroke="#868e96"
+                strokeWidth={0.6}
+                pointerEvents="none"
+              />
             </>
           ) : def.shape === "hexagon" ? (
             <>
@@ -2886,6 +3132,49 @@ const MapObjectShape = memo(
                 />
               ))}
             </>
+          ) : def.shape === "dome" ? (
+            <>
+              <ellipse
+                cx={cx}
+                cy={cy}
+                rx={w / 2}
+                ry={h / 2}
+                fill={fill}
+                fillOpacity={0.78}
+                stroke={selected ? "#1c1c1c" : fill}
+                strokeWidth={selected ? 2 : 1}
+                style={bodyStyle}
+                onPointerDown={onBodyDown}
+              />
+              {/* Geodesic facets: an inner ring + radial struts. */}
+              <ellipse
+                cx={cx}
+                cy={cy}
+                rx={w * 0.28}
+                ry={h * 0.28}
+                fill="none"
+                stroke="#1c1c1c"
+                strokeOpacity={0.3}
+                strokeWidth={0.75}
+                pointerEvents="none"
+              />
+              {[0, 60, 120, 180, 240, 300].map((a) => {
+                const r = (a * Math.PI) / 180;
+                return (
+                  <line
+                    key={a}
+                    x1={cx}
+                    y1={cy}
+                    x2={cx + Math.cos(r) * (w / 2)}
+                    y2={cy + Math.sin(r) * (h / 2)}
+                    stroke="#1c1c1c"
+                    strokeOpacity={0.25}
+                    strokeWidth={0.6}
+                    pointerEvents="none"
+                  />
+                );
+              })}
+            </>
           ) : (
             <rect
               x={px}
@@ -2902,7 +3191,7 @@ const MapObjectShape = memo(
             />
           )}
           <KindGlyph kind={o.kind} px={px} py={py} w={w} h={h} />
-          {o.kind === "rv" ? (
+          {showDoors && o.showDoor && o.kind === "rv" ? (
             <Door
               mx={px + w}
               my={cy}
@@ -2912,7 +3201,9 @@ const MapObjectShape = memo(
               ny={0}
               len={Math.min(3 * ppf, h * 0.4)}
             />
-          ) : o.kind === "hexayurt" || o.kind === "hyparhut" ? (
+          ) : showDoors && o.showDoor && o.kind === "hyparhut" ? (
+            <HyparDoor px={px} py={py} w={w} h={h} />
+          ) : showDoors && o.showDoor && o.kind === "hexayurt" ? (
             <Door
               mx={cx}
               my={py + h}
@@ -2922,28 +3213,8 @@ const MapObjectShape = memo(
               ny={-1}
               len={Math.min(3 * ppf, w * 0.5)}
             />
-          ) : o.kind === "container" ? (
-            // Double cargo doors on one short end, each leaf half the width.
-            <>
-              <Door
-                mx={px + w * 0.25}
-                my={py + h}
-                ex={1}
-                ey={0}
-                nx={0}
-                ny={-1}
-                len={w * 0.45}
-              />
-              <Door
-                mx={px + w * 0.75}
-                my={py + h}
-                ex={-1}
-                ey={0}
-                nx={0}
-                ny={-1}
-                len={w * 0.45}
-              />
-            </>
+          ) : showDoors && o.showDoor && o.kind === "container" ? (
+            <ContainerDoors px={px} py={py} w={w} h={h} />
           ) : null}
           {o.kind === "tent" ? (
             <rect
@@ -3016,7 +3287,7 @@ const MapObjectShape = memo(
                 x={cx}
                 y={showOwner ? cy - 7 : cy}
                 dominantBaseline="central"
-                fontSize={14}
+                fontSize={16}
                 fontWeight={700}
                 fill="#1c1c1c"
               >
@@ -3028,7 +3299,7 @@ const MapObjectShape = memo(
                 x={cx}
                 y={showName ? cy + 10 : cy}
                 dominantBaseline="central"
-                fontSize={showName ? 11 : 13}
+                fontSize={showName ? 13 : 15}
                 fontWeight={showName ? 400 : 600}
                 fill={showName ? "#868e96" : "#1c1c1c"}
               >
@@ -3270,6 +3541,22 @@ function SidePanel({
                   ]}
                 />
               </div>
+            ) : kindDef(selected.kind).shape === "dome" ? (
+              <NumberInput
+                size="xs"
+                label="Diameter (ft)"
+                value={Math.round(selected.width)}
+                min={4}
+                disabled={!canGeom}
+                onChange={(v) => {
+                  const d = Math.max(4, Number(v) || 4);
+                  patch(selected.id, { width: d, height: d });
+                }}
+                onBlur={() => {
+                  const d = round(selected.width);
+                  commitMany(selected.id, { width: d, height: d });
+                }}
+              />
             ) : kindDef(selected.kind).rigid ? (
               <Text size="xs" c="dimmed">
                 {fixedSizeLabel(selected.kind, selected.width, selected.height)}
@@ -3347,9 +3634,7 @@ function SidePanel({
               <NumberInput
                 size="xs"
                 label="Height (ft)"
-                description="for shade"
-                placeholder={String(kindHeight(selected.kind))}
-                value={selected.tallFt > 0 ? selected.tallFt : ""}
+                value={selected.tallFt}
                 min={0}
                 disabled={!canGeom}
                 onChange={(v) => patch(selected.id, { tallFt: Number(v) || 0 })}
@@ -3358,6 +3643,22 @@ function SidePanel({
                 }
               />
             </Group>
+            {canMeta && kindHasDoor(selected.kind) ? (
+              <Checkbox
+                size="xs"
+                label="Show door"
+                checked={selected.showDoor}
+                onChange={(e) => {
+                  const showDoor = e.currentTarget.checked;
+                  patch(selected.id, { showDoor });
+                  commitField(
+                    selected.id,
+                    "showDoor",
+                    showDoor ? "true" : "false",
+                  );
+                }}
+              />
+            ) : null}
             <Textarea
               size="xs"
               label="Notes"
