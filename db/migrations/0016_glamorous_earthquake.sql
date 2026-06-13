@@ -1,0 +1,1 @@
+ALTER TABLE `map_object` ADD `show_door` integer DEFAULT true NOT NULL;

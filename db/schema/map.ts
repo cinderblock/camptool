@@ -98,6 +98,8 @@ export const mapObject = sqliteTable(
     rotation: real("rotation").notNull().default(0),
     // Above-ground height (ft) for the 2D shade sim. 0 = use the kind's default.
     tallFt: real("tall_ft").notNull().default(0),
+    // Whether to draw this object's door on the map (only kinds that have one).
+    showDoor: integer("show_door", { mode: "boolean" }).notNull().default(true),
     color: text("color"),
     notes: text("notes"),
     // Pending-approval workflow: an owner-member may move/resize/rotate their own

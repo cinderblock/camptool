@@ -15,7 +15,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
 import { requireActiveEdition } from "~/lib/session.server";
-import { KINDS, ShapeSwatch, kindDef } from "~/lib/structures";
+import { KINDS, ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { mapObject } from "../../../db/schema";
 import type { Route } from "./+types/bringing";
@@ -94,6 +94,7 @@ export async function action({ request }: Route.ActionArgs) {
       placed: false,
       width: def.w,
       height: def.h,
+      tallFt: kindHeight(kind),
       createdById: user.id,
     });
     return data({ ok: true });

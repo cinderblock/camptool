@@ -765,6 +765,18 @@ placement page.)
       done). Verified: auto-redirect, per-step persistence + resume, occupant add,
       finish → dashboard with no loop. TODO: occupant who isn't yet a member
       (invite flow), richer profile questions.
+- [x] Map editor tweaks (2026-06-12, code-complete, NOT browser-tested) — (a)
+      **door visibility**: a global "Show doors" checkbox in the map's Highlight
+      panel (client-only master switch) + a per-element "Show door" checkbox in the
+      side panel (officer-only, kinds with a door = rv/hyparhut/hexayurt/container
+      via `kindHasDoor`). New `map_object.show_door` boolean (migration 0016, default
+      true); door render gated on `showDoors && o.showDoor`. (b) **default non-zero
+      height**: Bringing's `addItem` now seeds `tallFt = kindHeight(kind)` (was
+      falling to the DB default 0 → no shade); the map's `addObject` already did. (c)
+      removed the "for shade · 0 = no shade" helper text on the side-panel Height
+      input. typecheck + build green; migration 0016 verified on a DB copy. NOTE:
+      these edits layer on the parallel thread's still-uncommitted `map.tsx` /
+      `structures.tsx`.
 - [x] Routing flattened — no `/dashboard` URL segment (2026-06-12). The app shell
       is now a **pathless layout** (`layout("routes/dashboard/layout.tsx", …)` in
       `routes.ts`) whose index serves `/`; former `/dashboard/X` pages are now `/X`
