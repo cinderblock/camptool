@@ -964,16 +964,79 @@ config still editable since it's camp-scoped). Wired in `routes.ts` + a "Questio
 nav link (recruit+). `/start` wizard's `QuestionnaireStep` now renders the real
 audience-filtered questions instead of the stub.
 
-typecheck + build + biome green (on the new files). **Migration 0017 NOT yet
-applied to any live DB; feature NOT yet deployed or browser-tested.**
+typecheck + build + biome green. **DEPLOYED + browser-tested live (2026-06-14).**
+Commit b9fe917 pushed to master → firefly deploy green (2m33s) → migration 0017
+applied on app restart. Verified on `camptool.mathcamp.us` as admin: the
+`/questions` add form, each input type (short/long/single/multi/number/date/
+consent), reorder, and the read-only "Your answers" view all render and persist.
 
-**Next:** (1) browser-test `/questions` + the `/start` questionnaire step locally
-(restart dev server → migration 0017 applies). (2) Deploy (push to master →
-auto-deploy applies the migration). (3) Enter Math Camp's specific ~10 questions
-as DATA via the `/questions` admin UI on `camptool.mathcamp.us` — they stay camp
-data, never in the repo. **Still open:** edit-in-place for an existing question
-(currently delete + re-add); per-camp recruit-vs-returning audience tuning;
-answers in the officer inventory/roster view.
+**Math Camp's 11 questions entered as DATA via the live admin UI** (NOT in the
+repo): first-burn (single choice), how-you-heard (long, req), burner email +
+phone (short; phone req), rideshare (multi), strike day (date), bar supplies /
+interactivity / shared infra / what-makes-it-special (long), and the Expectations
+agreement (consent, req). All audience "Everyone" for now.
+
+**Still open:** edit-in-place for an existing question (currently delete +
+re-add); per-camp recruit-vs-returning audience tuning (axis is wired, all current
+questions are "all"); surfacing answers in the officer inventory/roster view.
+
+## Questionnaire + inventory — design-review backlog (2026-06-14)
+
+Rapid design feedback from the user after the question bank shipped. Captured
+here so nothing is lost; sequencing/forks to confirm before building the larger
+items. **Shipped already:** few-option single/multi choices render as buttons
+(commit 6556ea9); yes/no questions render as Yes/No buttons (commit ca09610).
+
+Backlog (not yet built):
+1. **Split the first-burn question into two yes/no.** Replace the 3-option
+   "first Burning Man, or first time with Math Camp?" with: (a) "Is this your
+   first Burning Man?" and (b) "Is this your first time camping with Math Camp?"
+   **Clarify (a) means ANY Burning Man-style event** (regional burns count), not
+   just the official Black Rock City main burn. Data-only change (delete + add
+   two boolean questions) — but see #5 (do it via the better inline editor, not
+   the current ↑/↓ UI).
+2. **Pre-fill "who invited you" from the invite tree.** When a camper joined via
+   an invite link, `membership.invited_by_membership_id` already records who
+   invited them. The "How did you hear / who invited you?" answer should be
+   pre-filled with that inviter. FORK: the question bank is generic and has no
+   way to know which question is "the inviter one" — needs a notion of a
+   **linked/smart question** (a semantic key on a question that binds it to
+   structured data), or split structured-inviter from free-text "how did you
+   hear." Part of the "smart questions" theme below.
+3. **Constrain date questions (arrival / strike) to the event window.** A `date`
+   question for arrival/strike should NOT show a generic calendar — only the
+   couple of relevant weeks around the event (derive from `eventStartFor(year)`
+   in brc.ts). FORK: new `event_date` question type that auto-bounds min/max, or
+   per-question min/max date config. Also reconsider arrival vs the setup-pass
+   dates already modeled (`setup_pass_date`).
+4. **Future: official-main-burn history + which year.** A separate ask: have you
+   been to the official BRC burn before, and which year(s)? Purpose: gauge
+   whether we expect them to be **prepared for the desert**. Likely a yes/no +
+   a year field (only meaningful if yes → conditional, which the bank doesn't
+   support yet).
+5. **Inline question management + drag-to-reorder. — LANDED.** Dropped the
+   read-only "Manage questions" card + separate add form. Officers now get an
+   `QuestionEditor` (`/questions`): each question is an inline-editable card
+   (prompt/help/type/audience/required/options auto-save per-field via a new
+   `editQuestion` action) with a **drag handle** (dnd-kit: core + sortable +
+   modifiers + utilities) and delete; an "+ Add question" button inserts a draft
+   ("New question") to edit in place. Drag persists via a new `reorder` action
+   (ordered id list → renumber sortOrder); the old `move` ↑/↓ intent is removed.
+   typecheck + build + biome green.
+6. **Camp inventory system (camp-level supplies, grouped).** NET-NEW, distinct
+   from the per-camper "bringing" inventory (personal tents/vehicles). Tracks
+   **shared camp supplies organized into groups/categories**, e.g. Bar (drinks,
+   mixers, tools, tchotchkes, signs), Lecture Hall (books, whiteboard markers, …).
+   Needs its own schema (item + category/group, likely camp- and edition-scoped,
+   qty, who's bringing/owns, status) + UI. Scope/design TBD.
+
+**Cross-cutting theme — "smart" vs free-form questions.** Items #2/#3/#4 all want
+questions that connect to *known structured data* (the invite edge, the event
+date window, participation/desert-readiness) rather than pure free text. Decision
+to make: extend the question bank with a small set of **built-in linked field
+types** (inviter, event-window date, …) alongside generic ones, vs keep questions
+dumb and handle these as bespoke first-class fields outside the bank. Lean toward
+a thin "linked key" on a question so the generic bank stays the single surface.
 
 ## Recruit funnel rework + invite tree (in progress)
 

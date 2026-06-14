@@ -1,6 +1,26 @@
 import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  restrictToParentElement,
+  restrictToVerticalAxis,
+} from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   ActionIcon,
-  Badge,
   Button,
   Card,
   Checkbox,
@@ -12,7 +32,6 @@ import {
   TextInput,
   Textarea,
   Title,
-  Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
@@ -25,10 +44,8 @@ import {
   QUESTION_TYPES,
   type QuestionAudience,
   type QuestionType,
-  audienceLabel,
   isSelectType,
   parseOptions,
-  questionTypeLabel,
 } from "~/lib/questions";
 import {
   filterByAudience,
@@ -171,26 +188,69 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
-  if (intent === "move") {
+  if (intent === "editQuestion") {
     const id = String(form.get("id"));
-    const dir = form.get("dir") === "up" ? -1 : 1;
-    const rows = await loadCampQuestions(campId);
-    const i = rows.findIndex((r) => r.id === id);
-    if (i < 0) return data({ ok: true });
-    const j = i + dir;
-    if (j < 0 || j >= rows.length) return data({ ok: true });
-    // Move the row, then renumber sequentially so order is stable regardless of ties.
-    const reordered = rows.slice();
-    const [moved] = reordered.splice(i, 1);
-    if (!moved) return data({ ok: true });
-    reordered.splice(j, 0, moved);
-    for (let k = 0; k < reordered.length; k++) {
-      const r = reordered[k];
-      if (!r) continue;
+    const field = String(form.get("field"));
+    const val = String(form.get("value") ?? "");
+    const set: Partial<typeof campQuestion.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+    switch (field) {
+      case "prompt": {
+        const p = val.trim();
+        if (!p)
+          return data({ error: "Prompt can't be empty." }, { status: 400 });
+        set.prompt = p;
+        break;
+      }
+      case "helpText":
+        set.helpText = val.trim() || null;
+        break;
+      case "type":
+        set.type = val as QuestionType;
+        break;
+      case "audience":
+        set.audience = val as QuestionAudience;
+        break;
+      case "required":
+        set.required = val === "true";
+        break;
+      case "options": {
+        const lines = val
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+        set.options = lines.length ? JSON.stringify(lines) : null;
+        break;
+      }
+      default:
+        return data({ error: "Unknown field." }, { status: 400 });
+    }
+    await db
+      .update(campQuestion)
+      .set(set)
+      .where(and(eq(campQuestion.id, id), eq(campQuestion.campId, campId)));
+    return data({ ok: true });
+  }
+
+  if (intent === "reorder") {
+    let ids: string[] = [];
+    try {
+      const v = JSON.parse(String(form.get("ids") ?? "[]"));
+      if (Array.isArray(v))
+        ids = v.filter((x): x is string => typeof x === "string");
+    } catch {
+      return data({ error: "Bad order." }, { status: 400 });
+    }
+    const owned = new Set((await loadCampQuestions(campId)).map((r) => r.id));
+    let k = 0;
+    for (const id of ids) {
+      if (!owned.has(id)) continue;
       await db
         .update(campQuestion)
         .set({ sortOrder: k })
-        .where(eq(campQuestion.id, r.id));
+        .where(and(eq(campQuestion.id, id), eq(campQuestion.campId, campId)));
+      k++;
     }
     return data({ ok: true });
   }
@@ -246,170 +306,211 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
           </Text>
         )}
 
-        {canManage ? <ManagePanel questions={questions} /> : null}
+        {canManage ? <QuestionEditor questions={questions} /> : null}
       </Stack>
     </Container>
   );
 }
 
-function ManagePanel({ questions }: { questions: Question[] }) {
-  const manageFetcher = useFetcher<FetcherData>();
-  const addFormRef = useRef<HTMLFormElement>(null);
-  const [type, setType] = useState<QuestionType>("short_text");
-  useFetcherError(manageFetcher.data, manageFetcher.state, () => {
-    addFormRef.current?.reset();
-    setType("short_text");
-  });
+/** Officer view: the questions edited in place, drag-to-reorder, with an add
+ * button. Replaces the old read-only "Manage" card + separate add form. */
+function QuestionEditor({ questions }: { questions: Question[] }) {
+  // Local copy so a drag reorders instantly; re-synced when the loader updates.
+  const [order, setOrder] = useState<Question[]>(questions);
+  useEffect(() => setOrder(questions), [questions]);
+
+  const reorderFetcher = useFetcher();
+  const addFetcher = useFetcher<FetcherData>();
+  useFetcherError(addFetcher.data, addFetcher.state);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIndex = order.findIndex((q) => q.id === active.id);
+    const newIndex = order.findIndex((q) => q.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(order, oldIndex, newIndex);
+    setOrder(next);
+    reorderFetcher.submit(
+      { intent: "reorder", ids: JSON.stringify(next.map((q) => q.id)) },
+      { method: "post" },
+    );
+  }
 
   return (
-    <Stack gap="md">
-      {questions.length > 0 ? (
-        <Card withBorder padding="md" radius="md">
-          <Text fw={600} mb="sm">
-            Manage questions
-          </Text>
-          <Stack gap="xs">
-            {questions.map((q, idx) => (
-              <Group
-                key={q.id}
-                justify="space-between"
-                wrap="nowrap"
-                align="flex-start"
-              >
-                <div style={{ minWidth: 0 }}>
-                  <Text size="sm" fw={500}>
-                    {q.prompt}
-                    {q.required ? (
-                      <Text component="span" c="red" inherit>
-                        {" *"}
-                      </Text>
-                    ) : null}
-                  </Text>
-                  <Group gap={6} mt={4}>
-                    <Badge size="xs" variant="light">
-                      {questionTypeLabel(q.type)}
-                    </Badge>
-                    <Badge size="xs" variant="light" color="grape">
-                      {audienceLabel(q.audience)}
-                    </Badge>
-                    {q.options.length > 0 ? (
-                      <Text size="xs" c="dimmed">
-                        {q.options.join(" · ")}
-                      </Text>
-                    ) : null}
-                  </Group>
-                </div>
-                <Group gap={2} wrap="nowrap">
-                  <Tooltip label="Move up">
-                    <ActionIcon
-                      variant="subtle"
-                      color="gray"
-                      disabled={idx === 0}
-                      onClick={() =>
-                        manageFetcher.submit(
-                          { intent: "move", id: q.id, dir: "up" },
-                          { method: "post" },
-                        )
-                      }
-                    >
-                      ↑
-                    </ActionIcon>
-                  </Tooltip>
-                  <Tooltip label="Move down">
-                    <ActionIcon
-                      variant="subtle"
-                      color="gray"
-                      disabled={idx === questions.length - 1}
-                      onClick={() =>
-                        manageFetcher.submit(
-                          { intent: "move", id: q.id, dir: "down" },
-                          { method: "post" },
-                        )
-                      }
-                    >
-                      ↓
-                    </ActionIcon>
-                  </Tooltip>
-                  <Tooltip label="Delete (also removes answers)">
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      onClick={() =>
-                        manageFetcher.submit(
-                          { intent: "deleteQuestion", id: q.id },
-                          { method: "post" },
-                        )
-                      }
-                    >
-                      ×
-                    </ActionIcon>
-                  </Tooltip>
-                </Group>
-              </Group>
-            ))}
-          </Stack>
-        </Card>
-      ) : null}
-
-      <Card withBorder padding="md" radius="md">
-        <Text fw={600} mb="sm">
-          Add a question
+    <Card withBorder padding="md" radius="md">
+      <Group justify="space-between" mb="sm">
+        <Text fw={600}>Edit questions</Text>
+        <Button
+          size="xs"
+          variant="light"
+          loading={addFetcher.state !== "idle"}
+          onClick={() =>
+            addFetcher.submit(
+              {
+                intent: "addQuestion",
+                prompt: "New question",
+                type: "short_text",
+                audience: "all",
+              },
+              { method: "post" },
+            )
+          }
+        >
+          + Add question
+        </Button>
+      </Group>
+      {order.length === 0 ? (
+        <Text c="dimmed" size="sm">
+          No questions yet — add the first one.
         </Text>
-        <manageFetcher.Form method="post" ref={addFormRef}>
-          <input type="hidden" name="intent" value="addQuestion" />
-          <Stack gap="sm">
-            <TextInput
-              name="prompt"
-              label="Question"
-              placeholder="e.g. Is this your first Burning Man?"
-              required
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext
+            items={order.map((q) => q.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <Stack gap="sm">
+              {order.map((q) => (
+                <SortableQuestion key={q.id} q={q} />
+              ))}
+            </Stack>
+          </SortableContext>
+        </DndContext>
+      )}
+    </Card>
+  );
+}
+
+/** One inline-editable question row. Each field auto-saves (blur for text,
+ * change for selects/checkbox). The handle is the drag affordance. */
+function SortableQuestion({ q }: { q: Question }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: q.id });
+  const fetcher = useFetcher<FetcherData>();
+  useFetcherError(fetcher.data, fetcher.state);
+  const save = (field: string, value: string) =>
+    fetcher.submit(
+      { intent: "editQuestion", id: q.id, field, value },
+      { method: "post" },
+    );
+
+  return (
+    <Card
+      ref={setNodeRef}
+      withBorder
+      padding="sm"
+      radius="md"
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+      }}
+    >
+      <Group align="flex-start" wrap="nowrap" gap="sm">
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          aria-label="Drag to reorder"
+          style={{ cursor: "grab", touchAction: "none" }}
+          {...attributes}
+          {...listeners}
+        >
+          ⠿
+        </ActionIcon>
+        <Stack gap="xs" style={{ flex: 1, minWidth: 0 }}>
+          <TextInput
+            size="xs"
+            placeholder="Question prompt"
+            defaultValue={q.prompt}
+            onBlur={(e) =>
+              e.currentTarget.value.trim() &&
+              e.currentTarget.value !== q.prompt &&
+              save("prompt", e.currentTarget.value)
+            }
+          />
+          <TextInput
+            size="xs"
+            placeholder="Help text (optional)"
+            defaultValue={q.helpText ?? ""}
+            onBlur={(e) =>
+              e.currentTarget.value !== (q.helpText ?? "") &&
+              save("helpText", e.currentTarget.value)
+            }
+          />
+          <Group gap="xs" align="flex-end">
+            <Select
+              size="xs"
+              label="Type"
+              data={QUESTION_TYPES}
+              value={q.type}
+              onChange={(v) => v && v !== q.type && save("type", v)}
+              allowDeselect={false}
+              comboboxProps={{ withinPortal: true }}
+              w={150}
             />
-            <TextInput
-              name="helpText"
-              label="Help text"
-              placeholder="Optional note shown under the question."
+            <Select
+              size="xs"
+              label="Who answers"
+              data={QUESTION_AUDIENCES}
+              value={q.audience}
+              onChange={(v) => v && v !== q.audience && save("audience", v)}
+              allowDeselect={false}
+              comboboxProps={{ withinPortal: true }}
+              w={160}
             />
-            <Group grow align="flex-start">
-              <Select
-                label="Type"
-                data={QUESTION_TYPES}
-                value={type}
-                onChange={(v) => setType((v as QuestionType) ?? "short_text")}
-                allowDeselect={false}
-                comboboxProps={{ withinPortal: true }}
-              />
-              <Select
-                name="audience"
-                label="Who answers"
-                data={QUESTION_AUDIENCES}
-                defaultValue="all"
-                allowDeselect={false}
-                comboboxProps={{ withinPortal: true }}
-              />
-            </Group>
-            {/* The Select above is controlled; mirror its value into the form. */}
-            <input type="hidden" name="type" value={type} />
-            {isSelectType(type) ? (
-              <Textarea
-                name="options"
-                label="Choices (one per line)"
-                placeholder={
-                  "First Burning Man\nNew to Math Camp\nReturning camper"
-                }
-                autosize
-                minRows={3}
-              />
-            ) : null}
-            <Checkbox name="required" label="Required" />
-            <Group justify="flex-end">
-              <Button type="submit" loading={manageFetcher.state !== "idle"}>
-                Add question
-              </Button>
-            </Group>
-          </Stack>
-        </manageFetcher.Form>
-      </Card>
-    </Stack>
+            <Checkbox
+              label="Required"
+              checked={q.required}
+              onChange={(e) =>
+                save("required", e.currentTarget.checked ? "true" : "false")
+              }
+            />
+          </Group>
+          {isSelectType(q.type) ? (
+            <Textarea
+              size="xs"
+              label="Choices (one per line)"
+              defaultValue={q.options.join("\n")}
+              onBlur={(e) => save("options", e.currentTarget.value)}
+              autosize
+              minRows={2}
+            />
+          ) : null}
+        </Stack>
+        <ActionIcon
+          variant="subtle"
+          color="red"
+          aria-label="Delete question"
+          onClick={() =>
+            fetcher.submit(
+              { intent: "deleteQuestion", id: q.id },
+              { method: "post" },
+            )
+          }
+        >
+          ×
+        </ActionIcon>
+      </Group>
+    </Card>
   );
 }
 
