@@ -1,5 +1,8 @@
 import {
+  Button,
   Checkbox,
+  Group,
+  Input,
   NumberInput,
   Select,
   Stack,
@@ -10,6 +13,10 @@ import {
 import { DateInput } from "@mantine/dates";
 import { useFetcher } from "react-router";
 import { type QuestionType, parseMultiValue } from "~/lib/questions";
+
+/** At or below this many options, a single/multi choice renders as a row of
+ * buttons instead of a dropdown — quicker to scan and tap for a short list. */
+const BUTTON_MAX = 5;
 
 export type QuestionFieldData = {
   id: string;
@@ -78,7 +85,27 @@ export function QuestionField({
           w={200}
         />
       );
-    case "single_select":
+    case "single_select": {
+      const current = value ?? "";
+      if (q.options.length <= BUTTON_MAX) {
+        return (
+          <Input.Wrapper label={label} description={q.helpText}>
+            <Group gap="xs" mt={6}>
+              {q.options.map((o) => (
+                <Button
+                  key={o}
+                  size="xs"
+                  variant={current === o ? "filled" : "default"}
+                  disabled={locked}
+                  onClick={() => save(current === o ? "" : o)}
+                >
+                  {o}
+                </Button>
+              ))}
+            </Group>
+          </Input.Wrapper>
+        );
+      }
       return (
         <Select
           label={label}
@@ -92,12 +119,41 @@ export function QuestionField({
           maw={360}
         />
       );
-    case "multi_select":
+    }
+    case "multi_select": {
+      const selected = parseMultiValue(value);
+      const toggle = (o: string) =>
+        save(
+          JSON.stringify(
+            selected.includes(o)
+              ? selected.filter((x) => x !== o)
+              : [...selected, o],
+          ),
+        );
+      if (q.options.length <= BUTTON_MAX) {
+        return (
+          <Input.Wrapper label={label} description={q.helpText}>
+            <Group gap="xs" mt={6}>
+              {q.options.map((o) => (
+                <Button
+                  key={o}
+                  size="xs"
+                  variant={selected.includes(o) ? "filled" : "default"}
+                  disabled={locked}
+                  onClick={() => toggle(o)}
+                >
+                  {o}
+                </Button>
+              ))}
+            </Group>
+          </Input.Wrapper>
+        );
+      }
       return (
         <Checkbox.Group
           label={label}
           description={q.helpText}
-          defaultValue={parseMultiValue(value)}
+          defaultValue={selected}
           onChange={(v) => save(JSON.stringify(v))}
         >
           <Stack gap={6} mt={6}>
@@ -107,6 +163,7 @@ export function QuestionField({
           </Stack>
         </Checkbox.Group>
       );
+    }
     case "boolean":
       return (
         <Checkbox
