@@ -37,11 +37,15 @@ export function QuestionField({
   value,
   locked,
   action,
+  bare,
 }: {
   question: QuestionFieldData;
   value: string | undefined;
   locked: boolean;
   action?: string;
+  /** Render only the input control — no prompt label or help text. The editor
+   * shows those as separate click-to-edit text, so it suppresses them here. */
+  bare?: boolean;
 }) {
   const fetcher = useFetcher();
   const save = (v: string) =>
@@ -50,7 +54,8 @@ export function QuestionField({
       action ? { method: "post", action } : { method: "post" },
     );
 
-  const label = (
+  const description = bare ? undefined : q.helpText;
+  const label = bare ? undefined : (
     <span>
       {q.prompt}
       {q.required ? (
@@ -66,7 +71,7 @@ export function QuestionField({
       return (
         <Textarea
           label={label}
-          description={q.helpText}
+          description={description}
           autosize
           minRows={3}
           disabled={locked}
@@ -78,7 +83,7 @@ export function QuestionField({
       return (
         <NumberInput
           label={label}
-          description={q.helpText}
+          description={description}
           disabled={locked}
           defaultValue={value === undefined ? undefined : Number(value)}
           onBlur={(e) => save(e.currentTarget.value)}
@@ -89,7 +94,7 @@ export function QuestionField({
       const current = value ?? "";
       if (q.options.length <= BUTTON_MAX) {
         return (
-          <Input.Wrapper label={label} description={q.helpText}>
+          <Input.Wrapper label={label} description={description}>
             <Group gap="xs" mt={6}>
               {q.options.map((o) => (
                 <Button
@@ -109,7 +114,7 @@ export function QuestionField({
       return (
         <Select
           label={label}
-          description={q.helpText}
+          description={description}
           data={q.options}
           disabled={locked}
           defaultValue={value ?? null}
@@ -132,7 +137,7 @@ export function QuestionField({
         );
       if (q.options.length <= BUTTON_MAX) {
         return (
-          <Input.Wrapper label={label} description={q.helpText}>
+          <Input.Wrapper label={label} description={description}>
             <Group gap="xs" mt={6}>
               {q.options.map((o) => (
                 <Button
@@ -152,7 +157,7 @@ export function QuestionField({
       return (
         <Checkbox.Group
           label={label}
-          description={q.helpText}
+          description={description}
           defaultValue={selected}
           onChange={(v) => save(JSON.stringify(v))}
         >
@@ -171,7 +176,7 @@ export function QuestionField({
       const pick = (choice: "yes" | "no") =>
         save(yn === choice ? "" : choice === "yes" ? "true" : "false");
       return (
-        <Input.Wrapper label={label} description={q.helpText}>
+        <Input.Wrapper label={label} description={description}>
           <Group gap="xs" mt={6}>
             <Button
               size="xs"
@@ -197,7 +202,7 @@ export function QuestionField({
       return (
         <Checkbox
           label={label}
-          description={q.helpText}
+          description={description}
           color="green"
           disabled={locked}
           defaultChecked={value === "true"}
@@ -208,7 +213,7 @@ export function QuestionField({
       return (
         <DateInput
           label={label}
-          description={q.helpText}
+          description={description}
           valueFormat="YYYY-MM-DD"
           disabled={locked}
           defaultValue={value ? new Date(value) : null}
@@ -221,7 +226,7 @@ export function QuestionField({
       return (
         <TextInput
           label={label}
-          description={q.helpText}
+          description={description}
           disabled={locked}
           defaultValue={value ?? ""}
           onBlur={(e) => save(e.currentTarget.value)}

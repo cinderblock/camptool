@@ -25,13 +25,11 @@ import {
   Card,
   Checkbox,
   Container,
-  Divider,
   Group,
   Select,
   Stack,
   Text,
   TextInput,
-  Textarea,
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -412,10 +410,111 @@ function QuestionEditor({
   );
 }
 
-/** One question, combined: the edit controls AND the live question (answer +
- * preview) in a single draggable card. Each edit field auto-saves (blur for text,
- * change for selects/checkbox). Memoized so a drag re-renders only the moving row.
- */
+/** Click-to-edit text: shows `value` as text; clicking swaps to an input that
+ * saves on blur / Enter (Escape cancels). The WYSIWYG editing primitive. */
+function EditableText({
+  value,
+  onSave,
+  placeholder,
+  fw,
+  size = "sm",
+}: {
+  value: string;
+  onSave: (v: string) => void;
+  placeholder: string;
+  fw?: number;
+  size?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (editing) {
+    return (
+      <TextInput
+        size={size}
+        autoFocus
+        defaultValue={value}
+        placeholder={placeholder}
+        onBlur={(e) => {
+          setEditing(false);
+          if (e.currentTarget.value !== value) onSave(e.currentTarget.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            setEditing(false);
+          }
+        }}
+      />
+    );
+  }
+  return (
+    <Text
+      size={size}
+      fw={fw}
+      c={value ? undefined : "dimmed"}
+      onClick={() => setEditing(true)}
+      style={{ cursor: "text", minHeight: "1.5em" }}
+    >
+      {value || placeholder}
+    </Text>
+  );
+}
+
+/** Click-to-edit list of choices for single/multi questions. */
+function OptionsEditor({
+  options,
+  onChange,
+}: {
+  options: string[];
+  onChange: (opts: string[]) => void;
+}) {
+  return (
+    <Stack gap={2}>
+      {options.map((opt, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: options are positional
+        <Group key={i} gap={4} wrap="nowrap" align="center">
+          <Text size="sm" c="dimmed">
+            •
+          </Text>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <EditableText
+              value={opt}
+              placeholder="Choice"
+              onSave={(v) => {
+                const next = options.slice();
+                next[i] = v;
+                onChange(next.filter((o) => o.trim()));
+              }}
+            />
+          </div>
+          <ActionIcon
+            size="sm"
+            variant="subtle"
+            color="red"
+            aria-label="Remove choice"
+            onClick={() => onChange(options.filter((_, j) => j !== i))}
+          >
+            ×
+          </ActionIcon>
+        </Group>
+      ))}
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        w="fit-content"
+        onClick={() => onChange([...options, `Choice ${options.length + 1}`])}
+      >
+        + Add choice
+      </Button>
+    </Stack>
+  );
+}
+
+/** One question as a WYSIWYG card: the prompt, help, and choices are the rendered
+ * question text — click any of them to edit in place. Type / audience / required
+ * (not text) sit in a small settings row. Drag handle reorders. Memoized so a drag
+ * re-renders only the moving row. */
 const SortableQuestion = memo(function SortableQuestion({
   q,
   value,
@@ -464,30 +563,40 @@ const SortableQuestion = memo(function SortableQuestion({
         >
           ⠿
         </ActionIcon>
-        <Stack gap="xs" style={{ flex: 1, minWidth: 0 }}>
-          <TextInput
+        <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={4} wrap="nowrap" align="baseline">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <EditableText
+                value={q.prompt}
+                fw={600}
+                placeholder="Question prompt"
+                onSave={(v) => v.trim() && save("prompt", v)}
+              />
+            </div>
+            {q.required ? (
+              <Text c="red" size="sm">
+                *
+              </Text>
+            ) : null}
+          </Group>
+          <EditableText
+            value={q.helpText ?? ""}
             size="xs"
-            placeholder="Question prompt"
-            defaultValue={q.prompt}
-            onBlur={(e) =>
-              e.currentTarget.value.trim() &&
-              e.currentTarget.value !== q.prompt &&
-              save("prompt", e.currentTarget.value)
-            }
+            placeholder="Add help text (optional)"
+            onSave={(v) => save("helpText", v)}
           />
-          <TextInput
-            size="xs"
-            placeholder="Help text (optional)"
-            defaultValue={q.helpText ?? ""}
-            onBlur={(e) =>
-              e.currentTarget.value !== (q.helpText ?? "") &&
-              save("helpText", e.currentTarget.value)
-            }
-          />
-          <Group gap="xs" align="flex-end">
+          {isSelectType(q.type) ? (
+            <OptionsEditor
+              options={q.options}
+              onChange={(opts) => save("options", opts.join("\n"))}
+            />
+          ) : (
+            <QuestionField question={q} value={value} locked={locked} bare />
+          )}
+          <Group gap="xs" align="center" mt={4} c="dimmed">
             <Select
               size="xs"
-              label="Type"
+              aria-label="Type"
               data={QUESTION_TYPES}
               value={q.type}
               onChange={(v) => v && v !== q.type && save("type", v)}
@@ -497,7 +606,7 @@ const SortableQuestion = memo(function SortableQuestion({
             />
             <Select
               size="xs"
-              label="Who answers"
+              aria-label="Who answers"
               data={QUESTION_AUDIENCES}
               value={q.audience}
               onChange={(v) => v && v !== q.audience && save("audience", v)}
@@ -506,6 +615,7 @@ const SortableQuestion = memo(function SortableQuestion({
               w={160}
             />
             <Checkbox
+              size="xs"
               label="Required"
               checked={q.required}
               onChange={(e) =>
@@ -513,18 +623,6 @@ const SortableQuestion = memo(function SortableQuestion({
               }
             />
           </Group>
-          {isSelectType(q.type) ? (
-            <Textarea
-              size="xs"
-              label="Choices (one per line)"
-              defaultValue={q.options.join("\n")}
-              onBlur={(e) => save("options", e.currentTarget.value)}
-              autosize
-              minRows={2}
-            />
-          ) : null}
-          <Divider my={4} label="Preview" labelPosition="left" />
-          <QuestionField question={q} value={value} locked={locked} />
         </Stack>
         <ActionIcon
           variant="subtle"
