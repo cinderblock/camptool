@@ -3,6 +3,7 @@ export * from "./camp";
 export * from "./discord";
 export * from "./instance";
 export * from "./map";
+export * from "./question";
 export * from "./recruit";
 export * from "./season";
 export * from "./ticket";

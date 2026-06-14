@@ -796,6 +796,16 @@ placement page.)
       new ask; tickets/questionnaire stubbed. Layout "Finish setup" nudge is now
       per-edition pending-asks. typecheck/build/biome green; migration + scheduler
       verified by script; NOT yet browser-tested. Details in the section below.
+- [x] Questionnaire / question bank (code-complete, NOT browser-tested) — generic
+      question-bank feature (the wizard's stubbed `questionnaire` ask). Schema
+      `db/schema/question.ts` (`camp_question` camp-scoped config + `question_answer`
+      edition-scoped) + migration 0017; `app/lib/questions.ts`/`.server.ts`;
+      `app/components/QuestionField.tsx`; `/questions` route (officer CRUD + member
+      answers) + nav link; `/start` questionnaire step wired to real questions.
+      typecheck/build/biome green. Converts the Math Camp Airtable forms: most
+      fields map to existing features (Bringing inventory, RSVP, passes, tickets);
+      only the free-form remainder is the new bank. Camp's actual questions get
+      entered as DATA via admin, not committed. See section below.
 
 ## Season-aware wizard (design direction — first slice landed)
 
@@ -904,6 +914,66 @@ audience-tagged questions + per-membership answers; recruits get more); per-camp
 RSVP'd / pending (`participation` + `wizard_ask` already capture it); browser-test
 the rewritten `/start` end-to-end; consider dropping the now-vestigial
 `wizard_completed_at` column in a later cleanup migration.
+
+## Questionnaire / question bank (LANDED, code-complete — NOT yet browser-tested)
+
+The net-new piece the season wizard's `questionnaire` ask was stubbed for. Built
+in response to "convert our Airtable forms into the new system." **Key framing
+(user-locked):** the *capability* to ask arbitrary questions is generic and lives
+in the shared app; a camp's *actual questions are DATA* an officer enters (never
+baked into the open-source code). This resolves the "shouldn't be baked in, but
+should let us ask these" tension.
+
+**Airtable → CampTool mapping (the real insight).** The two 2024/2025 Airtable
+forms are not one feature — most fields already had homes, so only a slice is the
+new question bank:
+- **Vehicles & Domiciles Census ≈ the existing Bringing inventory** (`map_object`):
+  name→name, type→kind, W/L/H→width/height/tallFt, prefs/details→notes. No
+  question bank needed.
+- **Census fields routed to existing features** (user decision: route overlap to
+  the real feature, don't duplicate as questions): names/playa→profile; "camping
+  this year?"→`participation` RSVP; SAP + setup day→`setup_pass`/`setup_pass_date`;
+  ticket/vehicle-pass ± counts→ticketing; "# in group"→occupants/participation.
+- **Genuinely-new free-form fields → the question bank:** first-burn/first-Math-
+  Camp, how-you-heard/who-invited, burner-profile email, phone, rideshare, strike
+  day, bar-supplies / interactivity / shared-infra contributions, "what makes it
+  special", and the Expectations agreement (a `consent` checkbox).
+
+**Schema — `db/schema/question.ts`, migration 0017** (2 tables):
+- `camp_question` — camp-scoped config (NOT edition-scoped; the question set
+  persists across years, like `onboarding_task`). Columns: prompt, helpText, type,
+  options (JSON string[] for selects), audience (all|returning|recruit, matches
+  `AskAudience`), required, sortOrder, archivedAt (soft-retire so answers survive).
+- `question_answer` — edition-scoped (per-year; contributions/consent are per-year)
+  per (edition, membership, question). value is text for every type (number→digits,
+  boolean/consent→"true"/"false", date→YYYY-MM-DD, single→option, multi→JSON array).
+  Unique (edition, membership, question).
+
+**Types/helpers.** `app/lib/questions.ts` (pure, client-safe): `QuestionType`
+union (keep in sync with the schema's), `QUESTION_TYPES`/`QUESTION_AUDIENCES`,
+`parseOptions`/`parseMultiValue`, label helpers. `app/lib/questions.server.ts`:
+`loadCampQuestions` (active, ordered), `filterByAudience` (reuses
+`audienceForRole` from wizard.ts), `loadAnswers`, `setAnswer` (upsert).
+
+**UI.** `app/components/QuestionField.tsx` — one shared component renders an answer
+field by type and saves via fetcher (optional `action` prop so the wizard can post
+to `/questions`). `app/routes/dashboard/questions.tsx` — officer management
+(add prompt/help/type/options/audience/required, delete, reorder ↑/↓) + member
+answering for the active edition; locked edition = answers read-only (officer
+config still editable since it's camp-scoped). Wired in `routes.ts` + a "Questions"
+nav link (recruit+). `/start` wizard's `QuestionnaireStep` now renders the real
+audience-filtered questions instead of the stub.
+
+typecheck + build + biome green (on the new files). **Migration 0017 NOT yet
+applied to any live DB; feature NOT yet deployed or browser-tested.**
+
+**Next:** (1) browser-test `/questions` + the `/start` questionnaire step locally
+(restart dev server → migration 0017 applies). (2) Deploy (push to master →
+auto-deploy applies the migration). (3) Enter Math Camp's specific ~10 questions
+as DATA via the `/questions` admin UI on `camptool.mathcamp.us` — they stay camp
+data, never in the repo. **Still open:** edit-in-place for an existing question
+(currently delete + re-add); per-camp recruit-vs-returning audience tuning;
+answers in the officer inventory/roster view.
 
 ## Recruit funnel rework + invite tree (in progress)
 

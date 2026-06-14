@@ -19,7 +19,15 @@ import {
 import { and, asc, eq } from "drizzle-orm";
 import { useState } from "react";
 import { Link, data, useFetcher, useNavigate } from "react-router";
+import { QuestionField } from "~/components/QuestionField";
 import { weeksUntilEvent } from "~/lib/brc";
+import type { QuestionType } from "~/lib/questions";
+import { parseOptions } from "~/lib/questions";
+import {
+  filterByAudience,
+  loadAnswers,
+  loadCampQuestions,
+} from "~/lib/questions.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { KINDS, ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
 import type { AskKey } from "~/lib/wizard";
@@ -98,6 +106,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   }[] = [];
   let roster: { membershipId: string; name: string | null }[] = [];
   let tasks: { id: string; title: string; done: boolean }[] = [];
+  let questions: {
+    id: string;
+    prompt: string;
+    helpText: string | null;
+    type: QuestionType;
+    options: string[];
+    required: boolean;
+  }[] = [];
+  let answers: Record<string, string> = {};
 
   if (keys.has("bringing") || keys.has("sharing")) {
     items = await db
@@ -167,6 +184,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     }));
   }
 
+  if (keys.has("questionnaire")) {
+    const rows = filterByAudience(await loadCampQuestions(campId), role);
+    questions = rows.map((q) => ({
+      id: q.id,
+      prompt: q.prompt,
+      helpText: q.helpText,
+      type: q.type as QuestionType,
+      options: parseOptions(q.options),
+      required: q.required,
+    }));
+    answers = await loadAnswers({ editionId, membershipId: mid });
+  }
+
   return {
     locked: activeEdition.locked,
     userName: authUser.name,
@@ -186,6 +216,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     occupants,
     roster,
     tasks,
+    questions,
+    answers,
   };
 }
 
@@ -329,11 +361,7 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
             Stop anytime and pick up where you left off.
           </Text>
         </div>
-        <Button
-          variant="subtle"
-          size="xs"
-          onClick={() => navigate("/")}
-        >
+        <Button variant="subtle" size="xs" onClick={() => navigate("/")}>
           Skip / do it manually
         </Button>
       </Group>
@@ -489,18 +517,28 @@ function RsvpStep({ data: d }: { data: LoaderData }) {
 
 function QuestionnaireStep({ data: d }: { data: LoaderData }) {
   return (
-    <Stack gap="sm" mt="md" maw={460}>
+    <Stack gap="md" mt="md" maw={520}>
       <Text size="sm" c="dimmed">
-        We'll collect a few questions here to get to know you and plan the camp.
+        {d.audience === "recruit"
+          ? "A few questions so we can get to know you."
+          : "A quick check-in to help us plan the camp."}{" "}
+        Answers save as you go.
       </Text>
-      <Paper withBorder p="md" radius="md" bg="var(--mantine-color-gray-0)">
-        <Text size="sm">
-          {d.audience === "recruit"
-            ? "As a prospective camper, you'll get a slightly longer set of questions so we can get to know you."
-            : "A short check-in for returning campers."}{" "}
-          The questionnaire isn't built yet — skip for now.
+      {d.questions.length === 0 ? (
+        <Text c="dimmed" size="sm">
+          No questions right now — you're good.
         </Text>
-      </Paper>
+      ) : (
+        d.questions.map((q) => (
+          <QuestionField
+            key={q.id}
+            question={q}
+            value={d.answers[q.id]}
+            locked={d.locked}
+            action="/questions"
+          />
+        ))
+      )}
     </Stack>
   );
 }
@@ -512,12 +550,7 @@ function TicketsStep() {
         We coordinate Directed Group Sale (DGS) tickets through the camp. If you
         need one, request it so an officer can allocate yours.
       </Text>
-      <Button
-        component={Link}
-        to="/tickets"
-        variant="light"
-        w="fit-content"
-      >
+      <Button component={Link} to="/tickets" variant="light" w="fit-content">
         Go to tickets
       </Button>
     </Stack>

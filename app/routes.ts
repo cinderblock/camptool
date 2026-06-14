@@ -22,6 +22,7 @@ export default [
     route("tickets", "routes/dashboard/tickets.tsx"),
     route("passes", "routes/dashboard/passes.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),
+    route("questions", "routes/dashboard/questions.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
     route("admin", "routes/dashboard/admin.tsx"),
   ]),
