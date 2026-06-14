@@ -1028,6 +1028,12 @@ Backlog (not yet built):
    auto-tested: the drag *gesture* itself — the claude-in-chrome drag tool doesn't
    emit the pointer events dnd-kit needs (same gotcha as the SVG map drag); have
    the user confirm a real drag reorders.
+   FOLLOW-UP (commit af0d829, deployed + verified): per user feedback, the
+   "Your answers" and "Edit questions" sections are now COMBINED — for officers
+   each card holds the edit controls AND a "Preview" divider + the live
+   QuestionField (answer/preview) together; members still see just the answer
+   list. Drag start-lag reduced by memoizing the sortable rows + lowering the
+   PointerSensor activation distance 5→3. User confirmed DnD works.
 6. **Camp inventory system (camp-level supplies, grouped).** NET-NEW, distinct
    from the per-camper "bringing" inventory (personal tents/vehicles). Tracks
    **shared camp supplies organized into groups/categories**, e.g. Bar (drinks,
