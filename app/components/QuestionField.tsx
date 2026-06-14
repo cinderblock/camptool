@@ -164,16 +164,35 @@ export function QuestionField({
         </Checkbox.Group>
       );
     }
-    case "boolean":
+    case "boolean": {
+      // Yes/No as two buttons (not a lone checkbox) so an unanswered question is
+      // distinguishable from an explicit "No". Re-clicking the active one clears it.
+      const yn = value === "true" ? "yes" : value === "false" ? "no" : "";
+      const pick = (choice: "yes" | "no") =>
+        save(yn === choice ? "" : choice === "yes" ? "true" : "false");
       return (
-        <Checkbox
-          label={label}
-          description={q.helpText}
-          disabled={locked}
-          defaultChecked={value === "true"}
-          onChange={(e) => save(e.currentTarget.checked ? "true" : "false")}
-        />
+        <Input.Wrapper label={label} description={q.helpText}>
+          <Group gap="xs" mt={6}>
+            <Button
+              size="xs"
+              variant={yn === "yes" ? "filled" : "default"}
+              disabled={locked}
+              onClick={() => pick("yes")}
+            >
+              Yes
+            </Button>
+            <Button
+              size="xs"
+              variant={yn === "no" ? "filled" : "default"}
+              disabled={locked}
+              onClick={() => pick("no")}
+            >
+              No
+            </Button>
+          </Group>
+        </Input.Wrapper>
       );
+    }
     case "consent":
       return (
         <Checkbox
