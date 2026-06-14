@@ -988,13 +988,13 @@ items. **Shipped already:** few-option single/multi choices render as buttons
 (commit 6556ea9); yes/no questions render as Yes/No buttons (commit ca09610).
 
 Backlog (not yet built):
-1. **Split the first-burn question into two yes/no.** Replace the 3-option
-   "first Burning Man, or first time with Math Camp?" with: (a) "Is this your
-   first Burning Man?" and (b) "Is this your first time camping with Math Camp?"
-   **Clarify (a) means ANY Burning Man-style event** (regional burns count), not
-   just the official Black Rock City main burn. Data-only change (delete + add
-   two boolean questions) — but see #5 (do it via the better inline editor, not
-   the current ↑/↓ UI).
+1. **Split the first-burn question into two yes/no. — DONE (live data).** Via the
+   new inline editor: converted the old 3-option question in place to (a) "Is this
+   your first Burning Man?" (Yes/No, required, help: "Any Burning Man-style event
+   counts (regional burns too) — not just Black Rock City."), and added (b) "Is
+   this your first time camping with Math Camp?" (Yes/No, required). (a) is at the
+   top; (b) currently sits last because drag-reorder can't be driven by the
+   automation tool — the user can drag it up under (a) to make them adjacent.
 2. **Pre-fill "who invited you" from the invite tree.** When a camper joined via
    an invite link, `membership.invited_by_membership_id` already records who
    invited them. The "How did you hear / who invited you?" answer should be
