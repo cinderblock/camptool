@@ -25,6 +25,7 @@ import {
   Card,
   Checkbox,
   Container,
+  Divider,
   Group,
   Select,
   Stack,
@@ -35,7 +36,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { QuestionField } from "~/components/QuestionField";
 import { hasAtLeast } from "~/lib/permissions";
@@ -263,7 +264,8 @@ type LoaderData = Route.ComponentProps["loaderData"];
 type Question = LoaderData["questions"][number];
 
 export default function Questions({ loaderData }: Route.ComponentProps) {
-  const { questions, canManage, audience, locked, year } = loaderData;
+  const { questions, answers, canManage, audience, locked, year } = loaderData;
+  // Members only see the questions relevant to them; officers manage all of them.
   const mine = questions.filter(
     (q) => q.audience === "all" || q.audience === audience,
   );
@@ -278,35 +280,36 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
           </Text>
         </div>
 
-        {mine.length > 0 ? (
+        {locked ? (
+          <Text size="sm" c="dimmed">
+            This year is locked — answers are read-only.
+          </Text>
+        ) : null}
+
+        {canManage ? (
+          // Officers: one combined list — each card edits the question AND shows
+          // it live (answer/preview) — plus drag-to-reorder.
+          <QuestionEditor
+            questions={questions}
+            answers={answers}
+            locked={locked}
+          />
+        ) : mine.length > 0 ? (
           <Card withBorder padding="md" radius="md">
-            <Text fw={600} mb="xs">
-              Your answers
-            </Text>
-            {locked ? (
-              <Text size="sm" c="dimmed" mb="sm">
-                This year is locked — answers are read-only.
-              </Text>
-            ) : null}
             <Stack gap="lg">
               {mine.map((q) => (
                 <QuestionField
                   key={q.id}
                   question={q}
-                  value={loaderData.answers[q.id]}
+                  value={answers[q.id]}
                   locked={locked}
                 />
               ))}
             </Stack>
           </Card>
         ) : (
-          <Text c="dimmed">
-            No questions yet.
-            {canManage ? " Add the first one below." : ""}
-          </Text>
+          <Text c="dimmed">No questions yet.</Text>
         )}
-
-        {canManage ? <QuestionEditor questions={questions} /> : null}
       </Stack>
     </Container>
   );
@@ -314,7 +317,15 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
 
 /** Officer view: the questions edited in place, drag-to-reorder, with an add
  * button. Replaces the old read-only "Manage" card + separate add form. */
-function QuestionEditor({ questions }: { questions: Question[] }) {
+function QuestionEditor({
+  questions,
+  answers,
+  locked,
+}: {
+  questions: Question[];
+  answers: Record<string, string>;
+  locked: boolean;
+}) {
   // Local copy so a drag reorders instantly; re-synced when the loader updates.
   const [order, setOrder] = useState<Question[]>(questions);
   useEffect(() => setOrder(questions), [questions]);
@@ -323,8 +334,10 @@ function QuestionEditor({ questions }: { questions: Question[] }) {
   const addFetcher = useFetcher<FetcherData>();
   useFetcherError(addFetcher.data, addFetcher.state);
 
+  // distance:3 activates the drag quickly (less start-lag) while still letting
+  // clicks land on the inputs/handle without triggering a drag.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 3 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
@@ -384,7 +397,12 @@ function QuestionEditor({ questions }: { questions: Question[] }) {
           >
             <Stack gap="sm">
               {order.map((q) => (
-                <SortableQuestion key={q.id} q={q} />
+                <SortableQuestion
+                  key={q.id}
+                  q={q}
+                  value={answers[q.id]}
+                  locked={locked}
+                />
               ))}
             </Stack>
           </SortableContext>
@@ -394,9 +412,19 @@ function QuestionEditor({ questions }: { questions: Question[] }) {
   );
 }
 
-/** One inline-editable question row. Each field auto-saves (blur for text,
- * change for selects/checkbox). The handle is the drag affordance. */
-function SortableQuestion({ q }: { q: Question }) {
+/** One question, combined: the edit controls AND the live question (answer +
+ * preview) in a single draggable card. Each edit field auto-saves (blur for text,
+ * change for selects/checkbox). Memoized so a drag re-renders only the moving row.
+ */
+const SortableQuestion = memo(function SortableQuestion({
+  q,
+  value,
+  locked,
+}: {
+  q: Question;
+  value: string | undefined;
+  locked: boolean;
+}) {
   const {
     attributes,
     listeners,
@@ -407,9 +435,9 @@ function SortableQuestion({ q }: { q: Question }) {
   } = useSortable({ id: q.id });
   const fetcher = useFetcher<FetcherData>();
   useFetcherError(fetcher.data, fetcher.state);
-  const save = (field: string, value: string) =>
+  const save = (field: string, val: string) =>
     fetcher.submit(
-      { intent: "editQuestion", id: q.id, field, value },
+      { intent: "editQuestion", id: q.id, field, value: val },
       { method: "post" },
     );
 
@@ -495,6 +523,8 @@ function SortableQuestion({ q }: { q: Question }) {
               minRows={2}
             />
           ) : null}
+          <Divider my={4} label="Preview" labelPosition="left" />
+          <QuestionField question={q} value={value} locked={locked} />
         </Stack>
         <ActionIcon
           variant="subtle"
@@ -512,7 +542,7 @@ function SortableQuestion({ q }: { q: Question }) {
       </Group>
     </Card>
   );
-}
+});
 
 function useFetcherError(
   data: FetcherData | undefined,
