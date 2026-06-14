@@ -378,16 +378,36 @@ Per-year allocations a camp distributes to members, scoped to `camp_edition`
 `C:\Users\camer\.claude\plans\cozy-singing-tulip.md`.
 
 **User-locked decisions (Q&A):** (a) tickets are **individual priced rows** (tier
-label + price-in-cents + assignee), bulk-added by officers — any mix of
+label + value-in-cents + assignee), bulk-added by officers — any mix of
 free/cheap/expensive, each uniquely assignable; (b) flow is **member-request →
 officer-approve** for both tickets and passes, and **recruits may request too**
 (requesting/viewing is recruit+, management is officer+); (c) tickets carry a
-status lifecycle `available → assigned → paid`; (d) passes use **real calendar
-dates + a per-date quota** the camp received.
+status lifecycle `available → assigned → purchased`; (d) passes use **real
+calendar dates + a per-date quota** the camp received.
+
+**Ticket pricing/collection redesign (2026-06-14, locked by the user; code +
+typecheck/build/lint green, migration verified on a DB copy, NOT yet browser-tested
+— see below).** The camp does **not** set prices or collect funds; Burning Man
+does. So the tickets page now carries **little-to-no price/cost framing besides
+each ticket's value**: removed the camp-collection model — the officer "Mark
+paid"/"Unpay" actions, the `paid` status, and the `$ collected`/`$ outstanding`
+totals are all gone (officer summary is now plain available/assigned/purchased
+counts). Instead the **assignee buys their own ticket from the vendor** via a
+**unique per-ticket purchase link** (`ticket.purchase_url`, officer-pasted),
+surfaced to them **only during the DGS sale window**
+(`camp_edition.ticket_sale_starts_at` / `ticket_sale_ends_at`, either bound
+nullable = unbounded). The member then **self-sets `purchased`** (with an Undo);
+`markPurchased`/`unmarkPurchased` are scoped to the caller's own assigned ticket.
+Officers set the window with two `@mantine/dates` `DateTimePicker`s. **Migration
+0018** adds the three columns and backfills any legacy `paid` ticket → `purchased`
+(the live DB had exactly one). Note: migration 0017 in the tree is another thread's;
+0018 sequenced cleanly after it.
 
 **Schema — `db/schema/ticket.ts`, migration 0013** (4 tables, all `camp_id` +
 `edition_id`; money = integer `price_cents`, nullable):
-- `ticket` — tier, priceCents, assignedMembershipId, status, notes. Index on edition.
+- `ticket` — tier, priceCents (the ticket's *value*), purchaseUrl (unique vendor
+  link, added migration 0018), assignedMembershipId, status
+  (`available|assigned|purchased`), notes. Index on edition.
 - `ticket_request` — membershipId, note, status (`pending|approved|denied`),
   resolvedTicketId + resolvedBy/At. The member's ask, unbound to a specific ticket
   until an officer assigns one.
@@ -406,10 +426,14 @@ file split by role (member self-service card + officer management), matching
 `bringing.tsx`/`inventory.tsx`. Gating via `requireActiveEdition` +
 `hasAtLeast(role,"officer")`; every mutation 403s when `activeEdition.locked`.
 - **Tickets:** members see their assigned tickets + can request (one pending at a
-  time) / cancel. Officers: bulk-add (tier/price/count), inline edit price+tier,
-  assign via member Select (auto-resolves that member's pending request),
-  unassign, mark paid/unpay, delete; pending-requests queue (deny); summary
-  counts + $ collected/outstanding.
+  time) / cancel; for an assigned ticket, during the sale window, they get a
+  "Purchase ticket" link (to the vendor) + a "Mark as purchased" toggle. Officers:
+  bulk-add (tier/value/count), inline edit value+tier+purchase-link, set the sale
+  window (DateTimePickers), assign via member Select (auto-resolves that member's
+  pending request), unassign, delete; pending-requests queue (deny); summary
+  counts (available/assigned/purchased). **No price/collection framing** — see the
+  2026-06-14 redesign note above. (Superseded: the old mark-paid / $ collected /
+  $ outstanding flow.)
 - **Passes:** members request an open date / cancel; see their passes + status.
   Officers: add dates (`@mantine/dates` DateInput) with quota, inline-edit quota,
   grant to a member (quota-enforced), revoke, delete date (blocked while granted
@@ -442,8 +466,9 @@ table plain text); unlocked again. No console errors.
    with no crash. **Note:** editing `vite.config.ts` makes Vite restart the dev
    server (brief downtime + dep re-optimization).
 
-Future: payment integration, reminder DMs for unpaid/upcoming (Phase 5), ticket
-transfer, first-class tier definitions.
+Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
+(Phase 5), ticket transfer, first-class tier definitions. (No payment integration
+— the camp never handles funds; checkout is the vendor's via the purchase link.)
 
 **Phase 4 — Operations**
 - Dues/financials with per-field view/edit permissions (#3).
@@ -1034,6 +1059,13 @@ Backlog (not yet built):
    QuestionField (answer/preview) together; members still see just the answer
    list. Drag start-lag reduced by memoizing the sortable rows + lowering the
    PointerSensor activation distance 5→3. User confirmed DnD works.
+   FOLLOW-UP 2 (commit b3191de, deployed + verified): **WYSIWYG** editor per user
+   feedback. Each card renders the question as it looks; the prompt, help, and
+   choices are **click-to-edit text** (`EditableText`: click → input → Enter/blur
+   saves, Escape cancels) instead of separate labeled fields + a preview. Choices
+   are an editable bulleted list (edit/remove/add). Type / audience / required
+   (not text) sit in a small muted settings row. `QuestionField` gained a `bare`
+   mode (no label/help) so the live control shows without duplicating prompt/help.
 6. **Camp inventory system (camp-level supplies, grouped).** NET-NEW, distinct
    from the per-camper "bringing" inventory (personal tents/vehicles). Tracks
    **shared camp supplies organized into groups/categories**, e.g. Bar (drinks,
