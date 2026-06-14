@@ -1049,6 +1049,30 @@ types** (inviter, event-window date, …) alongside generic ones, vs keep questi
 dumb and handle these as bespoke first-class fields outside the bank. Lean toward
 a thin "linked key" on a question so the generic bank stays the single surface.
 
+## Member lifecycle model cleanup (2026-06-14)
+
+Stepping back to clarify the conceptual model after the question bank shipped.
+Diagram + write-up: [`docs/camp-lifecycle.md`](../docs/camp-lifecycle.md) (TD
+mermaid: ways to join → the per-year season flow → next-year loop).
+
+**Decisions (user):**
+1. **Onboarding = auto-derived progress, NOT a manual checklist.** Each item
+   should flip to done when its real condition is met (admin marks a ticket paid →
+   the "ticket" item checks itself; you RSVP → done). It's a read-out of state, not
+   a to-do list ticked by hand. *(Today it's still manual self-tick — this is the
+   target.)* Implication: the `onboarding_task`/`onboarding_completion` model likely
+   gains a "condition" each task derives from, or onboarding becomes a computed
+   progress view over existing state (RSVP/answers/tickets/placement).
+2. **Questionnaire = pushed by the wizard.** Officers author questions on
+   `/questions`; members answer them via the season-aware `/start` wizard (already
+   wired). The wizard is the single member-facing driver.
+3. **The lifecycle flow should eventually be IN-APP and member-visible** — a "how
+   camp works / where am I" onboarding overview, not just a dev doc. The
+   `docs/camp-lifecycle.md` diagram is the spec for that future feature.
+
+Backlog items added: (a) onboarding auto-derivation; (b) in-app member-visible
+lifecycle/onboarding overview.
+
 ## Recruit funnel rework + invite tree (in progress)
 
 Reworking how people enter a camp. The Phase 2 funnel (anonymous application →
