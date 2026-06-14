@@ -1884,8 +1884,38 @@ function Editor({
   // Padded bounds (feet) for annotations that may sit outside the lot border.
   const clampPadX = (v: number) => clamp(v, -PAD_FT, lot.frontageFt + PAD_FT);
   const clampPadY = (v: number) => clamp(v, -PAD_FT, lot.depthFt + PAD_FT);
-  // Trapezoid outline (front edge, then rear edge wider when tapered).
-  const lotPoints = `${originX},${originY} ${originX + lot.frontageFt * ppf},${originY} ${rearCenterX + (rear / 2) * ppf},${yBot} ${rearCenterX - (rear / 2) * ppf},${yBot}`;
+  // Lot outline. When we know the frontage radius, draw the TRUE wedge: the
+  // frontage and rear are circular arcs centered on the Man (radius R and R±depth),
+  // with straight radial sides — i.e., the actual curve of the BRC street. The
+  // front corners stay pinned to (originX/originY ± frontage) so objects, which
+  // live on the plot-local grid, don't shift. Falls back to a straight trapezoid
+  // when no radius is derivable (innerRadius unset + no street).
+  const rFront = frontageRadiusOf(lot);
+  const halfFt = lot.frontageFt / 2;
+  let lotPoints: string;
+  if (rFront != null && rFront > halfFt) {
+    const sDir = lot.frontsToMan ? 1 : -1; // +1: Man above (front at top); −1: below
+    const h = ppf * Math.sqrt(rFront * rFront - halfFt * halfFt);
+    const manY = originY - sDir * h; // Man on the frontage's perpendicular bisector
+    const frontCx = originX + halfFt * ppf;
+    const theta = Math.asin(halfFt / rFront); // half-angle subtended by the frontage
+    const rRear = lot.frontsToMan
+      ? rFront + lot.depthFt
+      : Math.max(1, rFront - lot.depthFt);
+    const SEG = 24;
+    const pt = (r: number, phi: number) =>
+      `${frontCx + r * ppf * Math.sin(phi)},${manY + sDir * r * ppf * Math.cos(phi)}`;
+    const front: string[] = [];
+    const back: string[] = [];
+    for (let i = 0; i <= SEG; i++) {
+      const phi = -theta + (2 * theta * i) / SEG;
+      front.push(pt(rFront, phi));
+      back.push(pt(rRear, phi));
+    }
+    lotPoints = [...front, ...back.reverse()].join(" ");
+  } else {
+    lotPoints = `${originX},${originY} ${originX + lot.frontageFt * ppf},${originY} ${rearCenterX + (rear / 2) * ppf},${yBot} ${rearCenterX - (rear / 2) * ppf},${yBot}`;
+  }
   // The lettered street the camp fronts (override → per-year name → letter).
   const frontageStreet =
     lot.street ??
