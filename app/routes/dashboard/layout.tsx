@@ -101,6 +101,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const editionFetcher = useFetcher();
   const nav = [
     { to: "/", label: "Overview", end: true },
+    { to: "/guide", label: "How it works", end: false },
     ...(showFinishSetup
       ? [{ to: "/start", label: "Finish setup", end: false }]
       : []),

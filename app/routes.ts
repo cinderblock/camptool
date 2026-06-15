@@ -13,6 +13,7 @@ export default [
   // redirect to /login — there is no "/dashboard" segment.
   layout("routes/dashboard/layout.tsx", [
     index("routes/dashboard/index.tsx"),
+    route("guide", "routes/dashboard/guide.tsx"),
     route("members", "routes/dashboard/members.tsx"),
     route("invite", "routes/dashboard/invite.tsx"),
     route("editions", "routes/dashboard/editions.tsx"),
