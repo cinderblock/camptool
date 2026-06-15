@@ -1427,6 +1427,24 @@ Housekeeping left: ensure the ops env-file has a real `BETTER_AUTH_SECRET` (app
 serves 200 without it but sessions won't persist across restarts). Left unused dep
 `@react-router/serve` in `package.json` (harmless; optional cleanup).
 
+**GOTCHA — deploys go green WITHOUT swapping the build (recurring, 2026-06-15).**
+A push to `master` builds + stages the release + flips `current` + touches the
+`restart` sentinel, and the job goes green — but the **supervisor frequently does
+NOT pick up the restart**, so the OLD build keeps serving (new routes 404, edited
+pages show stale content) despite a green deploy. Confirmed: the CI "Wait for
+healthy socket" health check fires **~0.07s after `touch restart`** and gets 200
+from the *old* still-running process, so green proves nothing about the new build.
+**Workaround that reliably works:** manually re-run the deploy
+(`gh workflow run deploy.yml --ref master`) — the second sentinel touch takes, and
+the new build comes up. Seen on multiple pushes this session (supplies/guide
+needed a re-trigger; the tickets `unpurchased` stat needed one too). **Root cause
+is ops-side** (the supervisor's restart-sentinel watch is flaky/races). Fixes to
+pursue: (a) ops makes the sentinel restart reliable; (b) harden CI's health check
+to verify the *new* build actually came up (e.g. embed a build SHA/version marker
+and poll `/` until it reports the just-deployed SHA, with a real timeout) instead
+of a 0.07s check against whatever's bound. Until fixed: **after every push, verify
+the change is actually live; if not, re-run the deploy workflow.**
+
 ## Resolved (formerly open) questions
 
 1. **Repo visibility:** public, MIT-licensed. Work in the open from now.
