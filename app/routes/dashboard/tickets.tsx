@@ -395,7 +395,8 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
 
   const available = tickets.filter((t) => t.status === "available").length;
   const assigned = tickets.filter((t) => t.status === "assigned").length;
-  const purchased = tickets.filter((t) => t.status === "purchased").length;
+  // What's still outstanding — anything not yet member-confirmed as purchased.
+  const unpurchased = tickets.filter((t) => t.status !== "purchased").length;
 
   const memberData = members.map((m) => ({ value: m.id, label: m.name }));
 
@@ -484,7 +485,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
               <Group gap="lg" mb="md">
                 <Stat label="available" value={available} color="gray" />
                 <Stat label="assigned" value={assigned} color="blue" />
-                <Stat label="purchased" value={purchased} color="green" />
+                <Stat label="unpurchased" value={unpurchased} color="orange" />
               </Group>
               {locked ? null : (
                 <Stack gap="md">
