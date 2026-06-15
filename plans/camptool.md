@@ -1484,6 +1484,16 @@ and poll `/` until it reports the just-deployed SHA, with a real timeout) instea
 of a 0.07s check against whatever's bound. Until fixed: **after every push, verify
 the change is actually live; if not, re-run the deploy workflow.**
 
+**CI fix landed (commit 3bda95c): /_version build-SHA check.** `server.ts` now
+serves the release's git SHA at `/_version` (CI stamps it into the release tree as
+a `BUILD_SHA` file). The deploy's health step polls `/_version` until it reports
+**this commit's** SHA (90s timeout) instead of accepting any `GET / -> 200`. Proven
+working: the first run failed loudly ("new build … never came up — supervisor
+likely did not restart"), and a re-run went green once the supervisor swapped. So
+non-swaps are now **loud red deploys**, not silent false-greens — but the
+underlying flaky restart is still ops-side and a re-run is still the workaround
+until ops fixes the sentinel.
+
 ## Resolved (formerly open) questions
 
 1. **Repo visibility:** public, MIT-licensed. Work in the open from now.
