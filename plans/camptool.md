@@ -1072,6 +1072,19 @@ Backlog (not yet built):
    mixers, tools, tchotchkes, signs), Lecture Hall (books, whiteboard markers, …).
    Needs its own schema (item + category/group, likely camp- and edition-scoped,
    qty, who's bringing/owns, status) + UI. Scope/design TBD.
+   **— BUILT, code-complete + green; DEPLOY HELD (commit d1cc1cc, NOT pushed).**
+   `db/schema/inventory.ts`: `inventory_category` (camp-scoped grouping) +
+   `inventory_item` (edition-scoped: name, quantity, `owner_membership_id`, notes).
+   `/supplies` route + "Supplies" nav: officers add/rename/delete groups, add/edit
+   items inline (qty/name/notes), assign an owner; members can **claim** an item
+   ("I'll bring this") / unclaim. Locked edition = read-only. No status enum —
+   "covered" = has an owner. typecheck/build/biome green; NOT browser-tested.
+   **Migration collision:** `db:generate` numbered it **0019** because a parallel
+   tickets thread has an uncommitted **0018** (adds a ticket column). Per the user,
+   deploy is HELD: only the source is committed (locally, not pushed); the
+   migration 0019 + journal stay on disk to be committed/pushed cleanly **after**
+   the tickets thread's 0018 lands on master. Follow-ups: edition copy-from for
+   items (currently each year starts empty), member-visible vs officer-only tuning.
 
 **Cross-cutting theme — "smart" vs free-form questions.** Items #2/#3/#4 all want
 questions that connect to *known structured data* (the invite edge, the event
