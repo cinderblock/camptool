@@ -12,6 +12,7 @@ import {
 } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { useFetcher } from "react-router";
+import { eventWindowFor } from "~/lib/brc";
 import { type QuestionType, parseMultiValue } from "~/lib/questions";
 
 /** At or below this many options, a single/multi choice renders as a row of
@@ -38,6 +39,8 @@ export function QuestionField({
   locked,
   action,
   bare,
+  year,
+  invitedByName,
 }: {
   question: QuestionFieldData;
   value: string | undefined;
@@ -46,6 +49,10 @@ export function QuestionField({
   /** Render only the input control — no prompt label or help text. The editor
    * shows those as separate click-to-edit text, so it suppresses them here. */
   bare?: boolean;
+  /** Active edition year — bounds the `event_date` calendar to the event window. */
+  year?: number;
+  /** Who invited this member (from the invite tree) — pre-fills `invited_by`. */
+  invitedByName?: string | null;
 }) {
   const fetcher = useFetcher();
   const save = (v: string) =>
@@ -222,6 +229,36 @@ export function QuestionField({
           maw={260}
         />
       );
+    case "event_date": {
+      const win = year != null ? eventWindowFor(year) : null;
+      return (
+        <DateInput
+          label={label}
+          description={description}
+          valueFormat="YYYY-MM-DD"
+          disabled={locked}
+          defaultValue={value ? parseLocalDate(value) : null}
+          onChange={(d) => save(d ? formatDate(d) : "")}
+          minDate={win ? parseLocalDate(win.min) : undefined}
+          maxDate={win ? parseLocalDate(win.max) : undefined}
+          defaultDate={win ? parseLocalDate(win.focus) : undefined}
+          popoverProps={{ withinPortal: true }}
+          maw={260}
+        />
+      );
+    }
+    case "invited_by":
+      // Pre-fill with the inviter from the invite tree; still editable.
+      return (
+        <TextInput
+          label={label}
+          description={description}
+          disabled={locked}
+          defaultValue={value ?? invitedByName ?? ""}
+          placeholder={invitedByName ?? "Who invited you?"}
+          onBlur={(e) => save(e.currentTarget.value)}
+        />
+      );
     default:
       return (
         <TextInput
@@ -233,6 +270,13 @@ export function QuestionField({
         />
       );
   }
+}
+
+/** Parse a `YYYY-MM-DD` string as a LOCAL date (avoids the UTC-midnight day-shift
+ * `new Date("YYYY-MM-DD")` causes in negative-offset timezones). */
+function parseLocalDate(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
 }
 
 /** @mantine/dates may hand back a Date or a string depending on version; coerce

@@ -12,7 +12,10 @@ export type QuestionType =
   | "number"
   | "boolean"
   | "date"
-  | "consent";
+  | "consent"
+  // "Smart" types that wire to real data:
+  | "event_date" // a date bounded to the weeks around the event
+  | "invited_by"; // pre-fills who invited you from the invite tree
 
 export type QuestionAudience = "all" | "returning" | "recruit";
 
@@ -25,6 +28,8 @@ export const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
   { value: "boolean", label: "Yes / no" },
   { value: "date", label: "Date" },
   { value: "consent", label: "Agreement (must check)" },
+  { value: "event_date", label: "Date (near the event)" },
+  { value: "invited_by", label: "Who invited you (auto-fills)" },
 ];
 
 export const QUESTION_AUDIENCES: { value: QuestionAudience; label: string }[] =

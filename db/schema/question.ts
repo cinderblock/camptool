@@ -38,7 +38,10 @@ export type QuestionType =
   | "number"
   | "boolean"
   | "date"
-  | "consent";
+  | "consent"
+  // "Smart" types wired to real data (see app/lib/questions.ts):
+  | "event_date" // a date bounded to the weeks around the event
+  | "invited_by"; // pre-fills who invited you from the invite tree
 
 export const campQuestion = sqliteTable(
   "camp_question",

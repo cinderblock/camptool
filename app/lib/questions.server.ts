@@ -5,10 +5,36 @@
  */
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "../../db/client.server";
-import { campQuestion, questionAnswer } from "../../db/schema";
+import {
+  campQuestion,
+  membership,
+  questionAnswer,
+  user,
+} from "../../db/schema";
 import { audienceForRole } from "./wizard";
 
 export type QuestionRow = typeof campQuestion.$inferSelect;
+
+/** The name of whoever invited this member (from the invite tree), for the
+ * `invited_by` question type to pre-fill. Prefers playa name, then real name;
+ * null when they weren't invited (public applicant / founder). */
+export async function loadInviterName(
+  membershipId: string,
+): Promise<string | null> {
+  const [me] = await db
+    .select({ inviter: membership.invitedByMembershipId })
+    .from(membership)
+    .where(eq(membership.id, membershipId))
+    .limit(1);
+  if (!me?.inviter) return null;
+  const [inv] = await db
+    .select({ name: user.name, playa: membership.playaName })
+    .from(membership)
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(eq(membership.id, me.inviter))
+    .limit(1);
+  return inv?.playa || inv?.name || null;
+}
 
 /** Active (non-archived) questions for a camp, in display order. */
 export async function loadCampQuestions(

@@ -50,6 +50,7 @@ import {
   filterByAudience,
   loadAnswers,
   loadCampQuestions,
+  loadInviterName,
   setAnswer,
 } from "~/lib/questions.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -73,6 +74,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     editionId: activeEdition.id,
     membershipId: active.membership.id,
   });
+  const invitedByName = await loadInviterName(active.membership.id);
 
   const questions = rows.map((q) => ({
     id: q.id,
@@ -91,6 +93,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     year: activeEdition.year,
     questions,
     answers,
+    invitedByName,
   };
 }
 
@@ -262,7 +265,15 @@ type LoaderData = Route.ComponentProps["loaderData"];
 type Question = LoaderData["questions"][number];
 
 export default function Questions({ loaderData }: Route.ComponentProps) {
-  const { questions, answers, canManage, audience, locked, year } = loaderData;
+  const {
+    questions,
+    answers,
+    canManage,
+    audience,
+    locked,
+    year,
+    invitedByName,
+  } = loaderData;
   // Members only see the questions relevant to them; officers manage all of them.
   const mine = questions.filter(
     (q) => q.audience === "all" || q.audience === audience,
@@ -291,6 +302,8 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
             questions={questions}
             answers={answers}
             locked={locked}
+            year={year}
+            invitedByName={invitedByName}
           />
         ) : mine.length > 0 ? (
           <Card withBorder padding="md" radius="md">
@@ -301,6 +314,8 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
                   question={q}
                   value={answers[q.id]}
                   locked={locked}
+                  year={year}
+                  invitedByName={invitedByName}
                 />
               ))}
             </Stack>
@@ -319,10 +334,14 @@ function QuestionEditor({
   questions,
   answers,
   locked,
+  year,
+  invitedByName,
 }: {
   questions: Question[];
   answers: Record<string, string>;
   locked: boolean;
+  year: number;
+  invitedByName: string | null;
 }) {
   // Local copy so a drag reorders instantly; re-synced when the loader updates.
   const [order, setOrder] = useState<Question[]>(questions);
@@ -400,6 +419,8 @@ function QuestionEditor({
                   q={q}
                   value={answers[q.id]}
                   locked={locked}
+                  year={year}
+                  invitedByName={invitedByName}
                 />
               ))}
             </Stack>
@@ -519,10 +540,14 @@ const SortableQuestion = memo(function SortableQuestion({
   q,
   value,
   locked,
+  year,
+  invitedByName,
 }: {
   q: Question;
   value: string | undefined;
   locked: boolean;
+  year: number;
+  invitedByName: string | null;
 }) {
   const {
     attributes,
@@ -591,7 +616,14 @@ const SortableQuestion = memo(function SortableQuestion({
               onChange={(opts) => save("options", opts.join("\n"))}
             />
           ) : (
-            <QuestionField question={q} value={value} locked={locked} bare />
+            <QuestionField
+              question={q}
+              value={value}
+              locked={locked}
+              year={year}
+              invitedByName={invitedByName}
+              bare
+            />
           )}
           <Group gap="xs" align="center" mt={4} c="dimmed">
             <Select

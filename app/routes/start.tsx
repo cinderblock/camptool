@@ -27,6 +27,7 @@ import {
   filterByAudience,
   loadAnswers,
   loadCampQuestions,
+  loadInviterName,
 } from "~/lib/questions.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { KINDS, ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
@@ -115,6 +116,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     required: boolean;
   }[] = [];
   let answers: Record<string, string> = {};
+  let invitedByName: string | null = null;
 
   if (keys.has("bringing") || keys.has("sharing")) {
     items = await db
@@ -195,6 +197,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       required: q.required,
     }));
     answers = await loadAnswers({ editionId, membershipId: mid });
+    invitedByName = await loadInviterName(mid);
   }
 
   return {
@@ -218,6 +221,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     tasks,
     questions,
     answers,
+    invitedByName,
   };
 }
 
@@ -535,6 +539,8 @@ function QuestionnaireStep({ data: d }: { data: LoaderData }) {
             question={q}
             value={d.answers[q.id]}
             locked={d.locked}
+            year={d.year}
+            invitedByName={d.invitedByName}
             action="/questions"
           />
         ))

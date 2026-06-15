@@ -122,6 +122,29 @@ export function weeksUntilEvent(year: number, from: Date = new Date()): number {
   return Math.floor(ms / (7 * 24 * 60 * 60 * 1000));
 }
 
+/** A bounded date window around the event for arrival / strike date questions —
+ * a couple of weeks each side of gate-open — so the picker shows only the
+ * relevant span instead of a generic calendar. `focus` is the month to open on.
+ * All three are local `YYYY-MM-DD` strings. */
+export function eventWindowFor(year: number): {
+  min: string;
+  max: string;
+  focus: string;
+} {
+  const start = eventStartFor(year);
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate(),
+    ).padStart(2, "0")}`;
+  const shift = (days: number) =>
+    fmt(
+      new Date(start.getFullYear(), start.getMonth(), start.getDate() + days),
+    );
+  // Gates open the Sunday; setup access runs up to ~2 weeks earlier and strike a
+  // few days past Labor Day Monday (+8) — bound generously but not a full year.
+  return { min: shift(-14), max: shift(12), focus: fmt(start) };
+}
+
 /** Which geometry year to use for a given event year: that year if we have its
  * measurements, else the newest year at/below it, else the newest we have. */
 export function geometryYearFor(
