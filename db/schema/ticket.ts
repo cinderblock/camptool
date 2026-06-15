@@ -6,9 +6,10 @@
  *
  *   ticket          one guaranteed DGS ticket slot — fungible in access but not
  *                   in value (tier + price); assignable to a member. The camp
- *                   only decides who gets each slot: Burning Man sets the price
- *                   and runs checkout, so the assignee buys their own ticket via
- *                   a unique vendor link (`purchase_url`) during the sale window.
+ *                   only decides who gets each slot: Burning Man sets the price,
+ *                   emails the assignee their own purchase link once assignments
+ *                   are published (`camp_edition.tickets_published_at`), and runs
+ *                   checkout. The member then self-marks the ticket `purchased`.
  *   ticket_request  a member's ask for a ticket (unbound to a specific ticket
  *                   until an officer assigns one).
  *   setup_pass_date an early-arrival entry date + the per-date quota the camp got.
@@ -45,9 +46,6 @@ export const ticket = sqliteTable(
     tier: text("tier"),
     // Integer cents — the ticket's value as set by the vendor. Null = TBD; 0 = free.
     priceCents: integer("price_cents"),
-    // Unique vendor link the assignee uses to buy this ticket during the sale
-    // window (officer pastes the per-slot link BM hands out). Null = not set yet.
-    purchaseUrl: text("purchase_url"),
     // The member this ticket is allocated to; null = still in the pool.
     assignedMembershipId: text("assigned_membership_id").references(
       () => membership.id,

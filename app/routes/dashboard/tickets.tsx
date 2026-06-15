@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Anchor,
   Badge,
   Button,
   Card,
@@ -41,7 +40,6 @@ type TicketRow = {
   id: string;
   tier: string | null;
   priceCents: number | null;
-  purchaseUrl: string | null;
   status: string;
   assignedMembershipId: string | null;
   assigneeName: string | null;
@@ -60,13 +58,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const editionId = activeEdition.id;
   const isOfficer = hasAtLeast(active.membership.role, "officer");
 
-  const tickets = (
+  const published = activeEdition.ticketsPublishedAt != null;
+  const myMembershipId = active.membership.id;
+
+  const allTickets = (
     await db
       .select({
         id: ticket.id,
         tier: ticket.tier,
         priceCents: ticket.priceCents,
-        purchaseUrl: ticket.purchaseUrl,
         status: ticket.status,
         assignedMembershipId: ticket.assignedMembershipId,
         assigneeName: user.name,
@@ -81,6 +81,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       (a.priceCents ?? Number.POSITIVE_INFINITY) -
         (b.priceCents ?? Number.POSITIVE_INFINITY) || a.id.localeCompare(b.id),
   ) satisfies TicketRow[];
+
+  // Assignments are a draft until published: officers see the whole allocation;
+  // a member sees only their own ticket, and only once it's published.
+  const tickets = isOfficer
+    ? allTickets
+    : published
+      ? allTickets.filter((t) => t.assignedMembershipId === myMembershipId)
+      : [];
 
   const requests = (await db
     .select({
@@ -109,7 +117,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     isOfficer,
     locked: activeEdition.locked,
-    myMembershipId: active.membership.id,
+    myMembershipId,
+    published,
+    publishedAt: activeEdition.ticketsPublishedAt,
     saleStartsAt: activeEdition.ticketSaleStartsAt,
     saleEndsAt: activeEdition.ticketSaleEndsAt,
     tickets,
@@ -243,7 +253,6 @@ export async function action({ request }: Route.ActionArgs) {
     const set: Record<string, unknown> = { updatedAt: new Date() };
     if (form.has("tier")) set.tier = str("tier");
     if (form.has("price")) set.priceCents = dollarsToCents("price");
-    if (form.has("purchaseUrl")) set.purchaseUrl = str("purchaseUrl");
     if (form.has("notes")) set.notes = str("notes");
     await db
       .update(ticket)
@@ -267,6 +276,19 @@ export async function action({ request }: Route.ActionArgs) {
       })
       .where(eq(campEdition.id, editionId));
     return data({ ok: "Sale window saved." });
+  }
+
+  if (intent === "publishTickets" || intent === "unpublishTickets") {
+    const publish = intent === "publishTickets";
+    await db
+      .update(campEdition)
+      .set({ ticketsPublishedAt: publish ? new Date() : null })
+      .where(eq(campEdition.id, editionId));
+    return data({
+      ok: publish
+        ? "Assignments published — members can now see their tickets."
+        : "Unpublished — assignments are hidden from members again.",
+    });
   }
 
   if (intent === "deleteTicket") {
@@ -369,6 +391,8 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
     isOfficer,
     locked,
     myMembershipId,
+    published,
+    publishedAt,
     saleStartsAt,
     saleEndsAt,
     tickets,
@@ -378,12 +402,14 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
 
-  const now = Date.now();
   const saleStart = saleStartsAt ? new Date(saleStartsAt) : null;
   const saleEnd = saleEndsAt ? new Date(saleEndsAt) : null;
-  const saleStarted = !saleStart || now >= saleStart.getTime();
-  const saleEnded = !!saleEnd && now > saleEnd.getTime();
-  const saleOpen = saleStarted && !saleEnded;
+  const saleNote =
+    saleStart || saleEnd
+      ? `Sale window: ${saleStart ? fmtDateTime(saleStart) : "open"} – ${
+          saleEnd ? fmtDateTime(saleEnd) : "open"
+        }.`
+      : null;
 
   const myTickets = tickets.filter(
     (t) => t.assignedMembershipId === myMembershipId,
@@ -406,10 +432,10 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Direct Group Sale tickets</Title>
           <Text c="dimmed" size="sm">
-            The camp's guaranteed ticket allocation for this year. The camp just
-            decides who gets each slot — once you're assigned one, you'll get a
-            link to buy your ticket directly from Burning Man during the sale
-            window.
+            The camp's guaranteed ticket allocation for this year. The camp
+            decides who gets each slot; once assignments are published, Burning
+            Man emails you a link to buy your ticket directly. Mark it purchased
+            here after you do.
           </Text>
         </div>
 
@@ -431,22 +457,25 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
         <Card withBorder padding="md" radius="md">
           <Stack gap="sm">
             <Text fw={600}>Your tickets</Text>
-            {myTickets.length === 0 ? (
+            {!isOfficer && !published ? (
+              <Text size="sm" c="dimmed">
+                Ticket assignments haven't been announced yet — check back once
+                they're published.
+              </Text>
+            ) : myTickets.length === 0 ? (
               <Text size="sm" c="dimmed">
                 None assigned to you yet.
               </Text>
             ) : (
               <Stack gap="sm">
                 {myTickets.map((t) => (
-                  <MyTicket
-                    key={t.id}
-                    t={t}
-                    fetcher={fetcher}
-                    saleOpen={saleOpen}
-                    saleStarted={saleStarted}
-                    saleStart={saleStart}
-                  />
+                  <MyTicket key={t.id} t={t} fetcher={fetcher} />
                 ))}
+                <Text size="xs" c="dimmed">
+                  Burning Man emails your purchase link once assignments are
+                  published. Mark a ticket purchased here after you buy it.
+                  {saleNote ? ` ${saleNote}` : ""}
+                </Text>
               </Stack>
             )}
 
@@ -483,6 +512,51 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
         {/* ----- Officer management ----- */}
         {isOfficer ? (
           <>
+            <Paper
+              withBorder
+              p="md"
+              radius="md"
+              bg={published ? undefined : "var(--mantine-color-yellow-light)"}
+            >
+              <Group justify="space-between" wrap="nowrap">
+                <div>
+                  <Text fw={600} size="sm">
+                    {published
+                      ? "Assignments published"
+                      : "Draft — assignments hidden from members"}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {published
+                      ? `Members can see their own assigned tickets${
+                          publishedAt
+                            ? ` (published ${fmtDateTime(new Date(publishedAt))})`
+                            : ""
+                        }.`
+                      : "Only officers can see assignments. Publish when you're ready to announce them to members."}
+                  </Text>
+                </div>
+                {locked ? null : (
+                  <Button
+                    color={published ? "gray" : "green"}
+                    variant={published ? "default" : "filled"}
+                    loading={fetcher.state !== "idle"}
+                    onClick={() =>
+                      fetcher.submit(
+                        {
+                          intent: published
+                            ? "unpublishTickets"
+                            : "publishTickets",
+                        },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    {published ? "Unpublish" : "Publish assignments"}
+                  </Button>
+                )}
+              </Group>
+            </Paper>
+
             <Card withBorder padding="md" radius="md">
               <Text fw={600} mb="xs">
                 Allocation · {tickets.length} total
@@ -554,7 +628,6 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
                     <Table.Th>Value</Table.Th>
                     <Table.Th>Status</Table.Th>
                     <Table.Th>Assigned to</Table.Th>
-                    <Table.Th>Purchase link</Table.Th>
                     <Table.Th />
                   </Table.Tr>
                 </Table.Thead>
@@ -676,15 +749,9 @@ function AddTicketsForm({
 function MyTicket({
   t,
   fetcher,
-  saleOpen,
-  saleStarted,
-  saleStart,
 }: {
   t: TicketRow;
   fetcher: ReturnType<typeof useFetcher>;
-  saleOpen: boolean;
-  saleStarted: boolean;
-  saleStart: Date | null;
 }) {
   return (
     <Group gap="sm">
@@ -706,45 +773,20 @@ function MyTicket({
         >
           Undo
         </Button>
-      ) : saleOpen ? (
-        t.purchaseUrl ? (
-          <>
-            <Button
-              size="xs"
-              component="a"
-              href={t.purchaseUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Purchase ticket
-            </Button>
-            <Button
-              size="xs"
-              variant="light"
-              color="green"
-              onClick={() =>
-                fetcher.submit(
-                  { intent: "markPurchased", ticketId: t.id },
-                  { method: "post" },
-                )
-              }
-            >
-              Mark as purchased
-            </Button>
-          </>
-        ) : (
-          <Text size="sm" c="dimmed">
-            Purchase link coming soon.
-          </Text>
-        )
-      ) : !saleStarted && saleStart ? (
-        <Text size="sm" c="dimmed">
-          Sale opens {fmtDateTime(saleStart)}.
-        </Text>
       ) : (
-        <Text size="sm" c="dimmed">
-          Sale closed.
-        </Text>
+        <Button
+          size="xs"
+          variant="light"
+          color="green"
+          onClick={() =>
+            fetcher.submit(
+              { intent: "markPurchased", ticketId: t.id },
+              { method: "post" },
+            )
+          }
+        >
+          Mark as purchased
+        </Button>
       )}
     </Group>
   );
@@ -888,40 +930,6 @@ function TicketRowView({
               else
                 fetcher.submit(
                   { intent: "unassignTicket", ticketId: t.id },
-                  { method: "post" },
-                );
-            }}
-          />
-        )}
-      </Table.Td>
-      <Table.Td>
-        {locked ? (
-          t.purchaseUrl ? (
-            <Anchor
-              href={t.purchaseUrl}
-              target="_blank"
-              rel="noopener"
-              size="xs"
-            >
-              vendor link
-            </Anchor>
-          ) : (
-            "—"
-          )
-        ) : (
-          <TextInput
-            size="xs"
-            w={220}
-            defaultValue={t.purchaseUrl ?? ""}
-            placeholder="vendor purchase URL"
-            onBlur={(e) => {
-              if ((e.currentTarget.value || null) !== (t.purchaseUrl ?? null))
-                fetcher.submit(
-                  {
-                    intent: "editTicket",
-                    id: t.id,
-                    purchaseUrl: e.currentTarget.value,
-                  },
                   { method: "post" },
                 );
             }}

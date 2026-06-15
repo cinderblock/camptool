@@ -58,6 +58,11 @@ export const campEdition = sqliteTable(
       mode: "timestamp_ms",
     }),
     ticketSaleEndsAt: integer("ticket_sale_ends_at", { mode: "timestamp_ms" }),
+    // Ticket assignments are a DRAFT (visible only to officers) until published.
+    // Null = draft/hidden from members; set = published + the timestamp.
+    ticketsPublishedAt: integer("tickets_published_at", {
+      mode: "timestamp_ms",
+    }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
       .default(now),
