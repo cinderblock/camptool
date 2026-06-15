@@ -1020,20 +1020,20 @@ Backlog (not yet built):
    this your first time camping with Math Camp?" (Yes/No, required). (a) is at the
    top; (b) currently sits last because drag-reorder can't be driven by the
    automation tool — the user can drag it up under (a) to make them adjacent.
-2. **Pre-fill "who invited you" from the invite tree.** When a camper joined via
-   an invite link, `membership.invited_by_membership_id` already records who
-   invited them. The "How did you hear / who invited you?" answer should be
-   pre-filled with that inviter. FORK: the question bank is generic and has no
-   way to know which question is "the inviter one" — needs a notion of a
-   **linked/smart question** (a semantic key on a question that binds it to
-   structured data), or split structured-inviter from free-text "how did you
-   hear." Part of the "smart questions" theme below.
-3. **Constrain date questions (arrival / strike) to the event window.** A `date`
-   question for arrival/strike should NOT show a generic calendar — only the
-   couple of relevant weeks around the event (derive from `eventStartFor(year)`
-   in brc.ts). FORK: new `event_date` question type that auto-bounds min/max, or
-   per-question min/max date config. Also reconsider arrival vs the setup-pass
-   dates already modeled (`setup_pass_date`).
+2. **Pre-fill "who invited you" from the invite tree. — DONE** (commit 1659d78).
+   Resolved the FORK with a **new question type** rather than a generic linked-key:
+   `invited_by` renders a text input pre-filled with the inviter's name (playa then
+   real name) from `membership.invited_by_membership_id`, still editable. Threaded
+   via a `loadInviterName` helper into `/questions` (member + editor) + the wizard.
+   Not fully browser-verified (the admin/founder has no inviter, so the prefill
+   path needs an invited test account); rendering verified.
+3. **Constrain date questions (arrival / strike) to the event window. — DONE**
+   (commit 1659d78, browser-verified). New **`event_date`** question type: a
+   DateInput bounded via `brc.eventWindowFor(year)` (gate-open −14d … +12d, opens
+   on the event month) instead of a generic calendar. Verified live: switched the
+   strike question to `event_date` → calendar opened on **August 2026** with
+   pre-Aug-16 dates disabled. (Both new types chosen over a generic "linked field"
+   system — simpler, and the type is just a string so no migration was needed.)
 4. **Future: official-main-burn history + which year.** A separate ask: have you
    been to the official BRC burn before, and which year(s)? Purpose: gauge
    whether we expect them to be **prepared for the desert**. Likely a yes/no +
