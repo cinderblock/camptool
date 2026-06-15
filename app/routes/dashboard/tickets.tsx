@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Anchor,
   Badge,
   Button,
   Card,
@@ -15,14 +16,21 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
+import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { membership, ticket, ticketRequest, user } from "../../../db/schema";
+import {
+  campEdition,
+  membership,
+  ticket,
+  ticketRequest,
+  user,
+} from "../../../db/schema";
 import type { Route } from "./+types/tickets";
 
 export function meta(_: Route.MetaArgs) {
@@ -33,6 +41,7 @@ type TicketRow = {
   id: string;
   tier: string | null;
   priceCents: number | null;
+  purchaseUrl: string | null;
   status: string;
   assignedMembershipId: string | null;
   assigneeName: string | null;
@@ -57,6 +66,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         id: ticket.id,
         tier: ticket.tier,
         priceCents: ticket.priceCents,
+        purchaseUrl: ticket.purchaseUrl,
         status: ticket.status,
         assignedMembershipId: ticket.assignedMembershipId,
         assigneeName: user.name,
@@ -100,6 +110,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     isOfficer,
     locked: activeEdition.locked,
     myMembershipId: active.membership.id,
+    saleStartsAt: activeEdition.ticketSaleStartsAt,
+    saleEndsAt: activeEdition.ticketSaleEndsAt,
     tickets,
     requests,
     members,
@@ -172,6 +184,26 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: "Request cancelled." });
   }
 
+  // The assignee confirms (or un-confirms) they bought their ticket from the
+  // vendor. Scoped to their own assigned ticket so no one can flip another's.
+  if (intent === "markPurchased" || intent === "unmarkPurchased") {
+    const purchased = intent === "markPurchased";
+    await db
+      .update(ticket)
+      .set({
+        status: purchased ? "purchased" : "assigned",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(ticket.id, String(form.get("ticketId"))),
+          eq(ticket.editionId, editionId),
+          eq(ticket.assignedMembershipId, myMid),
+        ),
+      );
+    return data({ ok: purchased ? "Marked purchased." : "Undone." });
+  }
+
   // --- Officer-only from here ---------------------------------------------
   if (!isOfficer) {
     return data({ error: "Officers only." }, { status: 403 });
@@ -211,12 +243,30 @@ export async function action({ request }: Route.ActionArgs) {
     const set: Record<string, unknown> = { updatedAt: new Date() };
     if (form.has("tier")) set.tier = str("tier");
     if (form.has("price")) set.priceCents = dollarsToCents("price");
+    if (form.has("purchaseUrl")) set.purchaseUrl = str("purchaseUrl");
     if (form.has("notes")) set.notes = str("notes");
     await db
       .update(ticket)
       .set(set)
       .where(ownTicket(String(form.get("id"))));
     return data({ ok: "Saved." });
+  }
+
+  if (intent === "setSaleWindow") {
+    const ts = (k: string): Date | null => {
+      const v = form.get(k);
+      if (v == null || v === "") return null;
+      const d = new Date(String(v));
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    await db
+      .update(campEdition)
+      .set({
+        ticketSaleStartsAt: ts("saleStartsAt"),
+        ticketSaleEndsAt: ts("saleEndsAt"),
+      })
+      .where(eq(campEdition.id, editionId));
+    return data({ ok: "Sale window saved." });
   }
 
   if (intent === "deleteTicket") {
@@ -269,15 +319,6 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: "Returned to pool." });
   }
 
-  if (intent === "setPaid") {
-    const paid = String(form.get("paid")) === "true";
-    await db
-      .update(ticket)
-      .set({ status: paid ? "paid" : "assigned", updatedAt: new Date() })
-      .where(ownTicket(String(form.get("ticketId"))));
-    return data({ ok: paid ? "Marked paid." : "Marked unpaid." });
-  }
-
   if (intent === "denyRequest") {
     await db
       .update(ticketRequest)
@@ -298,34 +339,51 @@ export async function action({ request }: Route.ActionArgs) {
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
-function dollars(cents: number): string {
+// A ticket's value: blank = TBD, 0 = a free ticket, else dollars.
+function usd(cents: number | null): string {
+  if (cents == null) return "—";
+  if (cents === 0) return "Free";
   return `$${(cents / 100).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
-// Per-ticket price: blank = TBD, 0 = a free ticket. (Aggregate $ totals use
-// `dollars` directly so a $0 sum reads "$0.00", not "Free".)
-function usd(cents: number | null): string {
-  if (cents == null) return "—";
-  if (cents === 0) return "Free";
-  return dollars(cents);
+function fmtDateTime(d: Date): string {
+  return d.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
 }
 
 const STATUS_COLOR: Record<string, string> = {
   available: "gray",
   assigned: "blue",
-  paid: "green",
+  purchased: "green",
 };
 
 type FetcherData = { ok?: string; error?: string };
 
 export default function Tickets({ loaderData }: Route.ComponentProps) {
-  const { isOfficer, locked, myMembershipId, tickets, requests, members } =
-    loaderData;
+  const {
+    isOfficer,
+    locked,
+    myMembershipId,
+    saleStartsAt,
+    saleEndsAt,
+    tickets,
+    requests,
+    members,
+  } = loaderData;
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
+
+  const now = Date.now();
+  const saleStart = saleStartsAt ? new Date(saleStartsAt) : null;
+  const saleEnd = saleEndsAt ? new Date(saleEndsAt) : null;
+  const saleStarted = !saleStart || now >= saleStart.getTime();
+  const saleEnded = !!saleEnd && now > saleEnd.getTime();
+  const saleOpen = saleStarted && !saleEnded;
 
   const myTickets = tickets.filter(
     (t) => t.assignedMembershipId === myMembershipId,
@@ -337,13 +395,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
 
   const available = tickets.filter((t) => t.status === "available").length;
   const assigned = tickets.filter((t) => t.status === "assigned").length;
-  const paid = tickets.filter((t) => t.status === "paid").length;
-  const collected = tickets
-    .filter((t) => t.status === "paid")
-    .reduce((sum, t) => sum + (t.priceCents ?? 0), 0);
-  const outstanding = tickets
-    .filter((t) => t.status === "assigned")
-    .reduce((sum, t) => sum + (t.priceCents ?? 0), 0);
+  const purchased = tickets.filter((t) => t.status === "purchased").length;
 
   const memberData = members.map((m) => ({ value: m.id, label: m.name }));
 
@@ -353,8 +405,10 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Direct Group Sale tickets</Title>
           <Text c="dimmed" size="sm">
-            The camp's guaranteed ticket allocation for this year. Every ticket
-            gets you in the same — they only differ in price.
+            The camp's guaranteed ticket allocation for this year. The camp just
+            decides who gets each slot — once you're assigned one, you'll get a
+            link to buy your ticket directly from Burning Man during the sale
+            window.
           </Text>
         </div>
 
@@ -376,19 +430,18 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
                 None assigned to you yet.
               </Text>
             ) : (
-              <Group gap="sm">
+              <Stack gap="sm">
                 {myTickets.map((t) => (
-                  <Badge
+                  <MyTicket
                     key={t.id}
-                    size="lg"
-                    variant="light"
-                    color={STATUS_COLOR[t.status] ?? "gray"}
-                  >
-                    {t.tier ? `${t.tier} · ` : ""}
-                    {usd(t.priceCents)} · {t.status}
-                  </Badge>
+                    t={t}
+                    fetcher={fetcher}
+                    saleOpen={saleOpen}
+                    saleStarted={saleStarted}
+                    saleStart={saleStart}
+                  />
                 ))}
-              </Group>
+              </Stack>
             )}
 
             {locked ? null : myRequest ? (
@@ -431,19 +484,18 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
               <Group gap="lg" mb="md">
                 <Stat label="available" value={available} color="gray" />
                 <Stat label="assigned" value={assigned} color="blue" />
-                <Stat label="paid" value={paid} color="green" />
-                <Stat
-                  label="collected"
-                  value={dollars(collected)}
-                  color="green"
-                />
-                <Stat
-                  label="outstanding"
-                  value={dollars(outstanding)}
-                  color="orange"
-                />
+                <Stat label="purchased" value={purchased} color="green" />
               </Group>
-              {locked ? null : <AddTicketsForm fetcher={fetcher} />}
+              {locked ? null : (
+                <Stack gap="md">
+                  <SaleWindowForm
+                    fetcher={fetcher}
+                    saleStartsAt={saleStartsAt}
+                    saleEndsAt={saleEndsAt}
+                  />
+                  <AddTicketsForm fetcher={fetcher} />
+                </Stack>
+              )}
             </Card>
 
             {pending.length > 0 ? (
@@ -493,9 +545,10 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
                 <Table.Thead>
                   <Table.Tr>
                     <Table.Th>Tier</Table.Th>
-                    <Table.Th>Price</Table.Th>
+                    <Table.Th>Value</Table.Th>
                     <Table.Th>Status</Table.Th>
                     <Table.Th>Assigned to</Table.Th>
+                    <Table.Th>Purchase link</Table.Th>
                     <Table.Th />
                   </Table.Tr>
                 </Table.Thead>
@@ -591,7 +644,7 @@ function AddTicketsForm({
         />
         <NumberInput
           name="price"
-          label="Price ($)"
+          label="Value ($)"
           placeholder="0 = free"
           w={130}
           min={0}
@@ -611,6 +664,134 @@ function AddTicketsForm({
         </Button>
       </Group>
     </fetcher.Form>
+  );
+}
+
+function MyTicket({
+  t,
+  fetcher,
+  saleOpen,
+  saleStarted,
+  saleStart,
+}: {
+  t: TicketRow;
+  fetcher: ReturnType<typeof useFetcher>;
+  saleOpen: boolean;
+  saleStarted: boolean;
+  saleStart: Date | null;
+}) {
+  return (
+    <Group gap="sm">
+      <Badge size="lg" variant="light" color={STATUS_COLOR[t.status] ?? "gray"}>
+        {t.tier ? `${t.tier} · ` : ""}
+        {usd(t.priceCents)} · {t.status}
+      </Badge>
+      {t.status === "purchased" ? (
+        <Button
+          size="xs"
+          variant="subtle"
+          color="gray"
+          onClick={() =>
+            fetcher.submit(
+              { intent: "unmarkPurchased", ticketId: t.id },
+              { method: "post" },
+            )
+          }
+        >
+          Undo
+        </Button>
+      ) : saleOpen ? (
+        t.purchaseUrl ? (
+          <>
+            <Button
+              size="xs"
+              component="a"
+              href={t.purchaseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Purchase ticket
+            </Button>
+            <Button
+              size="xs"
+              variant="light"
+              color="green"
+              onClick={() =>
+                fetcher.submit(
+                  { intent: "markPurchased", ticketId: t.id },
+                  { method: "post" },
+                )
+              }
+            >
+              Mark as purchased
+            </Button>
+          </>
+        ) : (
+          <Text size="sm" c="dimmed">
+            Purchase link coming soon.
+          </Text>
+        )
+      ) : !saleStarted && saleStart ? (
+        <Text size="sm" c="dimmed">
+          Sale opens {fmtDateTime(saleStart)}.
+        </Text>
+      ) : (
+        <Text size="sm" c="dimmed">
+          Sale closed.
+        </Text>
+      )}
+    </Group>
+  );
+}
+
+function SaleWindowForm({
+  fetcher,
+  saleStartsAt,
+  saleEndsAt,
+}: {
+  fetcher: ReturnType<typeof useFetcher>;
+  saleStartsAt: Date | null;
+  saleEndsAt: Date | null;
+}) {
+  const [start, setStart] = useState<Date | null>(saleStartsAt);
+  const [end, setEnd] = useState<Date | null>(saleEndsAt);
+  return (
+    <Group align="flex-end">
+      <DateTimePicker
+        label="Sale opens"
+        placeholder="not set"
+        value={start}
+        onChange={setStart as (v: Date | null) => void}
+        clearable
+        w={200}
+        valueFormat="MMM D, YYYY h:mm A"
+      />
+      <DateTimePicker
+        label="Sale closes"
+        placeholder="not set"
+        value={end}
+        onChange={setEnd as (v: Date | null) => void}
+        clearable
+        w={200}
+        valueFormat="MMM D, YYYY h:mm A"
+      />
+      <Button
+        variant="default"
+        loading={fetcher.state !== "idle"}
+        onClick={() =>
+          fetcher.submit(
+            {
+              intent: "setSaleWindow",
+              saleStartsAt: start ? start.toISOString() : "",
+              saleEndsAt: end ? end.toISOString() : "",
+            },
+            { method: "post" },
+          )
+        }
+      >
+        Save window
+      </Button>
+    </Group>
   );
 }
 
@@ -708,37 +889,42 @@ function TicketRowView({
         )}
       </Table.Td>
       <Table.Td>
+        {locked ? (
+          t.purchaseUrl ? (
+            <Anchor
+              href={t.purchaseUrl}
+              target="_blank"
+              rel="noopener"
+              size="xs"
+            >
+              vendor link
+            </Anchor>
+          ) : (
+            "—"
+          )
+        ) : (
+          <TextInput
+            size="xs"
+            w={220}
+            defaultValue={t.purchaseUrl ?? ""}
+            placeholder="vendor purchase URL"
+            onBlur={(e) => {
+              if ((e.currentTarget.value || null) !== (t.purchaseUrl ?? null))
+                fetcher.submit(
+                  {
+                    intent: "editTicket",
+                    id: t.id,
+                    purchaseUrl: e.currentTarget.value,
+                  },
+                  { method: "post" },
+                );
+            }}
+          />
+        )}
+      </Table.Td>
+      <Table.Td>
         {locked ? null : (
           <Group gap={4} wrap="nowrap" justify="flex-end">
-            {t.status === "assigned" ? (
-              <Button
-                size="compact-xs"
-                variant="light"
-                color="green"
-                onClick={() =>
-                  fetcher.submit(
-                    { intent: "setPaid", ticketId: t.id, paid: "true" },
-                    { method: "post" },
-                  )
-                }
-              >
-                Mark paid
-              </Button>
-            ) : t.status === "paid" ? (
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="gray"
-                onClick={() =>
-                  fetcher.submit(
-                    { intent: "setPaid", ticketId: t.id, paid: "false" },
-                    { method: "post" },
-                  )
-                }
-              >
-                Unpay
-              </Button>
-            ) : null}
             <Tooltip label="Delete ticket">
               <ActionIcon
                 variant="subtle"

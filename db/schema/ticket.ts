@@ -5,14 +5,18 @@
  * per-year scope, like the map tables). A locked edition is read-only.
  *
  *   ticket          one guaranteed DGS ticket slot — fungible in access but not
- *                   in cost (tier + price); assignable to a member.
+ *                   in value (tier + price); assignable to a member. The camp
+ *                   only decides who gets each slot: Burning Man sets the price
+ *                   and runs checkout, so the assignee buys their own ticket via
+ *                   a unique vendor link (`purchase_url`) during the sale window.
  *   ticket_request  a member's ask for a ticket (unbound to a specific ticket
  *                   until an officer assigns one).
  *   setup_pass_date an early-arrival entry date + the per-date quota the camp got.
  *   setup_pass      an individual pass for a date; request + grant unified via
  *                   `status` (quota counts only `granted`).
  *
- * Money is stored as integer cents (`price_cents`), nullable (null = TBD, 0 = free).
+ * `price_cents` is the ticket's value as set by the vendor (integer cents,
+ * nullable: null = TBD, 0 = free) — the camp never collects it.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -39,14 +43,18 @@ export const ticket = sqliteTable(
     }),
     // Optional price tier label, e.g. "Standard" / "Low-income" / "Comp".
     tier: text("tier"),
-    // Integer cents. Null = price TBD; 0 = free.
+    // Integer cents — the ticket's value as set by the vendor. Null = TBD; 0 = free.
     priceCents: integer("price_cents"),
+    // Unique vendor link the assignee uses to buy this ticket during the sale
+    // window (officer pastes the per-slot link BM hands out). Null = not set yet.
+    purchaseUrl: text("purchase_url"),
     // The member this ticket is allocated to; null = still in the pool.
     assignedMembershipId: text("assigned_membership_id").references(
       () => membership.id,
       { onDelete: "set null" },
     ),
-    // available (in pool) -> assigned (allocated, unpaid) -> paid (claimed/paid).
+    // available (in pool) -> assigned (allocated to a member) -> purchased
+    // (the member confirms they bought it from the vendor; member-set).
     status: text("status").notNull().default("available"),
     notes: text("notes"),
     createdById: text("created_by_id").references(() => user.id, {

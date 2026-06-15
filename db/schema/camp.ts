@@ -51,6 +51,13 @@ export const campEdition = sqliteTable(
       (): AnySQLiteColumn => campEdition.id,
       { onDelete: "set null" },
     ),
+    // DGS ticket sale window for this year (the vendor's checkout open/close).
+    // Null = unbounded on that end. The per-ticket purchase link is only shown
+    // to the assignee while now is within [start, end].
+    ticketSaleStartsAt: integer("ticket_sale_starts_at", {
+      mode: "timestamp_ms",
+    }),
+    ticketSaleEndsAt: integer("ticket_sale_ends_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
       .default(now),
