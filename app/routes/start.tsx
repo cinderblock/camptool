@@ -376,7 +376,7 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
           p="md"
           radius="md"
           mb="md"
-          bg="var(--mantine-color-gray-0)"
+          bg="var(--mantine-color-default-hover)"
         >
           <Text size="sm" c="dimmed">
             This year is locked — items and RSVP are read-only.

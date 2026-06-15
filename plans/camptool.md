@@ -831,6 +831,25 @@ placement page.)
       fields map to existing features (Bringing inventory, RSVP, passes, tickets);
       only the free-form remainder is the new bank. Camp's actual questions get
       entered as DATA via admin, not committed. See section below.
+- [x] Dark mode follows the system (2026-06-15, browser-verified) — `root.tsx` now
+      passes `defaultColorScheme="auto"` to both `ColorSchemeScript` and
+      `MantineProvider`, so a dark-mode device renders dark out of the box (and
+      flips with the OS preference). A small inline `<style>` in `<head>` sets
+      `color-scheme: light dark` plus html background via `prefers-color-scheme`
+      AND `[data-mantine-color-scheme]` selectors — Mantine's ColorSchemeScript
+      synchronously sets the attribute pre-paint, and the attribute rules win
+      over the media query so a user who picks Mantine "light" on a dark OS
+      doesn't get dark html peeking around the white body. Colors mirror
+      Mantine 7.15's `--mantine-color-body` defaults (#fff / #242424); update
+      both if Mantine ever changes the dark shade. Hardcoded light-only tokens
+      (`var(--mantine-color-gray-0)` page bg in start/bringing/passes/tickets;
+      `gray-2`/`gray-3` borders in map.tsx) swapped to the scheme-adapting
+      `--mantine-color-default-hover` / `--mantine-color-default-border`. The
+      `ErrorBoundary` fallback now uses `--mantine-color-body` + `-text` so it
+      doesn't render as a white-on-white panel in dark mode. Verified all four
+      branches in Chrome on a dark OS (no-localStorage → dark; force light →
+      both html+body white; force dark → both dark) — html and body match in
+      every case, no flash, no scrollbar mismatch.
 
 ## Season-aware wizard (design direction — first slice landed)
 

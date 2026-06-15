@@ -141,7 +141,12 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
         </div>
 
         {locked ? (
-          <Paper withBorder p="md" radius="md" bg="var(--mantine-color-gray-0)">
+          <Paper
+            withBorder
+            p="md"
+            radius="md"
+            bg="var(--mantine-color-default-hover)"
+          >
             <Text size="sm" c="dimmed">
               This year is locked — your inventory is read-only. Switch to an
               open year to make changes.

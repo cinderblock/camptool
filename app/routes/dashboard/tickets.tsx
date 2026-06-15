@@ -414,7 +414,12 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
         </div>
 
         {locked ? (
-          <Paper withBorder p="md" radius="md" bg="var(--mantine-color-gray-0)">
+          <Paper
+            withBorder
+            p="md"
+            radius="md"
+            bg="var(--mantine-color-default-hover)"
+          >
             <Text size="sm" c="dimmed">
               This year is locked — tickets are read-only. Switch to an open
               year to make changes.

@@ -1575,7 +1575,7 @@ function UnplacedTray({ unplaced }: { unplaced: Unplaced[] }) {
                 }}
                 style={{
                   cursor: "grab",
-                  border: "1px solid var(--mantine-color-gray-3)",
+                  border: "1px solid var(--mantine-color-default-border)",
                   borderRadius: 6,
                   padding: "3px 8px",
                   userSelect: "none",
@@ -1637,7 +1637,7 @@ function Legend() {
                     }}
                     style={{
                       cursor: "grab",
-                      border: "1px solid var(--mantine-color-gray-3)",
+                      border: "1px solid var(--mantine-color-default-border)",
                       borderRadius: 6,
                       padding: 4,
                       userSelect: "none",
@@ -2250,7 +2250,9 @@ function Editor({
           p={6}
           justify="space-between"
           wrap="nowrap"
-          style={{ borderBottom: "1px solid var(--mantine-color-gray-2)" }}
+          style={{
+            borderBottom: "1px solid var(--mantine-color-default-border)",
+          }}
         >
           <Group gap="xs">
             {drawMode === "cable" ? (
