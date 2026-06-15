@@ -401,13 +401,33 @@ nullable = unbounded). The member then **self-sets `purchased`** (with an Undo);
 Officers set the window with two `@mantine/dates` `DateTimePicker`s. **Migration
 0018** adds the three columns and backfills any legacy `paid` ticket → `purchased`
 (the live DB had exactly one). Note: migration 0017 in the tree is another thread's;
-0018 sequenced cleanly after it.
+0018 sequenced cleanly after it. **DEPLOYED (commit c05800a, Deploy to firefly
+green).**
+
+**Follow-up corrections (2026-06-15, locked by the user; DEPLOYED commit 86c4bd2,
+Deploy to firefly green; migration 0020 verified on a VACUUM-INTO snapshot, NOT
+browser-tested):**
+- **No in-app purchase link.** Burning Man **emails each assignee their own
+  purchase link** after assignments are published — the camp doesn't hold links.
+  So `ticket.purchase_url` and all purchase-link UI (officer paste field, table
+  column, member "Purchase ticket" button) are **removed** (migration 0020 drops
+  the column). The member just self-marks `purchased` after buying.
+- **Sale window is info-only now.** `camp_edition.ticket_sale_starts_at`/`ends_at`
+  remain (officer-set) but only render as a dimmed note; they no longer gate any
+  link (there is none).
+- **Draft / publish gate on assignments.** New `camp_edition.tickets_published_at`
+  (null = draft). While draft, only officers see assignments; members see "not
+  announced yet" and the loader returns them no ticket rows. Officers get a DRAFT
+  banner + **Publish / Unpublish** toggle (intents `publishTickets`/
+  `unpublishTickets`). Once published, a member sees **only their own** assigned
+  ticket and can mark it purchased. ("certain groups" = officer+ — the existing
+  management tier.)
 
 **Schema — `db/schema/ticket.ts`, migration 0013** (4 tables, all `camp_id` +
 `edition_id`; money = integer `price_cents`, nullable):
-- `ticket` — tier, priceCents (the ticket's *value*), purchaseUrl (unique vendor
-  link, added migration 0018), assignedMembershipId, status
-  (`available|assigned|purchased`), notes. Index on edition.
+- `ticket` — tier, priceCents (the ticket's *value*), assignedMembershipId, status
+  (`available|assigned|purchased`), notes. Index on edition. (Had a `purchase_url`
+  briefly in migration 0018; dropped in 0020 — see follow-up note above.)
 - `ticket_request` — membershipId, note, status (`pending|approved|denied`),
   resolvedTicketId + resolvedBy/At. The member's ask, unbound to a specific ticket
   until an officer assigns one.
