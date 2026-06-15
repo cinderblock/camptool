@@ -50,6 +50,9 @@ jobs:
           # db/migrations (the app auto-migrates on boot from cwd).
           cp -r build db server.ts run package.json bun.lock "$REL"/
           chmod +x "$REL/run"
+          # Stamp the build SHA so the running app can report which release it is
+          # (server.ts serves it at /_version; the health check below verifies it).
+          printf '%s' "$GITHUB_SHA" > "$REL/BUILD_SHA"
           # Prune to production dependencies inside the release dir.
           ( cd "$REL" && bun install --frozen-lockfile --production )
 
@@ -60,23 +63,33 @@ jobs:
           ln -sfn "releases/$GITHUB_SHA" "$APP_ROOT/current"
           touch "$APP_ROOT/restart"
 
-      - name: Wait for healthy socket
-        # Use Bun (guaranteed present in the image) so we don't depend on
-        # curl/seq being installed in the runner container.
+      - name: Wait for the NEW build to be serving
+        # Poll /_version until it reports THIS commit's SHA — proving the
+        # supervisor actually restarted into the new release. A plain "GET / ->
+        # 200" is not enough: the old process answers 200 too, so a flaky/missed
+        # restart would pass silently (it did, repeatedly — see plans/camptool.md).
+        # Use Bun (guaranteed in the image); no dependency on curl/seq.
+        env:
+          EXPECT_SHA: ${{ github.sha }}
         run: |
           bun -e '
             const sock = process.env.SOCKET;
-            for (let i = 1; i <= 60; i++) {
+            const want = (process.env.EXPECT_SHA ?? "").trim();
+            for (let i = 1; i <= 90; i++) {
               try {
-                const r = await fetch("http://localhost/", { unix: sock });
-                if (r.status === 200) { console.log("healthy: GET / -> 200"); process.exit(0); }
-                console.log(`GET / -> ${r.status} (retry ${i})`);
+                const r = await fetch("http://localhost/_version", { unix: sock });
+                const got = (await r.text()).trim();
+                if (r.status === 200 && got === want) {
+                  console.log(`healthy: /_version -> ${got}`);
+                  process.exit(0);
+                }
+                console.log(`/_version -> ${r.status} "${got.slice(0, 12)}" (want ${want.slice(0, 12)}, retry ${i})`);
               } catch (e) {
                 console.log(`socket not ready (retry ${i}): ${e?.code ?? e?.message ?? e}`);
               }
               await new Promise((res) => setTimeout(res, 1000));
             }
-            console.error(`::error::app did not become healthy on ${sock}`);
+            console.error(`::error::new build ${want} never came up on ${sock} within 90s — the supervisor likely did not restart into the new release (the old build may still be serving). Re-run this workflow, and check the supervisor restart-sentinel.`);
             process.exit(1);
           '
 

@@ -5,7 +5,13 @@
 // Caddy (on the firefly host) reverse-proxies https://camptool.mathcamp.us/ to
 // the socket below, passing X-Forwarded-Proto/-For and X-Real-IP.
 
-import { chmodSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import { createRequestHandler } from "react-router";
 
@@ -15,6 +21,19 @@ import * as build from "./build/server/index.js";
 
 const SOCKET_PATH = process.env.SOCKET_PATH ?? "/run/camptool/camptool.sock";
 const CLIENT_DIR = `${import.meta.dir}/build/client`;
+
+// The git SHA this release was built from — written into the release tree by CI
+// (deploy.yml). Served at /_version so the deploy can confirm the NEW build is
+// actually live (the supervisor restart has been unreliable; a green socket
+// alone doesn't prove the new release took over). "dev" outside a release.
+const BUILD_SHA = (() => {
+  if (process.env.BUILD_SHA) return process.env.BUILD_SHA.trim();
+  try {
+    return readFileSync(`${import.meta.dir}/BUILD_SHA`, "utf8").trim();
+  } catch {
+    return "dev";
+  }
+})();
 
 const handler = createRequestHandler(build, "production");
 
@@ -42,6 +61,14 @@ Bun.serve({
     const url = new URL(req.url);
     const proto = req.headers.get("x-forwarded-proto");
     if (proto) url.protocol = `${proto}:`;
+
+    // Build marker for the deploy health check — handled before the app/auth so
+    // it's a plain, unauthenticated 200 reporting which release is serving.
+    if (url.pathname === "/_version") {
+      return new Response(BUILD_SHA, {
+        headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+      });
+    }
 
     if (req.method === "GET" || req.method === "HEAD") {
       const asset = serveAsset(url.pathname);
