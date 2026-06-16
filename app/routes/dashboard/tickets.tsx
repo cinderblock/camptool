@@ -250,9 +250,9 @@ export async function action({ request }: Route.ActionArgs) {
     and(eq(ticket.id, id), eq(ticket.editionId, editionId));
 
   if (intent === "editTicket") {
+    // Price/value is fixed at creation — only tier and notes are editable.
     const set: Record<string, unknown> = { updatedAt: new Date() };
     if (form.has("tier")) set.tier = str("tier");
-    if (form.has("price")) set.priceCents = dollarsToCents("price");
     if (form.has("notes")) set.notes = str("notes");
     await db
       .update(ticket)
@@ -879,27 +879,8 @@ function TicketRowView({
           />
         )}
       </Table.Td>
-      <Table.Td>
-        {locked ? (
-          usd(t.priceCents)
-        ) : (
-          <NumberInput
-            size="xs"
-            w={110}
-            min={0}
-            decimalScale={2}
-            defaultValue={t.priceCents == null ? undefined : t.priceCents / 100}
-            placeholder="TBD"
-            onBlur={(e) => {
-              const raw = e.currentTarget.value;
-              fetcher.submit(
-                { intent: "editTicket", id: t.id, price: raw },
-                { method: "post" },
-              );
-            }}
-          />
-        )}
-      </Table.Td>
+      {/* Value is fixed at creation — never editable here. */}
+      <Table.Td>{usd(t.priceCents)}</Table.Td>
       <Table.Td>
         <Badge color={STATUS_COLOR[t.status] ?? "gray"} variant="light">
           {t.status}
