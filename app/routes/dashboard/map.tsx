@@ -33,7 +33,6 @@ import {
 } from "~/lib/brc";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
-import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
 import {
   AMP_OPTIONS,
   CONTAINER_FULL,
@@ -52,6 +51,7 @@ import {
   kindHasDoor,
   kindHeight,
 } from "~/lib/structures";
+import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
 import { db } from "../../../db/client.server";
 import {
   mapCable,
@@ -2400,6 +2400,10 @@ function Editor({
         <clipPath id={clipId}>
           <polygon points={lotPoints} />
         </clipPath>
+        {/* Ground surface for the lot — a theme-aware fill (lighter than the page
+            in both schemes) so cast shadows read against it in dark mode too,
+            instead of vanishing on the transparent dark page. */}
+        <polygon points={lotPoints} fill="var(--mantine-color-default)" />
         <g clipPath={`url(#${clipId})`}>
           <Grid
             frontageFt={lot.frontageFt}
@@ -2868,18 +2872,30 @@ function Compass({
         aria-label="Compass"
       >
         <title>Compass</title>
-        <circle cx={cx} cy={cy} r={r} fill="#ffffff" stroke="#dee2e6" />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r}
+          fill="var(--mantine-color-default)"
+          stroke="var(--mantine-color-default-border)"
+        />
         {oriented ? (
           <path d={daylight} fill="#ffe066" fillOpacity={0.4} stroke="none" />
         ) : null}
-        <line x1={cx} y1={cy} x2={cx} y2={cy - r + 20} stroke="#1c1c1c" />
+        <line
+          x1={cx}
+          y1={cy}
+          x2={cx}
+          y2={cy - r + 20}
+          stroke="var(--mantine-color-text)"
+        />
         <ManGlyph x={cx} y={cy - r + 12} size={22} />
         {oriented ? (
           <>
             {ray(0, "#e03131", "N", { lw: 2, weight: 700 })}
-            {ray(90, "#adb5bd", "E", { lw: 0.6 })}
-            {ray(180, "#adb5bd", "S", { lw: 0.6 })}
-            {ray(270, "#adb5bd", "W", { lw: 0.6 })}
+            {ray(90, "var(--mantine-color-dimmed)", "E", { lw: 0.6 })}
+            {ray(180, "var(--mantine-color-dimmed)", "S", { lw: 0.6 })}
+            {ray(270, "var(--mantine-color-dimmed)", "W", { lw: 0.6 })}
           </>
         ) : null}
         {oriented && showShade ? (
@@ -2964,13 +2980,19 @@ function ManGlyph({ x, y, size }: { x: number; y: number; size: number }) {
   const s = size / 22;
   return (
     <g
-      stroke="#1c1c1c"
+      stroke="var(--mantine-color-text)"
       strokeWidth={1.6}
       strokeLinecap="round"
       fill="none"
       pointerEvents="none"
     >
-      <circle cx={x} cy={y - 9 * s} r={2.4 * s} fill="#1c1c1c" stroke="none" />
+      <circle
+        cx={x}
+        cy={y - 9 * s}
+        r={2.4 * s}
+        fill="var(--mantine-color-text)"
+        stroke="none"
+      />
       <line x1={x} y1={y - 6.5 * s} x2={x} y2={y + 3 * s} />
       <line x1={x} y1={y - 4.5 * s} x2={x - 6 * s} y2={y - 11 * s} />
       <line x1={x} y1={y - 4.5 * s} x2={x + 6 * s} y2={y - 11 * s} />
