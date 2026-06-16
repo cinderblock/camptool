@@ -145,6 +145,22 @@ export function eventWindowFor(year: number): {
   return { min: shift(-14), max: shift(12), focus: fmt(start) };
 }
 
+/** The pre-event Setup Access window: the **Monday before gate-open through the
+ * Saturday before** (the 6 build days leading up to the Sunday gates open). For
+ * bounding the Setup Access Pass date picker. Returns local `YYYY-MM-DD`. */
+export function setupPassWindowFor(year: number): { min: string; max: string } {
+  const start = eventStartFor(year); // the Sunday gates open
+  const fmt = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate(),
+    ).padStart(2, "0")}`;
+  const shift = (days: number) =>
+    fmt(
+      new Date(start.getFullYear(), start.getMonth(), start.getDate() + days),
+    );
+  return { min: shift(-6), max: shift(-1) };
+}
+
 /** Which geometry year to use for a given event year: that year if we have its
  * measurements, else the newest year at/below it, else the newest we have. */
 export function geometryYearFor(

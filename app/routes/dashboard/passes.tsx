@@ -20,6 +20,7 @@ import dayjs from "dayjs";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
+import { setupPassWindowFor } from "~/lib/brc";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -90,6 +91,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     isOfficer,
     locked: activeEdition.locked,
     myMembershipId: active.membership.id,
+    year: activeEdition.year,
     dates,
     passes,
     members,
@@ -364,7 +366,7 @@ const STATUS_COLOR: Record<string, string> = {
 type FetcherData = { ok?: string; error?: string };
 
 export default function Passes({ loaderData }: Route.ComponentProps) {
-  const { isOfficer, locked, myMembershipId, dates, passes, members } =
+  const { isOfficer, locked, myMembershipId, year, dates, passes, members } =
     loaderData;
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
@@ -544,7 +546,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
                   ))}
                 </Stack>
               )}
-              {locked ? null : <AddDateForm fetcher={fetcher} />}
+              {locked ? null : <AddDateForm fetcher={fetcher} year={year} />}
             </Card>
           </>
         ) : null}
@@ -593,10 +595,21 @@ function RequestPassForm({
   );
 }
 
-function AddDateForm({ fetcher }: { fetcher: ReturnType<typeof useFetcher> }) {
+function AddDateForm({
+  fetcher,
+  year,
+}: {
+  fetcher: ReturnType<typeof useFetcher>;
+  year: number;
+}) {
   const [date, setDate] = useState<Date | null>(null);
   const [label, setLabel] = useState("");
   const [quota, setQuota] = useState<number | string>(1);
+  // Setup access only runs the Monday→Saturday before gates open — bound the
+  // picker to that window so officers can't add unrelated dates.
+  const win = setupPassWindowFor(year);
+  const minDate = dayjs(win.min).toDate();
+  const maxDate = dayjs(win.max).toDate();
   return (
     <Group align="flex-end">
       <DateInput
@@ -604,6 +617,9 @@ function AddDateForm({ fetcher }: { fetcher: ReturnType<typeof useFetcher> }) {
         placeholder="pick a date"
         value={date}
         onChange={setDate as (v: Date | null) => void}
+        minDate={minDate}
+        maxDate={maxDate}
+        defaultDate={minDate}
         w={170}
         valueFormat="ddd, MMM D"
       />
