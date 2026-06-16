@@ -27,6 +27,10 @@ export type Kind = {
   group: string;
   /** Highlight categories this kind belongs to. */
   tags: readonly KindTag[];
+  /** A camper can declare this themselves on Bringing / in the wizard. Communal
+   * infrastructure (kitchen, generator, shipping container, spider box, camp art)
+   * is officer-placed only and stays out of the camper-facing palette. */
+  personal: boolean;
 };
 
 export const KINDS = [
@@ -41,6 +45,7 @@ export const KINDS = [
     rigid: false,
     group: "Domiciles",
     tags: ["domicile"],
+    personal: true,
   },
   // Regular hexagon, 8ft edges → 16ft point-to-point, 8√3 ≈ 13.86ft flat-to-flat.
   {
@@ -54,6 +59,7 @@ export const KINDS = [
     rigid: true,
     group: "Domiciles",
     tags: ["domicile"],
+    personal: true,
   },
   // 8ft square base; the roof is a hypar with one high corner.
   {
@@ -67,6 +73,7 @@ export const KINDS = [
     rigid: true,
     group: "Domiciles",
     tags: ["domicile"],
+    personal: true,
   },
   // Geodesic dome: circular footprint sized by a single diameter; optional height.
   {
@@ -80,6 +87,7 @@ export const KINDS = [
     rigid: false,
     group: "Domiciles",
     tags: ["domicile"],
+    personal: true,
   },
   {
     value: "rv",
@@ -92,6 +100,7 @@ export const KINDS = [
     rigid: false,
     group: "Domiciles",
     tags: ["domicile", "vehicle"],
+    personal: true,
   },
   {
     value: "car",
@@ -104,6 +113,7 @@ export const KINDS = [
     rigid: true,
     group: "Vehicles",
     tags: ["vehicle"],
+    personal: true,
   },
   {
     value: "truck",
@@ -116,6 +126,7 @@ export const KINDS = [
     rigid: true,
     group: "Vehicles",
     tags: ["vehicle"],
+    personal: true,
   },
   {
     value: "van",
@@ -128,6 +139,7 @@ export const KINDS = [
     rigid: true,
     group: "Vehicles",
     tags: ["vehicle"],
+    personal: true,
   },
   {
     value: "shade",
@@ -140,6 +152,7 @@ export const KINDS = [
     rigid: false,
     group: "Structures",
     tags: ["structure"],
+    personal: true,
   },
   {
     value: "kitchen",
@@ -152,6 +165,7 @@ export const KINDS = [
     rigid: false,
     group: "Structures",
     tags: ["structure"],
+    personal: false,
   },
   {
     value: "art",
@@ -164,6 +178,7 @@ export const KINDS = [
     rigid: false,
     group: "Structures",
     tags: ["structure"],
+    personal: false,
   },
   {
     value: "power",
@@ -176,6 +191,7 @@ export const KINDS = [
     rigid: false,
     group: "Power",
     tags: ["structure"],
+    personal: false,
   },
   // Shipping containers come in known sizes: fixed 8ft width, length is either
   // full (40ft) or half (20ft). See CONTAINER_* + the map's Full/Half toggle.
@@ -190,6 +206,7 @@ export const KINDS = [
     rigid: true,
     group: "Structures",
     tags: ["structure"],
+    personal: false,
   },
   // Power distribution node — small fixed footprint; cables (map_cable) run
   // between these and the generator. See power-line drawing on the map.
@@ -204,6 +221,7 @@ export const KINDS = [
     rigid: true,
     group: "Power",
     tags: ["structure"],
+    personal: false,
   },
   {
     value: "structure",
@@ -216,6 +234,7 @@ export const KINDS = [
     rigid: false,
     group: "Structures",
     tags: ["structure"],
+    personal: true,
   },
 ] as const;
 
@@ -263,6 +282,11 @@ export const GAUGE_OPTIONS = [
 export const CONTAINER_WIDTH = 8;
 export const CONTAINER_FULL = 40;
 export const CONTAINER_HALF = 20;
+
+/** The kinds a camper may declare for themselves (Bringing page + wizard).
+ * Excludes communal infrastructure (kitchen, generator, shipping container,
+ * spider box, camp art) that only officers place. */
+export const CAMPER_KINDS: readonly Kind[] = KINDS.filter((k) => k.personal);
 
 /** Legend groups in display order, each with its kinds. Derived from KINDS so
  * adding a kind only requires setting its `group`. */

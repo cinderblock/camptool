@@ -16,7 +16,6 @@ export type AskKey =
   | "rsvp"
   | "profile"
   | "questionnaire"
-  | "tickets"
   | "bringing"
   | "sharing"
   | "checklist";
@@ -66,14 +65,6 @@ export const ASKS: AskDef[] = [
     key: "questionnaire",
     label: "Questionnaire",
     hint: "A few questions",
-    audience: "all",
-    opensWeeksBefore: null,
-    priority: "optional",
-  },
-  {
-    key: "tickets",
-    label: "Tickets",
-    hint: "Directed group sale",
     audience: "all",
     opensWeeksBefore: null,
     priority: "optional",

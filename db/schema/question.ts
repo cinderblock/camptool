@@ -56,6 +56,10 @@ export const campQuestion = sqliteTable(
     type: text("type").notNull().default("short_text"),
     // JSON array of option strings for single_select / multi_select; null otherwise.
     options: text("options"),
+    // For multi_select: the one option that is mutually exclusive — picking it
+    // clears the others (and picking any other clears it). e.g. ride-share's
+    // "I don't have space". Null = no exclusive option. Must be one of `options`.
+    exclusiveOption: text("exclusive_option"),
     // all | returning (member+) | recruit. Matches AskAudience in app/lib/wizard.ts.
     audience: text("audience").notNull().default("all"),
     required: integer("required", { mode: "boolean" }).notNull().default(false),

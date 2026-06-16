@@ -1,4 +1,5 @@
 import {
+  Box,
   Button,
   Checkbox,
   Group,
@@ -12,7 +13,7 @@ import {
 } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { useFetcher } from "react-router";
-import { eventWindowFor } from "~/lib/brc";
+import { EventCalendar } from "~/components/EventCalendar";
 import { type QuestionType, parseMultiValue } from "~/lib/questions";
 
 /** At or below this many options, a single/multi choice renders as a row of
@@ -26,7 +27,22 @@ export type QuestionFieldData = {
   type: QuestionType;
   options: string[];
   required: boolean;
+  /** multi_select only: the option that clears the others when picked. */
+  exclusiveOption?: string | null;
 };
+
+/** Next multi_select selection after toggling `opt`, honoring an exclusive
+ * option: picking the exclusive one clears the rest; picking any other clears
+ * the exclusive one. */
+function nextMulti(
+  selected: string[],
+  opt: string,
+  exclusive: string | null | undefined,
+): string[] {
+  if (selected.includes(opt)) return selected.filter((x) => x !== opt);
+  if (exclusive && opt === exclusive) return [opt];
+  return [...selected.filter((x) => x !== exclusive), opt];
+}
 
 /**
  * Renders one questionnaire field by type and saves the answer via a fetcher.
@@ -134,14 +150,9 @@ export function QuestionField({
     }
     case "multi_select": {
       const selected = parseMultiValue(value);
+      const exclusive = q.exclusiveOption;
       const toggle = (o: string) =>
-        save(
-          JSON.stringify(
-            selected.includes(o)
-              ? selected.filter((x) => x !== o)
-              : [...selected, o],
-          ),
-        );
+        save(JSON.stringify(nextMulti(selected, o, exclusive)));
       if (q.options.length <= BUTTON_MAX) {
         return (
           <Input.Wrapper label={label} description={description}>
@@ -162,18 +173,19 @@ export function QuestionField({
         );
       }
       return (
-        <Checkbox.Group
-          label={label}
-          description={description}
-          defaultValue={selected}
-          onChange={(v) => save(JSON.stringify(v))}
-        >
+        <Input.Wrapper label={label} description={description}>
           <Stack gap={6} mt={6}>
             {q.options.map((o) => (
-              <Checkbox key={o} value={o} label={o} disabled={locked} />
+              <Checkbox
+                key={o}
+                label={o}
+                checked={selected.includes(o)}
+                disabled={locked}
+                onChange={() => toggle(o)}
+              />
             ))}
           </Stack>
-        </Checkbox.Group>
+        </Input.Wrapper>
       );
     }
     case "boolean": {
@@ -229,9 +241,11 @@ export function QuestionField({
           maw={260}
         />
       );
-    case "event_date": {
-      const win = year != null ? eventWindowFor(year) : null;
-      return (
+    case "event_date":
+      // One consistent calendar centered on the event (no month arrows — those
+      // rendered awkwardly at the window edges). Falls back to a plain date
+      // picker only when we don't know the year (no event to center on).
+      return year == null ? (
         <DateInput
           label={label}
           description={description}
@@ -239,14 +253,21 @@ export function QuestionField({
           disabled={locked}
           defaultValue={value ? parseLocalDate(value) : null}
           onChange={(d) => save(d ? formatDate(d) : "")}
-          minDate={win ? parseLocalDate(win.min) : undefined}
-          maxDate={win ? parseLocalDate(win.max) : undefined}
-          defaultDate={win ? parseLocalDate(win.focus) : undefined}
           popoverProps={{ withinPortal: true }}
           maw={260}
         />
+      ) : (
+        <Input.Wrapper label={label} description={description}>
+          <Box mt={6}>
+            <EventCalendar
+              year={year}
+              value={value ?? null}
+              onChange={(v) => save(v ?? "")}
+              disabled={locked}
+            />
+          </Box>
+        </Input.Wrapper>
       );
-    }
     case "invited_by":
       // Pre-fill with the inviter from the invite tree; still editable.
       return (

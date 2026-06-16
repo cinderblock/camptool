@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Badge,
-  Button,
   Container,
   Group,
   NumberInput,
@@ -14,8 +13,9 @@ import {
 } from "@mantine/core";
 import { and, eq } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
+import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { requireActiveEdition } from "~/lib/session.server";
-import { KINDS, ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
+import { ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { mapObject } from "../../../db/schema";
 import type { Route } from "./+types/bringing";
@@ -85,6 +85,18 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "addItem") {
     const kind = String(form.get("kind") ?? "tent");
     const def = kindDef(kind);
+    // Rigid kinds keep their fixed footprint; sizable ones may carry a
+    // camper-picked width/height from the size prompt.
+    const width = def.rigid
+      ? def.w
+      : form.has("width")
+        ? Math.max(1, num("width", def.w))
+        : def.w;
+    const height = def.rigid
+      ? def.h
+      : form.has("height")
+        ? Math.max(1, num("height", def.h))
+        : def.h;
     await db.insert(mapObject).values({
       id: crypto.randomUUID(),
       campId,
@@ -92,8 +104,8 @@ export async function action({ request }: Route.ActionArgs) {
       ownerMembershipId: mid,
       kind,
       placed: false,
-      width: def.w,
-      height: def.h,
+      width,
+      height,
       tallFt: kindHeight(kind),
       createdById: user.id,
     });
@@ -125,8 +137,11 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
   const { items, locked } = loaderData;
   const fetcher = useFetcher();
 
-  function add(kind: string) {
-    fetcher.submit({ intent: "addItem", kind }, { method: "post" });
+  function add(kind: string, size?: AddSize) {
+    const fields: Record<string, string> = { intent: "addItem", kind };
+    if (size?.width != null) fields.width = String(Math.round(size.width));
+    if (size?.height != null) fields.height = String(Math.round(size.height));
+    fetcher.submit(fields, { method: "post" });
   }
 
   return (
@@ -157,19 +172,7 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
             <Text fw={600} size="sm" mb="xs">
               Add an item
             </Text>
-            <Group gap="xs">
-              {KINDS.map((k) => (
-                <Button
-                  key={k.value}
-                  size="xs"
-                  variant="default"
-                  leftSection={<ShapeSwatch kind={k} size={14} />}
-                  onClick={() => add(k.value)}
-                >
-                  {k.label}
-                </Button>
-              ))}
-            </Group>
+            <AddStructures onAdd={add} />
           </Paper>
         )}
 

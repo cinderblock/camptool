@@ -18,7 +18,8 @@ import {
 } from "@mantine/core";
 import { and, asc, eq } from "drizzle-orm";
 import { useState } from "react";
-import { Link, data, useFetcher, useNavigate } from "react-router";
+import { data, useFetcher, useNavigate } from "react-router";
+import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { QuestionField } from "~/components/QuestionField";
 import { weeksUntilEvent } from "~/lib/brc";
 import type { QuestionType } from "~/lib/questions";
@@ -30,7 +31,7 @@ import {
   loadInviterName,
 } from "~/lib/questions.server";
 import { requireActiveEdition } from "~/lib/session.server";
-import { KINDS, ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
+import { ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
 import type { AskKey } from "~/lib/wizard";
 import { audienceForRole } from "~/lib/wizard";
 import {
@@ -114,6 +115,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     type: QuestionType;
     options: string[];
     required: boolean;
+    exclusiveOption: string | null;
   }[] = [];
   let answers: Record<string, string> = {};
   let invitedByName: string | null = null;
@@ -195,6 +197,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       type: q.type as QuestionType,
       options: parseOptions(q.options),
       required: q.required,
+      exclusiveOption: q.exclusiveOption,
     }));
     answers = await loadAnswers({ editionId, membershipId: mid });
     invitedByName = await loadInviterName(mid);
@@ -384,7 +387,12 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
         </Paper>
       ) : null}
 
-      <Stepper active={active} onStepClick={setActive} size="sm">
+      <Stepper
+        active={active}
+        onStepClick={setActive}
+        size="sm"
+        orientation="vertical"
+      >
         {steps.map((s) => (
           <Stepper.Step
             key={s.key}
@@ -455,8 +463,6 @@ function AskBody({
       return <ProfileStep data={d} fetcher={fetcher} />;
     case "questionnaire":
       return <QuestionnaireStep data={d} />;
-    case "tickets":
-      return <TicketsStep />;
     case "bringing":
       return <BringingStep data={d} />;
     case "sharing":
@@ -549,20 +555,6 @@ function QuestionnaireStep({ data: d }: { data: LoaderData }) {
   );
 }
 
-function TicketsStep() {
-  return (
-    <Stack gap="sm" mt="md" maw={460}>
-      <Text size="sm" c="dimmed">
-        We coordinate Directed Group Sale (DGS) tickets through the camp. If you
-        need one, request it so an officer can allocate yours.
-      </Text>
-      <Button component={Link} to="/tickets" variant="light" w="fit-content">
-        Go to tickets
-      </Button>
-    </Stack>
-  );
-}
-
 function ProfileStep({
   data: d,
   fetcher,
@@ -594,11 +586,12 @@ function ProfileStep({
 function BringingStep({ data: d }: { data: LoaderData }) {
   // Reuse the Bringing page's action so there's one source of truth for items.
   const itemFetcher = useFetcher();
-  const add = (kind: string) =>
-    itemFetcher.submit(
-      { intent: "addItem", kind },
-      { method: "post", action: "/bringing" },
-    );
+  const add = (kind: string, size?: AddSize) => {
+    const fields: Record<string, string> = { intent: "addItem", kind };
+    if (size?.width != null) fields.width = String(Math.round(size.width));
+    if (size?.height != null) fields.height = String(Math.round(size.height));
+    itemFetcher.submit(fields, { method: "post", action: "/bringing" });
+  };
   const update = (id: string, fields: Record<string, string>) =>
     itemFetcher.submit(
       { intent: "updateItem", id, ...fields },
@@ -615,21 +608,7 @@ function BringingStep({ data: d }: { data: LoaderData }) {
       <Text size="sm" c="dimmed">
         What are you bringing? Add each structure or vehicle and give its size.
       </Text>
-      {!d.locked ? (
-        <Group gap="xs">
-          {KINDS.map((k) => (
-            <Button
-              key={k.value}
-              size="xs"
-              variant="default"
-              leftSection={<ShapeSwatch kind={k} size={14} />}
-              onClick={() => add(k.value)}
-            >
-              {k.label}
-            </Button>
-          ))}
-        </Group>
-      ) : null}
+      {!d.locked ? <AddStructures onAdd={add} /> : null}
       {d.items.length === 0 ? (
         <Text c="dimmed" size="sm">
           Nothing yet — add what you're bringing above.

@@ -31,6 +31,7 @@ import {
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
@@ -84,6 +85,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     options: parseOptions(q.options),
     audience: q.audience as QuestionAudience,
     required: q.required,
+    exclusiveOption: q.exclusiveOption,
   }));
 
   return {
@@ -223,8 +225,20 @@ export async function action({ request }: Route.ActionArgs) {
           .map((l) => l.trim())
           .filter(Boolean);
         set.options = lines.length ? JSON.stringify(lines) : null;
+        // Drop a stale exclusive option that no longer exists in the new list.
+        const [cur] = await db
+          .select({ exclusiveOption: campQuestion.exclusiveOption })
+          .from(campQuestion)
+          .where(and(eq(campQuestion.id, id), eq(campQuestion.campId, campId)))
+          .limit(1);
+        if (cur?.exclusiveOption && !lines.includes(cur.exclusiveOption)) {
+          set.exclusiveOption = null;
+        }
         break;
       }
+      case "exclusiveOption":
+        set.exclusiveOption = val.trim() || null;
+        break;
       default:
         return data({ error: "Unknown field." }, { status: 400 });
     }
@@ -482,44 +496,74 @@ function EditableText({
   );
 }
 
-/** Click-to-edit list of choices for single/multi questions. */
+/** Click-to-edit list of choices for single/multi questions. When
+ * `onExclusiveChange` is provided (multi_select), each choice gets a toggle to
+ * mark it the mutually-exclusive option ("clears the others" — e.g. "I don't
+ * have space" on a ride-share question). */
 function OptionsEditor({
   options,
   onChange,
+  exclusiveOption,
+  onExclusiveChange,
 }: {
   options: string[];
   onChange: (opts: string[]) => void;
+  exclusiveOption?: string | null;
+  onExclusiveChange?: (opt: string | null) => void;
 }) {
   return (
     <Stack gap={2}>
-      {options.map((opt, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: options are positional
-        <Group key={i} gap={4} wrap="nowrap" align="center">
-          <Text size="sm" c="dimmed">
-            •
-          </Text>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <EditableText
-              value={opt}
-              placeholder="Choice"
-              onSave={(v) => {
-                const next = options.slice();
-                next[i] = v;
-                onChange(next.filter((o) => o.trim()));
-              }}
-            />
-          </div>
-          <ActionIcon
-            size="sm"
-            variant="subtle"
-            color="red"
-            aria-label="Remove choice"
-            onClick={() => onChange(options.filter((_, j) => j !== i))}
-          >
-            ×
-          </ActionIcon>
-        </Group>
-      ))}
+      {options.map((opt, i) => {
+        const isExclusive = !!exclusiveOption && exclusiveOption === opt;
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: options are positional
+          <Group key={i} gap={4} wrap="nowrap" align="center">
+            <Text size="sm" c="dimmed">
+              •
+            </Text>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <EditableText
+                value={opt}
+                placeholder="Choice"
+                onSave={(v) => {
+                  const next = options.slice();
+                  next[i] = v;
+                  onChange(next.filter((o) => o.trim()));
+                }}
+              />
+            </div>
+            {onExclusiveChange ? (
+              <Tooltip
+                label={
+                  isExclusive
+                    ? "Exclusive: picking this clears the others"
+                    : "Make exclusive (clears the others)"
+                }
+                withArrow
+              >
+                <ActionIcon
+                  size="sm"
+                  variant={isExclusive ? "filled" : "subtle"}
+                  color={isExclusive ? "blue" : "gray"}
+                  aria-label="Toggle exclusive option"
+                  onClick={() => onExclusiveChange(isExclusive ? null : opt)}
+                >
+                  ⊘
+                </ActionIcon>
+              </Tooltip>
+            ) : null}
+            <ActionIcon
+              size="sm"
+              variant="subtle"
+              color="red"
+              aria-label="Remove choice"
+              onClick={() => onChange(options.filter((_, j) => j !== i))}
+            >
+              ×
+            </ActionIcon>
+          </Group>
+        );
+      })}
       <Button
         size="compact-xs"
         variant="subtle"
@@ -614,6 +658,14 @@ const SortableQuestion = memo(function SortableQuestion({
             <OptionsEditor
               options={q.options}
               onChange={(opts) => save("options", opts.join("\n"))}
+              exclusiveOption={
+                q.type === "multi_select" ? q.exclusiveOption : undefined
+              }
+              onExclusiveChange={
+                q.type === "multi_select"
+                  ? (opt) => save("exclusiveOption", opt ?? "")
+                  : undefined
+              }
             />
           ) : (
             <QuestionField

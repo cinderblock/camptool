@@ -1,0 +1,1 @@
+ALTER TABLE `camp_question` ADD `exclusive_option` text;

@@ -148,6 +148,13 @@
       "when": 1781563937460,
       "tag": "0020_gorgeous_wrecking_crew",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1781641032025,
+      "tag": "0021_nice_manta",
+      "breakpoints": true
     }
   ]
 }
