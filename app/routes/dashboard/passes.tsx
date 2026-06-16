@@ -204,6 +204,15 @@ export async function action({ request }: Route.ActionArgs) {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return data({ error: "Pick a valid date." }, { status: 400 });
     }
+    // Enforce the pre-event setup window server-side too (not just the picker).
+    // YYYY-MM-DD strings compare lexicographically the same as chronologically.
+    const win = setupPassWindowFor(activeEdition.year);
+    if (date < win.min || date > win.max) {
+      return data(
+        { error: `Setup dates must be between ${win.min} and ${win.max}.` },
+        { status: 400 },
+      );
+    }
     const quota = Math.max(0, Math.round(num("quota") ?? 0));
     try {
       await db.insert(setupPassDate).values({
