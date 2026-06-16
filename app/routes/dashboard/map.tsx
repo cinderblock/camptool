@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Autocomplete,
+  Box,
   Button,
   Checkbox,
   Collapse,
@@ -17,6 +18,7 @@ import {
   Textarea,
   Title,
   Tooltip,
+  useComputedColorScheme,
 } from "@mantine/core";
 import { and, eq } from "drizzle-orm";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
@@ -1713,6 +1715,16 @@ function Editor({
   showDoors: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
+  const dark = useComputedColorScheme("light") === "dark";
+  // Map zoom: 1 = fit-to-width (the old behavior), >1 scrolls within the frame so
+  // you can inspect detail instead of always staring at the whole lot.
+  const [zoom, setZoom] = useState(1);
+  const ZOOM_MIN = 1;
+  const ZOOM_MAX = 6;
+  const zoomBy = (factor: number) =>
+    setZoom((z) =>
+      clamp(Math.round(z * factor * 100) / 100, ZOOM_MIN, ZOOM_MAX),
+    );
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<DragState | null>(null);
   const liveObj = useRef<ObjRow | null>(null);
@@ -1923,9 +1935,19 @@ function Editor({
       ? streetLabel(lot.year, lot.streetLetter)
       : lot.streetLetter);
   // Shade intensity tracks how strong the sun is (its altitude): faint near
-  // sunrise/sunset, darkest around midday. ~0.10 low → ~0.34 high.
-  const shadeOpacity =
-    0.08 + 0.28 * Math.sin((Math.max(sun.altitude, 0) * Math.PI) / 180);
+  // sunrise/sunset, darkest around midday. In dark mode the ground is dark, so a
+  // dark shadow barely reads — we lighten the ground AND push the shadow darker +
+  // more opaque so the shaded area still stands out.
+  const sunStrength = Math.sin((Math.max(sun.altitude, 0) * Math.PI) / 180);
+  const shadeOpacity = dark
+    ? 0.35 + 0.45 * sunStrength
+    : 0.08 + 0.28 * sunStrength;
+  // In dark mode the lot ground is a lighter dark-surface (so a near-black shadow
+  // clearly stands out against it); in light mode it stays the default white-ish.
+  const groundFill = dark
+    ? "var(--mantine-color-dark-4)"
+    : "var(--mantine-color-default)";
+  const shadowFill = dark ? "#000000" : "#1c1c1c";
 
   const fx = (sx: number) => (sx - originX) / ppf;
   const fy = (sy: number) => (sy - originY) / ppf;
@@ -2364,323 +2386,382 @@ function Editor({
           </Group>
         </Group>
       ) : null}
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${VIEW_W} ${viewH}`}
-        width={VIEW_W}
-        height={viewH}
-        style={{
-          display: "block",
-          maxWidth: "100%",
-          maxHeight: "calc(100vh - 180px)",
-          width: "auto",
-          height: "auto",
-          touchAction: "none",
-        }}
-        onPointerDown={onCanvasDown}
-        onDragOver={canManage ? (e) => e.preventDefault() : undefined}
-        onDrop={canManage ? onDrop : undefined}
-        role="img"
-        aria-label="Camp layout"
-      >
-        <title>Camp layout</title>
-        <defs>
-          {/* Hypar roof: bright at the high front-right corner (by the door) →
+      <Box style={{ position: "relative" }}>
+        <Group
+          gap={2}
+          wrap="nowrap"
+          style={{ position: "absolute", top: 8, right: 8, zIndex: 5 }}
+        >
+          <Tooltip label="Zoom out">
+            <ActionIcon
+              variant="default"
+              aria-label="Zoom out"
+              disabled={zoom <= ZOOM_MIN}
+              onClick={() => zoomBy(1 / 1.3)}
+            >
+              −
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Reset zoom (fit)">
+            <ActionIcon
+              variant="default"
+              aria-label="Reset zoom"
+              disabled={zoom === 1}
+              onClick={() => setZoom(1)}
+            >
+              ⤢
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Zoom in">
+            <ActionIcon
+              variant="default"
+              aria-label="Zoom in"
+              disabled={zoom >= ZOOM_MAX}
+              onClick={() => zoomBy(1.3)}
+            >
+              +
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+        <Box style={{ overflow: "auto", maxHeight: "calc(100vh - 180px)" }}>
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${VIEW_W} ${viewH}`}
+            width={VIEW_W}
+            height={viewH}
+            style={{
+              display: "block",
+              // zoom 1 = contain (fit both dims, old behavior); >1 scales the
+              // limits so the svg grows and the wrapper scrolls to pan.
+              maxWidth: `${zoom * 100}%`,
+              maxHeight: `calc((100vh - 180px) * ${zoom})`,
+              width: "auto",
+              height: "auto",
+              touchAction: "none",
+            }}
+            onPointerDown={onCanvasDown}
+            onDragOver={canManage ? (e) => e.preventDefault() : undefined}
+            onDrop={canManage ? onDrop : undefined}
+            role="img"
+            aria-label="Camp layout"
+          >
+            <title>Camp layout</title>
+            <defs>
+              {/* Hypar roof: bright at the high front-right corner (by the door) →
               dark toward the low back-left, matching the per-corner heights. */}
-          <linearGradient id="hypar-roof" x1="1" y1="0.9" x2="0.05" y2="0.25">
-            <stop offset="0" stopColor="#ffffff" stopOpacity={0.6} />
-            <stop offset="1" stopColor="#000000" stopOpacity={0.38} />
-          </linearGradient>
-          {/* Hexayurt roof: bright apex at the center → dark at the eaves. */}
-          <radialGradient id="hexayurt-roof" cx="0.5" cy="0.5" r="0.5">
-            <stop offset="0" stopColor="#ffffff" stopOpacity={0.62} />
-            <stop offset="1" stopColor="#000000" stopOpacity={0.32} />
-          </radialGradient>
-        </defs>
-        <clipPath id={clipId}>
-          <polygon points={lotPoints} />
-        </clipPath>
-        {/* Ground surface for the lot — a theme-aware fill (lighter than the page
+              <linearGradient
+                id="hypar-roof"
+                x1="1"
+                y1="0.9"
+                x2="0.05"
+                y2="0.25"
+              >
+                <stop offset="0" stopColor="#ffffff" stopOpacity={0.6} />
+                <stop offset="1" stopColor="#000000" stopOpacity={0.38} />
+              </linearGradient>
+              {/* Hexayurt roof: bright apex at the center → dark at the eaves. */}
+              <radialGradient id="hexayurt-roof" cx="0.5" cy="0.5" r="0.5">
+                <stop offset="0" stopColor="#ffffff" stopOpacity={0.62} />
+                <stop offset="1" stopColor="#000000" stopOpacity={0.32} />
+              </radialGradient>
+            </defs>
+            <clipPath id={clipId}>
+              <polygon points={lotPoints} />
+            </clipPath>
+            {/* Ground surface for the lot — a theme-aware fill (lighter than the page
             in both schemes) so cast shadows read against it in dark mode too,
             instead of vanishing on the transparent dark page. */}
-        <polygon points={lotPoints} fill="var(--mantine-color-default)" />
-        <g clipPath={`url(#${clipId})`}>
-          <Grid
-            frontageFt={lot.frontageFt}
-            depthFt={lot.depthFt}
-            rear={rear}
-            originX={originX}
-            originY={originY}
-            rearCenterX={rearCenterX}
-            ppf={ppf}
-          />
-        </g>
-        <polygon
-          points={lotPoints}
-          fill="none"
-          stroke="#adb5bd"
-          strokeWidth={2}
-        />
-        {/* The street the camp fronts, labeled along the frontage edge; the clock
-            address marks the radial avenue. Drawn in the pad above the lot. */}
-        {frontageStreet ? (
-          <g pointerEvents="none">
-            <line
-              x1={originX}
-              y1={originY - 4}
-              x2={originX + lot.frontageFt * ppf}
-              y2={originY - 4}
-              stroke="#ced4da"
-              strokeWidth={3}
-              strokeLinecap="round"
+            <polygon points={lotPoints} fill={groundFill} />
+            <g clipPath={`url(#${clipId})`}>
+              <Grid
+                frontageFt={lot.frontageFt}
+                depthFt={lot.depthFt}
+                rear={rear}
+                originX={originX}
+                originY={originY}
+                rearCenterX={rearCenterX}
+                ppf={ppf}
+              />
+            </g>
+            <polygon
+              points={lotPoints}
+              fill="none"
+              stroke="#adb5bd"
+              strokeWidth={2}
             />
-            <text
-              x={originX + (lot.frontageFt * ppf) / 2}
-              y={originY - 13}
-              textAnchor="middle"
-              fontSize={15}
-              fontWeight={700}
-              fill="#868e96"
-              style={{ userSelect: "none" }}
-            >
-              {frontageStreet}
-              {lot.address ? ` · ${lot.address}` : ""}
-            </text>
-          </g>
-        ) : null}
-        {/* Shade simulation: each object casts a shadow away from the sun, clipped
+            {/* The street the camp fronts, labeled along the frontage edge; the clock
+            address marks the radial avenue. Drawn in the pad above the lot. */}
+            {frontageStreet ? (
+              <g pointerEvents="none">
+                <line
+                  x1={originX}
+                  y1={originY - 4}
+                  x2={originX + lot.frontageFt * ppf}
+                  y2={originY - 4}
+                  stroke="#ced4da"
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                />
+                <text
+                  x={originX + (lot.frontageFt * ppf) / 2}
+                  y={originY - 13}
+                  textAnchor="middle"
+                  fontSize={15}
+                  fontWeight={700}
+                  fill="#868e96"
+                  style={{ userSelect: "none" }}
+                >
+                  {frontageStreet}
+                  {lot.address ? ` · ${lot.address}` : ""}
+                </text>
+              </g>
+            ) : null}
+            {/* Shade simulation: each object casts a shadow away from the sun, clipped
             to the lot. Overlaps UNION (OR) at one opacity rather than adding up —
             the polygons are opaque inside a single group whose opacity flattens
             them, so two overlapping shadows look the same as one. */}
-        {showShade && mapUpBearing != null && sun.altitude > 0.5 ? (
-          <g
-            clipPath={`url(#${clipId})`}
-            pointerEvents="none"
-            opacity={shadeOpacity}
-          >
-            {objects.map((o) => {
-              const poly = shadowPolygon(o, sun, mapUpBearing);
-              if (!poly || poly.length < 3) return null;
-              const pts = poly
+            {showShade && mapUpBearing != null && sun.altitude > 0.5 ? (
+              <g
+                clipPath={`url(#${clipId})`}
+                pointerEvents="none"
+                opacity={shadeOpacity}
+              >
+                {objects.map((o) => {
+                  const poly = shadowPolygon(o, sun, mapUpBearing);
+                  if (!poly || poly.length < 3) return null;
+                  const pts = poly
+                    .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                    .join(" ");
+                  return (
+                    <polygon
+                      key={`sh-${o.id}`}
+                      points={pts}
+                      fill={shadowFill}
+                    />
+                  );
+                })}
+              </g>
+            ) : null}
+            {/* Zones: labeled regions drawn under the structures. */}
+            {zones.map((z) => {
+              if (z.points.length < 2) return null;
+              const pts = z.points
                 .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
                 .join(" ");
-              return <polygon key={`sh-${o.id}`} points={pts} fill="#1c1c1c" />;
+              const cxFt =
+                z.points.reduce((s, p) => s + p.x, 0) / z.points.length;
+              const cyFt =
+                z.points.reduce((s, p) => s + p.y, 0) / z.points.length;
+              const sel = z.id === selectedZoneId;
+              return (
+                <g key={z.id}>
+                  <polygon
+                    points={pts}
+                    fill={z.color}
+                    fillOpacity={sel ? 0.22 : 0.12}
+                    stroke={z.color}
+                    strokeWidth={sel ? 2.5 : 1.5}
+                    strokeDasharray="6 4"
+                    style={{ cursor: "pointer" }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      selectZone(z.id);
+                    }}
+                  />
+                  <text
+                    x={originX + cxFt * ppf}
+                    y={originY + cyFt * ppf}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={15}
+                    fontWeight={600}
+                    fill={z.color}
+                    style={{ pointerEvents: "none", userSelect: "none" }}
+                  >
+                    {z.name ?? zoneKindLabel(z.kind)}
+                  </text>
+                </g>
+              );
             })}
-          </g>
-        ) : null}
-        {/* Zones: labeled regions drawn under the structures. */}
-        {zones.map((z) => {
-          if (z.points.length < 2) return null;
-          const pts = z.points
-            .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
-            .join(" ");
-          const cxFt = z.points.reduce((s, p) => s + p.x, 0) / z.points.length;
-          const cyFt = z.points.reduce((s, p) => s + p.y, 0) / z.points.length;
-          const sel = z.id === selectedZoneId;
-          return (
-            <g key={z.id}>
-              <polygon
-                points={pts}
-                fill={z.color}
-                fillOpacity={sel ? 0.22 : 0.12}
-                stroke={z.color}
-                strokeWidth={sel ? 2.5 : 1.5}
-                strokeDasharray="6 4"
-                style={{ cursor: "pointer" }}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  selectZone(z.id);
-                }}
-              />
-              <text
-                x={originX + cxFt * ppf}
-                y={originY + cyFt * ppf}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={15}
-                fontWeight={600}
-                fill={z.color}
-                style={{ pointerEvents: "none", userSelect: "none" }}
-              >
-                {z.name ?? zoneKindLabel(z.kind)}
-              </text>
-            </g>
-          );
-        })}
-        {/* Shade is a canopy: render it last so it sits over the items beneath. */}
-        {[...objects]
-          .sort(
-            (a, b) => Number(a.kind === "shade") - Number(b.kind === "shade"),
-          )
-          .map((o) => (
-            <MapObjectShape
-              key={o.id}
-              o={o}
-              originX={originX}
-              originY={originY}
-              ppf={ppf}
-              selected={o.id === selectedId}
-              editable={editable(o)}
-              dim={highlight !== "none" && !matches(o)}
-              showDoors={showDoors}
-              onBodyDown={(e) => startDrag(e, o, "move")}
-              onResizeDown={(e) => startDrag(e, o, "resize")}
-              onRotateDown={(e) => startDrag(e, o, "rotate")}
-            />
-          ))}
-        {/* Power lines: open polylines drawn over the structures (a planning
-            overlay), each labeled with its total run length. */}
-        {cables.map((c) => {
-          if (c.points.length < 2) return null;
-          const pts = c.points
-            .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
-            .join(" ");
-          const mid =
-            c.points[Math.floor((c.points.length - 1) / 2)] ?? c.points[0];
-          if (!mid) return null;
-          const ends = [c.points[0], c.points[c.points.length - 1]].filter(
-            (p): p is ZonePt => p != null,
-          );
-          const sel = c.id === selectedCableId;
-          const lenFt = pathLengthFt(c.points);
-          return (
-            <g key={c.id}>
-              <polyline
-                points={pts}
-                fill="none"
-                stroke={c.color}
-                strokeWidth={sel ? 4 : 2.5}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                style={{ cursor: "pointer" }}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  selectCable(c.id);
-                }}
-              />
-              {/* Endpoint dots mark the connected nodes. */}
-              {ends.map((p, i) => (
-                <circle
-                  key={`${c.id}-end-${i}`}
-                  cx={originX + p.x * ppf}
-                  cy={originY + p.y * ppf}
-                  r={sel ? 4 : 3}
-                  fill={c.color}
-                  stroke="#fff"
-                  strokeWidth={1}
-                  pointerEvents="none"
+            {/* Shade is a canopy: render it last so it sits over the items beneath. */}
+            {[...objects]
+              .sort(
+                (a, b) =>
+                  Number(a.kind === "shade") - Number(b.kind === "shade"),
+              )
+              .map((o) => (
+                <MapObjectShape
+                  key={o.id}
+                  o={o}
+                  originX={originX}
+                  originY={originY}
+                  ppf={ppf}
+                  selected={o.id === selectedId}
+                  editable={editable(o)}
+                  dim={highlight !== "none" && !matches(o)}
+                  showDoors={showDoors}
+                  onBodyDown={(e) => startDrag(e, o, "move")}
+                  onResizeDown={(e) => startDrag(e, o, "resize")}
+                  onRotateDown={(e) => startDrag(e, o, "rotate")}
                 />
               ))}
-              <text
-                x={originX + mid.x * ppf}
-                y={originY + mid.y * ppf - 6}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={14}
-                fontWeight={600}
-                fill={c.color}
-                stroke="#fff"
-                strokeWidth={2.5}
-                paintOrder="stroke"
-                style={{ pointerEvents: "none", userSelect: "none" }}
-              >
-                {c.name ? `${c.name} · ` : ""}
-                {feetInches(lenFt)}
-                {c.amps ? ` · ${c.amps}A` : ""}
-              </text>
-              {/* Edit handles on the selected cable: midpoint "+" adds a point,
-                  vertex handles drag (snapping to nodes); double-click removes. */}
-              {sel && canManage && drawMode === null ? (
-                <>
-                  {c.points.slice(0, -1).map((p, i) => {
-                    const q = c.points[i + 1];
-                    if (!q) return null;
-                    return (
-                      <circle
-                        key={`${c.id}-add-${i}`}
-                        cx={originX + ((p.x + q.x) / 2) * ppf}
-                        cy={originY + ((p.y + q.y) / 2) * ppf}
-                        r={4}
-                        fill="#fff"
-                        stroke={c.color}
-                        strokeWidth={1.5}
-                        strokeDasharray="2 2"
-                        style={{ cursor: "copy" }}
-                        onPointerDown={(e) => startCableInsertDrag(e, c, i)}
-                      >
-                        <title>Drag to add a point</title>
-                      </circle>
-                    );
-                  })}
-                  {c.points.map((p, i) => (
+            {/* Power lines: open polylines drawn over the structures (a planning
+            overlay), each labeled with its total run length. */}
+            {cables.map((c) => {
+              if (c.points.length < 2) return null;
+              const pts = c.points
+                .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                .join(" ");
+              const mid =
+                c.points[Math.floor((c.points.length - 1) / 2)] ?? c.points[0];
+              if (!mid) return null;
+              const ends = [c.points[0], c.points[c.points.length - 1]].filter(
+                (p): p is ZonePt => p != null,
+              );
+              const sel = c.id === selectedCableId;
+              const lenFt = pathLengthFt(c.points);
+              return (
+                <g key={c.id}>
+                  <polyline
+                    points={pts}
+                    fill="none"
+                    stroke={c.color}
+                    strokeWidth={sel ? 4 : 2.5}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    style={{ cursor: "pointer" }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      selectCable(c.id);
+                    }}
+                  />
+                  {/* Endpoint dots mark the connected nodes. */}
+                  {ends.map((p, i) => (
                     <circle
-                      key={`${c.id}-vtx-${i}`}
+                      key={`${c.id}-end-${i}`}
                       cx={originX + p.x * ppf}
                       cy={originY + p.y * ppf}
-                      r={5}
-                      fill="#fff"
-                      stroke={c.color}
-                      strokeWidth={2.5}
-                      style={{ cursor: "grab" }}
-                      onPointerDown={(e) => startCableVertexDrag(e, c, i)}
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        deleteCableVertex(c, i);
-                      }}
-                    >
-                      <title>
-                        Drag to move (snaps to power nodes) · double-click to
-                        remove
-                      </title>
-                    </circle>
+                      r={sel ? 4 : 3}
+                      fill={c.color}
+                      stroke="#fff"
+                      strokeWidth={1}
+                      pointerEvents="none"
+                    />
                   ))}
-                </>
-              ) : null}
-            </g>
-          );
-        })}
-        {/* Draw mode: a full overlay captures every click as a vertex. */}
-        {drawMode ? (
-          <>
-            <rect
-              x={0}
-              y={0}
-              width={VIEW_W}
-              height={viewH}
-              fill="transparent"
-              style={{ cursor: "crosshair" }}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                addDraftPoint(e);
-              }}
-            />
-            {draftPoints.length > 1 ? (
-              <polyline
-                points={draftPoints
-                  .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
-                  .join(" ")}
-                fill={drawMode === "cable" ? "none" : "#fa5252"}
-                fillOpacity={0.1}
-                stroke={drawMode === "cable" ? "#fab005" : "#fa5252"}
-                strokeWidth={drawMode === "cable" ? 2.5 : 2}
-                strokeDasharray="4 3"
-                strokeLinejoin="round"
-                pointerEvents="none"
-              />
+                  <text
+                    x={originX + mid.x * ppf}
+                    y={originY + mid.y * ppf - 6}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={14}
+                    fontWeight={600}
+                    fill={c.color}
+                    stroke="#fff"
+                    strokeWidth={2.5}
+                    paintOrder="stroke"
+                    style={{ pointerEvents: "none", userSelect: "none" }}
+                  >
+                    {c.name ? `${c.name} · ` : ""}
+                    {feetInches(lenFt)}
+                    {c.amps ? ` · ${c.amps}A` : ""}
+                  </text>
+                  {/* Edit handles on the selected cable: midpoint "+" adds a point,
+                  vertex handles drag (snapping to nodes); double-click removes. */}
+                  {sel && canManage && drawMode === null ? (
+                    <>
+                      {c.points.slice(0, -1).map((p, i) => {
+                        const q = c.points[i + 1];
+                        if (!q) return null;
+                        return (
+                          <circle
+                            key={`${c.id}-add-${i}`}
+                            cx={originX + ((p.x + q.x) / 2) * ppf}
+                            cy={originY + ((p.y + q.y) / 2) * ppf}
+                            r={4}
+                            fill="#fff"
+                            stroke={c.color}
+                            strokeWidth={1.5}
+                            strokeDasharray="2 2"
+                            style={{ cursor: "copy" }}
+                            onPointerDown={(e) => startCableInsertDrag(e, c, i)}
+                          >
+                            <title>Drag to add a point</title>
+                          </circle>
+                        );
+                      })}
+                      {c.points.map((p, i) => (
+                        <circle
+                          key={`${c.id}-vtx-${i}`}
+                          cx={originX + p.x * ppf}
+                          cy={originY + p.y * ppf}
+                          r={5}
+                          fill="#fff"
+                          stroke={c.color}
+                          strokeWidth={2.5}
+                          style={{ cursor: "grab" }}
+                          onPointerDown={(e) => startCableVertexDrag(e, c, i)}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            deleteCableVertex(c, i);
+                          }}
+                        >
+                          <title>
+                            Drag to move (snaps to power nodes) · double-click
+                            to remove
+                          </title>
+                        </circle>
+                      ))}
+                    </>
+                  ) : null}
+                </g>
+              );
+            })}
+            {/* Draw mode: a full overlay captures every click as a vertex. */}
+            {drawMode ? (
+              <>
+                <rect
+                  x={0}
+                  y={0}
+                  width={VIEW_W}
+                  height={viewH}
+                  fill="transparent"
+                  style={{ cursor: "crosshair" }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    addDraftPoint(e);
+                  }}
+                />
+                {draftPoints.length > 1 ? (
+                  <polyline
+                    points={draftPoints
+                      .map(
+                        (p) => `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                      )
+                      .join(" ")}
+                    fill={drawMode === "cable" ? "none" : "#fa5252"}
+                    fillOpacity={0.1}
+                    stroke={drawMode === "cable" ? "#fab005" : "#fa5252"}
+                    strokeWidth={drawMode === "cable" ? 2.5 : 2}
+                    strokeDasharray="4 3"
+                    strokeLinejoin="round"
+                    pointerEvents="none"
+                  />
+                ) : null}
+                {draftPoints.map((p, i) => (
+                  <circle
+                    key={`${p.x}-${p.y}-${i}`}
+                    cx={originX + p.x * ppf}
+                    cy={originY + p.y * ppf}
+                    r={3}
+                    fill={drawMode === "cable" ? "#fab005" : "#fa5252"}
+                    pointerEvents="none"
+                  />
+                ))}
+              </>
             ) : null}
-            {draftPoints.map((p, i) => (
-              <circle
-                key={`${p.x}-${p.y}-${i}`}
-                cx={originX + p.x * ppf}
-                cy={originY + p.y * ppf}
-                r={3}
-                fill={drawMode === "cable" ? "#fab005" : "#fa5252"}
-                pointerEvents="none"
-              />
-            ))}
-          </>
-        ) : null}
-      </svg>
+          </svg>
+        </Box>
+      </Box>
     </Paper>
   );
 }
