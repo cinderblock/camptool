@@ -1025,9 +1025,15 @@ export async function action({ request }: Route.ActionArgs) {
 const VIEW_W = 920;
 const MARGIN = 28;
 // Annotation margin (feet) drawn around the lot so officers can mark things
-// outside the border — e.g. the rear service lane. Objects stay inside the lot;
-// zones and power lines may extend into this padded area.
-const PAD_FT = 30;
+// outside the border — and room for the surroundings swaths (the ~45ft street
+// in front, the ~20ft rear service road, and neighbor lots on each side).
+// Objects stay inside the lot; zones and power lines may extend into this area.
+const PAD_FT = 50;
+// Surroundings swath widths (feet): BRC annular streets run ~40–50ft, the shared
+// rear service alley ~20ft.
+const STREET_W_FT = 45;
+const SERVICE_ROAD_W_FT = 20;
+const SURROUND_GAP_FT = 3;
 
 function rotateVec(vx: number, vy: number, deg: number) {
   const r = (deg * Math.PI) / 180;
@@ -1927,6 +1933,33 @@ function Editor({
   const originY = MARGIN + padPx;
   const rearCenterX = MARGIN + padPx + (maxWidthFt / 2) * ppf;
   const yBot = originY + lot.depthFt * ppf;
+
+  // Surroundings swaths (px), drawn in the annotation pad: the street the camp
+  // fronts (a wide band, not a thin line), the rear service road, and neighbor
+  // lots on either side. Axis-aligned bands (the wedge taper is visually small).
+  const gapPx = SURROUND_GAP_FT * ppf;
+  const viewL = MARGIN;
+  const viewR = VIEW_W - MARGIN;
+  const halfMaxPx = (maxWidthFt / 2) * ppf;
+  const lotLeftPx = rearCenterX - halfMaxPx;
+  const lotRightPx = rearCenterX + halfMaxPx;
+  const streetBandBot = originY - gapPx;
+  const streetBandTop = Math.max(MARGIN, streetBandBot - STREET_W_FT * ppf);
+  const roadBandTop = yBot + gapPx;
+  const roadBandBot = Math.min(
+    viewH - MARGIN,
+    roadBandTop + SERVICE_ROAD_W_FT * ppf,
+  );
+  const pavementFill = dark
+    ? "var(--mantine-color-dark-5)"
+    : "var(--mantine-color-gray-3)";
+  const neighborFill = dark
+    ? "var(--mantine-color-dark-6)"
+    : "var(--mantine-color-gray-1)";
+  const neighbors = [
+    { id: "L", x0: viewL, x1: lotLeftPx - gapPx },
+    { id: "R", x0: lotRightPx + gapPx, x1: viewR },
+  ];
   // Padded bounds (feet) for annotations that may sit outside the lot border.
   const clampPadX = (v: number) => clamp(v, -PAD_FT, lot.frontageFt + PAD_FT);
   const clampPadY = (v: number) => clamp(v, -PAD_FT, lot.depthFt + PAD_FT);
@@ -2523,33 +2556,78 @@ function Editor({
               stroke="#adb5bd"
               strokeWidth={2}
             />
-            {/* The street the camp fronts, labeled along the frontage edge; the clock
-            address marks the radial avenue. Drawn in the pad above the lot. */}
-            {frontageStreet ? (
-              <g pointerEvents="none">
-                <line
-                  x1={originX}
-                  y1={originY - 4}
-                  x2={originX + lot.frontageFt * ppf}
-                  y2={originY - 4}
-                  stroke="#ced4da"
-                  strokeWidth={3}
-                  strokeLinecap="round"
-                />
-                <text
-                  x={originX + (lot.frontageFt * ppf) / 2}
-                  y={originY - 13}
-                  textAnchor="middle"
-                  fontSize={15}
-                  fontWeight={700}
-                  fill="#868e96"
-                  style={{ userSelect: "none" }}
-                >
-                  {frontageStreet}
-                  {lot.address ? ` · ${lot.address}` : ""}
-                </text>
-              </g>
-            ) : null}
+            {/* Surroundings: the street the camp fronts (a wide swath, not a thin
+            line), the rear shared service road, and neighbor lots on each side —
+            so the lot reads in its real context. The clock address marks the
+            radial avenue along the street. */}
+            <g pointerEvents="none">
+              {neighbors.map((n) =>
+                n.x1 - n.x0 > 8 ? (
+                  <g key={n.id}>
+                    <rect
+                      x={n.x0}
+                      y={originY}
+                      width={n.x1 - n.x0}
+                      height={yBot - originY}
+                      fill={neighborFill}
+                      opacity={0.7}
+                      rx={3}
+                    />
+                    <text
+                      x={(n.x0 + n.x1) / 2}
+                      y={(originY + yBot) / 2}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={12}
+                      fill="var(--mantine-color-dimmed)"
+                      style={{ userSelect: "none" }}
+                    >
+                      Neighbor
+                    </text>
+                  </g>
+                ) : null,
+              )}
+              <rect
+                x={viewL}
+                y={streetBandTop}
+                width={viewR - viewL}
+                height={streetBandBot - streetBandTop}
+                fill={pavementFill}
+                rx={3}
+              />
+              <text
+                x={(viewL + viewR) / 2}
+                y={(streetBandTop + streetBandBot) / 2}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={14}
+                fontWeight={700}
+                fill="var(--mantine-color-dimmed)"
+                style={{ userSelect: "none" }}
+              >
+                {frontageStreet || "Street"}
+                {lot.address ? ` · ${lot.address}` : ""}
+              </text>
+              <rect
+                x={viewL}
+                y={roadBandTop}
+                width={viewR - viewL}
+                height={roadBandBot - roadBandTop}
+                fill={pavementFill}
+                rx={3}
+              />
+              <text
+                x={(viewL + viewR) / 2}
+                y={(roadBandTop + roadBandBot) / 2}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={12}
+                fill="var(--mantine-color-dimmed)"
+                style={{ userSelect: "none" }}
+              >
+                Service road
+              </text>
+            </g>
             {/* Shade simulation: each object casts a shadow away from the sun, clipped
             to the lot. Overlaps UNION (OR) at one opacity rather than adding up —
             the polygons are opaque inside a single group whose opacity flattens
