@@ -116,6 +116,32 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
+  if (intent === "editTask") {
+    if (!canManage) {
+      return data({ error: "You don't have permission." }, { status: 403 });
+    }
+    const taskId = String(form.get("taskId"));
+    const field = String(form.get("field"));
+    const raw = String(form.get("value") ?? "");
+    const set: Partial<typeof onboardingTask.$inferInsert> = {};
+    if (field === "title") {
+      const t = raw.trim();
+      if (!t) return data({ error: "Title can't be empty." }, { status: 400 });
+      set.title = t;
+    } else if (field === "description") {
+      set.description = raw.trim() || null;
+    } else {
+      return data({ error: "Unknown field." }, { status: 400 });
+    }
+    await db
+      .update(onboardingTask)
+      .set(set)
+      .where(
+        and(eq(onboardingTask.id, taskId), eq(onboardingTask.campId, campId)),
+      );
+    return data({ ok: true });
+  }
+
   if (intent === "deleteTask") {
     if (!canManage) {
       return data({ error: "You don't have permission." }, { status: 403 });
@@ -145,6 +171,12 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
     addFormRef.current?.reset(),
   );
 
+  const editTask = (taskId: string, field: string, value: string) =>
+    manageFetcher.submit(
+      { intent: "editTask", taskId, field, value },
+      { method: "post" },
+    );
+
   const completed = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
 
@@ -164,13 +196,9 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
             <Progress value={pct} mb="md" />
             <Stack gap="sm">
               {tasks.map((t) => (
-                <Group
-                  key={t.id}
-                  justify="space-between"
-                  wrap="nowrap"
-                  align="flex-start"
-                >
+                <Group key={t.id} wrap="nowrap" align="flex-start" gap="sm">
                   <Checkbox
+                    mt={canManage ? 6 : 0}
                     checked={t.done}
                     onChange={() =>
                       toggleFetcher.submit(
@@ -179,16 +207,44 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
                       )
                     }
                     label={
-                      <Box>
-                        <Text size="sm">{t.title}</Text>
-                        {t.description ? (
-                          <Text size="xs" c="dimmed">
-                            {t.description}
-                          </Text>
-                        ) : null}
-                      </Box>
+                      canManage ? undefined : (
+                        <Box>
+                          <Text size="sm">{t.title}</Text>
+                          {t.description ? (
+                            <Text size="xs" c="dimmed">
+                              {t.description}
+                            </Text>
+                          ) : null}
+                        </Box>
+                      )
                     }
                   />
+                  {canManage ? (
+                    // Officers edit in place; each field auto-saves on blur.
+                    <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+                      <TextInput
+                        size="xs"
+                        defaultValue={t.title}
+                        placeholder="Task title"
+                        onBlur={(e) =>
+                          e.currentTarget.value.trim() &&
+                          e.currentTarget.value !== t.title &&
+                          editTask(t.id, "title", e.currentTarget.value)
+                        }
+                      />
+                      <Textarea
+                        size="xs"
+                        autosize
+                        minRows={1}
+                        placeholder="Description (optional)"
+                        defaultValue={t.description ?? ""}
+                        onBlur={(e) =>
+                          e.currentTarget.value !== (t.description ?? "") &&
+                          editTask(t.id, "description", e.currentTarget.value)
+                        }
+                      />
+                    </Stack>
+                  ) : null}
                   {canManage ? (
                     <ActionIcon
                       variant="subtle"
