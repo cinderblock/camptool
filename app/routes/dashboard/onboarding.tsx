@@ -1,4 +1,25 @@
 import {
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  restrictToParentElement,
+  restrictToVerticalAxis,
+} from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   ActionIcon,
   Box,
   Button,
@@ -15,7 +36,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveCamp } from "~/lib/session.server";
@@ -142,6 +163,40 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
+  if (intent === "reorderTasks") {
+    if (!canManage) {
+      return data({ error: "You don't have permission." }, { status: 403 });
+    }
+    let ids: string[] = [];
+    try {
+      const v = JSON.parse(String(form.get("ids") ?? "[]"));
+      if (Array.isArray(v))
+        ids = v.filter((x): x is string => typeof x === "string");
+    } catch {
+      return data({ error: "Bad order." }, { status: 400 });
+    }
+    const owned = new Set(
+      (
+        await db
+          .select({ id: onboardingTask.id })
+          .from(onboardingTask)
+          .where(eq(onboardingTask.campId, campId))
+      ).map((r) => r.id),
+    );
+    let k = 0;
+    for (const id of ids) {
+      if (!owned.has(id)) continue;
+      await db
+        .update(onboardingTask)
+        .set({ sortOrder: k })
+        .where(
+          and(eq(onboardingTask.id, id), eq(onboardingTask.campId, campId)),
+        );
+      k++;
+    }
+    return data({ ok: true });
+  }
+
   if (intent === "deleteTask") {
     if (!canManage) {
       return data({ error: "You don't have permission." }, { status: 403 });
@@ -159,6 +214,88 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 type FetcherData = { ok?: boolean; error?: string };
+type Task = Route.ComponentProps["loaderData"]["tasks"][number];
+
+/** One officer task row: drag handle + done checkbox + inline-editable title and
+ * description (auto-save on blur) + delete. */
+function SortableTask({
+  task,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  task: Task;
+  onToggle: (id: string) => void;
+  onEdit: (id: string, field: string, value: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id });
+  return (
+    <Group
+      ref={setNodeRef}
+      wrap="nowrap"
+      align="flex-start"
+      gap="sm"
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.6 : 1,
+      }}
+    >
+      <ActionIcon
+        variant="subtle"
+        color="gray"
+        aria-label="Drag to reorder"
+        mt={6}
+        style={{ cursor: "grab", touchAction: "none" }}
+        {...attributes}
+        {...listeners}
+      >
+        ⠿
+      </ActionIcon>
+      <Checkbox mt={6} checked={task.done} onChange={() => onToggle(task.id)} />
+      <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+        <TextInput
+          size="xs"
+          defaultValue={task.title}
+          placeholder="Task title"
+          onBlur={(e) =>
+            e.currentTarget.value.trim() &&
+            e.currentTarget.value !== task.title &&
+            onEdit(task.id, "title", e.currentTarget.value)
+          }
+        />
+        <Textarea
+          size="xs"
+          autosize
+          minRows={1}
+          placeholder="Description (optional)"
+          defaultValue={task.description ?? ""}
+          onBlur={(e) =>
+            e.currentTarget.value !== (task.description ?? "") &&
+            onEdit(task.id, "description", e.currentTarget.value)
+          }
+        />
+      </Stack>
+      <ActionIcon
+        variant="subtle"
+        color="red"
+        aria-label="Delete task"
+        mt={6}
+        onClick={() => onDelete(task.id)}
+      >
+        ×
+      </ActionIcon>
+    </Group>
+  );
+}
 
 export default function Onboarding({ loaderData }: Route.ComponentProps) {
   const { tasks, canManage } = loaderData;
@@ -176,6 +313,34 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
       { intent: "editTask", taskId, field, value },
       { method: "post" },
     );
+  const onToggle = (taskId: string) =>
+    toggleFetcher.submit({ intent: "toggle", taskId }, { method: "post" });
+  const onDelete = (taskId: string) =>
+    manageFetcher.submit({ intent: "deleteTask", taskId }, { method: "post" });
+
+  // Local order so a drag reorders instantly; re-synced when the loader updates.
+  const reorderFetcher = useFetcher();
+  const [order, setOrder] = useState(tasks);
+  useEffect(() => setOrder(tasks), [tasks]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIndex = order.findIndex((t) => t.id === active.id);
+    const newIndex = order.findIndex((t) => t.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(order, oldIndex, newIndex);
+    setOrder(next);
+    reorderFetcher.submit(
+      { intent: "reorderTasks", ids: JSON.stringify(next.map((t) => t.id)) },
+      { method: "post" },
+    );
+  }
 
   const completed = tasks.filter((t) => t.done).length;
   const pct = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
@@ -194,75 +359,51 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
               </Text>
             </Group>
             <Progress value={pct} mb="md" />
-            <Stack gap="sm">
-              {tasks.map((t) => (
-                <Group key={t.id} wrap="nowrap" align="flex-start" gap="sm">
+            {canManage ? (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+                onDragEnd={onDragEnd}
+              >
+                <SortableContext
+                  items={order.map((t) => t.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <Stack gap="sm">
+                    {order.map((t) => (
+                      <SortableTask
+                        key={t.id}
+                        task={t}
+                        onToggle={onToggle}
+                        onEdit={editTask}
+                        onDelete={onDelete}
+                      />
+                    ))}
+                  </Stack>
+                </SortableContext>
+              </DndContext>
+            ) : (
+              <Stack gap="sm">
+                {tasks.map((t) => (
                   <Checkbox
-                    mt={canManage ? 6 : 0}
+                    key={t.id}
                     checked={t.done}
-                    onChange={() =>
-                      toggleFetcher.submit(
-                        { intent: "toggle", taskId: t.id },
-                        { method: "post" },
-                      )
-                    }
+                    onChange={() => onToggle(t.id)}
                     label={
-                      canManage ? undefined : (
-                        <Box>
-                          <Text size="sm">{t.title}</Text>
-                          {t.description ? (
-                            <Text size="xs" c="dimmed">
-                              {t.description}
-                            </Text>
-                          ) : null}
-                        </Box>
-                      )
+                      <Box>
+                        <Text size="sm">{t.title}</Text>
+                        {t.description ? (
+                          <Text size="xs" c="dimmed">
+                            {t.description}
+                          </Text>
+                        ) : null}
+                      </Box>
                     }
                   />
-                  {canManage ? (
-                    // Officers edit in place; each field auto-saves on blur.
-                    <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
-                      <TextInput
-                        size="xs"
-                        defaultValue={t.title}
-                        placeholder="Task title"
-                        onBlur={(e) =>
-                          e.currentTarget.value.trim() &&
-                          e.currentTarget.value !== t.title &&
-                          editTask(t.id, "title", e.currentTarget.value)
-                        }
-                      />
-                      <Textarea
-                        size="xs"
-                        autosize
-                        minRows={1}
-                        placeholder="Description (optional)"
-                        defaultValue={t.description ?? ""}
-                        onBlur={(e) =>
-                          e.currentTarget.value !== (t.description ?? "") &&
-                          editTask(t.id, "description", e.currentTarget.value)
-                        }
-                      />
-                    </Stack>
-                  ) : null}
-                  {canManage ? (
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      aria-label="Delete task"
-                      onClick={() =>
-                        manageFetcher.submit(
-                          { intent: "deleteTask", taskId: t.id },
-                          { method: "post" },
-                        )
-                      }
-                    >
-                      ×
-                    </ActionIcon>
-                  ) : null}
-                </Group>
-              ))}
-            </Stack>
+                ))}
+              </Stack>
+            )}
           </Card>
         ) : (
           <Text c="dimmed">
