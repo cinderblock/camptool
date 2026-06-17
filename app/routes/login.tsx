@@ -127,10 +127,12 @@ export default function Login({ loaderData }: Route.ComponentProps) {
                 <TextInput
                   label="Email"
                   placeholder="you@example.com"
+                  autoComplete="email"
                   {...form.getInputProps("email")}
                 />
                 <PasswordInput
                   label="Password"
+                  autoComplete="current-password"
                   {...form.getInputProps("password")}
                 />
                 <Button type="submit" loading={busy} fullWidth>
@@ -156,15 +158,18 @@ export default function Login({ loaderData }: Route.ComponentProps) {
                   <TextInput
                     label="Name"
                     placeholder="Your name"
+                    autoComplete="name"
                     {...form.getInputProps("name")}
                   />
                   <TextInput
                     label="Email"
                     placeholder="you@example.com"
+                    autoComplete="email"
                     {...form.getInputProps("email")}
                   />
                   <PasswordInput
                     label="Password"
+                    autoComplete="new-password"
                     {...form.getInputProps("password")}
                   />
                   <Button type="submit" loading={busy} fullWidth>

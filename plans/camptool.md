@@ -810,6 +810,18 @@ placement page.)
       done). Verified: auto-redirect, per-step persistence + resume, occupant add,
       finish → dashboard with no loop. TODO: occupant who isn't yet a member
       (invite flow), richer profile questions.
+- [x] Onboarding-notes fixes (2026-06-17, from a friend's run-through; code-complete,
+      typecheck green + both files biome-clean, NOT browser-tested): (1) **password
+      manager / Chrome generation** — added `autoComplete` hints to the login form
+      (`login.tsx`): signup password = `new-password` (triggers Chrome's strong-password
+      suggestion, the friend's "don't see google suggested password"), signin password =
+      `current-password`, email = `email`, name = `name`. (2) **"ok to leave now"
+      confirmation** — `/start` wizard Finish no longer bounces straight to `/`; it now
+      advances to the Stepper's **Completed** panel ("You're all set! Your answers are
+      saved — it's safe to close this tab"), with a "Go to dashboard" button. DEFERRED
+      (user decision): the **email-list opt-in** ("join email list, default NO") will be
+      added later as a built-in **camp question** via the existing questions system, not
+      a membership/user field.
 - [x] Map editor tweaks (2026-06-12, code-complete, NOT browser-tested) — (a)
       **door visibility**: a global "Show doors" checkbox in the map's Highlight
       panel (client-only master switch) + a per-element "Show door" checkbox in the

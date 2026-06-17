@@ -354,7 +354,10 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
   }
   function finish() {
     if (steps[active]) mark(steps[active].key, "done");
-    navigate("/");
+    // Advance past the last step so the Stepper shows its Completed panel —
+    // an explicit "you're saved, safe to leave" confirmation — rather than
+    // silently bouncing to the dashboard.
+    setActive(last + 1);
   }
 
   return (
@@ -409,8 +412,9 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
               You're all set!
             </Title>
             <Text size="sm" c="dimmed">
-              Thanks for setting up. You can refine any of this anytime from the
-              dashboard — Bringing, the map, tickets, and the checklist.
+              Your answers are saved — it's safe to close this tab now. You can
+              refine any of this anytime from the dashboard — Bringing, the map,
+              tickets, and the checklist.
             </Text>
           </Paper>
         </Stepper.Completed>
@@ -425,21 +429,27 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
           Back
         </Button>
         <Group gap="xs">
-          {active <= last ? (
-            <Button
-              variant="subtle"
-              color="gray"
-              onClick={() => next("skipped")}
-            >
-              Skip this
+          {active > last ? (
+            <Button color="green" onClick={() => navigate("/")}>
+              Go to dashboard
             </Button>
-          ) : null}
-          {active < last ? (
-            <Button onClick={() => next("done")}>Next</Button>
           ) : (
-            <Button color="green" onClick={finish}>
-              Finish
-            </Button>
+            <>
+              <Button
+                variant="subtle"
+                color="gray"
+                onClick={() => next("skipped")}
+              >
+                Skip this
+              </Button>
+              {active < last ? (
+                <Button onClick={() => next("done")}>Next</Button>
+              ) : (
+                <Button color="green" onClick={finish}>
+                  Finish
+                </Button>
+              )}
+            </>
           )}
         </Group>
       </Group>
