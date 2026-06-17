@@ -1187,17 +1187,51 @@ function cornerHeights(o: ObjRow): number[] {
   return footprintLocal(o).map(() => tall);
 }
 
+/** A geodesic dome is a hemisphere, not a box/cylinder — so its shadow is an
+ * ELLIPSE: the diameter is preserved across the sun, and the silhouette stretches
+ * along the sun as it drops (the apex shadow reaches height/tan(altitude)). At a
+ * high sun this collapses toward the round footprint; at a low sun it's a long
+ * ellipse. Far truer than translating the whole footprint circle (a capsule). */
+function domeShadow(
+  o: ObjRow,
+  sun: { altitude: number; azimuth: number },
+  mapUpBearing: number,
+): ZonePt[] | null {
+  const h = o.tallFt;
+  if (h <= 0) return null;
+  const altDeg = Math.max(sun.altitude, 3); // clamp so a low sun ≠ infinite shadow
+  const reach = Math.min(h / Math.tan((altDeg * Math.PI) / 180), 300);
+  const r = o.width / 2; // domes are round, so width === height
+  const dir = bearingToPlotDelta(sun.azimuth + 180, 1, mapUpBearing); // away from sun
+  const perp = { dx: -dir.dy, dy: dir.dx };
+  const cx = o.x + o.width / 2 + (dir.dx * reach) / 2;
+  const cy = o.y + o.height / 2 + (dir.dy * reach) / 2;
+  const along = r + reach / 2; // semi-axis along the sun
+  const n = 28;
+  return Array.from({ length: n }, (_, i) => {
+    const t = (i / n) * 2 * Math.PI;
+    const a = Math.cos(t) * along;
+    const b = Math.sin(t) * r; // across the sun: the dome's true radius
+    return {
+      x: cx + dir.dx * a + perp.dx * b,
+      y: cy + dir.dy * a + perp.dy * b,
+    };
+  });
+}
+
 /** The cast-shadow polygon (plot-local feet) for an object at a given sun
  * position, or null if it casts none (no height / sun at/below horizon). The
  * shadow = convex hull of the footprint outline + each corner pushed away from
  * the sun by its own height/tan(altitude). Footprint + per-corner height follow
- * the object's real shape (hexagon outline, hypar-warped heights, …). */
+ * the object's real shape (hexagon outline, hypar-warped heights, …); a dome is
+ * special-cased to a hemisphere ellipse. */
 function shadowPolygon(
   o: ObjRow,
   sun: { altitude: number; azimuth: number },
   mapUpBearing: number,
 ): ZonePt[] | null {
   if (sun.altitude <= 0.5) return null;
+  if (kindDef(o.kind).shape === "dome") return domeShadow(o, sun, mapUpBearing);
   const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
   const tan = Math.tan((altDeg * Math.PI) / 180);
   const heights = cornerHeights(o);
@@ -3396,7 +3430,9 @@ const MapObjectShape = memo(
                 style={{ cursor: "grab" }}
                 onPointerDown={onRotateDown}
               />
-              {def.vehicle || def.rigid ? null : (
+              {def.vehicle || def.rigid || def.shape === "dome" ? null : (
+                // Domes stay round: no corner-drag (which would skew w≠h); the
+                // diameter is set in the properties panel instead.
                 <rect
                   x={px + w - 6}
                   y={py + h - 6}
@@ -3644,6 +3680,14 @@ function SidePanel({
                 if (d.rigid) {
                   fields.height = d.h;
                   out.height = d.h;
+                }
+                // A dome must stay round: match height to width (its diameter).
+                if (d.shape === "dome") {
+                  const dia = fields.width ?? selected.width;
+                  fields.width = dia;
+                  fields.height = dia;
+                  out.width = dia;
+                  out.height = dia;
                 }
                 patch(selected.id, fields);
                 commitMany(selected.id, out);
