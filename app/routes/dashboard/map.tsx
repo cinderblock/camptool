@@ -21,7 +21,14 @@ import {
   useComputedColorScheme,
 } from "@mantine/core";
 import { and, eq } from "drizzle-orm";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { data, useFetcher } from "react-router";
 import {
   CURRENT_EVENT_YEAR,
@@ -1034,6 +1041,9 @@ const PAD_FT = 50;
 const STREET_W_FT = 45;
 const SERVICE_ROAD_W_FT = 20;
 const SURROUND_GAP_FT = 3;
+// Map zoom range (1 = fit the whole lot to the frame).
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 8;
 
 function rotateVec(vx: number, vy: number, deg: number) {
   const r = (deg * Math.PI) / 180;
@@ -1756,16 +1766,76 @@ function Editor({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
-  // Map zoom: 1 = fit-to-width (the old behavior), >1 scrolls within the frame so
-  // you can inspect detail instead of always staring at the whole lot.
+  // Map zoom: 1 fits the whole lot in the frame, >1 scales it up (the frame
+  // scrolls to pan). The buttons step it; the wheel zooms toward the cursor.
   const [zoom, setZoom] = useState(1);
-  const ZOOM_MIN = 1;
-  const ZOOM_MAX = 6;
   const zoomBy = (factor: number) =>
     setZoom((z) =>
       clamp(Math.round(z * factor * 100) / 100, ZOOM_MIN, ZOOM_MAX),
     );
   const svgRef = useRef<SVGSVGElement | null>(null);
+  // The scrollable frame around the svg, measured so zoom 1 = fit.
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [frame, setFrame] = useState({ w: VIEW_W, h: 600 });
+  // Scroll offset to apply right after a cursor-anchored wheel zoom commits.
+  const pendingScroll = useRef<{ left: number; top: number } | null>(null);
+
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el) return;
+    const measure = () =>
+      setFrame({
+        w: el.clientWidth,
+        h: Math.max(240, window.innerHeight - 180),
+      });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Wheel = zoom toward the cursor (non-passive so we can stop the page from
+  // scrolling). The frame's scrollbars handle panning once zoomed in.
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
+      const contentX = el.scrollLeft + cursorX;
+      const contentY = el.scrollTop + cursorY;
+      setZoom((prev) => {
+        const next = clamp(
+          Math.round(prev * Math.exp(-e.deltaY * 0.0015) * 100) / 100,
+          ZOOM_MIN,
+          ZOOM_MAX,
+        );
+        if (next !== prev) {
+          const ratio = next / prev;
+          pendingScroll.current = {
+            left: contentX * ratio - cursorX,
+            top: contentY * ratio - cursorY,
+          };
+        }
+        return next;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Keep the point under the cursor stable across a wheel zoom.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: zoom is the trigger — apply the pending scroll once the resized svg commits
+  useLayoutEffect(() => {
+    const el = frameRef.current;
+    if (el && pendingScroll.current) {
+      el.scrollLeft = pendingScroll.current.left;
+      el.scrollTop = pendingScroll.current.top;
+      pendingScroll.current = null;
+    }
+  }, [zoom]);
   const drag = useRef<DragState | null>(null);
   const liveObj = useRef<ObjRow | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -1933,6 +2003,13 @@ function Editor({
   const originY = MARGIN + padPx;
   const rearCenterX = MARGIN + padPx + (maxWidthFt / 2) * ppf;
   const yBot = originY + lot.depthFt * ppf;
+
+  // Rendered svg size: fit the whole view into the frame at zoom 1, scale up
+  // from there. Explicit px (not a CSS max) so zoom grows past the intrinsic
+  // size, and getBoundingClientRect stays proportional for pointer math.
+  const fitScale = Math.min(frame.w / VIEW_W, frame.h / viewH) || 1;
+  const renderW = Math.max(1, VIEW_W * fitScale * zoom);
+  const renderH = Math.max(1, viewH * fitScale * zoom);
 
   // Surroundings swaths (px), drawn in the annotation pad: the street the camp
   // fronts (a wide band, not a thin line), the rear service road, and neighbor
@@ -2490,20 +2567,19 @@ function Editor({
             </ActionIcon>
           </Tooltip>
         </Group>
-        <Box style={{ overflow: "auto", maxHeight: "calc(100vh - 180px)" }}>
+        <Box
+          ref={frameRef}
+          style={{ overflow: "auto", maxHeight: "calc(100vh - 180px)" }}
+        >
           <svg
             ref={svgRef}
             viewBox={`0 0 ${VIEW_W} ${viewH}`}
-            width={VIEW_W}
-            height={viewH}
+            width={renderW}
+            height={renderH}
             style={{
               display: "block",
-              // zoom 1 = contain (fit both dims, old behavior); >1 scales the
-              // limits so the svg grows and the wrapper scrolls to pan.
-              maxWidth: `${zoom * 100}%`,
-              maxHeight: `calc((100vh - 180px) * ${zoom})`,
-              width: "auto",
-              height: "auto",
+              width: `${renderW}px`,
+              height: `${renderH}px`,
               touchAction: "none",
             }}
             onPointerDown={onCanvasDown}
