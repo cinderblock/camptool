@@ -38,8 +38,16 @@ import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
+import { QuestionField } from "~/components/QuestionField";
 import { hasAtLeast } from "~/lib/permissions";
-import { requireActiveCamp } from "~/lib/session.server";
+import { type QuestionType, parseOptions } from "~/lib/questions";
+import {
+  filterByAudience,
+  loadAnswers,
+  loadCampQuestions,
+  loadInviterName,
+} from "~/lib/questions.server";
+import { requireActiveCamp, requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import { onboardingCompletion, onboardingTask } from "../../../db/schema";
 import type { Route } from "./+types/onboarding";
@@ -49,9 +57,10 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active } = await requireActiveCamp(request);
+  const { active, activeEdition } = await requireActiveEdition(request);
   const campId = active.camp.id;
   const membershipId = active.membership.id;
+  const role = active.membership.role;
 
   const tasks = await db
     .select()
@@ -65,9 +74,34 @@ export async function loader({ request }: Route.LoaderArgs) {
     .where(eq(onboardingCompletion.membershipId, membershipId));
   const doneSet = new Set(done.map((d) => d.taskId));
 
+  // The camp questionnaire (e.g. the email-list opt-in) is part of onboarding,
+  // so surface the member's relevant questions here too. Answers are
+  // edition-scoped and saved via the /questions route's "answer" action.
+  const questions = filterByAudience(await loadCampQuestions(campId), role).map(
+    (q) => ({
+      id: q.id,
+      prompt: q.prompt,
+      helpText: q.helpText,
+      type: q.type as QuestionType,
+      options: parseOptions(q.options),
+      required: q.required,
+      exclusiveOption: q.exclusiveOption,
+    }),
+  );
+  const answers = await loadAnswers({
+    editionId: activeEdition.id,
+    membershipId,
+  });
+  const invitedByName = await loadInviterName(membershipId);
+
   return {
-    canManage: hasAtLeast(active.membership.role, "officer"),
+    canManage: hasAtLeast(role, "officer"),
     tasks: tasks.map((t) => ({ ...t, done: doneSet.has(t.id) })),
+    questions,
+    answers,
+    invitedByName,
+    year: activeEdition.year,
+    locked: activeEdition.locked,
   };
 }
 
@@ -298,7 +332,8 @@ function SortableTask({
 }
 
 export default function Onboarding({ loaderData }: Route.ComponentProps) {
-  const { tasks, canManage } = loaderData;
+  const { tasks, canManage, questions, answers, invitedByName, year, locked } =
+    loaderData;
   const toggleFetcher = useFetcher<FetcherData>();
   const manageFetcher = useFetcher<FetcherData>();
   const addFormRef = useRef<HTMLFormElement>(null);
@@ -411,6 +446,32 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
             {canManage ? " Add the first one below." : ""}
           </Text>
         )}
+
+        {questions.length > 0 ? (
+          <Card withBorder padding="md" radius="md">
+            <Group justify="space-between" mb="xs">
+              <Text fw={600}>Camp questions</Text>
+              {locked ? (
+                <Text size="sm" c="dimmed">
+                  Locked — answers are read-only
+                </Text>
+              ) : null}
+            </Group>
+            <Stack gap="lg">
+              {questions.map((q) => (
+                <QuestionField
+                  key={q.id}
+                  question={q}
+                  value={answers[q.id]}
+                  locked={locked}
+                  year={year}
+                  invitedByName={invitedByName}
+                  action="/questions"
+                />
+              ))}
+            </Stack>
+          </Card>
+        ) : null}
 
         {canManage ? (
           <Card withBorder padding="md" radius="md">

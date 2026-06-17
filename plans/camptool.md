@@ -818,10 +818,23 @@ placement page.)
       `current-password`, email = `email`, name = `name`. (2) **"ok to leave now"
       confirmation** — `/start` wizard Finish no longer bounces straight to `/`; it now
       advances to the Stepper's **Completed** panel ("You're all set! Your answers are
-      saved — it's safe to close this tab"), with a "Go to dashboard" button. DEFERRED
-      (user decision): the **email-list opt-in** ("join email list, default NO") will be
-      added later as a built-in **camp question** via the existing questions system, not
-      a membership/user field.
+      saved — it's safe to close this tab"), with a "Go to dashboard" button. (3) the
+      friend's third note ("onboarding should ask about the email list") — the
+      **email-list opt-in already exists** as a camp question, but camp questions only
+      rendered in the `/start` wizard's Questionnaire step and on `/dashboard/questions`,
+      NOT on `/onboarding` (which was checklist / `onboarding_task` only). He was on the
+      checklist page, so saw nothing. **Fix (user decision: "joining the email list is
+      part of onboarding"):** the member's relevant questionnaire now also renders as a
+      "Camp questions" card on `/onboarding`, alongside the checklist. Its loader switched
+      `requireActiveCamp` → `requireActiveEdition` (answers are edition-scoped), loads
+      `filterByAudience(loadCampQuestions)` + `loadAnswers` + `loadInviterName`, and the
+      card reuses `<QuestionField action="/questions">` so answers post to the existing
+      `/questions` "answer" action (one source of truth; the action there stays the
+      officer/answer authority). Officer question *management* stays on `/dashboard/questions`.
+      typecheck + build + biome green. NOT browser-tested (local dev DB has no camp
+      questions to render). Note: if the friend was actually on `/start`, a secondary
+      cause could still be the question's `audience` filter excluding his role — worth
+      checking on the `/dashboard/questions` admin view.
 - [x] Map editor tweaks (2026-06-12, code-complete, NOT browser-tested) — (a)
       **door visibility**: a global "Show doors" checkbox in the map's Highlight
       panel (client-only master switch) + a per-element "Show door" checkbox in the
