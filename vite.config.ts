@@ -6,8 +6,19 @@ const publicHost = process.env.PUBLIC_BASE_URL
   ? new URL(process.env.PUBLIC_BASE_URL).hostname
   : undefined;
 
+// Camp-theme seam (Phase 2.5). Core imports the built-in `@camptool/default-theme`
+// through `~/theme`; if CAMP_THEME names a different (workspace) package, alias
+// that import to it so the active theme is swapped in at build time. Both satisfy
+// the same `CampTheme` contract, so the swap is type-identical. Default = built-in.
+const campTheme = process.env.CAMP_THEME;
+const themeAlias =
+  campTheme && campTheme !== "@camptool/default-theme"
+    ? { "@camptool/default-theme": campTheme }
+    : {};
+
 export default defineConfig({
   plugins: [reactRouter(), tsconfigPaths()],
+  resolve: { alias: themeAlias },
   server: {
     port: Number(process.env.PORT ?? 3000),
     allowedHosts: publicHost ? [publicHost] : undefined,

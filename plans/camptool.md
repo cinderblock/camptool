@@ -199,15 +199,31 @@ Man glyph, from clock address). Predefined footprint shapes: tent, **hexayurt**
 gradient), car/truck (rigid), RV (fixed width + numeric length), shade, kitchen,
 art, generator, container. Members+ edit; recruits view-only.
 
-*Two locked design directions (not yet built):*
-- **Custom per-camp structures = camp package, NOT the shared app.** A camp's
-  bespoke footprints (their specific shade structure, art car, etc.) are
-  registered by the per-deployment **camp package** from Phase 2.5 (`CAMP_THEME`/
-  camp-theme workspace package), which contributes extra `kinds` (value/label/
-  color/shape/size/rigid) into the palette registry the core reads. The open-
-  source app ships only the generic palette; custom kinds live in the self-
-  hoster's own package so they never bloat or fork the shared codebase. Needs a
-  small refactor: move `KINDS` behind a registry the camp package can extend.
+*Custom per-camp structures = camp package, NOT the shared app — LANDED
+(2026-06-18).* This realized BOTH Phase 2.5 (the camp-theme package seam) and
+the custom-structure registry. See `plans/camp-theme-and-custom-structures.md`
+for the full design + progress. Summary:
+- **Bun workspaces** introduced (`packages/*`). Three packages:
+  `@camptool/theme-contract` (types-only `CampTheme`/`CampStructure`/`Kind`/…),
+  `@camptool/default-theme` (built-in, ships with OSS, no custom structures),
+  `@camptool/mathcamp-theme` (worked example, contributes the Sierpinski pyramid).
+- **`~/theme`** (`app/theme/index.ts`) is the single point core reads camp
+  customization from. It imports `@camptool/default-theme`; **Vite
+  `resolve.alias` swaps that import to `$CAMP_THEME` at build time** (default →
+  built-in). Not a `~/`-tsconfig path (would collide with vite-tsconfig-paths).
+- **Registry:** `structures.tsx` now `KINDS = [...CORE_KINDS, ...campStructures]`;
+  a `CampStructure` extends `Kind` with optional `renderFootprint`/`renderIcon`
+  hooks + `tallFt`. `map.tsx` falls through to `def.renderFootprint` (drawn in
+  plot-local feet, wrapped in a translate+scale `<g>`). Custom kinds slot into
+  the legend ("Camp" group), Kind picker, and map for free. The OSS palette is
+  unbloated; bespoke kinds live only in the self-hoster's package.
+- Gotcha: Bun only symlinks workspace pkgs that are **depended upon** — root
+  `package.json` must list each `@camptool/*` as a `workspace:*` dep.
+- TODO: place the Sierpinski pyramid live on Math Camp's lot in the running
+  editor (rendering logic verified via react-dom/server screenshot; not yet
+  exercised in the live map). Flying-buttress shades + true tetra (open-frame)
+  shadow deferred. Other still-unbuilt Phase 2.5 surface (Mantine theme, slots,
+  route overrides, rootProvider) is typed-but-reserved in the contract.
 **Phase 3.5 — Inventory-driven placement (locked direction).** Supersedes the
 earlier "assign campers to objects" / "relationship graph" idea.
 - **Registration collects an inventory.** Each camper declares what they're

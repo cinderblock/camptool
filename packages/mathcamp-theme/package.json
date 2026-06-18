@@ -1,0 +1,18 @@
+{
+  "name": "@camptool/mathcamp-theme",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Math Camp @ Group W's bespoke CampTool theme. Example of a per-deployment camp-theme package; contributes camp-specific map structures (the Sierpinski pyramid).",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@camptool/theme-contract": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": ">=19"
+  }
+}

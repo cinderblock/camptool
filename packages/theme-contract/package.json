@@ -1,0 +1,15 @@
+{
+  "name": "@camptool/theme-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed contract a CampTool camp-theme package implements. Types only; no runtime.",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "peerDependencies": {
+    "react": ">=19"
+  }
+}

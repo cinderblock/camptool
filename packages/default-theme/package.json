@@ -1,0 +1,15 @@
+{
+  "name": "@camptool/default-theme",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Built-in default CampTool theme. Ships with the open-source app; contributes no camp-specific structures.",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@camptool/theme-contract": "workspace:*"
+  }
+}

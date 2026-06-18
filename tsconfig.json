@@ -30,6 +30,8 @@
     "db/**/*.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
+    "packages/**/*.ts",
+    "packages/**/*.tsx",
     ".react-router/types/**/*"
   ]
 }

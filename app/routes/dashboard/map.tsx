@@ -3498,6 +3498,22 @@ const MapObjectShape = memo(
                 );
               })}
             </>
+          ) : def.shape === "custom" && def.renderFootprint ? (
+            // A camp-theme structure draws its own footprint in plot-local FEET
+            // (0,0→w,h); the wrapper translates+scales it into pixel space so it
+            // composes with drag/resize/rotate like a built-in shape.
+            <g
+              style={bodyStyle}
+              onPointerDown={onBodyDown}
+              transform={`translate(${px} ${py}) scale(${ppf})`}
+            >
+              {def.renderFootprint({
+                w: o.width,
+                h: o.height,
+                color: fill,
+                selected,
+              })}
+            </g>
           ) : (
             <rect
               x={px}

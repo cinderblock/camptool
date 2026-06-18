@@ -48,7 +48,7 @@ New campers get a guided, resumable **onboarding wizard** at `/start`: a
 full-screen walkthrough to set a playa name, declare what they're bringing, add
 who's sharing their tent/RV, and tick the camp's checklist — one step at a time,
 with the regular dashboard pages remaining the "advanced" way to do the same
-things. Next: RV pop-outs, custom per-camp structures, and group sub-maps.
+things. Next: RV pop-outs and group sub-maps.
 
 The dashboard also tracks the camp's per-year ticket allocations. A **Tickets**
 page manages the camp's Direct Group Sale (guaranteed) allocation — individual
@@ -104,6 +104,17 @@ server into a container. Both are documented in
   REST API and slash commands use the interactions webhook — both live inside
   this web server, so the deployment stays a single "little webserver." A
   separate gateway process is only added if a feature needs live events.
+- **Per-deployment customization = a camp-theme package, not runtime config.** A
+  self-hoster who wants bespoke map structures (or, later, UI overrides) adds a
+  workspace package under `packages/` implementing the `@camptool/theme-contract`
+  `CampTheme` and points `CAMP_THEME` at it (default → the built-in
+  `@camptool/default-theme`). Core reads it through the single `~/theme` module;
+  Vite swaps the active package in at build time. Custom map structures contribute
+  a `CampStructure` (a palette kind with its own `renderFootprint`), so they slot
+  into the map/legend/picker without ever bloating the shared open-source palette.
+  `@camptool/mathcamp-theme` is the worked example (its **Sierpinski pyramid**
+  landmark — a 3-level Sierpinski tetrahedron drawn as an honest 40′ top-down
+  Sierpinski-triangle footprint).
 - **Instance admin vs. camp admin:** super admin is the only deployment-wide
   role (stored in a `super_admin` side table, not on `user`, so per-camp identity
   stays clean). Its two toggles live in a singleton `instance_setting` row. The

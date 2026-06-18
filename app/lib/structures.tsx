@@ -6,34 +6,24 @@
  * (Later: a self-hoster's camp package can extend this registry with custom
  * kinds — see Phase 2.5 / the custom-structures task.)
  */
+import type {
+  CampStructure,
+  Kind,
+  KindTag,
+  ShapeKind,
+} from "@camptool/theme-contract";
 import type { ReactNode } from "react";
+import { campStructures } from "~/theme";
 
-export type ShapeKind = "rect" | "hexagon" | "hypar" | "dome";
+// Palette types now live in the camp-theme contract (so a camp-theme package and
+// the core app share one definition). Re-exported here so existing imports of
+// `Kind`/`ShapeKind`/`KindTag` from `~/lib/structures` keep working.
+export type { CampStructure, Kind, KindTag, ShapeKind };
 
-/** Highlight categories an object can belong to (a kind can carry several —
- * an RV is both a domicile and a vehicle). Drives the map's highlight filter. */
-export type KindTag = "domicile" | "vehicle" | "structure";
-
-export type Kind = {
-  value: string;
-  label: string;
-  color: string;
-  w: number;
-  h: number;
-  shape: ShapeKind;
-  vehicle: boolean;
-  rigid: boolean;
-  /** Legend grouping heading. */
-  group: string;
-  /** Highlight categories this kind belongs to. */
-  tags: readonly KindTag[];
-  /** A camper can declare this themselves on Bringing / in the wizard. Communal
-   * infrastructure (kitchen, generator, shipping container, spider box, camp art)
-   * is officer-placed only and stays out of the camper-facing palette. */
-  personal: boolean;
-};
-
-export const KINDS = [
+/** The built-in palette shipped with the open-source app. A self-hoster's
+ * camp-theme package contributes additional structures (see `KINDS` below) —
+ * bespoke per-camp kinds never bloat this shared list. */
+const CORE_KINDS = [
   {
     value: "tent",
     label: "Tent",
@@ -238,6 +228,17 @@ export const KINDS = [
   },
 ] as const;
 
+/**
+ * The full palette the map + inventory read: built-in core kinds plus any custom
+ * structures the active camp-theme package contributes (`CAMP_THEME`, default →
+ * none). Every derived helper below (kindDef, KIND_GROUPS, CAMPER_KINDS, …) reads
+ * from this, so a camp-theme kind slots into the legend, picker, and map for free.
+ */
+export const KINDS: readonly CampStructure[] = [
+  ...CORE_KINDS,
+  ...campStructures,
+];
+
 /** Default above-ground height (feet) per kind, used to seed a new object's
  * height and as the fallback for the 2D shade simulation when height is unset. */
 const KIND_HEIGHTS: Record<string, number> = {
@@ -260,7 +261,8 @@ const KIND_HEIGHTS: Record<string, number> = {
   structure: 8,
 };
 export function kindHeight(kind: string): number {
-  return KIND_HEIGHTS[kind] ?? 8;
+  // Core kinds use the table; a camp-theme structure carries its own `tallFt`.
+  return KIND_HEIGHTS[kind] ?? kindDef(kind).tallFt ?? 8;
 }
 
 /** Industry-standard preset ratings a power line (map_cable) can carry. Both are
@@ -316,12 +318,15 @@ export const KIND_GROUPS: ReadonlyArray<{
   return groups.filter((g) => g.kinds.length > 0);
 })();
 
-const KIND_MAP: Record<string, (typeof KINDS)[number]> = Object.fromEntries(
+const KIND_MAP: Record<string, CampStructure> = Object.fromEntries(
   KINDS.map((k) => [k.value, k]),
 );
-const FALLBACK_KIND = KINDS.find((k) => k.value === "structure") ?? KINDS[0];
+// Derived from CORE_KINDS (a const tuple) so it's always defined — a camp theme
+// can't remove the built-in "structure" fallback.
+const FALLBACK_KIND: CampStructure =
+  CORE_KINDS.find((k) => k.value === "structure") ?? CORE_KINDS[0];
 
-export function kindDef(kind: string): (typeof KINDS)[number] {
+export function kindDef(kind: string): CampStructure {
   return KIND_MAP[kind] ?? FALLBACK_KIND;
 }
 export function isKind(value: string): boolean {
@@ -428,7 +433,12 @@ function starPoints(cx: number, cy: number, r: number): string {
  * for tents/hexayurts, burners for the kitchen, a bolt for the generator…).
  * Used in the legend and the unplaced tray, with the name shown as a tooltip.
  */
-export function KindIcon({ kind, size = 30 }: { kind: Kind; size?: number }) {
+export function KindIcon({
+  kind,
+  size = 30,
+}: { kind: CampStructure; size?: number }) {
+  // A camp-theme structure can ship its own legend/tray icon.
+  if (kind.renderIcon) return <>{kind.renderIcon(size)}</>;
   const S = size;
   const pad = S * 0.14;
   const scale = (S - 2 * pad) / Math.max(kind.w, kind.h);
