@@ -1,6 +1,9 @@
 .git
 .github
 node_modules
+# Nested workspace node_modules (bun creates packages/*/node_modules); a bare
+# `node_modules` only matches the root, so exclude nested ones explicitly.
+**/node_modules
 build
 .react-router
 data

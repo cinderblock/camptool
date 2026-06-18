@@ -52,6 +52,13 @@ with these keys:
 
 `SOCKET_PATH` defaults to `/run/camptool/camptool.sock` — leave it unset.
 
+**`CAMP_THEME` is build-time, not a runtime key.** The active camp-theme package
+is compiled into the bundle by Vite during `bun run build`, so it can't live in
+this runtime env-file (injected only when the process launches). It's set on the
+**Build** step in `.github/workflows/deploy.yml` (firefly bakes in
+`@camptool/mathcamp-theme`); generic self-host passes it as a Docker build-arg
+(see below). Default → the built-in `@camptool/default-theme`.
+
 ### Health
 
 The uptime monitor checks `GET https://camptool.mathcamp.us/` and expects `200`;
@@ -74,3 +81,6 @@ BETTER_AUTH_SECRET=__REPLACE_ME__
 EOF
 docker compose up -d --build
 ```
+
+If you ship a custom camp-theme package, set `CAMP_THEME` (build-time) before
+building: `CAMP_THEME=@camptool/mycamp-theme docker compose up -d --build`.

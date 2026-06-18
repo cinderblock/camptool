@@ -154,6 +154,28 @@ Core `map.tsx` shape branch gains a terminal `def.renderFootprint?.(ctx)` case;
       Camp's lot (officer) + sanity-check rotation/shade-sim in the running app —
       deferred to a browser session; the rendering logic itself is proven.
 
+## Deployment / ops (build-time theme — important)
+`CAMP_THEME` is consumed by **Vite at `bun run build`** (bakes the theme into the
+bundle), so it is a **build-time** var — NOT a runtime env-file key. Where it's set:
+- **firefly:** `.github/workflows/deploy.yml` Build step `env: CAMP_THEME:
+  "@camptool/mathcamp-theme"`. (The runtime ops env-file = PUBLIC_BASE_URL etc.
+  is injected at process launch — too late for the build.)
+- **generic self-host:** Docker build-arg (`Dockerfile` `ARG CAMP_THEME`, default
+  `@camptool/default-theme`; `compose.yaml` passes `${CAMP_THEME:-…}`).
+
+Workspaces forced build/release-plumbing fixes (all landed):
+- The three `@camptool/*` are **devDependencies** (build-time only; bundled into
+  `build/`), so the runtime `--production` install doesn't pull them.
+- BUT `packages/` MUST still ship to every dir that runs `bun install`, because
+  the root `workspaces: ["packages/*"]` glob fails to resolve if the dir is
+  missing — even under `--production`. Verified: `--production` with `packages/`
+  present succeeds and skips the devDep themes; without `packages/` it errors
+  `Workspace dependency … not found`.
+- firefly staging `cp`s `packages` into the release dir, then prunes any
+  `packages/*/node_modules` the build-step install created (release-dir install
+  regenerates). Dockerfile copies `packages` before BOTH installs; `.dockerignore`
+  gained `**/node_modules` so nested workspace node_modules don't leak into context.
+
 ## Findings / gotchas
 - typecheck uses the STATIC tsconfig path for `~/active-theme` (→ default-theme),
   so typecheck validates against the default; the active package is build-time.

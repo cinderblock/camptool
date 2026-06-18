@@ -35,6 +35,13 @@ jobs:
           echo "BETTER_AUTH_SECRET present (${#BETTER_AUTH_SECRET} chars)"
 
       - name: Build (Bun)
+        # CAMP_THEME is a BUILD-TIME var: Vite bakes the active camp-theme package
+        # into the bundle here (see vite.config.ts / app/theme). It must be set on
+        # the BUILD step, NOT in the ops runtime env-file (which is injected only
+        # when the app process launches — too late for the build). This firefly
+        # deploy is Math Camp's, so build with its theme.
+        env:
+          CAMP_THEME: "@camptool/mathcamp-theme"
         run: |
           set -euo pipefail
           bun install --frozen-lockfile
@@ -47,8 +54,13 @@ jobs:
           rm -rf "$REL"
           mkdir -p "$REL"
           # Ready-to-run tree: build output, server entry, the run wrapper, and
-          # db/migrations (the app auto-migrates on boot from cwd).
-          cp -r build db server.ts run package.json bun.lock "$REL"/
+          # db/migrations (the app auto-migrates on boot from cwd). `packages/`
+          # ships too so the release-dir `bun install` can resolve the workspace
+          # (`workspace:*`) camp-theme deps in package.json.
+          cp -r build db server.ts run package.json bun.lock packages "$REL"/
+          # The build-step `bun install` created packages/*/node_modules; drop them
+          # so the release-dir production install below regenerates cleanly.
+          find "$REL/packages" -name node_modules -type d -prune -exec rm -rf {} + 2>/dev/null || true
           chmod +x "$REL/run"
           # Stamp the build SHA so the running app can report which release it is
           # (server.ts serves it at /_version; the health check below verifies it).

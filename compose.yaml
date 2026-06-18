@@ -1,6 +1,13 @@
 services:
   camptool:
-    build: .
+    build:
+      context: .
+      args:
+        # Which camp-theme package to bake into the build (build-time; default =
+        # the built-in theme). Self-hosters with a custom theme set CAMP_THEME in
+        # the environment before `docker compose build`, e.g.
+        # `CAMP_THEME=@camptool/mycamp-theme docker compose up -d --build`.
+        CAMP_THEME: ${CAMP_THEME:-@camptool/default-theme}
     image: camptool:latest
     container_name: camptool
     restart: unless-stopped
