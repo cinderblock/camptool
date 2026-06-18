@@ -150,9 +150,20 @@ Core `map.tsx` shape branch gains a terminal `def.renderFootprint?.(ctx)` case;
       Sierpinski triangle, the 3 labeled corner mediums, central open space + π
       marker, clean legend icon. typecheck + build + biome all green; my files
       lint-clean (pre-existing migration-JSON lint noise is unrelated). Throwaway
-      preview script removed. STILL TODO: place it live in the map editor on Math
-      Camp's lot (officer) + sanity-check rotation/shade-sim in the running app —
-      deferred to a browser session; the rendering logic itself is proven.
+      preview script removed.
+- [x] **Deployed + live-palette verified (2026-06-18).** Pushed (commits 097b9c6
+      + 51f05a4); "Deploy to firefly" GREEN in 43s (Build with CAMP_THEME, the
+      packages/-aware staging, and the /_version health check all passed). On
+      https://camptool.mathcamp.us/map (logged in as Cameron, 2026 edition, lot
+      set up) the legend shows a new **CAMP** group with the **Sierpinski Pyramid**
+      icon rendered correctly — the whole build-time theme seam works in prod.
+      STILL TODO (manual): actually drag it onto the lot. Browser-automation
+      `left_click_drag` can't place it — the legend uses dnd-kit, which needs real
+      pointerdown/up (the documented map drag limitation); the tool only emits
+      pointermove, so the drop is a no-op. Left for Cameron to drag (one drag from
+      the CAMP legend onto the lot), since it's a 40′ centerpiece on real data he'll
+      want to position/rotate intentionally. Rotation/shade-sim sanity check rides
+      along with that manual placement.
 
 ## Deployment / ops (build-time theme — important)
 `CAMP_THEME` is consumed by **Vite at `bun run build`** (bakes the theme into the
