@@ -173,8 +173,15 @@ bundle), so it is a **build-time** var — NOT a runtime env-file key. Where it'
   `BETTER_AUTH_SECRET`), so the build reads it — the repo is camp-AGNOSTIC, nothing
   hardcoded in CI. Unset → built-in default-theme. Caveat: build-time, so a change
   needs a redeploy, not a restart. (Earlier I wrongly hardcoded
-  `@camptool/mathcamp-theme` into deploy.yml's Build step — reverted; the repo must
-  stay generic.)
+  `@camptool/mathcamp-theme` into deploy.yml's Build step — reverted in `ecc774e`;
+  the repo must stay generic.)
+  **DEPLOYED + VERIFIED env-driven (2026-06-18):** ops wired `CAMP_THEME` into the
+  runner container env (ops-comms msgs 14/15); pushed `ecc774e` → deploy green (49s);
+  confirmed the live bundle contains the theme WITHOUT login — fetched the SSR route
+  manifest from `/login`, walked the `/assets/*.js` chunks, found "Sierpinski"/
+  "Group W" in `entry.client-*.js`. So the env-driven build picks up the theme.
+  Flagged to ops (comms msg 16): `CAMP_THEME` is now a must-persist key — if it's
+  ever dropped, the theme silently falls back to default (green CI, no error).
 - **generic self-host:** Docker build-arg (`Dockerfile` `ARG CAMP_THEME`, default
   `@camptool/default-theme`; `compose.yaml` passes `${CAMP_THEME:-…}`).
 
