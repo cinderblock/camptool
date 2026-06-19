@@ -168,9 +168,13 @@ Core `map.tsx` shape branch gains a terminal `def.renderFootprint?.(ctx)` case;
 ## Deployment / ops (build-time theme — important)
 `CAMP_THEME` is consumed by **Vite at `bun run build`** (bakes the theme into the
 bundle), so it is a **build-time** var — NOT a runtime env-file key. Where it's set:
-- **firefly:** `.github/workflows/deploy.yml` Build step `env: CAMP_THEME:
-  "@camptool/mathcamp-theme"`. (The runtime ops env-file = PUBLIC_BASE_URL etc.
-  is injected at process launch — too late for the build.)
+- **firefly:** set in the **ops-managed env-file** (`CAMP_THEME=@camptool/
+  mathcamp-theme`). The deploy job inherits that env-file (same source as
+  `BETTER_AUTH_SECRET`), so the build reads it — the repo is camp-AGNOSTIC, nothing
+  hardcoded in CI. Unset → built-in default-theme. Caveat: build-time, so a change
+  needs a redeploy, not a restart. (Earlier I wrongly hardcoded
+  `@camptool/mathcamp-theme` into deploy.yml's Build step — reverted; the repo must
+  stay generic.)
 - **generic self-host:** Docker build-arg (`Dockerfile` `ARG CAMP_THEME`, default
   `@camptool/default-theme`; `compose.yaml` passes `${CAMP_THEME:-…}`).
 

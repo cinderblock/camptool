@@ -49,15 +49,20 @@ with these keys:
 | `DISCORD_CLIENT_ID` / `_SECRET` | no | enables Discord login/link |
 | `DISCORD_BOT_TOKEN` / `_GUILD_ID` | no | enables DM/guild features |
 | `NODE_ENV` | no | `production` (conventional) |
+| `CAMP_THEME` | no | **build-time** — camp-theme package to bake in (default = built-in). See below. |
 
 `SOCKET_PATH` defaults to `/run/camptool/camptool.sock` — leave it unset.
 
-**`CAMP_THEME` is build-time, not a runtime key.** The active camp-theme package
-is compiled into the bundle by Vite during `bun run build`, so it can't live in
-this runtime env-file (injected only when the process launches). It's set on the
-**Build** step in `.github/workflows/deploy.yml` (firefly bakes in
-`@camptool/mathcamp-theme`); generic self-host passes it as a Docker build-arg
-(see below). Default → the built-in `@camptool/default-theme`.
+**`CAMP_THEME` is build-time — the one env-file key consumed at build, not
+runtime.** It selects the camp-theme package Vite compiles into the bundle
+(custom map structures, etc.). It lives in this same ops env-file (the deploy job
+inherits it, like `BETTER_AUTH_SECRET`), so the build picks it up. The repo is
+camp-agnostic: nothing is hardcoded, and unset → the built-in
+`@camptool/default-theme`. Math Camp's deployment sets
+`CAMP_THEME=@camptool/mathcamp-theme`. Caveat: because it's read at build,
+**changing it takes effect on the next deploy, not a plain restart** (the other
+keys here are read at process launch). Generic self-host (non-firefly) passes it
+as a Docker build-arg instead (see below).
 
 ### Health
 

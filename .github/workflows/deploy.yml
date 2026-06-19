@@ -35,13 +35,12 @@ jobs:
           echo "BETTER_AUTH_SECRET present (${#BETTER_AUTH_SECRET} chars)"
 
       - name: Build (Bun)
-        # CAMP_THEME is a BUILD-TIME var: Vite bakes the active camp-theme package
-        # into the bundle here (see vite.config.ts / app/theme). It must be set on
-        # the BUILD step, NOT in the ops runtime env-file (which is injected only
-        # when the app process launches — too late for the build). This firefly
-        # deploy is Math Camp's, so build with its theme.
-        env:
-          CAMP_THEME: "@camptool/mathcamp-theme"
+        # CAMP_THEME (which camp-theme package Vite bakes into the bundle) is a
+        # BUILD-TIME var. It is deliberately NOT hardcoded here — this deploy stays
+        # camp-agnostic. The job inherits the app container's ops-managed env-file
+        # (the same source as BETTER_AUTH_SECRET above), so set CAMP_THEME there to
+        # pick a theme; unset → the built-in @camptool/default-theme. Note: it's
+        # read at build, so a change only takes effect on the next deploy.
         run: |
           set -euo pipefail
           bun install --frozen-lockfile
