@@ -247,7 +247,18 @@ Pyramid package (`packages/mathcamp-theme/structures/sierpinski.tsx`):
 
 Core map editor (`app/routes/dashboard/map.tsx`) — mostly VISUAL, and the chrome
 ext is currently de-authed so these need the user (or re-auth) to eyeball:
-- [ ] **B4. Shape-aware bounds (bug).** Current clamp is wrong/asymmetric (can't
+- [x] **B4. Shape-aware bounds (bug) — DONE.** Added module helpers
+      `lotHalfWidthAt`/`clampPointToLot`/`pointInLot`/`objectOverflowsLot` (lot =
+      trapezoid: front width frontageFt, rear width `rear`, centered on
+      frontageFt/2, depth depthFt). All 4 clamp sites (keyboard nudge, drag-move,
+      add, drop-from-tray) now constrain the object's CENTER to the trapezoid (was
+      clamping the top-left corner to a w/h-shrunk axis box → the asymmetry). New
+      `overflow` prop on `MapObjectShape` (memoized) draws a red dashed box when any
+      footprint corner crosses the lot border.
+- [x] **B5. Shadows onto neighbors — DONE.** Added a `ground-clip` rect (whole
+      inner view) and pointed the cast-shadow group at it instead of the lot clip,
+      so shadows fall onto neighbors/roads. (Neighbor-cast shadows still deferred.)
+- [ ] **B4-OLD. Shape-aware bounds (bug).** Current clamp is wrong/asymmetric (can't
       push the pyramid into the top-right corner, but can drag it far outside
       bottom-right). Change object clamping to constrain by the **centerpoint**
       within the camp area (the tapered wedge, not a w/h-shrunk axis box), and

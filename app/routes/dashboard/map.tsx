@@ -1340,6 +1340,72 @@ function rearWidthOf(lot: Lot, radius: number | null): number {
   return (lot.frontageFt * rearRadius) / radius;
 }
 
+/** Half-width (ft) of the lot trapezoid at depth `y` — interpolates the frontage
+ * half-width to the rear half-width. */
+function lotHalfWidthAt(
+  y: number,
+  frontageFt: number,
+  depthFt: number,
+  rear: number,
+): number {
+  const t = depthFt > 0 ? clamp(y / depthFt, 0, 1) : 0;
+  return (frontageFt / 2) * (1 - t) + (rear / 2) * t;
+}
+
+/** Clamp a point (plot-local feet) into the lot trapezoid — keeps an object's
+ * CENTER on the camp's area (front width `frontageFt`, rear width `rear`, both
+ * centered on x = frontageFt/2, depth `depthFt`). The shape may still overhang. */
+function clampPointToLot(
+  cx: number,
+  cy: number,
+  frontageFt: number,
+  depthFt: number,
+  rear: number,
+): { x: number; y: number } {
+  const y = clamp(cy, 0, depthFt);
+  const half = lotHalfWidthAt(y, frontageFt, depthFt, rear);
+  const mid = frontageFt / 2;
+  return { x: clamp(cx, mid - half, mid + half), y };
+}
+
+/** Is a point (plot-local feet) inside the lot trapezoid? */
+function pointInLot(
+  px: number,
+  py: number,
+  frontageFt: number,
+  depthFt: number,
+  rear: number,
+): boolean {
+  if (py < -1e-6 || py > depthFt + 1e-6) return false;
+  const half = lotHalfWidthAt(py, frontageFt, depthFt, rear);
+  return Math.abs(px - frontageFt / 2) <= half + 1e-6;
+}
+
+/** Does an object's (rotated) footprint cross the lot border? True if any of its
+ * box corners lies outside the lot trapezoid — drives the overflow highlight. */
+function objectOverflowsLot(
+  o: ObjRow,
+  frontageFt: number,
+  depthFt: number,
+  rear: number,
+): boolean {
+  const cx = o.x + o.width / 2;
+  const cy = o.y + o.height / 2;
+  const hw = o.width / 2;
+  const hh = o.height / 2;
+  const corners: Array<[number, number]> = [
+    [-hw, -hh],
+    [hw, -hh],
+    [hw, hh],
+    [-hw, hh],
+  ];
+  for (const [lx, ly] of corners) {
+    const v = rotateVec(lx, ly, o.rotation);
+    if (!pointInLot(cx + v.x, cy + v.y, frontageFt, depthFt, rear)) return true;
+  }
+  return false;
+}
+
 /** Format feet as feet-and-inches, e.g. 104.93 → 104′11″. */
 function feetInches(ft: number): string {
   const neg = ft < 0;
@@ -2003,14 +2069,26 @@ function Editor({
           ...obj,
           rotation: Math.round(obj.rotation + (e.shiftKey ? -15 : 15)),
         };
-      } else if (e.key === "ArrowLeft") {
-        next = { ...obj, x: clamp(obj.x - step, 0, lot.frontageFt) };
-      } else if (e.key === "ArrowRight") {
-        next = { ...obj, x: clamp(obj.x + step, 0, lot.frontageFt) };
-      } else if (e.key === "ArrowUp") {
-        next = { ...obj, y: clamp(obj.y - step, 0, lot.depthFt) };
-      } else if (e.key === "ArrowDown") {
-        next = { ...obj, y: clamp(obj.y + step, 0, lot.depthFt) };
+      } else if (
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight" ||
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown"
+      ) {
+        // Nudge, then constrain by the object's CENTER to the lot trapezoid.
+        const rearW = rearWidthOf(lot, frontageRadiusOf(lot));
+        const dx =
+          e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy =
+          e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        const c = clampPointToLot(
+          obj.x + dx + obj.width / 2,
+          obj.y + dy + obj.height / 2,
+          lot.frontageFt,
+          lot.depthFt,
+          rearW,
+        );
+        next = { ...obj, x: c.x - obj.width / 2, y: c.y - obj.height / 2 };
       }
       if (!next) return;
       e.preventDefault();
@@ -2161,11 +2239,17 @@ function Editor({
   function applyDrag(d: DragState, curFx: number, curFy: number): ObjRow {
     const s = d.start;
     if (d.mode === "move") {
-      return {
-        ...s,
-        x: clamp(s.x + (curFx - d.startFx), 0, lot.frontageFt),
-        y: clamp(s.y + (curFy - d.startFy), 0, lot.depthFt),
-      };
+      // Constrain by the object's CENTER to the lot trapezoid (shape may overhang).
+      const nx = s.x + (curFx - d.startFx);
+      const ny = s.y + (curFy - d.startFy);
+      const c = clampPointToLot(
+        nx + s.width / 2,
+        ny + s.height / 2,
+        lot.frontageFt,
+        lot.depthFt,
+        rear,
+      );
+      return { ...s, x: c.x - s.width / 2, y: c.y - s.height / 2 };
     }
     const cxFt = s.x + s.width / 2;
     const cyFt = s.y + s.height / 2;
@@ -2408,16 +2492,20 @@ function Editor({
 
   function addObjectAt(kind: string, fxFeet: number, fyFeet: number) {
     const def = kindDef(kind);
+    // Drop point = the object's center, constrained to the lot trapezoid.
+    const c = clampPointToLot(
+      fxFeet,
+      fyFeet,
+      lot.frontageFt,
+      lot.depthFt,
+      rear,
+    );
     fetcher.submit(
       {
         intent: "addObject",
         kind,
-        x: round(
-          clamp(fxFeet - def.w / 2, 0, Math.max(0, lot.frontageFt - def.w)),
-        ),
-        y: round(
-          clamp(fyFeet - def.h / 2, 0, Math.max(0, lot.depthFt - def.h)),
-        ),
+        x: round(c.x - def.w / 2),
+        y: round(c.y - def.h / 2),
         width: def.w,
         height: def.h,
       },
@@ -2433,14 +2521,19 @@ function Editor({
     if (placeId) {
       const iw = Number(e.dataTransfer.getData("application/camptool-w")) || 10;
       const ih = Number(e.dataTransfer.getData("application/camptool-h")) || 10;
+      const c = clampPointToLot(
+        fx(p.x),
+        fy(p.y),
+        lot.frontageFt,
+        lot.depthFt,
+        rear,
+      );
       fetcher.submit(
         {
           intent: "placeObject",
           id: placeId,
-          x: round(
-            clamp(fx(p.x) - iw / 2, 0, Math.max(0, lot.frontageFt - iw)),
-          ),
-          y: round(clamp(fy(p.y) - ih / 2, 0, Math.max(0, lot.depthFt - ih))),
+          x: round(c.x - iw / 2),
+          y: round(c.y - ih / 2),
         },
         { method: "post" },
       );
@@ -2663,6 +2756,16 @@ function Editor({
             <clipPath id={clipId}>
               <polygon points={lotPoints} />
             </clipPath>
+            {/* Shadows may fall past the lot onto the neighbors / roads, so clip
+            them to the whole ground view rather than the lot. */}
+            <clipPath id="ground-clip">
+              <rect
+                x={viewL}
+                y={MARGIN}
+                width={viewR - viewL}
+                height={viewH - 2 * MARGIN}
+              />
+            </clipPath>
             {/* Ground surface for the lot — a theme-aware fill (lighter than the page
             in both schemes) so cast shadows read against it in dark mode too,
             instead of vanishing on the transparent dark page. */}
@@ -2756,13 +2859,14 @@ function Editor({
                 Service road
               </text>
             </g>
-            {/* Shade simulation: each object casts a shadow away from the sun, clipped
-            to the lot. Overlaps UNION (OR) at one opacity rather than adding up —
-            the polygons are opaque inside a single group whose opacity flattens
-            them, so two overlapping shadows look the same as one. */}
+            {/* Shade simulation: each object casts a shadow away from the sun,
+            clipped to the whole ground view so it can fall onto neighbors/roads.
+            Overlaps UNION (OR) at one opacity rather than adding up — the polygons
+            are opaque inside a single group whose opacity flattens them, so two
+            overlapping shadows look the same as one. */}
             {showShade && mapUpBearing != null && sun.altitude > 0.5 ? (
               <g
-                clipPath={`url(#${clipId})`}
+                clipPath="url(#ground-clip)"
                 pointerEvents="none"
                 opacity={shadeOpacity}
               >
@@ -2840,6 +2944,12 @@ function Editor({
                   editable={editable(o)}
                   dim={highlight !== "none" && !matches(o)}
                   showDoors={showDoors}
+                  overflow={objectOverflowsLot(
+                    o,
+                    lot.frontageFt,
+                    lot.depthFt,
+                    rear,
+                  )}
                   onBodyDown={(e) => startDrag(e, o, "move")}
                   onResizeDown={(e) => startDrag(e, o, "resize")}
                   onRotateDown={(e) => startDrag(e, o, "rotate")}
@@ -3369,6 +3479,7 @@ const MapObjectShape = memo(
     editable,
     dim,
     showDoors,
+    overflow,
     onBodyDown,
     onResizeDown,
     onRotateDown,
@@ -3381,6 +3492,8 @@ const MapObjectShape = memo(
     editable: boolean;
     dim: boolean;
     showDoors: boolean;
+    /** The object's footprint crosses the lot border (center is still inside). */
+    overflow: boolean;
     onBodyDown: (e: React.PointerEvent) => void;
     onResizeDown: (e: React.PointerEvent) => void;
     onRotateDown: (e: React.PointerEvent) => void;
@@ -3665,6 +3778,21 @@ const MapObjectShape = memo(
               pointerEvents="none"
             />
           ) : null}
+          {overflow ? (
+            // The footprint crosses the lot border (its center is still inside) —
+            // flag it so the officer knows it overhangs.
+            <rect
+              x={px}
+              y={py}
+              width={w}
+              height={h}
+              fill="none"
+              stroke="#fa5252"
+              strokeWidth={2.5}
+              strokeDasharray="5 3"
+              pointerEvents="none"
+            />
+          ) : null}
           {selected && editable ? (
             <>
               <line
@@ -3742,6 +3870,7 @@ const MapObjectShape = memo(
     prev.selected === next.selected &&
     prev.editable === next.editable &&
     prev.dim === next.dim &&
+    prev.overflow === next.overflow &&
     prev.originX === next.originX &&
     prev.originY === next.originY &&
     prev.ppf === next.ppf,
