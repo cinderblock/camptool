@@ -112,6 +112,16 @@ Core `map.tsx` shape branch gains a terminal `def.renderFootprint?.(ctx)` case;
    core falls through to them. No ever-growing `ShapeKind` enum.
 4. Pyramid = ONE `map_object`, new kind `sierpinski` (mathcamp-theme), labels
    baked into the renderer, `tallFt` default ≈ 32.7, center Pi marker.
+6. **Self-shading (which face is in shade) — DONE (2026-06-18):** added a
+   `shadedFaces?: (w,h, sun: SunDir) => polygons` hook + `SunDir` (toward-sun unit
+   in object-local footprint coords) to the contract. Core computes the local sun
+   (`sunDirLocal`: un-rotates the plot azimuth by the object's rotation, adds the
+   altitude `up` component) and draws a sun-aware overlay layer over the structures
+   (gated on Show shade) tinting the returned wedges. The pyramid computes its 3
+   slant-face 3D normals and returns the corner→centroid wedge of each face turned
+   away from the sun (normal·sun ≤ 0) → shows the shady/lee side; a high sun lights
+   all faces. Done as a separate overlay layer (NOT threaded through the memoized
+   `MapObjectShape`), so no memo/perf churn. Verified vs the cast-shadow direction.
 5. Flying buttresses = deferred. ~~True tetra shadow = deferred~~ → **DONE
    (2026-06-18):** added a general `shadowVolume?: (w,h) => ShadowVertex[]` hook to
    the contract (3D silhouette = centered-local footprint pts + z as a fraction of

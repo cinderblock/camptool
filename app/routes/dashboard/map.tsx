@@ -1261,6 +1261,23 @@ function volumeShadow(
   return convexHull(pts);
 }
 
+/** Unit direction TOWARD the sun in an object's own footprint frame (x along +w,
+ * y along +h/into the lot, `up` = out of the ground), or null at/below the
+ * horizon. Un-rotates the sun's plot-local azimuth by the object's rotation so a
+ * structure's faces are lit/shaded in their own frame. */
+function sunDirLocal(
+  o: ObjRow,
+  sun: { altitude: number; azimuth: number },
+  mapUpBearing: number,
+): { x: number; y: number; up: number } | null {
+  if (sun.altitude <= 0.5) return null;
+  const altRad = (sun.altitude * Math.PI) / 180;
+  const toward = bearingToPlotDelta(sun.azimuth, 1, mapUpBearing); // toward the sun
+  const loc = rotateVec(toward.dx, toward.dy, -o.rotation); // into footprint-local
+  const cos = Math.cos(altRad);
+  return { x: loc.x * cos, y: loc.y * cos, up: Math.sin(altRad) };
+}
+
 /** The cast-shadow polygon (plot-local feet) for an object at a given sun
  * position, or null if it casts none (no height / sun at/below horizon). The
  * shadow = convex hull of the footprint outline + each corner pushed away from
@@ -2828,6 +2845,38 @@ function Editor({
                   onRotateDown={(e) => startDrag(e, o, "rotate")}
                 />
               ))}
+            {/* Self-shading: tint the faces of a 3D structure that are turned away
+            from the sun (its shady/lee side), drawn over the structure. Only kinds
+            that declare `shadedFaces` (e.g. the Sierpinski pyramid) participate. */}
+            {showShade && mapUpBearing != null && sun.altitude > 0.5
+              ? objects.flatMap((o) => {
+                  const def = kindDef(o.kind);
+                  if (!def.shadedFaces) return [];
+                  const sd = sunDirLocal(o, sun, mapUpBearing);
+                  if (!sd) return [];
+                  const polys = def.shadedFaces(o.width, o.height, sd);
+                  if (!polys.length) return [];
+                  const cx = o.x + o.width / 2;
+                  const cy = o.y + o.height / 2;
+                  const toPx = (p: { x: number; y: number }) => {
+                    const v = rotateVec(
+                      p.x - o.width / 2,
+                      p.y - o.height / 2,
+                      o.rotation,
+                    );
+                    return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
+                  };
+                  return polys.map((poly, i) => (
+                    <polygon
+                      key={`sf-${o.id}-${i}`}
+                      points={poly.map(toPx).join(" ")}
+                      fill="#1c1c1c"
+                      fillOpacity={0.3}
+                      pointerEvents="none"
+                    />
+                  ));
+                })
+              : null}
             {/* Power lines: open polylines drawn over the structures (a planning
             overlay), each labeled with its total run length. */}
             {cables.map((c) => {

@@ -72,6 +72,14 @@ export type FootprintCtx = {
 export type ShadowVertex = { x: number; y: number; z: number };
 
 /**
+ * Unit direction toward the sun, in a structure's object-local footprint frame:
+ * `x` along +w (frontage-right), `y` along +h (into the lot), `up` = out of the
+ * ground (= sin of the sun's altitude). Passed to `shadedFaces` so a structure
+ * can decide which of its faces are turned away from the sun.
+ */
+export type SunDir = { x: number; y: number; up: number };
+
+/**
  * A camp-specific structure contributed by a camp-theme package into the map
  * palette registry. Extends a core `Kind` with optional bespoke renderers; when
  * `renderFootprint` is present the core map draws via it instead of the
@@ -92,6 +100,15 @@ export type CampStructure = Kind & {
    * vertices projected away from the sun instead of extruding the footprint's
    * bounding box — so a non-box solid (e.g. a tetrahedron) casts its real shadow. */
   shadowVolume?: (w: number, h: number) => readonly ShadowVertex[];
+  /** Optional self-shading overlay: given the sun's local direction, return the
+   * footprint polygons (feet, in the 0,0→(w,h) box) of the faces turned AWAY from
+   * the sun, to tint as in-shade on the map. Only called when the shade sim is on.
+   * Lets a 3D solid show which of its own sides is the shady/lee side. */
+  shadedFaces?: (
+    w: number,
+    h: number,
+    sun: SunDir,
+  ) => ReadonlyArray<ReadonlyArray<{ x: number; y: number }>>;
 };
 
 /**

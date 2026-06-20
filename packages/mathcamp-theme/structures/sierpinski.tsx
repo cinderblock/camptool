@@ -20,6 +20,7 @@ import type {
   CampStructure,
   FootprintCtx,
   ShadowVertex,
+  SunDir,
 } from "@camptool/theme-contract";
 import type { ReactNode } from "react";
 
@@ -220,6 +221,50 @@ function shadowVolume(w: number, h: number): ShadowVertex[] {
   ];
 }
 
+// --- 3D helpers for slant-face lighting (footprint x,y + up = z). ---
+type V3 = [number, number, number];
+const sub3 = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot3 = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: V3, b: V3): V3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+
+/**
+ * Footprint polygons of the slant faces turned AWAY from the sun (the shady/lee
+ * sides). The tetra has 3 slant faces — one over each base edge — and each
+ * projects to its corner→centroid wedge. A face is in shade when its outward
+ * normal points away from the sun (normal·sunDir ≤ 0); the sun's `up` component
+ * means a high sun lights all faces, a low sun shades the lee ones.
+ */
+function shadedFaces(w: number, h: number, sun: SunDir) {
+  const A: V3 = [w / 2, 0, 0];
+  const B: V3 = [0, h, 0];
+  const C: V3 = [w, h, 0];
+  const G: V3 = [w / 2, (2 * h) / 3, 0]; // base centroid
+  const D: V3 = [G[0], G[1], w * Math.sqrt(2 / 3)]; // apex: height = edge·√(2/3), edge = w
+  const S: V3 = [sun.x, sun.y, sun.up];
+  const faces: { p: V3; q: V3; wedge: V3[] }[] = [
+    { p: A, q: B, wedge: [A, B, G] },
+    { p: B, q: C, wedge: [B, C, G] },
+    { p: C, q: A, wedge: [C, A, G] },
+  ];
+  const out: { x: number; y: number }[][] = [];
+  for (const f of faces) {
+    let n = cross3(sub3(f.q, f.p), sub3(D, f.p));
+    // Orient the normal outward (away from the base centroid G).
+    const m: V3 = [
+      (f.p[0] + f.q[0] + D[0]) / 3,
+      (f.p[1] + f.q[1] + D[1]) / 3,
+      (f.p[2] + f.q[2] + D[2]) / 3,
+    ];
+    if (dot3(n, sub3(m, G)) < 0) n = [-n[0], -n[1], -n[2]];
+    if (dot3(n, S) <= 0) out.push(f.wedge.map((v) => ({ x: v[0], y: v[1] })));
+  }
+  return out;
+}
+
 /** Regular 40′-edge tetra height = edge·√(2/3). */
 const TETRA_TALL_FT = Math.round(EDGE_FT * Math.sqrt(2 / 3) * 10) / 10; // ≈ 32.7′
 
@@ -239,4 +284,5 @@ export const sierpinskiPyramid: CampStructure = {
   renderFootprint,
   renderIcon,
   shadowVolume,
+  shadedFaces,
 };
