@@ -1282,6 +1282,64 @@ function sunDirLocal(
   return { x: loc.x * cos, y: loc.y * cos, up: Math.sin(altRad) };
 }
 
+// Minimal 3D helpers for core face-lighting (footprint x,y + up = z).
+type Vec3 = [number, number, number];
+const v3sub = (a: Vec3, b: Vec3): Vec3 => [
+  a[0] - b[0],
+  a[1] - b[1],
+  a[2] - b[2],
+];
+const v3dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const v3cross = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+
+/** Self-shading for a CORE kind whose roof is a set of facets meeting at a center
+ * apex (currently the hexayurt's hexagonal-pyramid roof). Returns each facet as a
+ * footprint wedge (edge → center) with a continuous Lambert `shade` — the same
+ * treatment the Sierpinski pyramid gets via its `shadedFaces` hook. Empty for
+ * kinds without facets. `tall` is the apex height (ft) above the footprint. */
+function coreShadedFaces(
+  kind: string,
+  w: number,
+  h: number,
+  sun: { x: number; y: number; up: number },
+  tall: number,
+): Array<{ points: Array<{ x: number; y: number }>; shade: number }> {
+  if (kind !== "hexayurt" || tall <= 0) return [];
+  const verts = hexVertices(0, 0, w, h); // 6 corners (local feet)
+  const cx = w / 2;
+  const cy = h / 2;
+  const apex: Vec3 = [cx, cy, tall];
+  const center: Vec3 = [cx, cy, 0];
+  const S: Vec3 = [sun.x, sun.y, sun.up];
+  return verts.map((p, i) => {
+    const q = verts[(i + 1) % verts.length] ?? p;
+    const P: Vec3 = [p.x, p.y, 0];
+    const Q: Vec3 = [q.x, q.y, 0];
+    let n = v3cross(v3sub(Q, P), v3sub(apex, P));
+    const m: Vec3 = [
+      (P[0] + Q[0] + apex[0]) / 3,
+      (P[1] + Q[1] + apex[1]) / 3,
+      (P[2] + Q[2] + apex[2]) / 3,
+    ];
+    if (v3dot(n, v3sub(m, center)) < 0) n = [-n[0], -n[1], -n[2]];
+    const nLen = Math.hypot(n[0], n[1], n[2]) || 1;
+    const lambert = Math.max(0, v3dot(n, S) / nLen);
+    const shade = (1 - lambert) * 0.5;
+    return {
+      points: [
+        { x: p.x, y: p.y },
+        { x: q.x, y: q.y },
+        { x: cx, y: cy },
+      ],
+      shade,
+    };
+  });
+}
+
 /** The cast-shadow polygon (plot-local feet) for an object at a given sun
  * position, or null if it casts none (no height / sun at/below horizon). The
  * shadow = convex hull of the footprint outline + each corner pushed away from
@@ -2965,10 +3023,19 @@ function Editor({
             {showShade && mapUpBearing != null && sun.altitude > 0.5
               ? objects.flatMap((o) => {
                   const def = kindDef(o.kind);
-                  if (!def.shadedFaces) return [];
                   const sd = sunDirLocal(o, sun, mapUpBearing);
                   if (!sd) return [];
-                  const faces = def.shadedFaces(o.width, o.height, sd);
+                  // A camp-theme structure supplies its own faces; otherwise core
+                  // handles facet-roofed core kinds (the hexayurt).
+                  const faces = def.shadedFaces
+                    ? def.shadedFaces(o.width, o.height, sd)
+                    : coreShadedFaces(
+                        o.kind,
+                        o.width,
+                        o.height,
+                        sd,
+                        o.tallFt || kindHeight(o.kind),
+                      );
                   if (!faces.length) return [];
                   const cx = o.x + o.width / 2;
                   const cy = o.y + o.height / 2;
