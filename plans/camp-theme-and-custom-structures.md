@@ -284,6 +284,44 @@ ext is currently de-authed so these need the user (or re-auth) to eyeball:
 
 Order: A1–A3 (self-verifiable) → B4, B5 (logic) → B6 → B1, B2, B3 (visual; need eyeball).
 
+## Later follow-ups (2026-06-20, batch 2) — status
+
+Shipped this batch: A1/A2/A3 (4c4b0dc), B4/B5 (53f91bf), doors-dark-mode + fixed
+pyramid height (b42a5d4). Remaining below.
+
+- [ ] **P2. Pyramid "mirror" option** (bar sometimes on the right). Needs a
+      per-object flag (no `mirrored` column on `map_object` today). See config note.
+- [ ] **P3. Flying buttresses** (user spec, 6 screenshots). The "flying shade":
+      - A point of interest ~8′ up (height of a 10′-edge tetra = 10·√(2/3) ≈ 8.16′)
+        above the **bar corner**.
+      - A horizontal **equilateral triangle** at that height, inside the pyramid.
+      - A **hexagon** of 6 such triangles around that point: 1 inside + **5 flying
+        OUTSIDE** the footprint (the start of the flying shade).
+      - **Support sticks** (legs) from the flying hexagon's outer vertices to the
+        ground.
+      - Optionally **extend** the flying shade with more triangles (a strip) + more
+        sticks.
+      - Filled as shade; casts an ~8′-high shadow.
+      Top-down: a hexagon (+ optional extension strip) centered on the bar corner,
+      spilling past the footprint, with stick footpoints. Needs per-object config
+      (extent/direction) → see config note. Intricate + visual → confirm via preview.
+- [ ] **B1/B2. Curved surroundings.** Neighbors/street/service as radial-wedge
+      geometry abutting the lot (no gap). Lot already draws a true wedge; redo the
+      axis-aligned surrounding bands to follow it. Visual.
+- [ ] **B3. Avenue arrows + labels** (e.g. "3:30"). Visual.
+- [ ] **B6. Cable follows its object on drag** (unless Shift to detach). Logic.
+
+**Per-object config (needed for P2 + P3).** `map_object` has no place for custom
+per-object params (mirror, buttress extent). Clean fix: add a nullable `config`
+(JSON text) column (migration) + thread it into the renderer ctx
+(`FootprintCtx.config`, shadow/faces ctx) so a custom structure reads its own
+params, and expose per-structure UI controls (a small contract hook returning the
+side-panel controls for the selected custom kind). Design before building.
+
+**Verification blocker:** the Chrome extension is de-authed, so I can't screenshot.
+The remaining items are visual; either re-auth the extension or I serve a localhost
+preview for the user to open before deploy.
+
 ## Findings / gotchas
 - typecheck uses the STATIC tsconfig path for `~/active-theme` (→ default-theme),
   so typecheck validates against the default; the active package is build-time.
