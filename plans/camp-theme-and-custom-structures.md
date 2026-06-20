@@ -228,6 +228,51 @@ Workspaces forced build/release-plumbing fixes (all landed):
   regenerates). Dockerfile copies `packages` before BOTH installs; `.dockerignore`
   gained `**/node_modules` so nested workspace node_modules don't leak into context.
 
+## Follow-up batch (2026-06-20) — pyramid polish + map-editor geometry
+
+Pyramid package (`packages/mathcamp-theme/structures/sierpinski.tsx`):
+- [ ] **A1. Labels map-oriented, not pyramid-oriented.** Bar / lecture-hall / π text
+      must stay upright to the map as the object rotates. Add `rotation` to
+      `FootprintCtx`; counter-rotate each text by `-rotation` about its anchor.
+- [ ] **A2. Pi casts a shadow.** The π sits ~6′ above the tetra apex (so height ≈
+      tallFt + 6 ≈ 38.7′). Project it to the ground — add the π tip as an extra
+      `shadowVolume` vertex (z = (tallFt+6)/tallFt ≈ 1.18) so the cast-shadow spike
+      reaches it. (Reasonable convex-hull approximation; refine to a distinct glyph
+      later if wanted.)
+- [ ] **A3. Gradual face shading (no snap).** Replace the binary `shadedFaces`
+      (face shaded or not) with a continuous Lambert tint: return per-wedge a
+      `shade` ∈ [0,1] = `(1 − max(0, n̂·Ŝ))·k`, so each upward face darkens smoothly
+      as it turns from the sun instead of snapping on. Contract: `shadedFaces` now
+      returns `{ points, shade }[]`; core uses `fillOpacity = shade`.
+
+Core map editor (`app/routes/dashboard/map.tsx`) — mostly VISUAL, and the chrome
+ext is currently de-authed so these need the user (or re-auth) to eyeball:
+- [ ] **B4. Shape-aware bounds (bug).** Current clamp is wrong/asymmetric (can't
+      push the pyramid into the top-right corner, but can drag it far outside
+      bottom-right). Change object clamping to constrain by the **centerpoint**
+      within the camp area (the tapered wedge, not a w/h-shrunk axis box), and
+      **highlight the object when its shape crosses the lot border**. Current clamp
+      sites: keyboard nudge (~2007), drag (~2166), add/drop (~2416/2441) all use
+      `clamp(.,0,frontageFt/depthFt)` minus w/h — that's the asymmetry.
+- [ ] **B5. Shadows extend onto neighbors.** Shadows are currently clipped to the
+      lot (`clipPath url(#lot-clip)`, ~2765). Let them spill onto neighbor areas
+      (widen/replace the clip). "Eventually from them" = neighbor-cast shadows —
+      defer.
+- [ ] **B1. No gap between camp and neighbors/street/service lane.** Close the gap
+      the lot drawing leaves around the wedge (~2067–2756 neighbor/service bands).
+- [ ] **B2. Neighbors/roads curved/angled to the city clock grid.** Draw the
+      adjacent streets/alley/neighbor lots as radial-wedge geometry (concentric
+      arcs + radial sides), not axis-aligned bands.
+- [ ] **B3. Avenue arrows + labels.** Arrows to the nearest radial avenues with
+      clock labels (e.g. "3:30"). Uses `brc.ts` clock/bearing helpers.
+- [ ] **B6. Cable follows its object on drag.** Dragging an object that has a
+      power line (`map_cable`) endpoint on/near it should drag that endpoint along
+      (stay connected), unless a modifier (Shift?) is held to detach. Need an
+      endpoint↔object association (proximity at drag-start) + move the cable point
+      with the object.
+
+Order: A1–A3 (self-verifiable) → B4, B5 (logic) → B6 → B1, B2, B3 (visual; need eyeball).
+
 ## Findings / gotchas
 - typecheck uses the STATIC tsconfig path for `~/active-theme` (→ default-theme),
   so typecheck validates against the default; the active package is build-time.

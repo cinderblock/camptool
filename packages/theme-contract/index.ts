@@ -58,6 +58,10 @@ export type FootprintCtx = {
   color: string;
   /** Whether the object is currently selected (for emphasis). */
   selected: boolean;
+  /** The object's rotation in degrees. The footprint is drawn inside the rotated
+   * group, so a renderer that wants map-upright text (labels) should counter-
+   * rotate it by `-rotation` about its anchor. */
+  rotation: number;
 };
 
 /**
@@ -100,15 +104,20 @@ export type CampStructure = Kind & {
    * vertices projected away from the sun instead of extruding the footprint's
    * bounding box — so a non-box solid (e.g. a tetrahedron) casts its real shadow. */
   shadowVolume?: (w: number, h: number) => readonly ShadowVertex[];
-  /** Optional self-shading overlay: given the sun's local direction, return the
-   * footprint polygons (feet, in the 0,0→(w,h) box) of the faces turned AWAY from
-   * the sun, to tint as in-shade on the map. Only called when the shade sim is on.
-   * Lets a 3D solid show which of its own sides is the shady/lee side. */
+  /** Optional self-shading overlay: given the sun's local direction, return each
+   * upward face as a footprint polygon (feet, in the 0,0→(w,h) box) with a
+   * continuous `shade` ∈ [0,1] = the dark-overlay opacity for that face (e.g. a
+   * Lambert term, darker as the face turns from the sun). Core tints each polygon
+   * at that opacity, so a face's shade rises smoothly rather than snapping on.
+   * Only called when the shade sim is on. */
   shadedFaces?: (
     w: number,
     h: number,
     sun: SunDir,
-  ) => ReadonlyArray<ReadonlyArray<{ x: number; y: number }>>;
+  ) => ReadonlyArray<{
+    points: ReadonlyArray<{ x: number; y: number }>;
+    shade: number;
+  }>;
 };
 
 /**

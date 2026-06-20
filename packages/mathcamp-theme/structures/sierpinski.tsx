@@ -57,17 +57,27 @@ function sierpCells(a: Pt, b: Pt, c: Pt, depth: number, out: Cell[]) {
 const tri = (a: Pt, b: Pt, c: Pt) =>
   `${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`;
 
-/** Two-line label centered at (x,y), in feet. */
+/** Two-line label centered at (x,y), in feet. `rotation` is the object's rotation
+ * (deg); we counter-rotate the text by `-rotation` about its anchor so it stays
+ * upright to the map even as the pyramid spins. */
 function Label({
   x,
   y,
   lines,
   fs,
-}: { x: number; y: number; lines: string[]; fs: number }) {
+  rotation,
+}: {
+  x: number;
+  y: number;
+  lines: string[];
+  fs: number;
+  rotation: number;
+}) {
   return (
     <text
       x={x}
       y={y - (lines.length - 1) * fs * 0.5}
+      transform={`rotate(${-rotation} ${x} ${y})`}
       textAnchor="middle"
       fontSize={fs}
       fontWeight={700}
@@ -95,7 +105,12 @@ function Label({
  * tetras → the "Group W Bar" / "lecture hall" labels; the apex (center) carries
  * the Pi stick.
  */
-function renderFootprint({ w, h, selected }: FootprintCtx): ReactNode {
+function renderFootprint({
+  w,
+  h,
+  selected,
+  rotation,
+}: FootprintCtx): ReactNode {
   const A: Pt = [w / 2, 0]; // base corner (footprint top)
   const B: Pt = [0, h]; // base corner (bottom-left)
   const C: Pt = [w, h]; // base corner (bottom-right)
@@ -147,6 +162,7 @@ function renderFootprint({ w, h, selected }: FootprintCtx): ReactNode {
           y={l.at[1]}
           lines={l.lines}
           fs={fs}
+          rotation={rotation}
         />
       ))}
       {/* Pi stick at the apex (over the centroid, where the 3 faces meet). */}
@@ -161,6 +177,7 @@ function renderFootprint({ w, h, selected }: FootprintCtx): ReactNode {
       <text
         x={G[0]}
         y={G[1] + fs * 0.36}
+        transform={`rotate(${-rotation} ${G[0]} ${G[1]})`}
         textAnchor="middle"
         fontSize={fs}
         fontWeight={700}
@@ -207,21 +224,29 @@ function renderIcon(size: number): ReactNode {
   );
 }
 
+/** Feet the Pi-symbol stick rises above the tetra apex. */
+const PI_STICK_FT = 6;
+
 /**
  * Solid-tetrahedron silhouette for the shade sim (centered local feet; z = a
  * fraction of tallFt). It's covered in shade cloth → a SOLID, so the cast shadow
  * is the convex hull of the four tetra vertices: the three ground corners (the
  * 40′ footprint triangle, z=0) plus the apex directly over the base centroid at
  * full height (z=1). The fractal voids don't pass light, and the convex hull of a
- * Sierpinski tetrahedron is the full tetrahedron — so this is the true shadow,
- * not the extruded bounding box the generic shade path would draw.
+ * Sierpinski tetrahedron is the full tetrahedron. Plus the **Pi-symbol stick**,
+ * ~6′ above the apex (also over the centroid), as a higher vertex (z>1) so its
+ * shadow projects to the ground and the cast-shadow spike reaches it.
  */
 function shadowVolume(w: number, h: number): ShadowVertex[] {
+  const apexY = (2 * h) / 3 - h / 2; // base centroid, centered
+  const tetraH = w * Math.sqrt(2 / 3); // apex height (ft), edge = w
+  const piZ = (tetraH + PI_STICK_FT) / tetraH; // π height as a fraction of tallFt (≈1.18)
   return [
     { x: 0, y: -h / 2, z: 0 }, // footprint top corner (apex of the triangle), on ground
     { x: -w / 2, y: h / 2, z: 0 }, // bottom-left, ground
     { x: w / 2, y: h / 2, z: 0 }, // bottom-right, ground
-    { x: 0, y: (2 * h) / 3 - h / 2, z: 1 }, // tetra apex over the base centroid, full height
+    { x: 0, y: apexY, z: 1 }, // tetra apex over the base centroid, full height
+    { x: 0, y: apexY, z: piZ }, // Pi symbol, 6′ above the apex
   ];
 }
 
@@ -235,12 +260,16 @@ const cross3 = (a: V3, b: V3): V3 => [
   a[0] * b[1] - a[1] * b[0],
 ];
 
+/** Max dark-overlay opacity for the most-shaded (fully lee) face. */
+const MAX_SHADE = 0.5;
+
 /**
- * Footprint polygons of the slant faces turned AWAY from the sun (the shady/lee
- * sides). The tetra has 3 slant faces — one over each base edge — and each
- * projects to its corner→centroid wedge. A face is in shade when its outward
- * normal points away from the sun (normal·sunDir ≤ 0); the sun's `up` component
- * means a high sun lights all faces, a low sun shades the lee ones.
+ * Per-face self-shading. The tetra has 3 slant faces — one over each base edge —
+ * each projecting to its corner→centroid wedge. Each face gets a continuous
+ * `shade` (dark-overlay opacity) from a Lambert term: `shade = (1 − max(0, n̂·Ŝ))
+ * · MAX_SHADE`, so a face darkens SMOOTHLY as it turns from the sun rather than
+ * snapping on — a face pointing at the sun is near-clear, the lee face is darkest,
+ * and a high sun lifts the shade off all faces.
  */
 function shadedFaces(w: number, h: number, sun: SunDir) {
   const A: V3 = [w / 2, 0, 0];
@@ -248,14 +277,13 @@ function shadedFaces(w: number, h: number, sun: SunDir) {
   const C: V3 = [w, h, 0];
   const G: V3 = [w / 2, (2 * h) / 3, 0]; // base centroid
   const D: V3 = [G[0], G[1], w * Math.sqrt(2 / 3)]; // apex: height = edge·√(2/3), edge = w
-  const S: V3 = [sun.x, sun.y, sun.up];
+  const S: V3 = [sun.x, sun.y, sun.up]; // unit toward the sun
   const faces: { p: V3; q: V3; wedge: V3[] }[] = [
     { p: A, q: B, wedge: [A, B, G] },
     { p: B, q: C, wedge: [B, C, G] },
     { p: C, q: A, wedge: [C, A, G] },
   ];
-  const out: { x: number; y: number }[][] = [];
-  for (const f of faces) {
+  return faces.map((f) => {
     let n = cross3(sub3(f.q, f.p), sub3(D, f.p));
     // Orient the normal outward (away from the base centroid G).
     const m: V3 = [
@@ -264,9 +292,11 @@ function shadedFaces(w: number, h: number, sun: SunDir) {
       (f.p[2] + f.q[2] + D[2]) / 3,
     ];
     if (dot3(n, sub3(m, G)) < 0) n = [-n[0], -n[1], -n[2]];
-    if (dot3(n, S) <= 0) out.push(f.wedge.map((v) => ({ x: v[0], y: v[1] })));
-  }
-  return out;
+    const nLen = Math.hypot(n[0], n[1], n[2]) || 1;
+    const lambert = Math.max(0, dot3(n, S) / nLen); // |S| = 1
+    const shade = (1 - lambert) * MAX_SHADE;
+    return { points: f.wedge.map((v) => ({ x: v[0], y: v[1] })), shade };
+  });
 }
 
 /** Regular 40′-edge tetra height = edge·√(2/3). */

@@ -2854,8 +2854,8 @@ function Editor({
                   if (!def.shadedFaces) return [];
                   const sd = sunDirLocal(o, sun, mapUpBearing);
                   if (!sd) return [];
-                  const polys = def.shadedFaces(o.width, o.height, sd);
-                  if (!polys.length) return [];
+                  const faces = def.shadedFaces(o.width, o.height, sd);
+                  if (!faces.length) return [];
                   const cx = o.x + o.width / 2;
                   const cy = o.y + o.height / 2;
                   const toPx = (p: { x: number; y: number }) => {
@@ -2866,12 +2866,12 @@ function Editor({
                     );
                     return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
                   };
-                  return polys.map((poly, i) => (
+                  return faces.map((face, i) => (
                     <polygon
                       key={`sf-${o.id}-${i}`}
-                      points={poly.map(toPx).join(" ")}
+                      points={face.points.map(toPx).join(" ")}
                       fill="#1c1c1c"
-                      fillOpacity={0.3}
+                      fillOpacity={face.shade}
                       pointerEvents="none"
                     />
                   ));
@@ -3596,6 +3596,7 @@ const MapObjectShape = memo(
                 h: o.height,
                 color: fill,
                 selected,
+                rotation: o.rotation,
               })}
             </g>
           ) : (
