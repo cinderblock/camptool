@@ -122,6 +122,18 @@ Core `map.tsx` shape branch gains a terminal `def.renderFootprint?.(ctx)` case;
    away from the sun (normal·sun ≤ 0) → shows the shady/lee side; a high sun lights
    all faces. Done as a separate overlay layer (NOT threaded through the memoized
    `MapObjectShape`), so no memo/perf churn. Verified vs the cast-shadow direction.
+7. **Footprint = 3 top faces, flattened (2026-06-20, user-chosen "Option B"):**
+   renderFootprint now draws the 3 UPWARD faces as 3 Sierpinski wedges meeting at
+   the apex (projected to the base centroid G): `sierpCells(G,A,B)`, `(G,B,C)`,
+   `(G,C,A)`, each depth 2. Negative space is FILLED, not void: each level's middle
+   "hole" = blue (`#4dabf7`), kept/solid triangles = tan (`#d2b48c`). (Per-face
+   coloring, so blue is each face's holes, not globally down-pointing — user
+   accepted this trade-off over the cleaner single-triangle Option A.) Corner labels
+   (Group W Bar / lecture hall ×2) moved to lerp(corner→G, 0.42) with a white text
+   halo for legibility over the busy fill; π apex marker stays at G; legend icon is
+   the same 3-wedge look at depth 1. The `shadedFaces` self-shade wedges now ALIGN
+   with these face-wedges (both are G-based), so a shaded face darkens its drawn
+   wedge. Verified by-coordinates (couldn't screenshot — chrome ext de-authed).
 5. Flying buttresses = deferred. ~~True tetra shadow = deferred~~ → **DONE
    (2026-06-18):** added a general `shadowVolume?: (w,h) => ShadowVertex[]` hook to
    the contract (3D silhouette = centered-local footprint pts + z as a fraction of
