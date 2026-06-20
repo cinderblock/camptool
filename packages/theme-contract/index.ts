@@ -94,6 +94,9 @@ export type CampStructure = Kind & {
   /** Default above-ground height (feet), seeded onto new objects and used by the
    * shade simulation. */
   tallFt?: number;
+  /** The structure's height is geometrically fixed (e.g. a regular tetrahedron),
+   * so the editor hides the editable Height field — `tallFt` stays authoritative. */
+  fixedTall?: boolean;
   /** SVG footprint, drawn in the 0,0→(w,h) feet box. Set `shape: "custom"`. */
   renderFootprint?: (ctx: FootprintCtx) => ReactNode;
   /** Optional legend/tray icon (square, `size` px). Falls back to a generic

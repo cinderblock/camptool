@@ -315,6 +315,7 @@ export const sierpinskiPyramid: CampStructure = {
   tags: ["structure"],
   personal: false, // officer-placed communal landmark
   tallFt: TETRA_TALL_FT,
+  fixedTall: true, // a regular tetra — height is geometric, not user-set
   renderFootprint,
   renderIcon,
   shadowVolume,

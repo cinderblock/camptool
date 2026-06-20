@@ -80,6 +80,10 @@ export function meta(_: Route.MetaArgs) {
  * OUT (away from the interior). (mx,my) = edge midpoint; (ex,ey) = unit along
  * the edge; (nx,ny) = inward normal; len = door width in px. Drawn in local
  * coords so it rotates with the object. */
+// Door linework color — theme-aware (near-black in light mode, near-white in
+// dark mode) so doors stay visible on the dark-mode ground.
+const DOOR_STROKE = "var(--mantine-color-text)";
+
 function Door({
   mx,
   my,
@@ -117,12 +121,12 @@ function Door({
         y1={hy + oy * off}
         x2={tipx + ox * off}
         y2={tipy + oy * off}
-        stroke="#1c1c1c"
+        stroke={DOOR_STROKE}
         strokeWidth={1}
       />
       <path
         d={`M ${lx} ${ly} A ${len} ${len} 0 1 ${sweep} ${tipx} ${tipy}`}
-        stroke="#1c1c1c"
+        stroke={DOOR_STROKE}
         strokeWidth={0.75}
         strokeOpacity={0.5}
         fill="none"
@@ -158,7 +162,7 @@ function HyparDoor({
       {/* Sweep 0 bulges the arc outward — below the front edge, away from the hut. */}
       <path
         d={`M ${left} ${y} A ${r} ${r} 0 0 0 ${right} ${y}`}
-        stroke="#1c1c1c"
+        stroke={DOOR_STROKE}
         strokeOpacity={0.5}
         strokeWidth={0.75}
         fill="none"
@@ -191,7 +195,7 @@ function ContainerDoors({
         y1={yb}
         x2={px}
         y2={yb - L}
-        stroke="#1c1c1c"
+        stroke={DOOR_STROKE}
         strokeOpacity={0.6}
         strokeWidth={1.5}
       />
@@ -200,21 +204,21 @@ function ContainerDoors({
         y1={yb}
         x2={px + w}
         y2={yb - L}
-        stroke="#1c1c1c"
+        stroke={DOOR_STROKE}
         strokeOpacity={0.6}
         strokeWidth={1.5}
       />
       {/* 270° swing arcs (large-arc): out, around, and back to the side wall. */}
       <path
         d={`M ${px + L} ${yb} A ${L} ${L} 0 1 1 ${px} ${yb - L}`}
-        stroke="#1c1c1c"
+        stroke={DOOR_STROKE}
         strokeOpacity={0.4}
         strokeWidth={0.75}
         fill="none"
       />
       <path
         d={`M ${px + w - L} ${yb} A ${L} ${L} 0 1 0 ${px + w} ${yb - L}`}
-        stroke="#1c1c1c"
+        stroke={DOOR_STROKE}
         strokeOpacity={0.4}
         strokeWidth={0.75}
         fill="none"
@@ -4194,17 +4198,21 @@ function SidePanel({
                   )
                 }
               />
-              <NumberInput
-                size="xs"
-                label="Height (ft)"
-                value={selected.tallFt}
-                min={0}
-                disabled={!canGeom}
-                onChange={(v) => patch(selected.id, { tallFt: Number(v) || 0 })}
-                onBlur={() =>
-                  commitField(selected.id, "tallFt", round(selected.tallFt))
-                }
-              />
+              {kindDef(selected.kind).fixedTall ? null : (
+                <NumberInput
+                  size="xs"
+                  label="Height (ft)"
+                  value={selected.tallFt}
+                  min={0}
+                  disabled={!canGeom}
+                  onChange={(v) =>
+                    patch(selected.id, { tallFt: Number(v) || 0 })
+                  }
+                  onBlur={() =>
+                    commitField(selected.id, "tallFt", round(selected.tallFt))
+                  }
+                />
+              )}
             </Group>
             {canMeta && kindHasDoor(selected.kind) ? (
               <Checkbox
