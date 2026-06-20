@@ -1235,19 +1235,54 @@ function domeShadow(
   });
 }
 
+/** Cast shadow for a structure that declares a 3D silhouette (a camp-theme
+ * `shadowVolume`): project each vertex away from the sun by
+ * (zFraction · tallFt)/tan(altitude) and take the convex hull. Lets a non-box
+ * solid throw its true shadow — e.g. a tetrahedron's three ground corners plus
+ * its apex (over the centroid, at full height) → a real triangular-with-apex
+ * shadow, not an extruded bounding box. */
+function volumeShadow(
+  o: ObjRow,
+  vol: readonly { x: number; y: number; z: number }[],
+  sun: { altitude: number; azimuth: number },
+  mapUpBearing: number,
+): ZonePt[] | null {
+  if (o.tallFt <= 0) return null;
+  const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
+  const tan = Math.tan((altDeg * Math.PI) / 180);
+  const dir = bearingToPlotDelta(sun.azimuth + 180, 1, mapUpBearing);
+  const cx = o.x + o.width / 2;
+  const cy = o.y + o.height / 2;
+  const pts: ZonePt[] = vol.map((p) => {
+    const v = rotateVec(p.x, p.y, o.rotation);
+    const len = Math.min((p.z * o.tallFt) / tan, 300);
+    return { x: cx + v.x + dir.dx * len, y: cy + v.y + dir.dy * len };
+  });
+  return convexHull(pts);
+}
+
 /** The cast-shadow polygon (plot-local feet) for an object at a given sun
  * position, or null if it casts none (no height / sun at/below horizon). The
  * shadow = convex hull of the footprint outline + each corner pushed away from
  * the sun by its own height/tan(altitude). Footprint + per-corner height follow
  * the object's real shape (hexagon outline, hypar-warped heights, …); a dome is
- * special-cased to a hemisphere ellipse. */
+ * special-cased to a hemisphere ellipse, and a camp-theme structure may supply a
+ * full 3D silhouette via `shadowVolume`. */
 function shadowPolygon(
   o: ObjRow,
   sun: { altitude: number; azimuth: number },
   mapUpBearing: number,
 ): ZonePt[] | null {
   if (sun.altitude <= 0.5) return null;
-  if (kindDef(o.kind).shape === "dome") return domeShadow(o, sun, mapUpBearing);
+  const def = kindDef(o.kind);
+  if (def.shape === "dome") return domeShadow(o, sun, mapUpBearing);
+  if (def.shadowVolume)
+    return volumeShadow(
+      o,
+      def.shadowVolume(o.width, o.height),
+      sun,
+      mapUpBearing,
+    );
   const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
   const tan = Math.tan((altDeg * Math.PI) / 180);
   const heights = cornerHeights(o);

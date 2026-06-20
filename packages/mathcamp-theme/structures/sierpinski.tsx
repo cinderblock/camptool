@@ -16,7 +16,11 @@
  * Labels (camp-specific, baked in — this is a per-deployment package): the 3
  * ground medium tetras are one "Group W Bar" + two "lecture hall".
  */
-import type { CampStructure, FootprintCtx } from "@camptool/theme-contract";
+import type {
+  CampStructure,
+  FootprintCtx,
+  ShadowVertex,
+} from "@camptool/theme-contract";
 import type { ReactNode } from "react";
 
 const SQRT3_2 = Math.sqrt(3) / 2; // equilateral triangle height / edge
@@ -198,6 +202,24 @@ function renderIcon(size: number): ReactNode {
   );
 }
 
+/**
+ * Solid-tetrahedron silhouette for the shade sim (centered local feet; z = a
+ * fraction of tallFt). It's covered in shade cloth → a SOLID, so the cast shadow
+ * is the convex hull of the four tetra vertices: the three ground corners (the
+ * 40′ footprint triangle, z=0) plus the apex directly over the base centroid at
+ * full height (z=1). The fractal voids don't pass light, and the convex hull of a
+ * Sierpinski tetrahedron is the full tetrahedron — so this is the true shadow,
+ * not the extruded bounding box the generic shade path would draw.
+ */
+function shadowVolume(w: number, h: number): ShadowVertex[] {
+  return [
+    { x: 0, y: -h / 2, z: 0 }, // footprint top corner (apex of the triangle), on ground
+    { x: -w / 2, y: h / 2, z: 0 }, // bottom-left, ground
+    { x: w / 2, y: h / 2, z: 0 }, // bottom-right, ground
+    { x: 0, y: (2 * h) / 3 - h / 2, z: 1 }, // tetra apex over the base centroid, full height
+  ];
+}
+
 /** Regular 40′-edge tetra height = edge·√(2/3). */
 const TETRA_TALL_FT = Math.round(EDGE_FT * Math.sqrt(2 / 3) * 10) / 10; // ≈ 32.7′
 
@@ -216,4 +238,5 @@ export const sierpinskiPyramid: CampStructure = {
   tallFt: TETRA_TALL_FT,
   renderFootprint,
   renderIcon,
+  shadowVolume,
 };

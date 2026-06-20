@@ -61,6 +61,17 @@ export type FootprintCtx = {
 };
 
 /**
+ * A vertex of a custom structure's 3D silhouette, for the shade simulation.
+ * `x`/`y` are feet in the object-local **centered** frame (origin = the object's
+ * center, +x along frontage, +y into the lot), pre-rotation; `z` is height as a
+ * fraction (0..1) of the object's `tallFt`. The core casts the convex hull of
+ * these vertices projected away from the sun, so a structure throws its true
+ * silhouette (a solid tetrahedron casts a tetrahedron shadow) instead of an
+ * extruded bounding box.
+ */
+export type ShadowVertex = { x: number; y: number; z: number };
+
+/**
  * A camp-specific structure contributed by a camp-theme package into the map
  * palette registry. Extends a core `Kind` with optional bespoke renderers; when
  * `renderFootprint` is present the core map draws via it instead of the
@@ -76,6 +87,11 @@ export type CampStructure = Kind & {
   /** Optional legend/tray icon (square, `size` px). Falls back to a generic
    * glyph derived from the footprint when omitted. */
   renderIcon?: (size: number) => ReactNode;
+  /** Optional 3D silhouette for the shade sim (object-local centered feet +
+   * height fraction). When present, the core casts the convex hull of these
+   * vertices projected away from the sun instead of extruding the footprint's
+   * bounding box — so a non-box solid (e.g. a tetrahedron) casts its real shadow. */
+  shadowVolume?: (w: number, h: number) => readonly ShadowVertex[];
 };
 
 /**

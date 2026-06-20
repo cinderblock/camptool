@@ -112,7 +112,15 @@ Core `map.tsx` shape branch gains a terminal `def.renderFootprint?.(ctx)` case;
    core falls through to them. No ever-growing `ShapeKind` enum.
 4. Pyramid = ONE `map_object`, new kind `sierpinski` (mathcamp-theme), labels
    baked into the renderer, `tallFt` default ≈ 32.7, center Pi marker.
-5. Flying buttresses + true tetra shadow = deferred.
+5. Flying buttresses = deferred. ~~True tetra shadow = deferred~~ → **DONE
+   (2026-06-18):** added a general `shadowVolume?: (w,h) => ShadowVertex[]` hook to
+   the contract (3D silhouette = centered-local footprint pts + z as a fraction of
+   tallFt). Core `map.tsx` `shadowPolygon` branches to a new `volumeShadow` (projects
+   each vertex away from the sun by `z·tallFt/tan(alt)`, convex-hulls them) when a
+   kind supplies it. The pyramid (solid, shade-covered) declares its 4 tetra
+   vertices → casts the true triangle-tapering-to-apex shadow, not the extruded
+   bounding box. Verified via a projection preview (new tetra hull vs old box). The
+   generic bbox path still applies to custom kinds without `shadowVolume`.
 
 ## Plan / steps (incremental — keep typecheck+build green at each)
 - [x] **A. Workspace + seam, no behavior change.** DONE. Root `workspaces` +
