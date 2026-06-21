@@ -1427,18 +1427,37 @@ function lotHalfWidthAt(
   return (frontageFt / 2) * (1 - t) + (rear / 2) * t;
 }
 
-/** Clamp a point (plot-local feet) into the lot trapezoid — keeps an object's
- * CENTER on the camp's area (front width `frontageFt`, rear width `rear`, both
- * centered on x = frontageFt/2, depth `depthFt`). The shape may still overhang. */
-function clampPointToLot(
+/** The footprint's reach: the max distance from an object's center to a footprint
+ * vertex (its circumradius). Uses the kind's true outline when it has one. */
+function footprintRadius(kind: string, w: number, h: number): number {
+  const def = kindDef(kind);
+  if (def.footprint) {
+    let r = 0;
+    for (const p of def.footprint(w, h)) r = Math.max(r, Math.hypot(p.x, p.y));
+    return r;
+  }
+  return Math.hypot(w / 2, h / 2);
+}
+
+/** Clamp an object's CENTER so its whole footprint stays inside the lot trapezoid
+ * — force the shape fully in (not just the center). `margin` = the footprint's
+ * reach (`footprintRadius`); the lot is effectively shrunk by it. If the shape is
+ * bigger than the lot, it's centered. */
+function clampCenterFit(
   cx: number,
   cy: number,
   frontageFt: number,
   depthFt: number,
   rear: number,
+  margin: number,
 ): { x: number; y: number } {
-  const y = clamp(cy, 0, depthFt);
-  const half = lotHalfWidthAt(y, frontageFt, depthFt, rear);
+  const yLo = margin;
+  const yHi = depthFt - margin;
+  const y = yLo <= yHi ? clamp(cy, yLo, yHi) : depthFt / 2;
+  const half = Math.max(
+    0,
+    lotHalfWidthAt(y, frontageFt, depthFt, rear) - margin,
+  );
   const mid = frontageFt / 2;
   return { x: clamp(cx, mid - half, mid + half), y };
 }
@@ -2144,18 +2163,19 @@ function Editor({
         e.key === "ArrowUp" ||
         e.key === "ArrowDown"
       ) {
-        // Nudge, then constrain by the object's CENTER to the lot trapezoid.
+        // Nudge, then force the whole footprint inside the lot trapezoid.
         const rearW = rearWidthOf(lot, frontageRadiusOf(lot));
         const dx =
           e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy =
           e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-        const c = clampPointToLot(
+        const c = clampCenterFit(
           obj.x + dx + obj.width / 2,
           obj.y + dy + obj.height / 2,
           lot.frontageFt,
           lot.depthFt,
           rearW,
+          footprintRadius(obj.kind, obj.width, obj.height),
         );
         next = { ...obj, x: c.x - obj.width / 2, y: c.y - obj.height / 2 };
       }
@@ -2308,15 +2328,16 @@ function Editor({
   function applyDrag(d: DragState, curFx: number, curFy: number): ObjRow {
     const s = d.start;
     if (d.mode === "move") {
-      // Constrain by the object's CENTER to the lot trapezoid (shape may overhang).
+      // Force the whole footprint inside the lot trapezoid.
       const nx = s.x + (curFx - d.startFx);
       const ny = s.y + (curFy - d.startFy);
-      const c = clampPointToLot(
+      const c = clampCenterFit(
         nx + s.width / 2,
         ny + s.height / 2,
         lot.frontageFt,
         lot.depthFt,
         rear,
+        footprintRadius(s.kind, s.width, s.height),
       );
       return { ...s, x: c.x - s.width / 2, y: c.y - s.height / 2 };
     }
@@ -2561,13 +2582,14 @@ function Editor({
 
   function addObjectAt(kind: string, fxFeet: number, fyFeet: number) {
     const def = kindDef(kind);
-    // Drop point = the object's center, constrained to the lot trapezoid.
-    const c = clampPointToLot(
+    // Drop point = the object's center; force the whole footprint inside the lot.
+    const c = clampCenterFit(
       fxFeet,
       fyFeet,
       lot.frontageFt,
       lot.depthFt,
       rear,
+      footprintRadius(kind, def.w, def.h),
     );
     fetcher.submit(
       {
@@ -2590,12 +2612,13 @@ function Editor({
     if (placeId) {
       const iw = Number(e.dataTransfer.getData("application/camptool-w")) || 10;
       const ih = Number(e.dataTransfer.getData("application/camptool-h")) || 10;
-      const c = clampPointToLot(
+      const c = clampCenterFit(
         fx(p.x),
         fy(p.y),
         lot.frontageFt,
         lot.depthFt,
         rear,
+        Math.hypot(iw / 2, ih / 2),
       );
       fetcher.submit(
         {
@@ -3949,6 +3972,7 @@ const MapObjectShape = memo(
     prev.editable === next.editable &&
     prev.dim === next.dim &&
     prev.overflow === next.overflow &&
+    prev.showDoors === next.showDoors &&
     prev.originX === next.originX &&
     prev.originY === next.originY &&
     prev.ppf === next.ppf,
