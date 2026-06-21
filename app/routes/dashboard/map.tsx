@@ -1231,20 +1231,19 @@ function domeShadow(
   const reach = Math.min(h / Math.tan((altDeg * Math.PI) / 180), 300);
   const r = o.width / 2; // domes are round, so width === height
   const dir = bearingToPlotDelta(sun.azimuth + 180, 1, mapUpBearing); // away from sun
-  const perp = { dx: -dir.dy, dy: dir.dx };
-  const cx = o.x + o.width / 2 + (dir.dx * reach) / 2;
-  const cy = o.y + o.height / 2 + (dir.dy * reach) / 2;
-  const along = r + reach / 2; // semi-axis along the sun
-  const n = 28;
-  return Array.from({ length: n }, (_, i) => {
+  const cx = o.x + o.width / 2;
+  const cy = o.y + o.height / 2;
+  // Hull of the dome's circular footprint + the apex shadow tip: the silhouette is
+  // full-width (2r) AT the dome — its midline lines up with the circle — and
+  // tapers to the tip, instead of a symmetric ellipse whose widest point sat at
+  // the midpoint (which is the misalignment you saw at a low sun).
+  const n = 24;
+  const circle: ZonePt[] = Array.from({ length: n }, (_, i) => {
     const t = (i / n) * 2 * Math.PI;
-    const a = Math.cos(t) * along;
-    const b = Math.sin(t) * r; // across the sun: the dome's true radius
-    return {
-      x: cx + dir.dx * a + perp.dx * b,
-      y: cy + dir.dy * a + perp.dy * b,
-    };
+    return { x: cx + Math.cos(t) * r, y: cy + Math.sin(t) * r };
   });
+  const tip: ZonePt = { x: cx + dir.dx * reach, y: cy + dir.dy * reach };
+  return convexHull([...circle, tip]);
 }
 
 /** Cast shadow for a structure that declares a 3D silhouette (a camp-theme
