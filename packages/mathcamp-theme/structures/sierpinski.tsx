@@ -79,30 +79,35 @@ function flyingButtress(
 ): {
   flying: [Pt, Pt, Pt][];
   sticks: Pt[];
+  verts: Pt[]; // the 6 hexagon vertices (for the cast shadow)
 } {
   const A: Pt = [w / 2, 0]; // bar corner
   const B: Pt = [0, h];
   const edge = w / 4; // 10′ for a 40′ pyramid
+  // Hexagon center = the corner small-tetra's centroid (the point ~8′ up, the peak
+  // of the 10′ tetra at the bar). It sits inset from the corner by h/6.
+  const O: Pt = [w / 2, h / 6];
   const dl = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
   const u: Pt = [(B[0] - A[0]) / dl, (B[1] - A[1]) / dl]; // unit A→B
-  // 6 hexagon vertices around A (V0 = 10′ toward B, V1 = toward C, then around).
+  // 6 hexagon vertices around O (V0,V1 = the inside green triangle, pointing into
+  // the pyramid; the rest fan outward).
   const V: Pt[] = [];
   for (let k = 0; k < 6; k++) {
     const d = rot(u, -60 * k);
-    V.push([A[0] + d[0] * edge, A[1] + d[1] * edge]);
+    V.push([O[0] + d[0] * edge, O[1] + d[1] * edge]);
   }
-  // Triangle (A,V0,V1) is inside; the next 5 fly outside.
+  // Triangle (O,V0,V1) is inside; the next 5 fly outside (apex shared at O).
   const flying: [Pt, Pt, Pt][] = [];
   for (let k = 1; k < 6; k++) {
     const vk = V[k];
     const vn = V[(k + 1) % 6];
-    if (vk && vn) flying.push([A, vk, vn]);
+    if (vk && vn) flying.push([O, vk, vn]);
   }
   // The outer (flying) vertices need legs to the ground.
   const sticks: Pt[] = [V[2], V[3], V[4], V[5]].filter(
     (p): p is Pt => p !== undefined,
   );
-  return { flying, sticks };
+  return { flying, sticks, verts: V };
 }
 
 /** Two-line label centered at (x,y), in feet. `rotation` is the object's rotation
@@ -329,12 +334,18 @@ function shadowVolume(w: number, h: number): ShadowVertex[] {
   const apexY = (2 * h) / 3 - h / 2; // base centroid, centered
   const tetraH = w * Math.sqrt(2 / 3); // apex height (ft), edge = w
   const piZ = (tetraH + PI_STICK_FT) / tetraH; // π height as a fraction of tallFt (≈1.18)
+  // The flying-buttress canopy floats at the peak of a 10′ tetra (8′2″); as a
+  // fraction of the full tetra height that's 10/w. Its vertices cast shade too.
+  const flyZ = 10 / w;
+  const bt = flyingButtress(w, h);
   return [
     { x: 0, y: -h / 2, z: 0 }, // footprint top corner (apex of the triangle), on ground
     { x: -w / 2, y: h / 2, z: 0 }, // bottom-left, ground
     { x: w / 2, y: h / 2, z: 0 }, // bottom-right, ground
     { x: 0, y: apexY, z: 1 }, // tetra apex over the base centroid, full height
     { x: 0, y: apexY, z: piZ }, // Pi symbol, 6′ above the apex
+    // Flying-buttress canopy (centered), so its shadow is included.
+    ...bt.verts.map((p) => ({ x: p[0] - w / 2, y: p[1] - h / 2, z: flyZ })),
   ];
 }
 
