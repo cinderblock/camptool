@@ -1,0 +1,1 @@
+ALTER TABLE `camp_question` ADD `wizard_placement` text DEFAULT 'before' NOT NULL;

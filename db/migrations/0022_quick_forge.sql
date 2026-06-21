@@ -1,0 +1,1 @@
+ALTER TABLE `map_object` ADD `mirrored` integer DEFAULT false NOT NULL;

@@ -406,6 +406,8 @@ type ObjRow = {
   tallFt: number;
   // Draw this object's door on the map (kinds that have one).
   showDoor: boolean;
+  // Mirror (left-right reflect) the structure — for chiral kinds.
+  mirrored: boolean;
   color: string | null;
   notes: string | null;
   // The camper who brought this (NULL = shared/communal camp item).
@@ -484,6 +486,7 @@ const objSelect = {
   rotation: mapObject.rotation,
   tallFt: mapObject.tallFt,
   showDoor: mapObject.showDoor,
+  mirrored: mapObject.mirrored,
   color: mapObject.color,
   notes: mapObject.notes,
   ownerMembershipId: mapObject.ownerMembershipId,
@@ -503,6 +506,7 @@ type ObjSelectRow = {
   rotation: number;
   tallFt: number;
   showDoor: boolean;
+  mirrored: boolean;
   color: string | null;
   notes: string | null;
   ownerMembershipId: string | null;
@@ -523,6 +527,7 @@ function toObjRow(r: ObjSelectRow): ObjRow {
     rotation: r.rotation,
     tallFt: r.tallFt,
     showDoor: r.showDoor,
+    mirrored: r.mirrored,
     color: r.color,
     notes: r.notes,
     ownerMembershipId: r.ownerMembershipId,
@@ -746,6 +751,7 @@ export async function action({ request }: Route.ActionArgs) {
       rotation: num("rotation", 0),
       tallFt: num("tallFt", kindHeight(kind)),
       showDoor: true,
+      mirrored: false,
       color: str("color"),
       notes: str("notes"),
       createdById: user.id,
@@ -763,6 +769,7 @@ export async function action({ request }: Route.ActionArgs) {
         rotation: row.rotation,
         tallFt: row.tallFt,
         showDoor: row.showDoor,
+        mirrored: row.mirrored,
         color: row.color,
         notes: row.notes,
         ownerMembershipId: null,
@@ -803,6 +810,7 @@ export async function action({ request }: Route.ActionArgs) {
       if (form.has("color")) set.color = str("color");
       if (form.has("notes")) set.notes = str("notes");
       if (form.has("showDoor")) set.showDoor = form.get("showDoor") === "true";
+      if (form.has("mirrored")) set.mirrored = form.get("mirrored") === "true";
       set.pendingByMembershipId = null;
       set.pendingAt = null;
       set.pendingPrev = null;
@@ -1232,11 +1240,14 @@ function domeShadow(
   sun: { altitude: number; azimuth: number },
   mapUpBearing: number,
 ): ZonePt[] | null {
-  const h = o.tallFt;
-  if (h <= 0) return null;
-  const altDeg = Math.max(sun.altitude, 3); // clamp so a low sun ≠ infinite shadow
-  const reach = Math.min(h / Math.tan((altDeg * Math.PI) / 180), 300);
   const r = o.width / 2; // domes are round, so width === height
+  if (r <= 0) return null;
+  // A geodesic dome is ~a hemisphere, so the apex height = the radius (it scales
+  // with the dome's size, unlike the fixed tallFt — which made wide domes' apex
+  // shadow land inside the footprint and vanish).
+  const apexH = r;
+  const altDeg = Math.max(sun.altitude, 3); // clamp so a low sun ≠ infinite shadow
+  const reach = Math.min(apexH / Math.tan((altDeg * Math.PI) / 180), 300);
   const dir = bearingToPlotDelta(sun.azimuth + 180, 1, mapUpBearing); // away from sun
   const cx = o.x + o.width / 2;
   const cy = o.y + o.height / 2;
@@ -1277,7 +1288,8 @@ function volumeShadow(
     .map((part) =>
       convexHull(
         part.map((p) => {
-          const v = rotateVec(p.x, p.y, o.rotation);
+          // Mirror reflects about the object's vertical axis (x→−x) before rotate.
+          const v = rotateVec(o.mirrored ? -p.x : p.x, p.y, o.rotation);
           const len = Math.min((p.z * o.tallFt) / tan, 300);
           return { x: cx + v.x + dir.dx * len, y: cy + v.y + dir.dy * len };
         }),
@@ -3090,26 +3102,29 @@ function Editor({
                   const def = kindDef(o.kind);
                   const sd = sunDirLocal(o, sun, mapUpBearing);
                   if (!sd) return [];
+                  // Mirror reflects the structure about its vertical axis; that's
+                  // equivalent to lighting it with an x-reflected sun and drawing
+                  // each face at its mirrored position (see toPx).
+                  const lit = o.mirrored ? { ...sd, x: -sd.x } : sd;
                   // A camp-theme structure supplies its own faces; otherwise core
                   // handles facet-roofed core kinds (the hexayurt).
                   const faces = def.shadedFaces
-                    ? def.shadedFaces(o.width, o.height, sd)
+                    ? def.shadedFaces(o.width, o.height, lit)
                     : coreShadedFaces(
                         o.kind,
                         o.width,
                         o.height,
-                        sd,
+                        lit,
                         o.tallFt || kindHeight(o.kind),
                       );
                   if (!faces.length) return [];
                   const cx = o.x + o.width / 2;
                   const cy = o.y + o.height / 2;
                   const toPx = (p: { x: number; y: number }) => {
-                    const v = rotateVec(
-                      p.x - o.width / 2,
-                      p.y - o.height / 2,
-                      o.rotation,
-                    );
+                    const lx = o.mirrored
+                      ? o.width / 2 - p.x
+                      : p.x - o.width / 2;
+                    const v = rotateVec(lx, p.y - o.height / 2, o.rotation);
                     return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
                   };
                   return faces.map((face, i) => (
@@ -3846,6 +3861,7 @@ const MapObjectShape = memo(
                 color: fill,
                 selected,
                 rotation: o.rotation,
+                mirror: o.mirrored,
               })}
             </g>
           ) : (
@@ -4364,6 +4380,22 @@ function SidePanel({
                     selected.id,
                     "showDoor",
                     showDoor ? "true" : "false",
+                  );
+                }}
+              />
+            ) : null}
+            {canMeta && kindDef(selected.kind).mirrorable ? (
+              <Checkbox
+                size="xs"
+                label="Mirror (flip left–right)"
+                checked={selected.mirrored}
+                onChange={(e) => {
+                  const mirrored = e.currentTarget.checked;
+                  patch(selected.id, { mirrored });
+                  commitField(
+                    selected.id,
+                    "mirrored",
+                    mirrored ? "true" : "false",
                   );
                 }}
               />

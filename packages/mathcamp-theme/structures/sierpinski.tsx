@@ -163,6 +163,7 @@ function renderFootprint({
   h,
   selected,
   rotation,
+  mirror,
 }: FootprintCtx): ReactNode {
   const A: Pt = [w / 2, 0]; // base corner (footprint top)
   const B: Pt = [0, h]; // base corner (bottom-left)
@@ -190,54 +191,52 @@ function renderFootprint({
     { at: lerp(C, G, 0.42), lines: ["lecture", "hall"] },
   ];
 
+  const bt = flyingButtress(w, h);
   return (
     <g>
-      {cells.map((cell) => (
+      {/* Geometry reflects under mirror (x→w−x); text stays upright (drawn after,
+          outside this group). */}
+      <g transform={mirror ? `translate(${w} 0) scale(-1 1)` : undefined}>
+        {cells.map((cell) => (
+          <polygon
+            key={tri(cell.pts[0], cell.pts[1], cell.pts[2])}
+            points={tri(cell.pts[0], cell.pts[1], cell.pts[2])}
+            fill={cell.fill}
+            stroke="#00000022"
+            strokeWidth={0.12}
+          />
+        ))}
+        {/* Overall 40′ outline. */}
         <polygon
-          key={tri(cell.pts[0], cell.pts[1], cell.pts[2])}
-          points={tri(cell.pts[0], cell.pts[1], cell.pts[2])}
-          fill={cell.fill}
-          stroke="#00000022"
-          strokeWidth={0.12}
+          points={tri(A, B, C)}
+          fill="none"
+          stroke={selected ? "#1c1c1c" : "#7a5c3e"}
+          strokeWidth={selected ? 0.8 : 0.5}
         />
-      ))}
-      {/* Overall 40′ outline. */}
-      <polygon
-        points={tri(A, B, C)}
-        fill="none"
-        stroke={selected ? "#1c1c1c" : "#7a5c3e"}
-        strokeWidth={selected ? 0.8 : 0.5}
-      />
-      {/* Flying buttress: the elevated (~8′) flying-shade canopy at the bar
-          corner — 5 triangles flying outside the footprint, dashed to read as
-          "above ground", with support-stick footings. */}
-      {(() => {
-        const bt = flyingButtress(w, h);
-        return (
-          <g>
-            {bt.flying.map((t) => (
-              <polygon
-                key={`fly-${tri(t[0], t[1], t[2])}`}
-                points={tri(t[0], t[1], t[2])}
-                fill={TAN}
-                fillOpacity={0.5}
-                stroke="#7a5c3e"
-                strokeWidth={0.25}
-                strokeDasharray="1 0.7"
-              />
-            ))}
-            {bt.sticks.map((p) => (
-              <circle
-                key={`stick-${p[0].toFixed(1)},${p[1].toFixed(1)}`}
-                cx={p[0]}
-                cy={p[1]}
-                r={0.7}
-                fill="#7a5c3e"
-              />
-            ))}
-          </g>
-        );
-      })()}
+        {/* Flying buttress: the elevated (~8′) flying-shade canopy at the bar
+            corner — 5 triangles flying outside the footprint, dashed to read as
+            "above ground", with support-stick footings. */}
+        {bt.flying.map((t) => (
+          <polygon
+            key={`fly-${tri(t[0], t[1], t[2])}`}
+            points={tri(t[0], t[1], t[2])}
+            fill={TAN}
+            fillOpacity={0.5}
+            stroke="#7a5c3e"
+            strokeWidth={0.25}
+            strokeDasharray="1 0.7"
+          />
+        ))}
+        {bt.sticks.map((p) => (
+          <circle
+            key={`stick-${p[0].toFixed(1)},${p[1].toFixed(1)}`}
+            cx={p[0]}
+            cy={p[1]}
+            r={0.7}
+            fill="#7a5c3e"
+          />
+        ))}
+      </g>
       {labels.map((l) => (
         <Label
           key={`${l.lines.join()}-${l.at[0].toFixed(1)}`}
@@ -419,6 +418,7 @@ export const sierpinskiPyramid: CampStructure = {
   personal: false, // officer-placed communal landmark
   tallFt: TETRA_TALL_FT,
   fixedTall: true, // a regular tetra — height is geometric, not user-set
+  mirrorable: true, // chiral once the flying buttress has a side
   footprint,
   renderFootprint,
   renderIcon,

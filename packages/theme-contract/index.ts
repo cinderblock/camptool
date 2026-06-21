@@ -62,6 +62,11 @@ export type FootprintCtx = {
    * group, so a renderer that wants map-upright text (labels) should counter-
    * rotate it by `-rotation` about its anchor. */
   rotation: number;
+  /** Whether this object is mirrored (left-right reflected). The renderer should
+   * reflect its own geometry about the vertical centerline (x→w−x) when set, while
+   * keeping any text upright/forward (don't flip the labels). Core mirrors the
+   * shadow/shade geometry to match. */
+  mirror: boolean;
 };
 
 /**
@@ -97,6 +102,9 @@ export type CampStructure = Kind & {
   /** The structure's height is geometrically fixed (e.g. a regular tetrahedron),
    * so the editor hides the editable Height field — `tallFt` stays authoritative. */
   fixedTall?: boolean;
+  /** This kind is chiral, so the editor offers a Mirror toggle (left-right
+   * reflect) — e.g. the Sierpinski pyramid, to put the bar/buttress on either side. */
+  mirrorable?: boolean;
   /** SVG footprint, drawn in the 0,0→(w,h) feet box. Set `shape: "custom"`. */
   renderFootprint?: (ctx: FootprintCtx) => ReactNode;
   /** Optional legend/tray icon (square, `size` px). Falls back to a generic

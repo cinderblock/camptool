@@ -100,6 +100,9 @@ export const mapObject = sqliteTable(
     tallFt: real("tall_ft").notNull().default(0),
     // Whether to draw this object's door on the map (only kinds that have one).
     showDoor: integer("show_door", { mode: "boolean" }).notNull().default(true),
+    // Mirror (left-right reflect) the structure — for chiral kinds (e.g. the
+    // Sierpinski pyramid: which side the bar/flying-buttress is on).
+    mirrored: integer("mirrored", { mode: "boolean" }).notNull().default(false),
     color: text("color"),
     notes: text("notes"),
     // Pending-approval workflow: an owner-member may move/resize/rotate their own
