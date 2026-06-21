@@ -108,10 +108,14 @@ export type CampStructure = Kind & {
    * the bounding box, so a rotated non-rect footprint is tested accurately. */
   footprint?: (w: number, h: number) => ReadonlyArray<{ x: number; y: number }>;
   /** Optional 3D silhouette for the shade sim (object-local centered feet +
-   * height fraction). When present, the core casts the convex hull of these
-   * vertices projected away from the sun instead of extruding the footprint's
-   * bounding box — so a non-box solid (e.g. a tetrahedron) casts its real shadow. */
-  shadowVolume?: (w: number, h: number) => readonly ShadowVertex[];
+   * height fraction). Returns one or more PARTS; the core casts each part's convex
+   * hull (projected away from the sun) as a SEPARATE shadow, then unions them — so
+   * a non-box solid (a tetrahedron) casts its real shadow, and a detached piece
+   * (a flying canopy) casts its own shadow instead of being merged into one hull. */
+  shadowVolume?: (
+    w: number,
+    h: number,
+  ) => ReadonlyArray<readonly ShadowVertex[]>;
   /** Optional self-shading overlay: given the sun's local direction, return each
    * upward face as a footprint polygon (feet, in the 0,0→(w,h) box) with a
    * continuous `shade` ∈ [0,1] = the dark-overlay opacity for that face (e.g. a

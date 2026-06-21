@@ -330,22 +330,26 @@ const PI_STICK_FT = 6;
  * ~6′ above the apex (also over the centroid), as a higher vertex (z>1) so its
  * shadow projects to the ground and the cast-shadow spike reaches it.
  */
-function shadowVolume(w: number, h: number): ShadowVertex[] {
+function shadowVolume(w: number, h: number): ShadowVertex[][] {
   const apexY = (2 * h) / 3 - h / 2; // base centroid, centered
   const tetraH = w * Math.sqrt(2 / 3); // apex height (ft), edge = w
   const piZ = (tetraH + PI_STICK_FT) / tetraH; // π height as a fraction of tallFt (≈1.18)
   // The flying-buttress canopy floats at the peak of a 10′ tetra (8′2″); as a
-  // fraction of the full tetra height that's 10/w. Its vertices cast shade too.
+  // fraction of the full tetra height that's 10/w.
   const flyZ = 10 / w;
   const bt = flyingButtress(w, h);
   return [
-    { x: 0, y: -h / 2, z: 0 }, // footprint top corner (apex of the triangle), on ground
-    { x: -w / 2, y: h / 2, z: 0 }, // bottom-left, ground
-    { x: w / 2, y: h / 2, z: 0 }, // bottom-right, ground
-    { x: 0, y: apexY, z: 1 }, // tetra apex over the base centroid, full height
-    { x: 0, y: apexY, z: piZ }, // Pi symbol, 6′ above the apex
-    // Flying-buttress canopy (centered), so its shadow is included.
-    ...bt.verts.map((p) => ({ x: p[0] - w / 2, y: p[1] - h / 2, z: flyZ })),
+    // Part 1 — the solid tetra (base corners + apex + Pi stick): one hull.
+    [
+      { x: 0, y: -h / 2, z: 0 }, // top corner, ground
+      { x: -w / 2, y: h / 2, z: 0 }, // bottom-left, ground
+      { x: w / 2, y: h / 2, z: 0 }, // bottom-right, ground
+      { x: 0, y: apexY, z: 1 }, // tetra apex, full height
+      { x: 0, y: apexY, z: piZ }, // Pi symbol, 6′ above the apex
+    ],
+    // Part 2 — the flying-buttress canopy (separate flat shade at 8′2″): its own
+    // hull, so it casts a distinct shadow rather than merging with the tetra.
+    bt.verts.map((p) => ({ x: p[0] - w / 2, y: p[1] - h / 2, z: flyZ })),
   ];
 }
 

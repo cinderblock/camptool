@@ -1164,28 +1164,30 @@ function convexHull(pts: ZonePt[]): ZonePt[] {
   return half(p).concat(half([...p].reverse()));
 }
 
-/** The footprint outline (object-local feet, centered on the object) used to cast
- * shade — the real shape, so a hexayurt throws a hexagonal shadow, not a box. */
-function footprintLocal(o: ObjRow): Array<[number, number]> {
-  const def = kindDef(o.kind);
+/** The footprint outline (object-local feet, centered on the object) for a KIND
+ * at a given size — the real shape, so a hexayurt throws a hexagonal shadow (and
+ * a triangle is tested as a triangle), not a box. */
+function footprintOutline(
+  kind: string,
+  w: number,
+  h: number,
+): Array<[number, number]> {
+  const def = kindDef(kind);
   // A camp-theme structure can declare its true outline (e.g. the pyramid's
   // base triangle); use it instead of the bounding box.
   if (def.footprint) {
-    return def
-      .footprint(o.width, o.height)
-      .map((p) => [p.x, p.y] as [number, number]);
+    return def.footprint(w, h).map((p) => [p.x, p.y] as [number, number]);
   }
-  const shape = def.shape;
-  if (shape === "hexagon") {
-    return hexVertices(0, 0, o.width, o.height).map(
-      (p) => [p.x - o.width / 2, p.y - o.height / 2] as [number, number],
+  if (def.shape === "hexagon") {
+    return hexVertices(0, 0, w, h).map(
+      (p) => [p.x - w / 2, p.y - h / 2] as [number, number],
     );
   }
-  if (shape === "dome") {
+  if (def.shape === "dome") {
     // Circle (ellipse if non-uniform) approximated as a 16-gon, so the dome
     // casts a round/elongated shadow rather than a box.
-    const rx = o.width / 2;
-    const ry = o.height / 2;
+    const rx = w / 2;
+    const ry = h / 2;
     const n = 16;
     return Array.from({ length: n }, (_, i) => {
       const a = (i / n) * 2 * Math.PI;
@@ -1193,11 +1195,16 @@ function footprintLocal(o: ObjRow): Array<[number, number]> {
     });
   }
   return [
-    [-o.width / 2, -o.height / 2],
-    [o.width / 2, -o.height / 2],
-    [o.width / 2, o.height / 2],
-    [-o.width / 2, o.height / 2],
+    [-w / 2, -h / 2],
+    [w / 2, -h / 2],
+    [w / 2, h / 2],
+    [-w / 2, h / 2],
   ];
+}
+
+/** The footprint outline for a placed object (centered local feet). */
+function footprintLocal(o: ObjRow): Array<[number, number]> {
+  return footprintOutline(o.kind, o.width, o.height);
 }
 
 /** Above-ground height (ft) at each footprint corner, aligned with
@@ -1254,22 +1261,29 @@ function domeShadow(
  * shadow, not an extruded bounding box. */
 function volumeShadow(
   o: ObjRow,
-  vol: readonly { x: number; y: number; z: number }[],
+  parts: ReadonlyArray<readonly { x: number; y: number; z: number }[]>,
   sun: { altitude: number; azimuth: number },
   mapUpBearing: number,
-): ZonePt[] | null {
-  if (o.tallFt <= 0) return null;
+): ZonePt[][] {
+  if (o.tallFt <= 0) return [];
   const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
   const tan = Math.tan((altDeg * Math.PI) / 180);
   const dir = bearingToPlotDelta(sun.azimuth + 180, 1, mapUpBearing);
   const cx = o.x + o.width / 2;
   const cy = o.y + o.height / 2;
-  const pts: ZonePt[] = vol.map((p) => {
-    const v = rotateVec(p.x, p.y, o.rotation);
-    const len = Math.min((p.z * o.tallFt) / tan, 300);
-    return { x: cx + v.x + dir.dx * len, y: cy + v.y + dir.dy * len };
-  });
-  return convexHull(pts);
+  // Each part hulls + casts SEPARATELY (e.g. the tetra vs. the flying canopy), so
+  // detached pieces aren't merged into one blob.
+  return parts
+    .map((part) =>
+      convexHull(
+        part.map((p) => {
+          const v = rotateVec(p.x, p.y, o.rotation);
+          const len = Math.min((p.z * o.tallFt) / tan, 300);
+          return { x: cx + v.x + dir.dx * len, y: cy + v.y + dir.dy * len };
+        }),
+      ),
+    )
+    .filter((poly) => poly.length >= 3);
 }
 
 /** Unit direction TOWARD the sun in an object's own footprint frame (x along +w,
@@ -1363,10 +1377,13 @@ function shadowPolygon(
   o: ObjRow,
   sun: { altitude: number; azimuth: number },
   mapUpBearing: number,
-): ZonePt[] | null {
-  if (sun.altitude <= 0.5) return null;
+): ZonePt[][] {
+  if (sun.altitude <= 0.5) return [];
   const def = kindDef(o.kind);
-  if (def.shape === "dome") return domeShadow(o, sun, mapUpBearing);
+  if (def.shape === "dome") {
+    const d = domeShadow(o, sun, mapUpBearing);
+    return d ? [d] : [];
+  }
   if (def.shadowVolume)
     return volumeShadow(
       o,
@@ -1377,7 +1394,7 @@ function shadowPolygon(
   const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
   const tan = Math.tan((altDeg * Math.PI) / 180);
   const heights = cornerHeights(o);
-  if (heights.every((h) => h <= 0)) return null;
+  if (heights.every((h) => h <= 0)) return [];
   // Unit shadow direction in plot-local feet (pointing away from the sun).
   const dir = bearingToPlotDelta(sun.azimuth + 180, 1, mapUpBearing);
   const cx = o.x + o.width / 2;
@@ -1390,7 +1407,7 @@ function shadowPolygon(
     const len = Math.min((heights[i] ?? 0) / tan, 300);
     return { x: c.x + dir.dx * len, y: c.y + dir.dy * len };
   });
-  return convexHull(corners.concat(tips));
+  return [convexHull(corners.concat(tips))];
 }
 
 /** Effective frontage radius (ft from the Man): the manual override if set,
@@ -1426,39 +1443,53 @@ function lotHalfWidthAt(
   return (frontageFt / 2) * (1 - t) + (rear / 2) * t;
 }
 
-/** The footprint's reach: the max distance from an object's center to a footprint
- * vertex (its circumradius). Uses the kind's true outline when it has one. */
-function footprintRadius(kind: string, w: number, h: number): number {
-  const def = kindDef(kind);
-  if (def.footprint) {
-    let r = 0;
-    for (const p of def.footprint(w, h)) r = Math.max(r, Math.hypot(p.x, p.y));
-    return r;
-  }
-  return Math.hypot(w / 2, h / 2);
+/** A kind's footprint vertices as offsets from the object center, rotated by
+ * `rotation` — the real (polygon) outline, so containment uses the true shape. */
+function footprintOffsets(
+  kind: string,
+  w: number,
+  h: number,
+  rotation: number,
+): Array<{ x: number; y: number }> {
+  return footprintOutline(kind, w, h).map(([lx, ly]) =>
+    rotateVec(lx, ly, rotation),
+  );
 }
 
-/** Clamp an object's CENTER so its whole footprint stays inside the lot trapezoid
- * — force the shape fully in (not just the center). `margin` = the footprint's
- * reach (`footprintRadius`); the lot is effectively shrunk by it. If the shape is
- * bigger than the lot, it's centered. */
-function clampCenterFit(
+/** Fit an object's CENTER so its whole ROTATED footprint polygon stays inside the
+ * lot trapezoid (not a bounding circle/box). `offs` = the footprint vertices as
+ * offsets from the center. Clamps the vertical span into [0, depthFt], then clamps
+ * x using each vertex's own half-width at its depth (so the taper is respected).
+ * If the shape is bigger than the lot in a dimension, it's centered there. */
+function fitCenterInsideLot(
   cx: number,
   cy: number,
+  offs: Array<{ x: number; y: number }>,
   frontageFt: number,
   depthFt: number,
   rear: number,
-  margin: number,
 ): { x: number; y: number } {
-  const yLo = margin;
-  const yHi = depthFt - margin;
-  const y = yLo <= yHi ? clamp(cy, yLo, yHi) : depthFt / 2;
-  const half = Math.max(
-    0,
-    lotHalfWidthAt(y, frontageFt, depthFt, rear) - margin,
-  );
+  if (!offs.length) return { x: cx, y: clamp(cy, 0, depthFt) };
+  let minVy = Number.POSITIVE_INFINITY;
+  let maxVy = Number.NEGATIVE_INFINITY;
+  for (const o of offs) {
+    minVy = Math.min(minVy, o.y);
+    maxVy = Math.max(maxVy, o.y);
+  }
+  const yLo = -minVy;
+  const yHi = depthFt - maxVy;
+  const y = yLo <= yHi ? clamp(cy, yLo, yHi) : (yLo + yHi) / 2;
   const mid = frontageFt / 2;
-  return { x: clamp(cx, mid - half, mid + half), y };
+  let xLo = Number.NEGATIVE_INFINITY;
+  let xHi = Number.POSITIVE_INFINITY;
+  for (const o of offs) {
+    const ay = clamp(y + o.y, 0, depthFt);
+    const hw = lotHalfWidthAt(ay, frontageFt, depthFt, rear);
+    xLo = Math.max(xLo, mid - hw - o.x);
+    xHi = Math.min(xHi, mid + hw - o.x);
+  }
+  const x = xLo <= xHi ? clamp(cx, xLo, xHi) : (xLo + xHi) / 2;
+  return { x, y };
 }
 
 /** Is a point (plot-local feet) inside the lot trapezoid? */
@@ -2168,13 +2199,13 @@ function Editor({
           e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy =
           e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-        const c = clampCenterFit(
+        const c = fitCenterInsideLot(
           obj.x + dx + obj.width / 2,
           obj.y + dy + obj.height / 2,
+          footprintOffsets(obj.kind, obj.width, obj.height, obj.rotation),
           lot.frontageFt,
           lot.depthFt,
           rearW,
-          footprintRadius(obj.kind, obj.width, obj.height),
         );
         next = { ...obj, x: c.x - obj.width / 2, y: c.y - obj.height / 2 };
       }
@@ -2330,13 +2361,13 @@ function Editor({
       // Force the whole footprint inside the lot trapezoid.
       const nx = s.x + (curFx - d.startFx);
       const ny = s.y + (curFy - d.startFy);
-      const c = clampCenterFit(
+      const c = fitCenterInsideLot(
         nx + s.width / 2,
         ny + s.height / 2,
+        footprintOffsets(s.kind, s.width, s.height, s.rotation),
         lot.frontageFt,
         lot.depthFt,
         rear,
-        footprintRadius(s.kind, s.width, s.height),
       );
       return { ...s, x: c.x - s.width / 2, y: c.y - s.height / 2 };
     }
@@ -2582,13 +2613,13 @@ function Editor({
   function addObjectAt(kind: string, fxFeet: number, fyFeet: number) {
     const def = kindDef(kind);
     // Drop point = the object's center; force the whole footprint inside the lot.
-    const c = clampCenterFit(
+    const c = fitCenterInsideLot(
       fxFeet,
       fyFeet,
+      footprintOffsets(kind, def.w, def.h, 0),
       lot.frontageFt,
       lot.depthFt,
       rear,
-      footprintRadius(kind, def.w, def.h),
     );
     fetcher.submit(
       {
@@ -2611,13 +2642,18 @@ function Editor({
     if (placeId) {
       const iw = Number(e.dataTransfer.getData("application/camptool-w")) || 10;
       const ih = Number(e.dataTransfer.getData("application/camptool-h")) || 10;
-      const c = clampCenterFit(
+      const c = fitCenterInsideLot(
         fx(p.x),
         fy(p.y),
+        [
+          { x: -iw / 2, y: -ih / 2 },
+          { x: iw / 2, y: -ih / 2 },
+          { x: iw / 2, y: ih / 2 },
+          { x: -iw / 2, y: ih / 2 },
+        ],
         lot.frontageFt,
         lot.depthFt,
         rear,
-        Math.hypot(iw / 2, ih / 2),
       );
       fetcher.submit(
         {
@@ -2961,20 +2997,20 @@ function Editor({
                 pointerEvents="none"
                 opacity={shadeOpacity}
               >
-                {objects.map((o) => {
-                  const poly = shadowPolygon(o, sun, mapUpBearing);
-                  if (!poly || poly.length < 3) return null;
-                  const pts = poly
-                    .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
-                    .join(" ");
-                  return (
+                {objects.flatMap((o) =>
+                  shadowPolygon(o, sun, mapUpBearing).map((poly, i) => (
                     <polygon
-                      key={`sh-${o.id}`}
-                      points={pts}
+                      key={`sh-${o.id}-${i}`}
+                      points={poly
+                        .map(
+                          (p) =>
+                            `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                        )
+                        .join(" ")}
                       fill={shadowFill}
                     />
-                  );
-                })}
+                  )),
+                )}
               </g>
             ) : null}
             {/* Zones: labeled regions drawn under the structures. */}
