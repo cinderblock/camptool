@@ -161,6 +161,33 @@ export function setupPassWindowFor(year: number): { min: string; max: string } {
   return { min: shift(-6), max: shift(-1) };
 }
 
+/** The handful of named days inside the event week, for calendar callouts. Day
+ * offsets are from gate-open Sunday (`eventStartFor`): the Man burns the Saturday
+ * before Labor Day (+6), the Temple the Sunday after (+7), exodus on Labor Day
+ * Monday (+8). Returns local `YYYY-MM-DD` keyed with a short + long label. */
+export function eventDayLabels(
+  year: number,
+): { date: string; short: string; label: string }[] {
+  const start = eventStartFor(year);
+  const fmt = (days: number) => {
+    const d = new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate() + days,
+    );
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  return [
+    { date: fmt(0), short: "Gates", label: "Gates open (Sun)" },
+    { date: fmt(6), short: "Burn", label: "Man burn (Sat)" },
+    { date: fmt(7), short: "Temple", label: "Temple burn (Sun)" },
+    { date: fmt(8), short: "Exodus", label: "Exodus (Mon)" },
+  ];
+}
+
 /** Which geometry year to use for a given event year: that year if we have its
  * measurements, else the newest year at/below it, else the newest we have. */
 export function geometryYearFor(

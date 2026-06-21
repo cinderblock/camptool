@@ -41,7 +41,13 @@ export type QuestionType =
   | "consent"
   // "Smart" types wired to real data (see app/lib/questions.ts):
   | "event_date" // a date bounded to the weeks around the event
+  | "event_range" // arrival + departure picked on one event calendar
   | "invited_by"; // pre-fills who invited you from the invite tree
+
+/** Where a question sits in the onboarding wizard relative to the "Bringing"
+ * (tents/vehicles) step: `before` = the intro questionnaire; `after` = the
+ * "a few more questions" step that follows the gear selection. */
+export type QuestionPlacement = "before" | "after";
 
 export const campQuestion = sqliteTable(
   "camp_question",
@@ -62,6 +68,10 @@ export const campQuestion = sqliteTable(
     exclusiveOption: text("exclusive_option"),
     // all | returning (member+) | recruit. Matches AskAudience in app/lib/wizard.ts.
     audience: text("audience").notNull().default("all"),
+    // before | after — which side of the wizard's "Bringing" step this question
+    // shows on (see QuestionPlacement). "what are you bringing"-type questions go
+    // after; everything else stays in the early questionnaire.
+    wizardPlacement: text("wizard_placement").notNull().default("before"),
     required: integer("required", { mode: "boolean" }).notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     // Soft-retire: a question with archivedAt set is hidden from new answers but

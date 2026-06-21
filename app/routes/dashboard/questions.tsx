@@ -41,8 +41,10 @@ import { QuestionField } from "~/components/QuestionField";
 import { hasAtLeast } from "~/lib/permissions";
 import {
   QUESTION_AUDIENCES,
+  QUESTION_PLACEMENTS,
   QUESTION_TYPES,
   type QuestionAudience,
+  type QuestionPlacement,
   type QuestionType,
   isSelectType,
   parseOptions,
@@ -52,6 +54,7 @@ import {
   loadAnswers,
   loadCampQuestions,
   loadInviterName,
+  loadInviterOptions,
   setAnswer,
 } from "~/lib/questions.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -76,6 +79,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     membershipId: active.membership.id,
   });
   const invitedByName = await loadInviterName(active.membership.id);
+  const inviterOptions = await loadInviterOptions(campId);
 
   const questions = rows.map((q) => ({
     id: q.id,
@@ -84,6 +88,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     type: q.type as QuestionType,
     options: parseOptions(q.options),
     audience: q.audience as QuestionAudience,
+    placement: q.wizardPlacement as QuestionPlacement,
     required: q.required,
     exclusiveOption: q.exclusiveOption,
   }));
@@ -96,6 +101,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     questions,
     answers,
     invitedByName,
+    inviterOptions,
   };
 }
 
@@ -216,6 +222,9 @@ export async function action({ request }: Route.ActionArgs) {
       case "audience":
         set.audience = val as QuestionAudience;
         break;
+      case "placement":
+        set.wizardPlacement = val === "after" ? "after" : "before";
+        break;
       case "required":
         set.required = val === "true";
         break;
@@ -287,6 +296,7 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
     locked,
     year,
     invitedByName,
+    inviterOptions,
   } = loaderData;
   // Members only see the questions relevant to them; officers manage all of them.
   const mine = questions.filter(
@@ -318,6 +328,7 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
             locked={locked}
             year={year}
             invitedByName={invitedByName}
+            inviterOptions={inviterOptions}
           />
         ) : mine.length > 0 ? (
           <Card withBorder padding="md" radius="md">
@@ -330,6 +341,7 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
                   locked={locked}
                   year={year}
                   invitedByName={invitedByName}
+                  inviterOptions={inviterOptions}
                 />
               ))}
             </Stack>
@@ -350,12 +362,14 @@ function QuestionEditor({
   locked,
   year,
   invitedByName,
+  inviterOptions,
 }: {
   questions: Question[];
   answers: Record<string, string>;
   locked: boolean;
   year: number;
   invitedByName: string | null;
+  inviterOptions: string[];
 }) {
   // Local copy so a drag reorders instantly; re-synced when the loader updates.
   const [order, setOrder] = useState<Question[]>(questions);
@@ -435,6 +449,7 @@ function QuestionEditor({
                   locked={locked}
                   year={year}
                   invitedByName={invitedByName}
+                  inviterOptions={inviterOptions}
                 />
               ))}
             </Stack>
@@ -586,12 +601,14 @@ const SortableQuestion = memo(function SortableQuestion({
   locked,
   year,
   invitedByName,
+  inviterOptions,
 }: {
   q: Question;
   value: string | undefined;
   locked: boolean;
   year: number;
   invitedByName: string | null;
+  inviterOptions: string[];
 }) {
   const {
     attributes,
@@ -674,6 +691,7 @@ const SortableQuestion = memo(function SortableQuestion({
               locked={locked}
               year={year}
               invitedByName={invitedByName}
+              inviterOptions={inviterOptions}
               bare
             />
           )}
@@ -697,6 +715,16 @@ const SortableQuestion = memo(function SortableQuestion({
               allowDeselect={false}
               comboboxProps={{ withinPortal: true }}
               w={160}
+            />
+            <Select
+              size="xs"
+              aria-label="Wizard placement"
+              data={QUESTION_PLACEMENTS}
+              value={q.placement}
+              onChange={(v) => v && v !== q.placement && save("placement", v)}
+              allowDeselect={false}
+              comboboxProps={{ withinPortal: true }}
+              w={170}
             />
             <Checkbox
               size="xs"

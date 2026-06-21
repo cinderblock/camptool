@@ -15,9 +15,13 @@ export type QuestionType =
   | "consent"
   // "Smart" types that wire to real data:
   | "event_date" // a date bounded to the weeks around the event
+  | "event_range" // arrival + departure picked on one event calendar
   | "invited_by"; // pre-fills who invited you from the invite tree
 
 export type QuestionAudience = "all" | "returning" | "recruit";
+
+/** Which side of the wizard's "Bringing" step a question shows on. */
+export type QuestionPlacement = "before" | "after";
 
 export const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
   { value: "short_text", label: "Short text" },
@@ -29,6 +33,7 @@ export const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
   { value: "date", label: "Date" },
   { value: "consent", label: "Agreement (must check)" },
   { value: "event_date", label: "Date (near the event)" },
+  { value: "event_range", label: "Arrival & departure" },
   { value: "invited_by", label: "Who invited you (auto-fills)" },
 ];
 
@@ -38,6 +43,14 @@ export const QUESTION_AUDIENCES: { value: QuestionAudience; label: string }[] =
     { value: "returning", label: "Returning members" },
     { value: "recruit", label: "Recruits / prospective" },
   ];
+
+export const QUESTION_PLACEMENTS: {
+  value: QuestionPlacement;
+  label: string;
+}[] = [
+  { value: "before", label: "Before “Bringing”" },
+  { value: "after", label: "After “Bringing”" },
+];
 
 export function questionTypeLabel(type: string): string {
   return QUESTION_TYPES.find((t) => t.value === type)?.label ?? type;
@@ -69,4 +82,25 @@ export function parseOptions(raw: string | null | undefined): string[] {
 /** A multi_select answer value is a JSON array of the chosen options. */
 export function parseMultiValue(raw: string | null | undefined): string[] {
   return parseOptions(raw);
+}
+
+export type EventRange = { arrival: string | null; departure: string | null };
+
+/** An `event_range` answer is stored as JSON `{arrival,departure}` (each a
+ * `YYYY-MM-DD` string or null). Tolerant of empty/garbage → both null. */
+export function parseEventRange(raw: string | null | undefined): EventRange {
+  if (!raw) return { arrival: null, departure: null };
+  try {
+    const v = JSON.parse(raw);
+    const pick = (x: unknown) => (typeof x === "string" && x ? x : null);
+    return { arrival: pick(v?.arrival), departure: pick(v?.departure) };
+  } catch {
+    return { arrival: null, departure: null };
+  }
+}
+
+/** Serialize an event range for storage; an all-null range stores as "" (clear). */
+export function stringifyEventRange(r: EventRange): string {
+  if (!r.arrival && !r.departure) return "";
+  return JSON.stringify({ arrival: r.arrival, departure: r.departure });
 }

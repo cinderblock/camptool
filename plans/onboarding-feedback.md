@@ -147,6 +147,51 @@ wizard cleaner and less confusing for a brand-new recruit.
 - Box-numbering / packing-binder system (Math Camp idea, future feature).
 - Map shade dark-mode legibility.
 
+## Batch 2 — Cameron's run-through feedback (2026-06-21)
+
+A second pass over `/start`. Locked decisions (asked + answered):
+- **B5 calendar → arrival + departure RANGE on one calendar** (not two questions).
+  New `event_range` question type; value = JSON `{arrival,departure}`. `EventCalendar`
+  gains a range mode (tap arrival, tap departure) + named-day callouts (Gates Sun,
+  **Man Burn Sat = start+6**, **Temple Sun = start+7**, Exodus Mon = start+8).
+- **B6 question placement → per-question `wizard_placement` ('before'|'after')**
+  (migration 0022, additive ALTER, default 'before'). Officer-set in `/questions`.
+  Wizard splits the questionnaire into two steps: intro (before) early, and an
+  `extras` step (after) right after the Bringing step.
+- **B4 'who invited you' → member dropdown + escape hatch.** `invited_by` renders a
+  searchable Select of active member names (pre-filled with the detected inviter)
+  plus an "I found camp another way" option. No more open-ended blanks.
+- **B6 'bar supplies' question removal = Cameron does it in `/questions` admin**
+  (it's per-camp DB data, not seed code). No code change for that item.
+
+Work list (this batch):
+- [x] **B1.** Moved the RSVP "Anything to add?" note off page 1 → bottom of the
+      new `extras` step (`ExtrasStep` in `start.tsx`). RSVP status buttons folded
+      into the Questionnaire step (`RsvpButtons`).
+- [x] **B2.** Profile step now asks real name (`user.name`, editable) AND playa
+      name together; `saveProfile` action accepts `name` (updates `user`) and/or
+      `playaName`.
+- [x] **B3.** Folded "Coming back?" into the Questionnaire step; dropped `rsvp`
+      from `ASKS`/`AskKey`; removed the dead `resolveAsk("rsvp")` in
+      `setParticipation`.
+- [x] **B4.** `invited_by` → searchable member-name `Select` (pre-filled with the
+      detected inviter) + `INVITED_BY_OTHER` escape hatch. `loadInviterOptions`
+      added; threaded `inviterOptions` into `/start` + `/questions`.
+- [x] **B5.** New `event_range` question type; `EventCalendar` gained a `range`
+      mode (tap arrival → departure, green stay band) + named-day callouts
+      (`eventDayLabels`: Gates/Burn/Temple/Exodus). `QuestionField` renders it
+      (two `DateInput`s as the year-unknown fallback).
+- [x] **B6.** `wizard_placement` column (**migration 0023**, additive ALTER,
+      default 'before'); `/questions` per-question placement `Select`; wizard
+      splits questionnaire → intro (`questionsBefore`) + `extras`
+      (`questionsAfter`) after the Bringing step. Bar-supplies removal stays
+      Cameron's `/questions` admin task.
+
+typecheck + build green; biome clean on all edited files (remaining repo lint
+errors are pre-existing in generated drizzle migration-meta JSON). Migration 0023
+applies on next dev-server restart (startup migrator; `db:migrate` doesn't work
+here). NOT yet browser-tested or committed.
+
 ## Progress log
 - [x] 2026-06-16 Triaged the transcript; scope confirmed (do everything; questions
       are runtime admin config). Work list above is the durable checklist.

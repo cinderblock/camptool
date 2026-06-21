@@ -14,11 +14,20 @@ import {
 import { DateInput } from "@mantine/dates";
 import { useFetcher } from "react-router";
 import { EventCalendar } from "~/components/EventCalendar";
-import { type QuestionType, parseMultiValue } from "~/lib/questions";
+import {
+  type QuestionType,
+  parseEventRange,
+  parseMultiValue,
+  stringifyEventRange,
+} from "~/lib/questions";
 
 /** At or below this many options, a single/multi choice renders as a row of
  * buttons instead of a dropdown — quicker to scan and tap for a short list. */
 const BUTTON_MAX = 5;
+
+/** Escape-hatch choice for the `invited_by` dropdown, for campers whose inviter
+ * isn't a listed member (found the camp some other way). */
+export const INVITED_BY_OTHER = "I found camp another way";
 
 export type QuestionFieldData = {
   id: string;
@@ -57,6 +66,7 @@ export function QuestionField({
   bare,
   year,
   invitedByName,
+  inviterOptions,
 }: {
   question: QuestionFieldData;
   value: string | undefined;
@@ -69,6 +79,8 @@ export function QuestionField({
   year?: number;
   /** Who invited this member (from the invite tree) — pre-fills `invited_by`. */
   invitedByName?: string | null;
+  /** Active member names for the `invited_by` dropdown (so it isn't open-ended). */
+  inviterOptions?: string[];
 }) {
   const fetcher = useFetcher();
   const save = (v: string) =>
@@ -268,18 +280,100 @@ export function QuestionField({
           </Box>
         </Input.Wrapper>
       );
-    case "invited_by":
-      // Pre-fill with the inviter from the invite tree; still editable.
+    case "event_range": {
+      // Arrival + departure picked on one event calendar. Falls back to two plain
+      // date inputs only when we don't know the year (no event to center on).
+      const range = parseEventRange(value);
+      if (year == null) {
+        return (
+          <Input.Wrapper label={label} description={description}>
+            <Group gap="sm" mt={6} align="flex-end">
+              <DateInput
+                label="Arrival"
+                valueFormat="YYYY-MM-DD"
+                disabled={locked}
+                defaultValue={
+                  range.arrival ? parseLocalDate(range.arrival) : null
+                }
+                onChange={(d) =>
+                  save(
+                    stringifyEventRange({
+                      ...range,
+                      arrival: d ? formatDate(d) : null,
+                    }),
+                  )
+                }
+                popoverProps={{ withinPortal: true }}
+                maw={200}
+              />
+              <DateInput
+                label="Departure"
+                valueFormat="YYYY-MM-DD"
+                disabled={locked}
+                defaultValue={
+                  range.departure ? parseLocalDate(range.departure) : null
+                }
+                onChange={(d) =>
+                  save(
+                    stringifyEventRange({
+                      ...range,
+                      departure: d ? formatDate(d) : null,
+                    }),
+                  )
+                }
+                popoverProps={{ withinPortal: true }}
+                maw={200}
+              />
+            </Group>
+          </Input.Wrapper>
+        );
+      }
       return (
-        <TextInput
+        <Input.Wrapper label={label} description={description}>
+          <Text size="xs" c="dimmed" mt={4}>
+            Tap your arrival day, then your departure day.
+          </Text>
+          <Box mt={6}>
+            <EventCalendar
+              year={year}
+              mode="range"
+              range={range}
+              onRangeChange={(r) => save(stringifyEventRange(r))}
+              disabled={locked}
+            />
+          </Box>
+        </Input.Wrapper>
+      );
+    }
+    case "invited_by": {
+      // Not open-ended: pick from current members (pre-filled with the detected
+      // inviter) plus an escape hatch for "found camp another way".
+      const opts = inviterOptions ?? [];
+      const current = value ?? invitedByName ?? null;
+      // Keep a stored value that isn't in the roster (e.g. a member who left)
+      // selectable so it isn't silently dropped.
+      const extra =
+        current && current !== INVITED_BY_OTHER && !opts.includes(current)
+          ? [current]
+          : [];
+      const data = [...opts, ...extra, INVITED_BY_OTHER];
+      return (
+        <Select
           label={label}
           description={description}
+          data={data}
           disabled={locked}
-          defaultValue={value ?? invitedByName ?? ""}
-          placeholder={invitedByName ?? "Who invited you?"}
-          onBlur={(e) => save(e.currentTarget.value)}
+          defaultValue={current}
+          onChange={(v) => save(v ?? "")}
+          searchable
+          clearable
+          placeholder="Choose a member…"
+          comboboxProps={{ withinPortal: true }}
+          maw={360}
+          nothingFoundMessage="No match"
         />
       );
+    }
     default:
       return (
         <TextInput

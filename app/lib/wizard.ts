@@ -13,10 +13,10 @@
 import { hasAtLeast } from "./permissions";
 
 export type AskKey =
-  | "rsvp"
   | "profile"
   | "questionnaire"
   | "bringing"
+  | "extras"
   | "sharing"
   | "checklist";
 
@@ -42,21 +42,14 @@ export type AskDef = {
 };
 
 /** Catalog order = the order the wizard presents asks. Roughly the season arc:
- * RSVP / profile / questionnaire / tickets early; bringing / sharing / checklist
- * as the event nears. */
+ * profile / questionnaire (which now includes the "coming back?" RSVP) early;
+ * bringing / extras / sharing / checklist as the event nears. The `extras` step
+ * holds the "after the gear" questions plus the free-text "anything to add?". */
 export const ASKS: AskDef[] = [
   {
-    key: "rsvp",
-    label: "Coming back?",
-    hint: "Your plans this year",
-    audience: "all",
-    opensWeeksBefore: null,
-    priority: "required",
-  },
-  {
     key: "profile",
-    label: "Profile",
-    hint: "Your name",
+    label: "Your info",
+    hint: "Name & playa name",
     audience: "all",
     opensWeeksBefore: null,
     priority: "optional",
@@ -64,10 +57,10 @@ export const ASKS: AskDef[] = [
   {
     key: "questionnaire",
     label: "Questionnaire",
-    hint: "A few questions",
+    hint: "Coming back & a few questions",
     audience: "all",
     opensWeeksBefore: null,
-    priority: "optional",
+    priority: "required",
   },
   {
     key: "bringing",
@@ -75,6 +68,14 @@ export const ASKS: AskDef[] = [
     hint: "Tents, vehicles, …",
     audience: "all",
     opensWeeksBefore: 12,
+    priority: "optional",
+  },
+  {
+    key: "extras",
+    label: "A few more questions",
+    hint: "About your gear & anything else",
+    audience: "all",
+    opensWeeksBefore: null,
     priority: "optional",
   },
   {

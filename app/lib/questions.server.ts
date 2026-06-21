@@ -36,6 +36,27 @@ export async function loadInviterName(
   return inv?.playa || inv?.name || null;
 }
 
+/** Distinct active-member display names (playa name preferred) for the
+ * `invited_by` dropdown, so "who invited you" isn't an open-ended text box. */
+export async function loadInviterOptions(campId: string): Promise<string[]> {
+  const rows = await db
+    .select({ name: user.name, playa: membership.playaName })
+    .from(membership)
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(
+      and(
+        eq(membership.organizationId, campId),
+        eq(membership.status, "active"),
+      ),
+    );
+  const names = new Set<string>();
+  for (const r of rows) {
+    const n = r.playa || r.name;
+    if (n) names.add(n);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
 /** Active (non-archived) questions for a camp, in display order. */
 export async function loadCampQuestions(
   campId: string,

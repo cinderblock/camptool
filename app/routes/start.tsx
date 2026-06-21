@@ -29,6 +29,7 @@ import {
   loadAnswers,
   loadCampQuestions,
   loadInviterName,
+  loadInviterOptions,
 } from "~/lib/questions.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
@@ -108,7 +109,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   }[] = [];
   let roster: { membershipId: string; name: string | null }[] = [];
   let tasks: { id: string; title: string; done: boolean }[] = [];
-  let questions: {
+  type WizardQuestion = {
     id: string;
     prompt: string;
     helpText: string | null;
@@ -116,9 +117,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     options: string[];
     required: boolean;
     exclusiveOption: string | null;
-  }[] = [];
+  };
+  let questionsBefore: WizardQuestion[] = [];
+  let questionsAfter: WizardQuestion[] = [];
   let answers: Record<string, string> = {};
   let invitedByName: string | null = null;
+  let inviterOptions: string[] = [];
 
   if (keys.has("bringing") || keys.has("sharing")) {
     items = await db
@@ -188,19 +192,25 @@ export async function loader({ request }: Route.LoaderArgs) {
     }));
   }
 
-  if (keys.has("questionnaire")) {
+  if (keys.has("questionnaire") || keys.has("extras")) {
     const rows = filterByAudience(await loadCampQuestions(campId), role);
-    questions = rows.map((q) => ({
-      id: q.id,
-      prompt: q.prompt,
-      helpText: q.helpText,
-      type: q.type as QuestionType,
-      options: parseOptions(q.options),
-      required: q.required,
-      exclusiveOption: q.exclusiveOption,
-    }));
+    const mapped: (WizardQuestion & { placement: string })[] = rows.map(
+      (q) => ({
+        id: q.id,
+        prompt: q.prompt,
+        helpText: q.helpText,
+        type: q.type as QuestionType,
+        options: parseOptions(q.options),
+        required: q.required,
+        exclusiveOption: q.exclusiveOption,
+        placement: q.wizardPlacement,
+      }),
+    );
+    questionsBefore = mapped.filter((q) => q.placement !== "after");
+    questionsAfter = mapped.filter((q) => q.placement === "after");
     answers = await loadAnswers({ editionId, membershipId: mid });
     invitedByName = await loadInviterName(mid);
+    inviterOptions = await loadInviterOptions(campId);
   }
 
   return {
@@ -222,14 +232,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     occupants,
     roster,
     tasks,
-    questions,
+    questionsBefore,
+    questionsAfter,
     answers,
     invitedByName,
+    inviterOptions,
   };
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const {
+    user: authUser,
+    active,
+    activeEdition,
+  } = await requireActiveEdition(request);
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   const mid = active.membership.id;
@@ -237,12 +253,23 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = String(form.get("intent"));
 
   if (intent === "saveProfile") {
-    const v = form.get("playaName");
-    const playaName = v == null || v === "" ? null : String(v);
-    await db
-      .update(membership)
-      .set({ playaName })
-      .where(eq(membership.id, mid));
+    // Real name and playa name are collected together (real name lives on the
+    // shared `user`; playa name is per-membership). Either may be sent alone.
+    if (form.has("playaName")) {
+      const v = form.get("playaName");
+      const playaName = v == null || v === "" ? null : String(v);
+      await db
+        .update(membership)
+        .set({ playaName })
+        .where(eq(membership.id, mid));
+    }
+    if (form.has("name")) {
+      const name = String(form.get("name") ?? "").trim();
+      // A blank name would orphan the account's display; ignore empty submits.
+      if (name) {
+        await db.update(user).set({ name }).where(eq(user.id, authUser.id));
+      }
+    }
     return data({ ok: true });
   }
 
@@ -467,14 +494,14 @@ function AskBody({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   switch (askKey) {
-    case "rsvp":
-      return <RsvpStep data={d} />;
     case "profile":
       return <ProfileStep data={d} fetcher={fetcher} />;
     case "questionnaire":
       return <QuestionnaireStep data={d} />;
     case "bringing":
       return <BringingStep data={d} />;
+    case "extras":
+      return <ExtrasStep data={d} />;
     case "sharing":
       return <OccupantsStep data={d} />;
     case "checklist":
@@ -484,7 +511,8 @@ function AskBody({
   }
 }
 
-function RsvpStep({ data: d }: { data: LoaderData }) {
+/** The "coming back?" RSVP, folded into the questionnaire step. */
+function RsvpButtons({ data: d }: { data: LoaderData }) {
   const fetcher = useFetcher();
   const current = d.participation.status;
   const choices: {
@@ -499,10 +527,12 @@ function RsvpStep({ data: d }: { data: LoaderData }) {
   const setStatus = (status: ParticipationStatus) =>
     fetcher.submit({ intent: "rsvp", status }, { method: "post" });
   return (
-    <Stack gap="md" mt="md" maw={460}>
+    <Stack gap="xs" maw={460}>
+      <Text size="sm" fw={600}>
+        Are you camping with us for {d.year}?
+      </Text>
       <Text size="sm" c="dimmed">
-        Are you planning to camp with us for {d.year}? This helps us plan
-        tickets and space — you can change it anytime.
+        This helps us plan tickets and space — you can change it anytime.
       </Text>
       <Group gap="xs">
         {choices.map((c) => (
@@ -517,9 +547,72 @@ function RsvpStep({ data: d }: { data: LoaderData }) {
           </Button>
         ))}
       </Group>
+    </Stack>
+  );
+}
+
+function QuestionnaireStep({ data: d }: { data: LoaderData }) {
+  return (
+    <Stack gap="lg" mt="md" maw={520}>
+      <RsvpButtons data={d} />
+      <div>
+        <Text size="sm" c="dimmed" mb="sm">
+          {d.audience === "recruit"
+            ? "A few questions so we can get to know you."
+            : "A quick check-in to help us plan the camp."}{" "}
+          Answers save as you go.
+        </Text>
+        {d.questionsBefore.length === 0 ? (
+          <Text c="dimmed" size="sm">
+            No questions right now — you're good.
+          </Text>
+        ) : (
+          <Stack gap="md">
+            {d.questionsBefore.map((q) => (
+              <QuestionField
+                key={q.id}
+                question={q}
+                value={d.answers[q.id]}
+                locked={d.locked}
+                year={d.year}
+                invitedByName={d.invitedByName}
+                inviterOptions={d.inviterOptions}
+                action="/questions"
+              />
+            ))}
+          </Stack>
+        )}
+      </div>
+    </Stack>
+  );
+}
+
+/** The wrap-up step: questions an officer placed *after* the gear selection,
+ * plus the free-text "anything to add?" (moved off the first page). */
+function ExtrasStep({ data: d }: { data: LoaderData }) {
+  const fetcher = useFetcher();
+  const current = d.participation.status;
+  return (
+    <Stack gap="lg" mt="md" maw={520}>
+      {d.questionsAfter.length > 0 ? (
+        <Stack gap="md">
+          {d.questionsAfter.map((q) => (
+            <QuestionField
+              key={q.id}
+              question={q}
+              value={d.answers[q.id]}
+              locked={d.locked}
+              year={d.year}
+              invitedByName={d.invitedByName}
+              inviterOptions={d.inviterOptions}
+              action="/questions"
+            />
+          ))}
+        </Stack>
+      ) : null}
       <Textarea
-        label="Anything to add? (optional)"
-        placeholder="e.g. arriving late, bringing a friend…"
+        label="Anything to add?"
+        description="Anything else we should know — arriving late, bringing a friend, a question for us…"
         autosize
         minRows={2}
         disabled={d.locked}
@@ -535,36 +628,6 @@ function RsvpStep({ data: d }: { data: LoaderData }) {
   );
 }
 
-function QuestionnaireStep({ data: d }: { data: LoaderData }) {
-  return (
-    <Stack gap="md" mt="md" maw={520}>
-      <Text size="sm" c="dimmed">
-        {d.audience === "recruit"
-          ? "A few questions so we can get to know you."
-          : "A quick check-in to help us plan the camp."}{" "}
-        Answers save as you go.
-      </Text>
-      {d.questions.length === 0 ? (
-        <Text c="dimmed" size="sm">
-          No questions right now — you're good.
-        </Text>
-      ) : (
-        d.questions.map((q) => (
-          <QuestionField
-            key={q.id}
-            question={q}
-            value={d.answers[q.id]}
-            locked={d.locked}
-            year={d.year}
-            invitedByName={d.invitedByName}
-            action="/questions"
-          />
-        ))
-      )}
-    </Stack>
-  );
-}
-
 function ProfileStep({
   data: d,
   fetcher,
@@ -574,9 +637,18 @@ function ProfileStep({
 }) {
   return (
     <Stack gap="sm" mt="md" maw={420}>
-      <Text size="sm">
-        Signed in as <b>{d.userName}</b>.
-      </Text>
+      <TextInput
+        label="Your name"
+        description="Your real / default name on your account."
+        placeholder="e.g. Alex Rivera"
+        defaultValue={d.userName ?? ""}
+        onBlur={(e) =>
+          fetcher.submit(
+            { intent: "saveProfile", name: e.currentTarget.value },
+            { method: "post" },
+          )
+        }
+      />
       <TextInput
         label="Playa name (optional)"
         description="What folks call you out on the playa."

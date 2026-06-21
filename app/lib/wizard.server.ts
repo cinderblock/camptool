@@ -92,7 +92,8 @@ export async function resolveAsk(opts: {
     });
 }
 
-/** Upsert a camper's per-year RSVP. Also resolves the `rsvp` ask. */
+/** Upsert a camper's per-year RSVP. The "coming back?" question now lives inside
+ * the `questionnaire` step, so its ask resolution is handled there — not here. */
 export async function setParticipation(opts: {
   campId: string;
   editionId: string;
@@ -118,11 +119,4 @@ export async function setParticipation(opts: {
         updatedAt: new Date(),
       },
     });
-  await resolveAsk({
-    campId: opts.campId,
-    editionId: opts.editionId,
-    membershipId: opts.membershipId,
-    askKey: "rsvp",
-    status: "done",
-  });
 }

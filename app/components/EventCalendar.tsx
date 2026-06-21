@@ -1,5 +1,6 @@
-import { Box, Text, UnstyledButton } from "@mantine/core";
-import { eventStartFor, eventWindowFor } from "~/lib/brc";
+import { Box, Group, Text, UnstyledButton } from "@mantine/core";
+import { eventDayLabels, eventStartFor, eventWindowFor } from "~/lib/brc";
+import type { EventRange } from "~/lib/questions";
 
 /**
  * A single, consistent calendar centered on the event — the shared primitive for
@@ -7,19 +8,31 @@ import { eventStartFor, eventWindowFor } from "~/lib/brc";
  *
  * It is intentionally NOT a navigable month calendar: there are no prev/next
  * arrows. It renders the fixed span of whole weeks around the event window
- * (`eventWindowFor`), highlights the event days, and lets the user tap a single
- * day to set it. Days outside the window are dimmed and not selectable.
+ * (`eventWindowFor`), highlights the event days, calls out the named days (gates
+ * open, Man burn, Temple burn, exodus), and lets the user tap days to set a value.
+ *
+ * Two modes:
+ *  - `single` (default): tap one day. Driven by `value` / `onChange`.
+ *  - `range`: tap an arrival day, then a departure day — for "when do you arrive
+ *    and leave?". Driven by `range` / `onRangeChange`.
  */
 export function EventCalendar({
   year,
   value,
   onChange,
+  mode = "single",
+  range,
+  onRangeChange,
   disabled,
 }: {
   year: number;
-  /** Selected day as `YYYY-MM-DD`, or null. */
-  value: string | null;
-  onChange: (value: string | null) => void;
+  /** single mode: selected day as `YYYY-MM-DD`, or null. */
+  value?: string | null;
+  onChange?: (value: string | null) => void;
+  mode?: "single" | "range";
+  /** range mode: the arrival/departure pair. */
+  range?: EventRange;
+  onRangeChange?: (range: EventRange) => void;
   disabled?: boolean;
 }) {
   const start = eventStartFor(year); // Sunday gates open
@@ -28,6 +41,7 @@ export function EventCalendar({
   const win = eventWindowFor(year);
   const min = parseYmd(win.min);
   const max = parseYmd(win.max);
+  const named = new Map(eventDayLabels(year).map((d) => [d.date, d.short]));
 
   // Pad out to whole Sun–Sat weeks so the grid columns line up.
   const gridStart = addDays(min, -min.getDay());
@@ -46,6 +60,24 @@ export function EventCalendar({
 
   const inWindow = (d: Date) => d >= min && d <= max;
   const inEvent = (d: Date) => d >= start && d <= eventEnd;
+
+  const arrival = range?.arrival ?? null;
+  const departure = range?.departure ?? null;
+
+  // Tapping in range mode: first tap (or a tap with both already set) starts a new
+  // arrival; a tap before the arrival restarts; tapping the arrival again clears it.
+  const tapRange = (ymd: string) => {
+    if (!onRangeChange) return;
+    if (!arrival || (arrival && departure)) {
+      onRangeChange({ arrival: ymd, departure: null });
+    } else if (ymd < arrival) {
+      onRangeChange({ arrival: ymd, departure: null });
+    } else if (ymd === arrival) {
+      onRangeChange({ arrival: null, departure: null });
+    } else {
+      onRangeChange({ arrival, departure: ymd });
+    }
+  };
 
   return (
     <Box maw={320}>
@@ -71,15 +103,49 @@ export function EventCalendar({
         ))}
         {weeks.flat().map((d) => {
           const ymd = formatYmd(d);
-          const selected = value === ymd;
           const enabled = !disabled && inWindow(d);
           const event = inEvent(d);
           const firstOfMonth = d.getDate() === 1;
+          const callout = named.get(ymd);
+
+          // Selection state differs by mode.
+          const isArrival = mode === "range" && ymd === arrival;
+          const isDeparture = mode === "range" && ymd === departure;
+          const isEndpoint = isArrival || isDeparture;
+          const between =
+            mode === "range" &&
+            !!arrival &&
+            !!departure &&
+            ymd > arrival &&
+            ymd < departure;
+          const singleSelected = mode === "single" && value === ymd;
+          const selected = singleSelected || isEndpoint;
+
+          const bg = singleSelected
+            ? "var(--mantine-color-blue-6)"
+            : isEndpoint
+              ? "var(--mantine-color-green-6)"
+              : between
+                ? "var(--mantine-color-green-light)"
+                : event
+                  ? "var(--mantine-color-blue-light)"
+                  : "transparent";
+          const fg = selected
+            ? "var(--mantine-color-white)"
+            : event
+              ? "var(--mantine-color-blue-7)"
+              : undefined;
+
           return (
             <UnstyledButton
               key={ymd}
               disabled={!enabled}
-              onClick={() => onChange(selected ? null : ymd)}
+              onClick={() =>
+                mode === "range"
+                  ? tapRange(ymd)
+                  : onChange?.(singleSelected ? null : ymd)
+              }
+              title={callout}
               style={{
                 aspectRatio: "1 / 1",
                 borderRadius: "var(--mantine-radius-sm)",
@@ -87,20 +153,12 @@ export function EventCalendar({
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                lineHeight: 1.05,
+                lineHeight: 1.0,
                 cursor: enabled ? "pointer" : "default",
                 opacity: inWindow(d) ? 1 : 0.3,
-                color: selected
-                  ? "var(--mantine-color-white)"
-                  : event
-                    ? "var(--mantine-color-blue-7)"
-                    : undefined,
+                color: fg,
                 fontWeight: event || selected ? 700 : 400,
-                backgroundColor: selected
-                  ? "var(--mantine-color-blue-6)"
-                  : event
-                    ? "var(--mantine-color-blue-light)"
-                    : "transparent",
+                backgroundColor: bg,
                 border: enabled
                   ? "1px solid var(--mantine-color-default-border)"
                   : "1px solid transparent",
@@ -114,26 +172,49 @@ export function EventCalendar({
               <Text span fz="sm" lh={1}>
                 {d.getDate()}
               </Text>
+              {callout ? (
+                <Text
+                  span
+                  fz={8}
+                  lh={1}
+                  mt={1}
+                  c={selected ? "white" : "blue.7"}
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  {callout}
+                </Text>
+              ) : null}
             </UnstyledButton>
           );
         })}
       </Box>
-      <Text size="xs" c="dimmed" mt={6}>
-        <Box
-          component="span"
-          mr={4}
-          style={{
-            display: "inline-block",
-            width: 10,
-            height: 10,
-            borderRadius: 2,
-            backgroundColor: "var(--mantine-color-blue-light)",
-            verticalAlign: "middle",
-          }}
-        />
-        Event days
-      </Text>
+      <Group gap="md" mt={6}>
+        <Legend color="var(--mantine-color-blue-light)" label="Event days" />
+        {mode === "range" ? (
+          <Legend color="var(--mantine-color-green-6)" label="Your stay" />
+        ) : null}
+      </Group>
     </Box>
+  );
+}
+
+function Legend({ color, label }: { color: string; label: string }) {
+  return (
+    <Text size="xs" c="dimmed">
+      <Box
+        component="span"
+        mr={4}
+        style={{
+          display: "inline-block",
+          width: 10,
+          height: 10,
+          borderRadius: 2,
+          backgroundColor: color,
+          verticalAlign: "middle",
+        }}
+      />
+      {label}
+    </Text>
   );
 }
 
