@@ -107,7 +107,38 @@ function flyingButtress(
   const sticks: Pt[] = [V[2], V[3], V[4], V[5]].filter(
     (p): p is Pt => p !== undefined,
   );
-  return { flying, sticks, verts: V };
+  const verts: Pt[] = [...V];
+
+  // --- Front extension: a flying-shade strip continuing PARTWAY along the front
+  // edge (A→C, a fixed side — the Mirror toggle swaps it). A row of equilateral
+  // triangles just outside the edge, with support sticks at the outer vertices. ---
+  const C: Pt = [w, h];
+  const cl = Math.hypot(C[0] - A[0], C[1] - A[1]) || 1;
+  const uAC: Pt = [(C[0] - A[0]) / cl, (C[1] - A[1]) / cl]; // unit A→C
+  const nAC: Pt = [uAC[1], -uAC[0]]; // outward normal (away from interior)
+  const triH = edge * SQRT3_2;
+  const onEdge = (t: number): Pt => [A[0] + uAC[0] * t, A[1] + uAC[1] * t];
+  const onOuter = (t: number): Pt => [
+    A[0] + uAC[0] * t + nAC[0] * triH,
+    A[1] + uAC[1] * t + nAC[1] * triH,
+  ];
+  const startT = edge; // begin just past the hexagon
+  const bays = 2; // partway across the 4-edge front
+  for (let i = 0; i < bays; i++) {
+    const b0 = onEdge(startT + i * edge);
+    const b1 = onEdge(startT + (i + 1) * edge);
+    const t0 = onOuter(startT + (i + 0.5) * edge);
+    flying.push([b0, b1, t0]); // upright
+    sticks.push(t0);
+    verts.push(b0, b1, t0);
+    if (i < bays - 1) {
+      const t1 = onOuter(startT + (i + 1.5) * edge);
+      flying.push([b1, t0, t1]); // inverted, fills the bay
+      verts.push(t1);
+    }
+  }
+
+  return { flying, sticks, verts };
 }
 
 /** Two-line label centered at (x,y), in feet. `rotation` is the object's rotation
