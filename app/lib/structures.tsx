@@ -38,6 +38,7 @@ const CORE_KINDS = [
     personal: true,
   },
   // Regular hexagon, 8ft edges → 16ft point-to-point, 8√3 ≈ 13.86ft flat-to-flat.
+  // Standard hexayurt: 4ft walls + a 2ft pyramidal roof → a fixed 6ft peak.
   {
     value: "hexayurt",
     label: "Hexayurt",
@@ -47,6 +48,7 @@ const CORE_KINDS = [
     shape: "hexagon",
     vehicle: false,
     rigid: true,
+    fixedTall: true,
     group: "Domiciles",
     tags: ["domicile"],
     personal: true,
@@ -243,7 +245,9 @@ export const KINDS: readonly CampStructure[] = [
  * height and as the fallback for the 2D shade simulation when height is unset. */
 const KIND_HEIGHTS: Record<string, number> = {
   tent: 7,
-  hexayurt: 8,
+  // 4ft walls + 2ft roof = 6ft peak (the roof is the height of an 8ft equilateral
+  // triangle's apex over its base... ≈ 2ft rise). Fixed (fixedTall).
+  hexayurt: 6,
   // Hyparhut roof peaks at 6' (front-right corner, by the door) and dips to 4';
   // this is the peak. Per-corner heights for shade live in map.tsx cornerHeights.
   hyparhut: 6,

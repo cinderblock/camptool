@@ -1309,16 +1309,21 @@ function coreShadedFaces(
   tall: number,
 ): Array<{ points: Array<{ x: number; y: number }>; shade: number }> {
   if (kind !== "hexayurt" || tall <= 0) return [];
+  // Standard hexayurt: 4ft walls, a 2ft pyramidal roof → 6ft peak. The roof facets
+  // (what self-shade) rise from the wall-top ring to the center peak, so compute
+  // the normals from that real 2ft pitch, not from the ground.
+  const WALL_H = 4;
+  const PEAK_H = 6;
   const verts = hexVertices(0, 0, w, h); // 6 corners (local feet)
   const cx = w / 2;
   const cy = h / 2;
-  const apex: Vec3 = [cx, cy, tall];
-  const center: Vec3 = [cx, cy, 0];
+  const apex: Vec3 = [cx, cy, PEAK_H];
+  const center: Vec3 = [cx, cy, WALL_H];
   const S: Vec3 = [sun.x, sun.y, sun.up];
   return verts.map((p, i) => {
     const q = verts[(i + 1) % verts.length] ?? p;
-    const P: Vec3 = [p.x, p.y, 0];
-    const Q: Vec3 = [q.x, q.y, 0];
+    const P: Vec3 = [p.x, p.y, WALL_H];
+    const Q: Vec3 = [q.x, q.y, WALL_H];
     let n = v3cross(v3sub(Q, P), v3sub(apex, P));
     const m: Vec3 = [
       (P[0] + Q[0] + apex[0]) / 3,
