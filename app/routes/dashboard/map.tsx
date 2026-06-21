@@ -2353,6 +2353,15 @@ function Editor({
     ? "var(--mantine-color-dark-4)"
     : "var(--mantine-color-default)";
   const shadowFill = dark ? "#000000" : "#1c1c1c";
+  // Sun direction in the plot plane (toward the sun), used to offset the dome's
+  // spherical-shading highlight toward the sun. Faint near the horizon.
+  const toSun =
+    mapUpBearing != null
+      ? bearingToPlotDelta(sun.azimuth, 1, mapUpBearing)
+      : { dx: 0, dy: 0 };
+  const domeFx = 0.5 + toSun.dx * 0.32;
+  const domeFy = 0.5 + toSun.dy * 0.32;
+  const domeShadeOn = showShade && mapUpBearing != null && sun.altitude > 0.5;
 
   const fx = (sx: number) => (sx - originX) / ppf;
   const fy = (sy: number) => (sy - originY) / ppf;
@@ -2891,6 +2900,21 @@ function Editor({
                 <stop offset="0" stopColor="#ffffff" stopOpacity={0.62} />
                 <stop offset="1" stopColor="#000000" stopOpacity={0.32} />
               </radialGradient>
+              {/* Geodesic dome: a sphere highlight offset TOWARD the sun (fx,fy),
+              fading to a dark far side — so the dome reads as round and the lit
+              side tracks the sun. */}
+              <radialGradient
+                id="dome-sphere"
+                cx="0.5"
+                cy="0.5"
+                r="0.62"
+                fx={domeFx}
+                fy={domeFy}
+              >
+                <stop offset="0" stopColor="#ffffff" stopOpacity={0.55} />
+                <stop offset="0.45" stopColor="#ffffff" stopOpacity={0} />
+                <stop offset="1" stopColor="#000000" stopOpacity={0.5} />
+              </radialGradient>
             </defs>
             <clipPath id={clipId}>
               <polygon points={lotPoints} />
@@ -3137,6 +3161,25 @@ function Editor({
                     />
                   ));
                 })
+              : null}
+            {/* Geodesic domes: a spherical shading overlay whose lit side tracks
+            the sun, so a dome reads as a 3D sphere. */}
+            {domeShadeOn
+              ? objects.flatMap((o) =>
+                  kindDef(o.kind).shape === "dome"
+                    ? [
+                        <ellipse
+                          key={`sphere-${o.id}`}
+                          cx={originX + (o.x + o.width / 2) * ppf}
+                          cy={originY + (o.y + o.height / 2) * ppf}
+                          rx={(o.width / 2) * ppf}
+                          ry={(o.height / 2) * ppf}
+                          fill="url(#dome-sphere)"
+                          pointerEvents="none"
+                        />,
+                      ]
+                    : [],
+                )
               : null}
             {/* Power lines: open polylines drawn over the structures (a planning
             overlay), each labeled with its total run length. */}
