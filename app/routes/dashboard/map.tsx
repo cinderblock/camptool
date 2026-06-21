@@ -3915,13 +3915,12 @@ const MapObjectShape = memo(
             />
           ) : null}
           {overflow ? (
-            // The footprint crosses the lot border (its center is still inside) —
-            // flag it so the officer knows it overhangs.
-            <rect
-              x={px}
-              y={py}
-              width={w}
-              height={h}
+            // The footprint crosses the lot border — flag it tracing the REAL
+            // outline (triangle/hexagon/…), not a bounding box.
+            <polygon
+              points={footprintOutline(o.kind, o.width, o.height)
+                .map(([lx, ly]) => `${cx + lx * ppf},${cy + ly * ppf}`)
+                .join(" ")}
               fill="none"
               stroke="#fa5252"
               strokeWidth={2.5}
