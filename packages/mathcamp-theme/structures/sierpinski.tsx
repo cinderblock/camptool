@@ -57,6 +57,54 @@ function sierpCells(a: Pt, b: Pt, c: Pt, depth: number, out: Cell[]) {
 const tri = (a: Pt, b: Pt, c: Pt) =>
   `${a[0]},${a[1]} ${b[0]},${b[1]} ${c[0]},${c[1]}`;
 
+/** Rotate a vector by `deg` (screen coords, +y down). */
+function rot(v: Pt, deg: number): Pt {
+  const r = (deg * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  return [v[0] * c - v[1] * s, v[0] * s + v[1] * c];
+}
+
+/**
+ * Flying-buttress canopy at the **bar corner** (A). A hexagon of 6 equilateral
+ * triangles shares its apex at A (edge = the 10′ small-tetra edge): one sits
+ * INSIDE the pyramid, the other **5 fly OUTSIDE** the footprint — the flying
+ * shade. The outer flying vertices get support sticks to the ground. The whole
+ * canopy floats at ~8′2″. Returns the 5 flying triangles + the stick footings
+ * (object-local feet, in the 0,0→(w,h) frame).
+ */
+function flyingButtress(
+  w: number,
+  h: number,
+): {
+  flying: [Pt, Pt, Pt][];
+  sticks: Pt[];
+} {
+  const A: Pt = [w / 2, 0]; // bar corner
+  const B: Pt = [0, h];
+  const edge = w / 4; // 10′ for a 40′ pyramid
+  const dl = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
+  const u: Pt = [(B[0] - A[0]) / dl, (B[1] - A[1]) / dl]; // unit A→B
+  // 6 hexagon vertices around A (V0 = 10′ toward B, V1 = toward C, then around).
+  const V: Pt[] = [];
+  for (let k = 0; k < 6; k++) {
+    const d = rot(u, -60 * k);
+    V.push([A[0] + d[0] * edge, A[1] + d[1] * edge]);
+  }
+  // Triangle (A,V0,V1) is inside; the next 5 fly outside.
+  const flying: [Pt, Pt, Pt][] = [];
+  for (let k = 1; k < 6; k++) {
+    const vk = V[k];
+    const vn = V[(k + 1) % 6];
+    if (vk && vn) flying.push([A, vk, vn]);
+  }
+  // The outer (flying) vertices need legs to the ground.
+  const sticks: Pt[] = [V[2], V[3], V[4], V[5]].filter(
+    (p): p is Pt => p !== undefined,
+  );
+  return { flying, sticks };
+}
+
 /** Two-line label centered at (x,y), in feet. `rotation` is the object's rotation
  * (deg); we counter-rotate the text by `-rotation` about its anchor so it stays
  * upright to the map even as the pyramid spins. */
@@ -155,6 +203,36 @@ function renderFootprint({
         stroke={selected ? "#1c1c1c" : "#7a5c3e"}
         strokeWidth={selected ? 0.8 : 0.5}
       />
+      {/* Flying buttress: the elevated (~8′) flying-shade canopy at the bar
+          corner — 5 triangles flying outside the footprint, dashed to read as
+          "above ground", with support-stick footings. */}
+      {(() => {
+        const bt = flyingButtress(w, h);
+        return (
+          <g>
+            {bt.flying.map((t) => (
+              <polygon
+                key={`fly-${tri(t[0], t[1], t[2])}`}
+                points={tri(t[0], t[1], t[2])}
+                fill={TAN}
+                fillOpacity={0.5}
+                stroke="#7a5c3e"
+                strokeWidth={0.25}
+                strokeDasharray="1 0.7"
+              />
+            ))}
+            {bt.sticks.map((p) => (
+              <circle
+                key={`stick-${p[0].toFixed(1)},${p[1].toFixed(1)}`}
+                cx={p[0]}
+                cy={p[1]}
+                r={0.7}
+                fill="#7a5c3e"
+              />
+            ))}
+          </g>
+        );
+      })()}
       {labels.map((l) => (
         <Label
           key={`${l.lines.join()}-${l.at[0].toFixed(1)}`}
