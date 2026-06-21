@@ -4275,8 +4275,14 @@ function SidePanel({
                   onChange={(v) =>
                     patch(selected.id, { tallFt: Number(v) || 0 })
                   }
-                  onBlur={() =>
-                    commitField(selected.id, "tallFt", round(selected.tallFt))
+                  // Commit the live input value (not a possibly-stale `selected`
+                  // closure, which could re-save the old height and revert it).
+                  onBlur={(e) =>
+                    commitField(
+                      selected.id,
+                      "tallFt",
+                      Math.max(0, round(Number(e.currentTarget.value) || 0)),
+                    )
                   }
                 />
               )}
