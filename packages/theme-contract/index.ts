@@ -102,6 +102,11 @@ export type CampStructure = Kind & {
   /** Optional legend/tray icon (square, `size` px). Falls back to a generic
    * glyph derived from the footprint when omitted. */
   renderIcon?: (size: number) => ReactNode;
+  /** Optional true footprint outline (object-local **centered** feet, origin =
+   * object center) — the real plan shape, e.g. the pyramid's base triangle. Core
+   * uses it for border-overlap checks (and the generic shade outline) instead of
+   * the bounding box, so a rotated non-rect footprint is tested accurately. */
+  footprint?: (w: number, h: number) => ReadonlyArray<{ x: number; y: number }>;
   /** Optional 3D silhouette for the shade sim (object-local centered feet +
    * height fraction). When present, the core casts the convex hull of these
    * vertices projected away from the sun instead of extruding the footprint's

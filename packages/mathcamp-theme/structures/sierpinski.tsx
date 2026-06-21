@@ -224,6 +224,16 @@ function renderIcon(size: number): ReactNode {
   );
 }
 
+/** The true footprint outline (object-local centered feet): the base triangle.
+ * Used for accurate border-overlap checks instead of the bounding box. */
+function footprint(w: number, h: number): Array<{ x: number; y: number }> {
+  return [
+    { x: 0, y: -h / 2 }, // top corner
+    { x: -w / 2, y: h / 2 }, // bottom-left
+    { x: w / 2, y: h / 2 }, // bottom-right
+  ];
+}
+
 /** Feet the Pi-symbol stick rises above the tetra apex. */
 const PI_STICK_FT = 6;
 
@@ -316,6 +326,7 @@ export const sierpinskiPyramid: CampStructure = {
   personal: false, // officer-placed communal landmark
   tallFt: TETRA_TALL_FT,
   fixedTall: true, // a regular tetra — height is geometric, not user-set
+  footprint,
   renderFootprint,
   renderIcon,
   shadowVolume,

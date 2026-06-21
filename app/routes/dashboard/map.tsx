@@ -1167,7 +1167,15 @@ function convexHull(pts: ZonePt[]): ZonePt[] {
 /** The footprint outline (object-local feet, centered on the object) used to cast
  * shade — the real shape, so a hexayurt throws a hexagonal shadow, not a box. */
 function footprintLocal(o: ObjRow): Array<[number, number]> {
-  const shape = kindDef(o.kind).shape;
+  const def = kindDef(o.kind);
+  // A camp-theme structure can declare its true outline (e.g. the pyramid's
+  // base triangle); use it instead of the bounding box.
+  if (def.footprint) {
+    return def
+      .footprint(o.width, o.height)
+      .map((p) => [p.x, p.y] as [number, number]);
+  }
+  const shape = def.shape;
   if (shape === "hexagon") {
     return hexVertices(0, 0, o.width, o.height).map(
       (p) => [p.x - o.width / 2, p.y - o.height / 2] as [number, number],
@@ -1458,15 +1466,9 @@ function objectOverflowsLot(
 ): boolean {
   const cx = o.x + o.width / 2;
   const cy = o.y + o.height / 2;
-  const hw = o.width / 2;
-  const hh = o.height / 2;
-  const corners: Array<[number, number]> = [
-    [-hw, -hh],
-    [hw, -hh],
-    [hw, hh],
-    [-hw, hh],
-  ];
-  for (const [lx, ly] of corners) {
+  // Test the object's REAL footprint outline (triangle, hexagon, …), rotated —
+  // not a bounding box, so a rotated non-rect shape isn't falsely flagged.
+  for (const [lx, ly] of footprintLocal(o)) {
     const v = rotateVec(lx, ly, o.rotation);
     if (!pointInLot(cx + v.x, cy + v.y, frontageFt, depthFt, rear)) return true;
   }
@@ -2280,9 +2282,9 @@ function Editor({
   // dark shadow barely reads — we lighten the ground AND push the shadow darker +
   // more opaque so the shaded area still stands out.
   const sunStrength = Math.sin((Math.max(sun.altitude, 0) * Math.PI) / 180);
-  const shadeOpacity = dark
-    ? 0.35 + 0.45 * sunStrength
-    : 0.08 + 0.28 * sunStrength;
+  // Scales fully with the sun's strength (no constant floor) so shadows fade to
+  // nothing at the sunrise/sunset extremes; dark mode runs darker for contrast.
+  const shadeOpacity = (dark ? 0.85 : 0.36) * sunStrength;
   // In dark mode the lot ground is a lighter dark-surface (so a near-black shadow
   // clearly stands out against it); in light mode it stays the default white-ish.
   const groundFill = dark
