@@ -109,28 +109,32 @@ function flyingButtress(
   );
   const verts: Pt[] = [...V];
 
-  // --- Front extension: CONTINUE the hexagon's own triangular lattice as a strip
-  // running outward (the V2 direction = one lattice step `bStep`; the Mirror toggle
-  // swaps the side). The strip shares the hexagon's V2–V3 edge so it's contiguous,
-  // and flies outside the footprint. Bottom row = V2 + k·bStep; top row = V3 + k·bStep.
-  const v2 = V[2];
-  const v3 = V[3];
-  if (v2 && v3) {
-    const bStep: Pt = [v2[0] - O[0], v2[1] - O[1]]; // one lattice step (= 10·d2)
-    const bays = 3; // partway
-    const row = (base: Pt, k: number): Pt => [
-      base[0] + k * bStep[0],
-      base[1] + k * bStep[1],
-    ];
-    for (let k = 0; k < bays; k++) {
-      const Bk = row(v2, k);
-      const Bk1 = row(v2, k + 1);
-      const Tk = row(v3, k);
-      const Tk1 = row(v3, k + 1);
-      flying.push([Tk, Bk, Tk1]); // apex-down (outer)
-      flying.push([Bk, Tk1, Bk1]); // apex-up
-      sticks.push(Tk1);
-      verts.push(Bk, Bk1, Tk, Tk1);
+  // --- Front extension: a flying-shade strip running ALONG the front edge (A→C,
+  // a fixed side — Mirror swaps it to A→B), hugging it on the OUTSIDE. Bases sit on
+  // the edge, apexes point outward, so the band stays adjacent to the pyramid in
+  // any rotation (rather than jutting off in a fixed direction). Partway toward C. ---
+  const C: Pt = [w, h];
+  const cl = Math.hypot(C[0] - A[0], C[1] - A[1]) || 1;
+  const uAC: Pt = [(C[0] - A[0]) / cl, (C[1] - A[1]) / cl]; // unit A→C
+  const nAC: Pt = [uAC[1], -uAC[0]]; // outward normal (away from the interior)
+  const triH = edge * SQRT3_2;
+  const onEdge = (t: number): Pt => [A[0] + uAC[0] * t, A[1] + uAC[1] * t];
+  const onOut = (t: number): Pt => [
+    A[0] + uAC[0] * t + nAC[0] * triH,
+    A[1] + uAC[1] * t + nAC[1] * triH,
+  ];
+  const bays = 3; // partway along the 40′ edge
+  for (let k = 0; k < bays; k++) {
+    const e0 = onEdge(k * edge);
+    const e1 = onEdge((k + 1) * edge);
+    const tk = onOut((k + 0.5) * edge);
+    flying.push([e0, e1, tk]); // apex out
+    sticks.push(tk);
+    verts.push(e0, e1, tk);
+    if (k < bays - 1) {
+      const tk1 = onOut((k + 1.5) * edge);
+      flying.push([e1, tk, tk1]); // inverted, fills the bay
+      verts.push(tk1);
     }
   }
 
@@ -206,16 +210,16 @@ function renderFootprint({
   const edge = Math.min(w, h / SQRT3_2); // current edge length (feet)
   const fs = Math.max(1.4, edge * 0.06); // label font ~2.4′ at 40′ edge
 
-  // Labels sit in each outer corner (the 3 ground medium tetras), pulled in
-  // toward the apex so they land inside the footprint.
+  // Labels pulled in toward the apex so they land inside the footprint. The bar is
+  // its own corner; the two lecture-hall corners share ONE label at their midpoint.
   const lerp = (p: Pt, q: Pt, t: number): Pt => [
     p[0] + (q[0] - p[0]) * t,
     p[1] + (q[1] - p[1]) * t,
   ];
+  const bcMid: Pt = [(B[0] + C[0]) / 2, (B[1] + C[1]) / 2];
   const labels: { at: Pt; lines: string[] }[] = [
     { at: lerp(A, G, 0.42), lines: ["Group W", "Bar"] },
-    { at: lerp(B, G, 0.42), lines: ["lecture", "hall"] },
-    { at: lerp(C, G, 0.42), lines: ["lecture", "hall"] },
+    { at: lerp(bcMid, G, 0.42), lines: ["lecture", "hall"] },
   ];
 
   const bt = flyingButtress(w, h);
