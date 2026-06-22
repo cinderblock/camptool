@@ -4138,22 +4138,6 @@ function Compass({
             ]}
             label={(v) => (v === 0 ? "off" : String(v))}
           />
-          {windOn ? (
-            <>
-              <Text size="xs" fw={500} mt={8}>
-                Strength
-              </Text>
-              <Slider
-                size="sm"
-                min={WIND_MIN}
-                max={WIND_MAX}
-                step={0.1}
-                value={windStrength}
-                onChange={setWindStrength}
-                label={(v) => `${v.toFixed(1)}×`}
-              />
-            </>
-          ) : null}
         </>
       ) : (
         <Text size="xs" c="dimmed" mt={4}>
@@ -4235,6 +4219,9 @@ function WindLayer({
   const stateRef = useRef({ field, originX, originY, ppf });
   stateRef.current = { field, originX, originY, ppf };
   const lineRefs = useRef<Array<SVGLineElement | null>>([]);
+  const dotRefs = useRef<Array<SVGCircleElement | null>>([]);
+  // Tail length in feet (fixed, so the comet look doesn't depend on frame rate).
+  const TAIL_FT = 5;
 
   const streamlines = useMemo(
     () => (reduced ? traceStreamlines(field) : null),
@@ -4243,12 +4230,10 @@ function WindLayer({
 
   useEffect(() => {
     if (reduced) return;
-    type P = { fx: number; fy: number; pfx: number; pfy: number; life: number };
+    type P = { fx: number; fy: number; life: number };
     const parts: P[] = Array.from({ length: count }, () => ({
       fx: 0,
       fy: 0,
-      pfx: 0,
-      pfy: 0,
       life: 0,
     }));
     const bounds = () => {
@@ -4269,8 +4254,6 @@ function WindLayer({
         if (!sampleFlow(f, fx, fy).solid) {
           p.fx = fx;
           p.fy = fy;
-          p.pfx = fx;
-          p.pfy = fy;
           p.life = (fresh ? Math.random() : 1) * 2.5 + 0.8;
           return;
         }
@@ -4296,20 +4279,30 @@ function WindLayer({
         if (p.life <= 0 || s.solid || out) {
           respawn(p, false);
         } else {
-          p.pfx = p.fx;
-          p.pfy = p.fy;
           p.fx += s.x * dt * WIND_SPEED_FT_S;
           p.fy += s.y * dt * WIND_SPEED_FT_S;
         }
         const ln = lineRefs.current[i];
+        const dot = dotRefs.current[i];
+        // Comet: a head dot at the particle, and a fixed-length tail pointing
+        // upstream (along −velocity), so motion reads clearly as flowing particles.
+        const inv = spd > 1e-4 ? TAIL_FT / spd : 0;
+        const hx = ox + p.fx * pf;
+        const hy = oy + p.fy * pf;
+        const tlx = ox + (p.fx - s.x * inv) * pf;
+        const tly = oy + (p.fy - s.y * inv) * pf;
+        const op = clamp(0.2 + spd * 0.45, 0, 0.9) * Math.min(1, p.life * 1.5);
         if (ln) {
-          ln.setAttribute("x1", String(ox + p.pfx * pf));
-          ln.setAttribute("y1", String(oy + p.pfy * pf));
-          ln.setAttribute("x2", String(ox + p.fx * pf));
-          ln.setAttribute("y2", String(oy + p.fy * pf));
-          const op =
-            clamp(0.12 + spd * 0.5, 0, 0.85) * Math.min(1, p.life * 1.5);
-          ln.setAttribute("opacity", String(op));
+          ln.setAttribute("x1", String(tlx));
+          ln.setAttribute("y1", String(tly));
+          ln.setAttribute("x2", String(hx));
+          ln.setAttribute("y2", String(hy));
+          ln.setAttribute("opacity", String(op * 0.7));
+        }
+        if (dot) {
+          dot.setAttribute("cx", String(hx));
+          dot.setAttribute("cy", String(hy));
+          dot.setAttribute("opacity", String(op));
         }
       }
       raf = requestAnimationFrame(step);
@@ -4341,16 +4334,29 @@ function WindLayer({
   }
   return (
     <g clipPath={`url(#${clipId})`} pointerEvents="none">
+      {/* Each particle = a tail (line) + head (dot); positions set imperatively. */}
       {Array.from({ length: count }, (_, i) => (
         <line
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size particle pool — index is the stable identity
-          key={`wp-${i}`}
+          key={`wt-${i}`}
           ref={(el) => {
             lineRefs.current[i] = el;
           }}
           stroke={color}
-          strokeWidth={1.6}
+          strokeWidth={1.4}
           strokeLinecap="round"
+          opacity={0}
+        />
+      ))}
+      {Array.from({ length: count }, (_, i) => (
+        <circle
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size particle pool — index is the stable identity
+          key={`wd-${i}`}
+          ref={(el) => {
+            dotRefs.current[i] = el;
+          }}
+          r={1.8}
+          fill={color}
           opacity={0}
         />
       ))}
