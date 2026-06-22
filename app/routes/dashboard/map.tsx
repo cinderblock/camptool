@@ -4148,47 +4148,7 @@ function Compass({
   );
 }
 
-/** True when the user asked the OS to reduce motion (we then show static
- * streamlines instead of animated wind particles). */
-function usePrefersReducedMotion() {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    const m = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReduced(m.matches);
-    update();
-    m.addEventListener("change", update);
-    return () => m.removeEventListener("change", update);
-  }, []);
-  return reduced;
-}
-
 const WIND_SPEED_FT_S = 26; // visual feet/sec per unit wind speed
-
-/** Trace a sparse set of streamlines (feet polylines) through the field — the
- * static, reduced-motion fallback for the animated particles. */
-function traceStreamlines(field: FlowField): Array<Array<[number, number]>> {
-  const lines: Array<Array<[number, number]>> = [];
-  const seed = Math.max(2, Math.round(field.nx / 14));
-  const stepFt = field.cell * 0.7;
-  for (let j = 1; j < field.ny - 1; j += seed) {
-    for (let i = 1; i < field.nx - 1; i += seed) {
-      let fx = field.x0 + i * field.cell;
-      let fy = field.y0 + j * field.cell;
-      if (sampleFlow(field, fx, fy).solid) continue;
-      const pts: Array<[number, number]> = [[fx, fy]];
-      for (let s = 0; s < 80; s++) {
-        const v = sampleFlow(field, fx, fy);
-        const mag = Math.hypot(v.x, v.y);
-        if (v.solid || mag < 1e-3) break;
-        fx += (v.x / mag) * stepFt;
-        fy += (v.y / mag) * stepFt;
-        pts.push([fx, fy]);
-      }
-      if (pts.length > 3) lines.push(pts);
-    }
-  }
-  return lines;
-}
 
 /** Animated prevailing-wind layer: a fixed pool of particles advected through the
  * flow field and drawn as short streaks. Animation runs imperatively in a
@@ -4213,7 +4173,6 @@ function WindLayer({
   clipId: string;
   count: number;
 }) {
-  const reduced = usePrefersReducedMotion();
   const color = dark ? "#a5d8ff" : "#1971c2";
   // Latest props for the rAF loop (which doesn't depend on them, so it persists).
   const stateRef = useRef({ field, originX, originY, ppf });
@@ -4223,13 +4182,10 @@ function WindLayer({
   // Tail length in feet (fixed, so the comet look doesn't depend on frame rate).
   const TAIL_FT = 5;
 
-  const streamlines = useMemo(
-    () => (reduced ? traceStreamlines(field) : null),
-    [reduced, field],
-  );
-
+  // The wind sim is opt-in (enabled via the particle slider), so we always
+  // animate — we don't downgrade to static streamlines under prefers-reduced-
+  // motion, which would otherwise silently freeze a feature the user turned on.
   useEffect(() => {
-    if (reduced) return;
     type P = { fx: number; fy: number; life: number };
     const parts: P[] = Array.from({ length: count }, () => ({
       fx: 0,
@@ -4309,29 +4265,8 @@ function WindLayer({
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [reduced, count]);
+  }, [count]);
 
-  if (reduced) {
-    return (
-      <g clipPath={`url(#${clipId})`} pointerEvents="none">
-        {streamlines?.map((pts, i) => (
-          <path
-            key={`wsl-${i}-${pts.length}`}
-            d={pts
-              .map(
-                ([px, py], k) =>
-                  `${k === 0 ? "M" : "L"} ${originX + px * ppf} ${originY + py * ppf}`,
-              )
-              .join(" ")}
-            fill="none"
-            stroke={color}
-            strokeWidth={1.2}
-            opacity={0.5}
-          />
-        ))}
-      </g>
-    );
-  }
   return (
     <g clipPath={`url(#${clipId})`} pointerEvents="none">
       {/* Each particle = a tail (line) + head (dot); positions set imperatively. */}
