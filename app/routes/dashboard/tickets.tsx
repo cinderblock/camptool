@@ -20,6 +20,7 @@ import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
+import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -651,6 +652,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
             ) : null}
           </>
         ) : null}
+        <BurningManDisclaimer />
       </Stack>
     </Container>
   );

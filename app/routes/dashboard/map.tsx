@@ -31,6 +31,7 @@ import {
   useState,
 } from "react";
 import { data, useFetcher } from "react-router";
+import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import {
   CURRENT_EVENT_YEAR,
   clockOptions,
@@ -1816,6 +1817,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             {lot.frontsToMan ? "" : " · mountain-facing"}
           </Text>
         </div>
+        <BurningManDisclaimer mt={0} />
       </Group>
 
       <Group

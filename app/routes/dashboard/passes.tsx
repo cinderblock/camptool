@@ -20,6 +20,7 @@ import dayjs from "dayjs";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
+import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { setupPassWindowFor } from "~/lib/brc";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -559,6 +560,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
             </Card>
           </>
         ) : null}
+        <BurningManDisclaimer />
       </Stack>
     </Container>
   );
