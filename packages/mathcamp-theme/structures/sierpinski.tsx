@@ -76,10 +76,11 @@ function rot(v: Pt, deg: number): Pt {
 function flyingButtress(
   w: number,
   h: number,
+  ext: number, // 0–4 extension triangles beyond the hexagon
 ): {
   flying: [Pt, Pt, Pt][];
   sticks: Pt[];
-  verts: Pt[]; // the 6 hexagon vertices (for the cast shadow)
+  verts: Pt[]; // hexagon + extension vertices (for the cast shadow)
 } {
   const A: Pt = [w / 2, 0]; // bar corner
   const B: Pt = [0, h];
@@ -111,29 +112,36 @@ function flyingButtress(
 
   // --- Front extension: CONTINUE the hexagon's triangular grid along the front
   // edge (the d1 / A→C direction; Mirror swaps it to A→B). It STRADDLES the edge —
-  // an inner row of lattice points (O + k·a, inside the footprint) and an outer row
-  // (O + k·a + b, outside) — so the strip is the same grid as the hexagon, half
-  // over the pyramid and half flying past the edge. Sticks at the outer vertices. ---
+  // a strip of `ext` (0–4) extra triangles whose vertices alternate inner (over the
+  // footprint) / outer (flying past the edge). The very first grid triangle exactly
+  // re-draws hexagon triangle T1, so we skip it. Sticks at the outer vertices. ---
   const v1 = V[1];
   const v2 = V[2];
-  if (v1 && v2) {
+  const n = Math.max(0, Math.min(4, Math.round(ext)));
+  if (v1 && v2 && n > 0) {
     const a: Pt = [v1[0] - O[0], v1[1] - O[1]]; // grid step toward C (along the edge)
     const b: Pt = [v2[0] - O[0], v2[1] - O[1]]; // grid step to the outer side
-    const inner = (k: number): Pt => [O[0] + k * a[0], O[1] + k * a[1]];
-    const outer = (k: number): Pt => [
-      O[0] + k * a[0] + b[0],
-      O[1] + k * a[1] + b[1],
-    ];
-    const bays = 3; // partway along the edge
-    for (let k = 0; k < bays; k++) {
-      const i0 = inner(k);
-      const o0 = outer(k);
-      const i1 = inner(k + 1);
-      const o1 = outer(k + 1);
-      flying.push([i0, o0, i1]);
-      flying.push([o0, i1, o1]);
-      sticks.push(o0); // the OUTER (flying) vertices need legs
-      verts.push(i0, o0, i1, o1);
+    // Strip vertices alternate inner/outer along the grid: i0,o0,i1,o1,…
+    const strip: { p: Pt; outer: boolean }[] = [];
+    for (let k = 0; k <= 4; k++) {
+      strip.push({ p: [O[0] + k * a[0], O[1] + k * a[1]], outer: false });
+      strip.push({
+        p: [O[0] + k * a[0] + b[0], O[1] + k * a[1] + b[1]],
+        outer: true,
+      });
+    }
+    // Triangles are consecutive triples; index 0 (= hexagon T1) is skipped.
+    for (let t = 1; t <= n; t++) {
+      const p0 = strip[t];
+      const p1 = strip[t + 1];
+      const p2 = strip[t + 2];
+      if (p0 && p1 && p2) {
+        flying.push([p0.p, p1.p, p2.p]);
+        for (const v of [p0, p1, p2]) {
+          verts.push(v.p);
+          if (v.outer) sticks.push(v.p);
+        }
+      }
     }
   }
 
@@ -188,12 +196,18 @@ function Label({
  * tetras → the "Group W Bar" / "lecture hall" labels; the apex (center) carries
  * the Pi stick.
  */
+/** Default number of flying-buttress extension triangles (0–4, adjustable). */
+const BUTTRESS_EXT_DEFAULT = 2;
+const buttressExt = (config: Record<string, number>) =>
+  config.buttressExt ?? BUTTRESS_EXT_DEFAULT;
+
 function renderFootprint({
   w,
   h,
   selected,
   rotation,
   mirror,
+  config,
 }: FootprintCtx): ReactNode {
   const A: Pt = [w / 2, 0]; // base corner (footprint top)
   const B: Pt = [0, h]; // base corner (bottom-left)
@@ -221,7 +235,7 @@ function renderFootprint({
     { at: lerp(bcMid, G, 0.42), lines: ["lecture", "hall"] },
   ];
 
-  const bt = flyingButtress(w, h);
+  const bt = flyingButtress(w, h, buttressExt(config));
   return (
     <g>
       {/* Geometry reflects under mirror (x→w−x); text stays upright (drawn after,
@@ -336,13 +350,23 @@ function renderIcon(size: number): ReactNode {
   );
 }
 
-/** The true footprint outline (object-local centered feet): the base triangle.
- * Used for accurate border-overlap checks instead of the bounding box. */
-function footprint(w: number, h: number): Array<{ x: number; y: number }> {
+/** The true footprint outline (object-local centered feet): the base triangle
+ * PLUS the flying-buttress reach, so the keep-inside / border-overlap checks
+ * account for the buttress shades extending past the front edge (they can't go
+ * off the camp). `config.buttressExt` sets the extension (0–4 triangles). */
+function footprint(
+  w: number,
+  h: number,
+  config: Record<string, number>,
+): Array<{ x: number; y: number }> {
+  const bt = flyingButtress(w, h, buttressExt(config));
   return [
     { x: 0, y: -h / 2 }, // top corner
     { x: -w / 2, y: h / 2 }, // bottom-left
     { x: w / 2, y: h / 2 }, // bottom-right
+    // Buttress reach (canopy + outer stick footings): uncentered 0→w/h coords →
+    // centered, so the keep-inside / overlap checks enclose the buttress too.
+    ...bt.verts.map((p) => ({ x: p[0] - w / 2, y: p[1] - h / 2 })),
   ];
 }
 
@@ -359,14 +383,18 @@ const PI_STICK_FT = 6;
  * ~6′ above the apex (also over the centroid), as a higher vertex (z>1) so its
  * shadow projects to the ground and the cast-shadow spike reaches it.
  */
-function shadowVolume(w: number, h: number): ShadowVertex[][] {
+function shadowVolume(
+  w: number,
+  h: number,
+  config: Record<string, number>,
+): ShadowVertex[][] {
   const apexY = (2 * h) / 3 - h / 2; // base centroid, centered
   const tetraH = w * Math.sqrt(2 / 3); // apex height (ft), edge = w
   const piZ = (tetraH + PI_STICK_FT) / tetraH; // π height as a fraction of tallFt (≈1.18)
   // The flying-buttress canopy floats at the peak of a 10′ tetra (8′2″); as a
   // fraction of the full tetra height that's 10/w.
   const flyZ = 10 / w;
-  const bt = flyingButtress(w, h);
+  const bt = flyingButtress(w, h, buttressExt(config));
   return [
     // Part 1 — the solid tetra (base corners + apex + Pi stick): one hull.
     [
@@ -449,6 +477,16 @@ export const sierpinskiPyramid: CampStructure = {
   tallFt: TETRA_TALL_FT,
   fixedTall: true, // a regular tetra — height is geometric, not user-set
   mirrorable: true, // chiral once the flying buttress has a side
+  controls: [
+    {
+      key: "buttressExt",
+      label: "Buttress extension",
+      min: 0,
+      max: 4,
+      step: 1,
+      default: BUTTRESS_EXT_DEFAULT,
+    },
+  ],
   footprint,
   renderFootprint,
   renderIcon,

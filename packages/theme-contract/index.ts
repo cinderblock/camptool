@@ -67,7 +67,14 @@ export type FootprintCtx = {
    * keeping any text upright/forward (don't flip the labels). Core mirrors the
    * shadow/shade geometry to match. */
   mirror: boolean;
+  /** Per-object adjustable values keyed by a `controls` entry's `key` (e.g. the
+   * flying-buttress extension count). Missing keys fall back to the control's
+   * `default`. */
+  config: StructureConfig;
 };
+
+/** Per-object adjustable numeric settings (see `CampStructure.controls`). */
+export type StructureConfig = Record<string, number>;
 
 /**
  * A vertex of a custom structure's 3D silhouette, for the shade simulation.
@@ -105,16 +112,32 @@ export type CampStructure = Kind & {
   /** This kind is chiral, so the editor offers a Mirror toggle (left-right
    * reflect) — e.g. the Sierpinski pyramid, to put the bar/buttress on either side. */
   mirrorable?: boolean;
+  /** Per-object adjustable numeric settings the editor renders as sliders (e.g. the
+   * flying-buttress extension count). The chosen values are passed back through the
+   * `config` arg of `footprint`/`renderFootprint`/`shadowVolume`. */
+  controls?: ReadonlyArray<{
+    key: string;
+    label: string;
+    min: number;
+    max: number;
+    step?: number;
+    default: number;
+  }>;
   /** SVG footprint, drawn in the 0,0→(w,h) feet box. Set `shape: "custom"`. */
   renderFootprint?: (ctx: FootprintCtx) => ReactNode;
   /** Optional legend/tray icon (square, `size` px). Falls back to a generic
    * glyph derived from the footprint when omitted. */
   renderIcon?: (size: number) => ReactNode;
   /** Optional true footprint outline (object-local **centered** feet, origin =
-   * object center) — the real plan shape, e.g. the pyramid's base triangle. Core
-   * uses it for border-overlap checks (and the generic shade outline) instead of
-   * the bounding box, so a rotated non-rect footprint is tested accurately. */
-  footprint?: (w: number, h: number) => ReadonlyArray<{ x: number; y: number }>;
+   * object center) — the real plan shape, e.g. the pyramid's base triangle PLUS any
+   * ground-reaching parts (buttress stick footings). Core uses it for border-overlap
+   * checks (and the generic shade outline) instead of the bounding box, so a rotated
+   * non-rect footprint is tested accurately. `config` carries the per-object sizes. */
+  footprint?: (
+    w: number,
+    h: number,
+    config: StructureConfig,
+  ) => ReadonlyArray<{ x: number; y: number }>;
   /** Optional 3D silhouette for the shade sim (object-local centered feet +
    * height fraction). Returns one or more PARTS; the core casts each part's convex
    * hull (projected away from the sun) as a SEPARATE shadow, then unions them — so
@@ -123,6 +146,7 @@ export type CampStructure = Kind & {
   shadowVolume?: (
     w: number,
     h: number,
+    config: StructureConfig,
   ) => ReadonlyArray<readonly ShadowVertex[]>;
   /** Optional self-shading overlay: given the sun's local direction, return each
    * upward face as a footprint polygon (feet, in the 0,0→(w,h) box) with a

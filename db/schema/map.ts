@@ -103,6 +103,10 @@ export const mapObject = sqliteTable(
     // Mirror (left-right reflect) the structure — for chiral kinds (e.g. the
     // Sierpinski pyramid: which side the bar/flying-buttress is on).
     mirrored: integer("mirrored", { mode: "boolean" }).notNull().default(false),
+    // Per-object adjustable structure settings (JSON object of number values,
+    // keyed by a CampStructure `controls` entry — e.g. the Sierpinski pyramid's
+    // flying-buttress extension count). NULL = use each control's default.
+    config: text("config"),
     color: text("color"),
     notes: text("notes"),
     // Pending-approval workflow: an owner-member may move/resize/rotate their own

@@ -169,6 +169,13 @@
       "when": 1782076435271,
       "tag": "0023_workable_midnight",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1782089624698,
+      "tag": "0024_lucky_sauron",
+      "breakpoints": true
     }
   ]
 }

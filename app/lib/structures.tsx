@@ -11,6 +11,7 @@ import type {
   Kind,
   KindTag,
   ShapeKind,
+  StructureConfig,
 } from "@camptool/theme-contract";
 import type { ReactNode } from "react";
 import { campStructures } from "~/theme";
@@ -18,7 +19,7 @@ import { campStructures } from "~/theme";
 // Palette types now live in the camp-theme contract (so a camp-theme package and
 // the core app share one definition). Re-exported here so existing imports of
 // `Kind`/`ShapeKind`/`KindTag` from `~/lib/structures` keep working.
-export type { CampStructure, Kind, KindTag, ShapeKind };
+export type { CampStructure, Kind, KindTag, ShapeKind, StructureConfig };
 
 /** The built-in palette shipped with the open-source app. A self-hoster's
  * camp-theme package contributes additional structures (see `KINDS` below) —

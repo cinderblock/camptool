@@ -11,6 +11,7 @@ import {
   Paper,
   SegmentedControl,
   Select,
+  Slider,
   Stack,
   Switch,
   Text,
@@ -60,6 +61,7 @@ import {
   kindHasDoor,
   kindHeight,
 } from "~/lib/structures";
+import type { StructureConfig } from "~/lib/structures";
 import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
 import { db } from "../../../db/client.server";
 import {
@@ -408,6 +410,10 @@ type ObjRow = {
   showDoor: boolean;
   // Mirror (left-right reflect) the structure — for chiral kinds.
   mirrored: boolean;
+  // Per-object adjustable structure settings (keyed by a CampStructure `controls`
+  // entry, e.g. the pyramid's flying-buttress extension). Missing keys fall back
+  // to each control's default.
+  config: StructureConfig;
   color: string | null;
   notes: string | null;
   // The camper who brought this (NULL = shared/communal camp item).
@@ -487,6 +493,7 @@ const objSelect = {
   tallFt: mapObject.tallFt,
   showDoor: mapObject.showDoor,
   mirrored: mapObject.mirrored,
+  config: mapObject.config,
   color: mapObject.color,
   notes: mapObject.notes,
   ownerMembershipId: mapObject.ownerMembershipId,
@@ -507,6 +514,7 @@ type ObjSelectRow = {
   tallFt: number;
   showDoor: boolean;
   mirrored: boolean;
+  config: string | null;
   color: string | null;
   notes: string | null;
   ownerMembershipId: string | null;
@@ -514,6 +522,23 @@ type ObjSelectRow = {
   pendingAt: Date | null;
   pendingPrev: string | null;
 };
+
+/** Parse the stored config JSON into a clean Record<string, number> (bad → {}). */
+function parseConfig(json: string | null): StructureConfig {
+  if (!json) return {};
+  try {
+    const obj = JSON.parse(json);
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      const n = Number(v);
+      if (Number.isFinite(n)) out[k] = n;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 function toObjRow(r: ObjSelectRow): ObjRow {
   return {
@@ -528,6 +553,7 @@ function toObjRow(r: ObjSelectRow): ObjRow {
     tallFt: r.tallFt,
     showDoor: r.showDoor,
     mirrored: r.mirrored,
+    config: parseConfig(r.config),
     color: r.color,
     notes: r.notes,
     ownerMembershipId: r.ownerMembershipId,
@@ -770,6 +796,7 @@ export async function action({ request }: Route.ActionArgs) {
         tallFt: row.tallFt,
         showDoor: row.showDoor,
         mirrored: row.mirrored,
+        config: {},
         color: row.color,
         notes: row.notes,
         ownerMembershipId: null,
@@ -811,6 +838,10 @@ export async function action({ request }: Route.ActionArgs) {
       if (form.has("notes")) set.notes = str("notes");
       if (form.has("showDoor")) set.showDoor = form.get("showDoor") === "true";
       if (form.has("mirrored")) set.mirrored = form.get("mirrored") === "true";
+      if (form.has("config")) {
+        // Re-serialize through parseConfig so only finite-number values persist.
+        set.config = JSON.stringify(parseConfig(str("config")));
+      }
       set.pendingByMembershipId = null;
       set.pendingAt = null;
       set.pendingPrev = null;
@@ -1179,12 +1210,18 @@ function footprintOutline(
   kind: string,
   w: number,
   h: number,
+  config: StructureConfig = {},
+  mirror = false,
 ): Array<[number, number]> {
   const def = kindDef(kind);
   // A camp-theme structure can declare its true outline (e.g. the pyramid's
-  // base triangle); use it instead of the bounding box.
+  // base triangle + buttress reach); use it instead of the bounding box. A
+  // chiral structure's outline is reflected (x→−x) when the object is mirrored,
+  // so the asymmetric part (the flying buttress) is bounded on the correct side.
   if (def.footprint) {
-    return def.footprint(w, h).map((p) => [p.x, p.y] as [number, number]);
+    return def
+      .footprint(w, h, config)
+      .map((p) => [mirror ? -p.x : p.x, p.y] as [number, number]);
   }
   if (def.shape === "hexagon") {
     return hexVertices(0, 0, w, h).map(
@@ -1212,7 +1249,7 @@ function footprintOutline(
 
 /** The footprint outline for a placed object (centered local feet). */
 function footprintLocal(o: ObjRow): Array<[number, number]> {
-  return footprintOutline(o.kind, o.width, o.height);
+  return footprintOutline(o.kind, o.width, o.height, o.config, o.mirrored);
 }
 
 /** Above-ground height (ft) at each footprint corner, aligned with
@@ -1399,7 +1436,7 @@ function shadowPolygon(
   if (def.shadowVolume)
     return volumeShadow(
       o,
-      def.shadowVolume(o.width, o.height),
+      def.shadowVolume(o.width, o.height, o.config),
       sun,
       mapUpBearing,
     );
@@ -1462,8 +1499,10 @@ function footprintOffsets(
   w: number,
   h: number,
   rotation: number,
+  config: StructureConfig = {},
+  mirror = false,
 ): Array<{ x: number; y: number }> {
-  return footprintOutline(kind, w, h).map(([lx, ly]) =>
+  return footprintOutline(kind, w, h, config, mirror).map(([lx, ly]) =>
     rotateVec(lx, ly, rotation),
   );
 }
@@ -2214,7 +2253,14 @@ function Editor({
         const c = fitCenterInsideLot(
           obj.x + dx + obj.width / 2,
           obj.y + dy + obj.height / 2,
-          footprintOffsets(obj.kind, obj.width, obj.height, obj.rotation),
+          footprintOffsets(
+            obj.kind,
+            obj.width,
+            obj.height,
+            obj.rotation,
+            obj.config,
+            obj.mirrored,
+          ),
           lot.frontageFt,
           lot.depthFt,
           rearW,
@@ -2385,7 +2431,14 @@ function Editor({
       const c = fitCenterInsideLot(
         nx + s.width / 2,
         ny + s.height / 2,
-        footprintOffsets(s.kind, s.width, s.height, s.rotation),
+        footprintOffsets(
+          s.kind,
+          s.width,
+          s.height,
+          s.rotation,
+          s.config,
+          s.mirrored,
+        ),
         lot.frontageFt,
         lot.depthFt,
         rear,
@@ -3905,6 +3958,7 @@ const MapObjectShape = memo(
                 selected,
                 rotation: o.rotation,
                 mirror: o.mirrored,
+                config: o.config,
               })}
             </g>
           ) : (
@@ -3977,7 +4031,13 @@ const MapObjectShape = memo(
             // The footprint crosses the lot border — flag it tracing the REAL
             // outline (triangle/hexagon/…), not a bounding box.
             <polygon
-              points={footprintOutline(o.kind, o.width, o.height)
+              points={footprintOutline(
+                o.kind,
+                o.width,
+                o.height,
+                o.config,
+                o.mirrored,
+              )
                 .map(([lx, ly]) => `${cx + lx * ppf},${cy + ly * ppf}`)
                 .join(" ")}
               fill="none"
@@ -4443,6 +4503,48 @@ function SidePanel({
                 }}
               />
             ) : null}
+            {canMeta
+              ? (kindDef(selected.kind).controls ?? []).map((c) => {
+                  const val = selected.config[c.key] ?? c.default;
+                  const apply = (v: number, commit: boolean) => {
+                    const config = { ...selected.config, [c.key]: v };
+                    patch(selected.id, { config });
+                    if (commit)
+                      commitField(
+                        selected.id,
+                        "config",
+                        JSON.stringify(config),
+                      );
+                  };
+                  return (
+                    <div key={c.key}>
+                      <Text size="xs" fw={500} mb={2}>
+                        {c.label}: {val}
+                      </Text>
+                      <Slider
+                        size="sm"
+                        min={c.min}
+                        max={c.max}
+                        step={c.step ?? 1}
+                        value={val}
+                        marks={Array.from(
+                          {
+                            length:
+                              Math.floor((c.max - c.min) / (c.step ?? 1)) + 1,
+                          },
+                          (_, i) => {
+                            const m = c.min + i * (c.step ?? 1);
+                            return { value: m, label: String(m) };
+                          },
+                        )}
+                        onChange={(v) => apply(v, false)}
+                        onChangeEnd={(v) => apply(v, true)}
+                        mb="sm"
+                      />
+                    </div>
+                  );
+                })
+              : null}
             <Textarea
               size="xs"
               label="Notes"
