@@ -289,9 +289,17 @@ Order: A1–A3 (self-verifiable) → B4, B5 (logic) → B6 → B1, B2, B3 (visua
 Shipped this batch: A1/A2/A3 (4c4b0dc), B4/B5 (53f91bf), doors-dark-mode + fixed
 pyramid height (b42a5d4). Remaining below.
 
-- [ ] **P2. Pyramid "mirror" option** (bar sometimes on the right). Needs a
-      per-object flag (no `mirrored` column on `map_object` today). See config note.
-- [ ] **P3. Flying buttresses** (user spec, 6 screenshots). The "flying shade":
+- [x] **P2. Pyramid "mirror" option** — DONE. `mirrored` boolean column (mig
+      0022); reflects geometry + shadow + the asymmetric buttress footprint.
+- [x] **P3. Flying buttresses** — DONE. Hexagon of 6 equilateral triangles over
+      the corner small-tetra centroid (8′2″ up), 5 flying outside + ground sticks,
+      casting its own (separate) shade. **Extension is adjustable 0–4** via a live
+      Slider in the side panel (continues the hexagon's triangular grid, straddling
+      the front edge). Bounds now include the buttress reach (footprint() returns
+      base triangle + buttress verts), so the buttress shades can't run off the
+      camp. Per-object `config` JSON column (mig 0024) carries `buttressExt`.
+      Commit 2bed56b.
+  Original spec, for reference:
       - A point of interest ~8′ up (height of a 10′-edge tetra = 10·√(2/3) ≈ 8.16′)
         above the **bar corner**.
       - A horizontal **equilateral triangle** at that height, inside the pyramid.
@@ -311,12 +319,13 @@ pyramid height (b42a5d4). Remaining below.
 - [ ] **B3. Avenue arrows + labels** (e.g. "3:30"). Visual.
 - [ ] **B6. Cable follows its object on drag** (unless Shift to detach). Logic.
 
-**Per-object config (needed for P2 + P3).** `map_object` has no place for custom
-per-object params (mirror, buttress extent). Clean fix: add a nullable `config`
-(JSON text) column (migration) + thread it into the renderer ctx
-(`FootprintCtx.config`, shadow/faces ctx) so a custom structure reads its own
-params, and expose per-structure UI controls (a small contract hook returning the
-side-panel controls for the selected custom kind). Design before building.
+**Per-object config (P2 + P3) — DONE.** `map_object` now has a nullable `config`
+(JSON text) column (mig 0024). Threaded into `FootprintCtx.config` and the
+`footprint(w,h,config)` / `shadowVolume(w,h,config)` hooks. A custom structure
+declares `controls: [{key,label,min,max,step,default}]`; the side panel renders a
+Slider per control and commits the config JSON via the `updateObject` action
+(officer-only). `parseConfig` keeps only finite-number values. The pyramid uses
+`buttressExt` (0–4, default 2).
 
 **Verification blocker:** the Chrome extension is de-authed, so I can't screenshot.
 The remaining items are visual; either re-auth the extension or I serve a localhost
