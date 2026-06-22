@@ -1899,6 +1899,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           </Paper>
           <Compass
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
+            frontsToMan={lot.frontsToMan}
             sun={sun}
             year={sunYear}
             arc={arc}
@@ -3792,6 +3793,7 @@ function Grid({
  * the draggable sun that scrubs time of day for the shade simulation. */
 function Compass({
   mapUpBearing,
+  frontsToMan,
   sun,
   year,
   arc,
@@ -3810,6 +3812,7 @@ function Compass({
   setWindParticles,
 }: {
   mapUpBearing: number | null;
+  frontsToMan: boolean;
   sun: { altitude: number; azimuth: number };
   year: number;
   arc: { sunriseMin: number; sunsetMin: number; noonMin: number };
@@ -3992,14 +3995,17 @@ function Compass({
         {oriented ? (
           <path d={daylight} fill="#ffe066" fillOpacity={0.4} stroke="none" />
         ) : null}
+        {/* The Man sits where it really is relative to the map's "up": at the
+        top for a Man-facing lot, at the bottom for a mountain-facing one (whose
+        frontage — and the map's up — points away from the Man). */}
         <line
           x1={cx}
           y1={cy}
           x2={cx}
-          y2={cy - r + 20}
+          y2={cy + (frontsToMan ? -1 : 1) * (r - 20)}
           stroke="var(--mantine-color-text)"
         />
-        <ManGlyph x={cx} y={cy - r + 12} size={22} />
+        <ManGlyph x={cx} y={cy + (frontsToMan ? -1 : 1) * (r - 12)} size={22} />
         {oriented ? (
           <>
             {ray(0, "#e03131", "N", { lw: 2, weight: 700 })}
