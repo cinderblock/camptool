@@ -1,10 +1,15 @@
 # CampTool
 
-Self-hosted registration & management for Burning Man theme camps: member
+Self-hosted registration & management for event **theme camps**: member
 management, a visual camp-map editor tied to the database, optional dues, camp
 onboarding, shared documents, announcements, a public recruit page, and
 Discord-based outreach. Built for one camp first; designed to be publishable for
 other camps to self-host.
+
+The core app is **event-agnostic**. Burning Man — its Black Rock City
+map/addressing and ticket/pass flows — is one *event layer* on top, bundled in
+this repo for now but designed to peel out; a single camp can attend multiple
+events (see the four-layer architecture in the plan).
 
 > Full vision, decisions, schema, and roadmap live in
 > [`plans/camptool.md`](plans/camptool.md). Read it first.
@@ -25,8 +30,10 @@ Phase 3 — camp map editor (in progress). On top of the Phase 1 foundation
 Discord; member directory with role management) and Phase 2 recruiting (public
 `/c/:slug` application page, officer review queue, per-member onboarding
 checklists), the dashboard now has a **Map** tab: a visual, database-backed
-editor for laying out camp. Set your lot (street, address, frontage × depth, and
-an optional Man→street radius that draws the real wedge taper), then add
+editor for laying out camp. The map/addressing is a pluggable **per-event
+provider** (Black Rock City is the built-in one). Set your lot (street, address,
+frontage × depth, and an optional Man→street radius that draws the real wedge
+taper), then add
 structures from a palette (tent, RV, shade, kitchen, art, generator, container)
 and drag/resize/rotate them into place, with an orientation compass (true north,
 sun, the Man) and footprint shapes for tents, hexayurts, hyparhuts, cars/RVs.
@@ -50,8 +57,9 @@ who's sharing their tent/RV, and tick the camp's checklist — one step at a tim
 with the regular dashboard pages remaining the "advanced" way to do the same
 things. Next: RV pop-outs and group sub-maps.
 
-The dashboard also tracks the camp's per-year ticket allocations. A **Tickets**
-page manages the camp's Direct Group Sale (guaranteed) allocation — individual
+The dashboard also tracks the camp's per-year ticket allocations (a Burning
+Man–event feature today). A **Tickets** page manages the camp's Direct Group Sale
+(guaranteed) allocation — individual
 priced tickets (tier + price, any mix of free/cheap/expensive) that officers
 assign to members and mark paid; members can request one. A **Passes** page
 handles early-arrival **Setup Access Passes**: officers define entry dates with a
@@ -97,6 +105,16 @@ server into a container. Both are documented in
 
 ## Design notes
 
+- **Four layers (the app is not Burning-Man-specific):** (1) the **core app**
+  framework — users, groups, the onboarding framework, post-event followups, the
+  camp/edition/membership skeleton (this repo, event- and camp-agnostic); (2)
+  **per-camp theming** — custom structures/questions/branding via the
+  `camp-theme` contract; (3) **per-event theming + map/addressing** — events
+  differ structurally (Burning Man's BRC annular-clock layout vs. others), so BRC
+  geometry, BM ticket/pass flows, and the Burning Man disclaimer live here; (4)
+  the **per-camp/event/year data** in the database. The Math Camp camp-theme and
+  the Burning Man event layer are bundled in this repo for now but are designed to
+  peel out into their own packages. One camp can attend multiple events.
 - **Multi-camp aware from day one:** every tenant-scoped table carries a
   `camp_id`, even though we run a single deployment now. Avoids a painful
   migration when cross-camp map sharing / multi-camp hosting arrives.

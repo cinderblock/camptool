@@ -7,8 +7,18 @@ path in your responses.
 
 ## What this is
 
-Self-hosted Burning Man theme-camp management web app. Built for one camp first,
-open-sourced (MIT) so other camps can self-host. See `README.md`.
+Self-hosted web app for managing an event **theme camp**. Built for one camp
+first, open-sourced (MIT) so other camps can self-host. See `README.md`.
+
+**Not Burning-Man-specific.** Four layers (see the plan's Architecture section):
+(1) the **core app** framework — users, groups, onboarding framework, post-event
+followups (this repo, event/camp-agnostic); (2) **per-camp** theming (the
+`camp-theme` contract); (3) **per-event** theming + map/addressing — Burning Man
+(BRC map, BM ticket/pass flows, the BM disclaimer) is one event layer here, others
+(e.g. UnSCruz) differ structurally; (4) per-camp/event/year **data**. The Math
+Camp camp-theme and the Burning Man event layer live in this repo for now but
+should peel out later — keep these seams clean and don't bake BM into the core. A
+camp can attend multiple events.
 
 ## Locked decisions (don't re-litigate — see plan for full reasoning)
 
