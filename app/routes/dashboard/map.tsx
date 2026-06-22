@@ -714,6 +714,7 @@ export async function action({ request }: Route.ActionArgs) {
     "savePlacement",
     "addObject",
     "placeObject",
+    "unplaceObject",
     "deleteObject",
     "approveChange",
     "rejectChange",
@@ -925,6 +926,26 @@ export async function action({ request }: Route.ActionArgs) {
     if (!row) return data({ error: "Item not found." }, { status: 404 });
     const object = await loadObjRow(editionId, id);
     return data({ object });
+  }
+
+  if (intent === "unplaceObject") {
+    // "Remove from map" doesn't destroy the item — it returns to the Unplaced
+    // tray (placed = false), keeping its name/size/config so it can be dropped
+    // back later. Any pending member change is cleared.
+    const id = String(form.get("id"));
+    const [row] = await db
+      .update(mapObject)
+      .set({
+        placed: false,
+        pendingByMembershipId: null,
+        pendingAt: null,
+        pendingPrev: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+      .returning();
+    if (!row) return data({ error: "Item not found." }, { status: 404 });
+    return data({ unplacedId: id });
   }
 
   if (intent === "deleteObject") {
@@ -1669,6 +1690,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       | {
           object?: ObjRow;
           deletedId?: string;
+          unplacedId?: string;
           zone?: ZoneRow;
           deletedZoneId?: string;
           cable?: CableRow;
@@ -1677,10 +1699,11 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       | undefined;
     if (!d || d === lastSynced.current) return;
     lastSynced.current = d;
-    if (d.deletedId) {
-      const gone = d.deletedId;
-      setObjects((prev) => prev.filter((o) => o.id !== gone));
-      setSelectedId((s) => (s === gone ? null : s));
+    // Deleted (gone for good) or unplaced (back to the tray) both leave the map.
+    const removedId = d.deletedId ?? d.unplacedId;
+    if (removedId) {
+      setObjects((prev) => prev.filter((o) => o.id !== removedId));
+      setSelectedId((s) => (s === removedId ? null : s));
       return;
     }
     if (d.object) {
@@ -1840,7 +1863,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               fetcher={fetcher}
             />
           ) : null}
-          {canManage ? <UnplacedTray unplaced={unplaced} /> : null}
+          {canManage ? (
+            <UnplacedTray unplaced={unplaced} fetcher={fetcher} />
+          ) : null}
           {canManage ? <Legend /> : null}
           {selectedZoneId ? (
             <ZonePanel
@@ -1879,8 +1904,16 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
 
 type Unplaced = Route.ComponentProps["loaderData"]["unplaced"][number];
 
-/** Officer queue of declared-but-unplaced items; drag one onto the lot to place. */
-function UnplacedTray({ unplaced }: { unplaced: Unplaced[] }) {
+/** Officer queue of declared-but-unplaced items; drag one onto the lot to place,
+ * or permanently delete one with its ✕ (the only place items are truly removed —
+ * the map's ✕ just returns them here). */
+function UnplacedTray({
+  unplaced,
+  fetcher,
+}: {
+  unplaced: Unplaced[];
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
   return (
     <Paper withBorder p="sm" radius="md">
       <Text size="xs" fw={600} mb={6}>
@@ -1929,10 +1962,25 @@ function UnplacedTray({ unplaced }: { unplaced: Unplaced[] }) {
                   {round(u.width)}×{round(u.height)}′
                 </Text>
                 {u.ownerName ? (
-                  <Text size="xs" c="dimmed" truncate maw={90}>
+                  <Text size="xs" c="dimmed" truncate maw={72}>
                     {u.ownerName}
                   </Text>
                 ) : null}
+                <Tooltip label="Delete permanently" withArrow openDelay={150}>
+                  <ActionIcon
+                    size="sm"
+                    variant="subtle"
+                    color="red"
+                    onClick={() =>
+                      fetcher.submit(
+                        { intent: "deleteObject", id: u.id },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    ✕
+                  </ActionIcon>
+                </Tooltip>
               </Group>
             );
           })}
@@ -2212,13 +2260,14 @@ function Editor({
         setSelectedId(null);
         return;
       }
-      // Delete is officer-only; geometry nudges require edit rights on the item.
+      // Delete/Backspace removes the item from the map → back to the Unplaced
+      // tray (it isn't destroyed). Officer-only, like the other map edits.
       if (e.key === "Delete" || e.key === "Backspace") {
         if (!canManage) return;
         e.preventDefault();
         setObjects((prev) => prev.filter((o) => o.id !== selectedId));
         fetcher.submit(
-          { intent: "deleteObject", id: selectedId },
+          { intent: "unplaceObject", id: selectedId },
           { method: "post" },
         );
         setSelectedId(null);
@@ -2356,6 +2405,20 @@ function Editor({
   const rFront = frontageRadiusOf(lot);
   const halfFt = lot.frontageFt / 2;
   let lotPoints: string;
+  // Curved surroundings (concentric annular sectors centered on the Man) that
+  // share the lot wedge's geometry, so the street/service-road/neighbors follow
+  // the SAME arc as the lot's front/rear edges instead of being flat bands. Null
+  // → no derivable radius, so the straight-trapezoid fallback + rect bands run.
+  let surround: {
+    street: string;
+    streetLabel: { x: number; y: number; angle: number };
+    service: string;
+    serviceLabel: { x: number; y: number; angle: number };
+    neighborL: string;
+    neighborR: string;
+    neighborLLabel: { x: number; y: number; angle: number };
+    neighborRLabel: { x: number; y: number; angle: number };
+  } | null = null;
   if (rFront != null && rFront > halfFt) {
     const sDir = lot.frontsToMan ? 1 : -1; // +1: Man above (front at top); −1: below
     const h = ppf * Math.sqrt(rFront * rFront - halfFt * halfFt);
@@ -2366,8 +2429,26 @@ function Editor({
       ? rFront + lot.depthFt
       : Math.max(1, rFront - lot.depthFt);
     const SEG = 24;
-    const pt = (r: number, phi: number) =>
-      `${frontCx + r * ppf * Math.sin(phi)},${manY + sDir * r * ppf * Math.cos(phi)}`;
+    // Point on the circle of feet-radius r at polar angle phi (0 = toward the
+    // frontage centerline), as an "x,y" px string; numeric variant for labels.
+    const ptXY = (r: number, phi: number) => ({
+      x: frontCx + r * ppf * Math.sin(phi),
+      y: manY + sDir * r * ppf * Math.cos(phi),
+    });
+    const pt = (r: number, phi: number) => {
+      const p = ptXY(r, phi);
+      return `${p.x},${p.y}`;
+    };
+    const arcPts = (r: number, phi0: number, phi1: number) => {
+      const out: string[] = [];
+      for (let i = 0; i <= SEG; i++)
+        out.push(pt(r, phi0 + ((phi1 - phi0) * i) / SEG));
+      return out;
+    };
+    // Annular sector (rIn..rOut, phi0..phi1) as a closed polygon point list.
+    const sector = (rIn: number, rOut: number, phi0: number, phi1: number) =>
+      [...arcPts(rOut, phi0, phi1), ...arcPts(rIn, phi1, phi0)].join(" ");
+
     const front: string[] = [];
     const back: string[] = [];
     for (let i = 0; i <= SEG; i++) {
@@ -2376,6 +2457,48 @@ function Editor({
       back.push(pt(rRear, phi));
     }
     lotPoints = [...front, ...back.reverse()].join(" ");
+
+    // Radial direction from the frontage into the lot (+1 if the rear is at a
+    // larger radius, as for a Man-facing lot; −1 for a mountain-facing lot). The
+    // street hugs the frontage on the far side; the service road hugs the rear.
+    const outward = rRear > rFront ? 1 : -1;
+    const gapFt = SURROUND_GAP_FT;
+    const streetA = rFront - outward * gapFt;
+    const streetB = rFront - outward * (gapFt + STREET_W_FT);
+    const streetIn = Math.max(1, Math.min(streetA, streetB));
+    const streetOut = Math.max(streetA, streetB);
+    const serviceA = rRear + outward * gapFt;
+    const serviceB = rRear + outward * (gapFt + SERVICE_ROAD_W_FT);
+    const serviceIn = Math.max(1, Math.min(serviceA, serviceB));
+    const serviceOut = Math.max(serviceA, serviceB);
+    const nIn = Math.min(rFront, rRear);
+    const nOut = Math.max(rFront, rRear);
+
+    // Angular half-span wide enough that even the innermost band reaches the view
+    // edges (larger radii overshoot and are clipped to the viewport).
+    const angTo = (r: number, x: number) =>
+      Math.asin(clamp((x - frontCx) / (r * ppf), -1, 1));
+    const rMin = Math.max(1, Math.min(streetIn, serviceIn, nIn));
+    const phiMax = Math.max(
+      theta + 0.02,
+      Math.abs(angTo(rMin, viewL)),
+      Math.abs(angTo(rMin, viewR)),
+    );
+    const midNbr = (theta + phiMax) / 2;
+    const lbl = (r: number, phi: number) => {
+      const p = ptXY(r, phi);
+      return { x: p.x, y: p.y, angle: (phi * 180) / Math.PI };
+    };
+    surround = {
+      street: sector(streetIn, streetOut, -phiMax, phiMax),
+      streetLabel: lbl((streetIn + streetOut) / 2, 0),
+      service: sector(serviceIn, serviceOut, -phiMax, phiMax),
+      serviceLabel: lbl((serviceIn + serviceOut) / 2, 0),
+      neighborL: sector(nIn, nOut, -phiMax, -theta),
+      neighborR: sector(nIn, nOut, theta, phiMax),
+      neighborLLabel: lbl((nIn + nOut) / 2, -midNbr),
+      neighborRLabel: lbl((nIn + nOut) / 2, midNbr),
+    };
   } else {
     lotPoints = `${originX},${originY} ${originX + lot.frontageFt * ppf},${originY} ${rearCenterX + (rear / 2) * ppf},${yBot} ${rearCenterX - (rear / 2) * ppf},${yBot}`;
   }
@@ -3007,73 +3130,141 @@ function Editor({
             line), the rear shared service road, and neighbor lots on each side —
             so the lot reads in its real context. The clock address marks the
             radial avenue along the street. */}
-            <g pointerEvents="none">
-              {neighbors.map((n) =>
-                n.x1 - n.x0 > 8 ? (
-                  <g key={n.id}>
-                    <rect
-                      x={n.x0}
-                      y={originY}
-                      width={n.x1 - n.x0}
-                      height={yBot - originY}
-                      fill={neighborFill}
-                      opacity={0.7}
-                      rx={3}
-                    />
-                    <text
-                      x={(n.x0 + n.x1) / 2}
-                      y={(originY + yBot) / 2}
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      fontSize={12}
-                      fill="var(--mantine-color-dimmed)"
-                      style={{ userSelect: "none" }}
-                    >
-                      Neighbor
-                    </text>
-                  </g>
-                ) : null,
+            <g pointerEvents="none" clipPath="url(#ground-clip)">
+              {surround ? (
+                // Curved context: concentric annular sectors that follow the lot
+                // wedge's arc (clipped to the view), so the street/service road
+                // and neighbor lots match the BRC clock-section curvature.
+                <>
+                  <polygon
+                    points={surround.neighborL}
+                    fill={neighborFill}
+                    opacity={0.7}
+                  />
+                  <polygon
+                    points={surround.neighborR}
+                    fill={neighborFill}
+                    opacity={0.7}
+                  />
+                  <text
+                    x={surround.neighborLLabel.x}
+                    y={surround.neighborLLabel.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={12}
+                    fill="var(--mantine-color-dimmed)"
+                    style={{ userSelect: "none" }}
+                  >
+                    Neighbor
+                  </text>
+                  <text
+                    x={surround.neighborRLabel.x}
+                    y={surround.neighborRLabel.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={12}
+                    fill="var(--mantine-color-dimmed)"
+                    style={{ userSelect: "none" }}
+                  >
+                    Neighbor
+                  </text>
+                  <polygon points={surround.street} fill={pavementFill} />
+                  <text
+                    x={surround.streetLabel.x}
+                    y={surround.streetLabel.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={14}
+                    fontWeight={700}
+                    fill="var(--mantine-color-dimmed)"
+                    style={{ userSelect: "none" }}
+                  >
+                    {frontageStreet || "Street"}
+                    {lot.address ? ` · ${lot.address}` : ""}
+                  </text>
+                  <polygon points={surround.service} fill={pavementFill} />
+                  <text
+                    x={surround.serviceLabel.x}
+                    y={surround.serviceLabel.y}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={12}
+                    fill="var(--mantine-color-dimmed)"
+                    style={{ userSelect: "none" }}
+                  >
+                    Service road
+                  </text>
+                </>
+              ) : (
+                <>
+                  {neighbors.map((n) =>
+                    n.x1 - n.x0 > 8 ? (
+                      <g key={n.id}>
+                        <rect
+                          x={n.x0}
+                          y={originY}
+                          width={n.x1 - n.x0}
+                          height={yBot - originY}
+                          fill={neighborFill}
+                          opacity={0.7}
+                          rx={3}
+                        />
+                        <text
+                          x={(n.x0 + n.x1) / 2}
+                          y={(originY + yBot) / 2}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={12}
+                          fill="var(--mantine-color-dimmed)"
+                          style={{ userSelect: "none" }}
+                        >
+                          Neighbor
+                        </text>
+                      </g>
+                    ) : null,
+                  )}
+                  <rect
+                    x={viewL}
+                    y={streetBandTop}
+                    width={viewR - viewL}
+                    height={streetBandBot - streetBandTop}
+                    fill={pavementFill}
+                    rx={3}
+                  />
+                  <text
+                    x={(viewL + viewR) / 2}
+                    y={(streetBandTop + streetBandBot) / 2}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={14}
+                    fontWeight={700}
+                    fill="var(--mantine-color-dimmed)"
+                    style={{ userSelect: "none" }}
+                  >
+                    {frontageStreet || "Street"}
+                    {lot.address ? ` · ${lot.address}` : ""}
+                  </text>
+                  <rect
+                    x={viewL}
+                    y={roadBandTop}
+                    width={viewR - viewL}
+                    height={roadBandBot - roadBandTop}
+                    fill={pavementFill}
+                    rx={3}
+                  />
+                  <text
+                    x={(viewL + viewR) / 2}
+                    y={(roadBandTop + roadBandBot) / 2}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={12}
+                    fill="var(--mantine-color-dimmed)"
+                    style={{ userSelect: "none" }}
+                  >
+                    Service road
+                  </text>
+                </>
               )}
-              <rect
-                x={viewL}
-                y={streetBandTop}
-                width={viewR - viewL}
-                height={streetBandBot - streetBandTop}
-                fill={pavementFill}
-                rx={3}
-              />
-              <text
-                x={(viewL + viewR) / 2}
-                y={(streetBandTop + streetBandBot) / 2}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={14}
-                fontWeight={700}
-                fill="var(--mantine-color-dimmed)"
-                style={{ userSelect: "none" }}
-              >
-                {frontageStreet || "Street"}
-                {lot.address ? ` · ${lot.address}` : ""}
-              </text>
-              <rect
-                x={viewL}
-                y={roadBandTop}
-                width={viewR - viewL}
-                height={roadBandBot - roadBandTop}
-                fill={pavementFill}
-                rx={3}
-              />
-              <text
-                x={(viewL + viewR) / 2}
-                y={(roadBandTop + roadBandBot) / 2}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize={12}
-                fill="var(--mantine-color-dimmed)"
-                style={{ userSelect: "none" }}
-              >
-                Service road
-              </text>
             </g>
             {/* Shade simulation: each object casts a shadow away from the sun,
             clipped to the whole ground view so it can fall onto neighbors/roads.
@@ -4220,7 +4411,7 @@ function SidePanel({
                 </Text>
               </div>
               {canMeta ? (
-                <Tooltip label="Delete">
+                <Tooltip label="Remove from map (keeps it in Unplaced)">
                   <ActionIcon
                     variant="subtle"
                     color="red"
@@ -4229,7 +4420,7 @@ function SidePanel({
                         prev.filter((o) => o.id !== selected.id),
                       );
                       fetcher.submit(
-                        { intent: "deleteObject", id: selected.id },
+                        { intent: "unplaceObject", id: selected.id },
                         { method: "post" },
                       );
                     }}
@@ -4286,18 +4477,20 @@ function SidePanel({
               )
             ) : null}
 
-            <TextInput
-              size="xs"
-              label="Name"
-              value={selected.name ?? ""}
-              disabled={!canMeta}
-              onChange={(e) =>
-                patch(selected.id, { name: e.currentTarget.value })
-              }
-              onBlur={(e) =>
-                commitField(selected.id, "name", e.currentTarget.value)
-              }
-            />
+            {kindDef(selected.kind).fixedName ? null : (
+              <TextInput
+                size="xs"
+                label="Name"
+                value={selected.name ?? ""}
+                disabled={!canMeta}
+                onChange={(e) =>
+                  patch(selected.id, { name: e.currentTarget.value })
+                }
+                onBlur={(e) =>
+                  commitField(selected.id, "name", e.currentTarget.value)
+                }
+              />
+            )}
             <Select
               size="xs"
               label="Kind"

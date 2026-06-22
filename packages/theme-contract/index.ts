@@ -112,6 +112,10 @@ export type CampStructure = Kind & {
   /** This kind is chiral, so the editor offers a Mirror toggle (left-right
    * reflect) — e.g. the Sierpinski pyramid, to put the bar/buttress on either side. */
   mirrorable?: boolean;
+  /** This structure has a fixed identity (e.g. the one-and-only Sierpinski
+   * Pyramid), so the editor hides the per-object Name field — the kind's `label`
+   * is the name. */
+  fixedName?: boolean;
   /** Per-object adjustable numeric settings the editor renders as sliders (e.g. the
    * flying-buttress extension count). The chosen values are passed back through the
    * `config` arg of `footprint`/`renderFootprint`/`shadowVolume`. */

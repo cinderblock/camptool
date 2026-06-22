@@ -477,6 +477,7 @@ export const sierpinskiPyramid: CampStructure = {
   tallFt: TETRA_TALL_FT,
   fixedTall: true, // a regular tetra — height is geometric, not user-set
   mirrorable: true, // chiral once the flying buttress has a side
+  fixedName: true, // the one-and-only pyramid — no per-object name field
   controls: [
     {
       key: "buttressExt",
