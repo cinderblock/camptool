@@ -290,9 +290,13 @@ export function parseClock(addr: string | null): number | null {
 
 /**
  * Compass bearing (deg from true north) the map's "up" points to. Map-up faces
- * across the frontage; for a Man-facing camp that's toward the Man — a 3:00 camp
- * faces NE (45°), so bearing = (135 − 30·h). A mountain-facing camp fronts the
- * outward street, so its up points away from the Man (+180°).
+ * across the frontage; for a Man-facing camp that's toward the Man.
+ *
+ * BRC ground truth: the open playa / Temple (12:00) is to the NE and the gate
+ * (6:00) is to the SW, so Man→12:00 ≈ 45°. Clock numbers increase clockwise, so
+ * Man→clock(h) = 45 + 30·h, and the camp→Man "up" direction is the opposite:
+ * (225 + 30·h). A 3:00 camp is SE of the Man, so its up points NW (315°). A
+ * mountain-facing camp fronts the outward street, so its up flips +180°.
  */
 export function mapUpBearingFor(
   addr: string | null,
@@ -300,6 +304,6 @@ export function mapUpBearingFor(
 ): number | null {
   const h = parseClock(addr);
   if (h == null) return null;
-  const base = (((135 - 30 * h) % 360) + 360) % 360;
+  const base = (((225 + 30 * h) % 360) + 360) % 360;
   return frontsToMan ? base : (base + 180) % 360;
 }

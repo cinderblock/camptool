@@ -1187,10 +1187,10 @@ function containsPoint(o: ObjRow, fxp: number, fyp: number) {
   return Math.abs(local.x) <= o.width / 2 && Math.abs(local.y) <= o.height / 2;
 }
 
-// Black Rock City orientation, anchored to ground truth: a 3:00 camp's frontage
-// faces NE toward the Man. So the bearing the map's "up" (toward the Man, across
-// the frontage) points to, for a clock address H, is (135 - 30·H) mod 360
-// — 3:00 → 45° (NE), 4:30 → 0° (N), 6:00 → 315° (NW), 12:00 → 135° (SE).
+// Black Rock City orientation, anchored to ground truth: the open playa/Temple
+// (12:00) is NE and the gate (6:00) is SW, so Man→12:00 ≈ 45°. The map's "up"
+// (toward the Man) for a clock address H is (225 + 30·H) mod 360 — 3:00 → 315°
+// (NW), 4:30 → 0° (N), 6:00 → 45° (NE), 12:00 → 225° (SW). See `mapUpBearingFor`.
 // Sun azimuths come from the real solar model in `~/lib/sun` (see Compass).
 
 type Lot = NonNullable<Route.ComponentProps["loaderData"]["lot"]>;
@@ -1674,11 +1674,13 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const sun = useMemo(() => sunAt(sunYear, timeMin), [sunYear, timeMin]);
 
   // ---- Prevailing-wind flow visualization (animated particles around buildings).
-  // Off by default; direction is a *from* bearing seeded to BRC's prevailing wind
-  // and adjustable on the wind dial. Client-only (not persisted).
-  const [showWind, setShowWind] = useState(false);
+  // The particle-count slider doubles as the on/off control (0 = off); direction
+  // + strength live on the orientation dial (a *from* bearing seeded to BRC's
+  // prevailing wind, distance-from-center = strength). Client-only (not persisted).
+  const [windParticles, setWindParticles] = useState(0);
   const [windFromBearing, setWindFromBearing] = useState(BRC_WIND_FROM_BEARING);
   const [windStrength, setWindStrength] = useState(1);
+  const showWind = windParticles > 0;
   // Auto-drift the sun slowly across the daylight arc while animation is on (and
   // the sun isn't being dragged); loop back to sunrise after sunset.
   useEffect(() => {
@@ -1781,8 +1783,23 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   }
 
   return (
-    <Stack gap="md">
-      <Group justify="space-between" align="flex-end">
+    // Fill the dashboard content area (viewport − header − Main padding) and keep
+    // all scrolling INSIDE the map frame / sidebar, so zooming never adds a second
+    // page-level scrollbar.
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "calc(100vh - 88px)",
+        minHeight: 0,
+      }}
+    >
+      <Group
+        justify="space-between"
+        align="flex-end"
+        mb="sm"
+        style={{ flex: "0 0 auto" }}
+      >
         <div>
           <Title order={2}>Camp map</Title>
           <Text c="dimmed" size="sm">
@@ -1798,8 +1815,22 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         </div>
       </Group>
 
-      <Group align="flex-start" gap="lg" wrap="wrap">
-        <div style={{ flex: "1 1 360px", minWidth: 300, maxWidth: 760 }}>
+      <Group
+        align="stretch"
+        gap="lg"
+        wrap="nowrap"
+        style={{ flex: 1, minHeight: 0 }}
+      >
+        <div
+          style={{
+            flex: "1 1 auto",
+            minWidth: 0,
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+          }}
+        >
           <Editor
             lot={lot}
             objects={objects}
@@ -1826,13 +1857,20 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             showWind={showWind}
             windFromBearing={windFromBearing}
             windStrength={windStrength}
+            windParticles={windParticles}
             fetcher={fetcher}
           />
           <GridScaleNote lot={lot} />
         </div>
         <Stack
           gap="md"
-          style={{ flex: "1 1 240px", minWidth: 240, maxWidth: 340 }}
+          style={{
+            flex: "0 0 320px",
+            width: 320,
+            height: "100%",
+            overflowY: "auto",
+            paddingRight: 4,
+          }}
         >
           <Paper withBorder p="sm" radius="md">
             <Text size="xs" fw={600} mb={6}>
@@ -1871,15 +1909,12 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setShowShade={setShowShade}
             animateShade={animateShade}
             setAnimateShade={setAnimateShade}
-          />
-          <WindControl
-            mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
-            showWind={showWind}
-            setShowWind={setShowWind}
-            fromBearing={windFromBearing}
-            setFromBearing={setWindFromBearing}
-            strength={windStrength}
-            setStrength={setWindStrength}
+            windFromBearing={windFromBearing}
+            setWindFromBearing={setWindFromBearing}
+            windStrength={windStrength}
+            setWindStrength={setWindStrength}
+            windParticles={windParticles}
+            setWindParticles={setWindParticles}
           />
           {canManage ? (
             <PendingPanel
@@ -1923,7 +1958,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           />
         </Stack>
       </Group>
-    </Stack>
+    </div>
   );
 }
 
@@ -2102,6 +2137,7 @@ function Editor({
   showWind,
   windFromBearing,
   windStrength,
+  windParticles,
   fetcher,
 }: {
   lot: Lot;
@@ -2129,6 +2165,7 @@ function Editor({
   showWind: boolean;
   windFromBearing: number;
   windStrength: number;
+  windParticles: number;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
@@ -2152,7 +2189,7 @@ function Editor({
     const measure = () =>
       setFrame({
         w: el.clientWidth,
-        h: Math.max(240, window.innerHeight - 180),
+        h: Math.max(240, el.clientHeight),
       });
     measure();
     const ro = new ResizeObserver(measure);
@@ -2491,15 +2528,15 @@ function Editor({
 
     // Radial direction from the frontage into the lot (+1 if the rear is at a
     // larger radius, as for a Man-facing lot; −1 for a mountain-facing lot). The
-    // street hugs the frontage on the far side; the service road hugs the rear.
+    // street abuts the frontage edge directly; the service road abuts the rear —
+    // no gap (the lot's border IS the curb), matching the neighbors.
     const outward = rRear > rFront ? 1 : -1;
-    const gapFt = SURROUND_GAP_FT;
-    const streetA = rFront - outward * gapFt;
-    const streetB = rFront - outward * (gapFt + STREET_W_FT);
+    const streetA = rFront;
+    const streetB = rFront - outward * STREET_W_FT;
     const streetIn = Math.max(1, Math.min(streetA, streetB));
     const streetOut = Math.max(streetA, streetB);
-    const serviceA = rRear + outward * gapFt;
-    const serviceB = rRear + outward * (gapFt + SERVICE_ROAD_W_FT);
+    const serviceA = rRear;
+    const serviceB = rRear + outward * SERVICE_ROAD_W_FT;
     const serviceIn = Math.max(1, Math.min(serviceA, serviceB));
     const serviceOut = Math.max(serviceA, serviceB);
     const nIn = Math.min(rFront, rRear);
@@ -2577,18 +2614,22 @@ function Editor({
     const y0 = -PAD_FT;
     const y1 = lot.depthFt + PAD_FT;
     const cell = Math.max(2, Math.max(x1 - x0, y1 - y0) / 60);
-    const obstacles = objects.map((o) => {
-      const ox = o.x + o.width / 2;
-      const oy = o.y + o.height / 2;
-      return footprintOffsets(
-        o.kind,
-        o.width,
-        o.height,
-        o.rotation,
-        o.config,
-        o.mirrored,
-      ).map((p) => [ox + p.x, oy + p.y] as [number, number]);
-    });
+    // Shade structures are open shade cloth — they block sun, not wind — so they
+    // don't deflect the flow. Solid builds (tents, RVs, containers, …) do.
+    const obstacles = objects
+      .filter((o) => o.kind !== "shade")
+      .map((o) => {
+        const ox = o.x + o.width / 2;
+        const oy = o.y + o.height / 2;
+        return footprintOffsets(
+          o.kind,
+          o.width,
+          o.height,
+          o.rotation,
+          o.config,
+          o.mirrored,
+        ).map((p) => [ox + p.x, oy + p.y] as [number, number]);
+      });
     return solveFlow({
       x0,
       y0,
@@ -2956,7 +2997,14 @@ function Editor({
       withBorder
       radius="md"
       p={0}
-      style={{ overflow: "hidden", display: "inline-block", maxWidth: "100%" }}
+      style={{
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        flex: 1,
+        minHeight: 0,
+        width: "100%",
+      }}
     >
       {canManage ? (
         <Group
@@ -3078,7 +3126,15 @@ function Editor({
           </Group>
         </Group>
       ) : null}
-      <Box style={{ position: "relative" }}>
+      <Box
+        style={{
+          position: "relative",
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         <Group
           gap={2}
           wrap="nowrap"
@@ -3115,10 +3171,7 @@ function Editor({
             </ActionIcon>
           </Tooltip>
         </Group>
-        <Box
-          ref={frameRef}
-          style={{ overflow: "auto", maxHeight: "calc(100vh - 180px)" }}
-        >
+        <Box ref={frameRef} style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
           <svg
             ref={svgRef}
             viewBox={`0 0 ${VIEW_W} ${viewH}`}
@@ -3382,6 +3435,7 @@ function Editor({
                 ppf={ppf}
                 dark={dark}
                 clipId="ground-clip"
+                count={windParticles}
               />
             ) : null}
             {/* Zones: labeled regions drawn under the structures. */}
@@ -3748,6 +3802,12 @@ function Compass({
   setShowShade,
   animateShade,
   setAnimateShade,
+  windFromBearing,
+  setWindFromBearing,
+  windStrength,
+  setWindStrength,
+  windParticles,
+  setWindParticles,
 }: {
   mapUpBearing: number | null;
   sun: { altitude: number; azimuth: number };
@@ -3760,6 +3820,12 @@ function Compass({
   setShowShade: (v: boolean) => void;
   animateShade: boolean;
   setAnimateShade: (v: boolean) => void;
+  windFromBearing: number;
+  setWindFromBearing: (n: number) => void;
+  windStrength: number;
+  setWindStrength: (n: number) => void;
+  windParticles: number;
+  setWindParticles: (n: number) => void;
 }) {
   const S = 168;
   const cx = S / 2;
@@ -3767,7 +3833,12 @@ function Compass({
   const r = 60;
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [draggingSun, setDraggingSun] = useState(false);
+  const [draggingWind, setDraggingWind] = useState(false);
   const oriented = mapUpBearing != null;
+  // Wind speed maps to the wind handle's distance from the dial center.
+  const WIND_MIN = 0.4;
+  const WIND_MAX = 2;
+  const WIND_MAX_PARTICLES = 400;
   const vec = (bearing: number) => {
     const phi = (((bearing - (mapUpBearing ?? 0)) % 360) * Math.PI) / 180;
     return { x: Math.sin(phi), y: -Math.cos(phi) };
@@ -3805,15 +3876,24 @@ function Compass({
     );
   };
 
-  // Pointer → compass bearing (inverse of vec): x=sinθ, y=−cosθ, θ=bearing−up.
-  function bearingFromPointer(clientX: number, clientY: number): number {
+  // Pointer → compass bearing (inverse of vec) + distance from center (dial units).
+  function pointerPolar(
+    clientX: number,
+    clientY: number,
+  ): { bearing: number; dist: number } {
     const svg = svgRef.current;
-    if (!svg) return 0;
+    if (!svg) return { bearing: 0, dist: 0 };
     const rect = svg.getBoundingClientRect();
     const x = ((clientX - rect.left) * S) / rect.width - cx;
     const y = ((clientY - rect.top) * S) / rect.height - cy;
     const theta = (Math.atan2(x, -y) * 180) / Math.PI;
-    return (((theta + (mapUpBearing ?? 0)) % 360) + 360) % 360;
+    return {
+      bearing: (((theta + (mapUpBearing ?? 0)) % 360) + 360) % 360,
+      dist: Math.hypot(x, y),
+    };
+  }
+  function bearingFromPointer(clientX: number, clientY: number): number {
+    return pointerPolar(clientX, clientY).bearing;
   }
   // biome-ignore lint/correctness/useExhaustiveDependencies: setters/arc/year are stable enough
   useEffect(() => {
@@ -3836,6 +3916,27 @@ function Compass({
     };
   }, [draggingSun]);
 
+  // Wind handle drag: angle sets the *from* bearing, distance from center sets
+  // the strength (clamped to [WIND_MIN, WIND_MAX]).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setters are stable
+  useEffect(() => {
+    if (!draggingWind) return;
+    const move = (e: PointerEvent) => {
+      const { bearing, dist } = pointerPolar(e.clientX, e.clientY);
+      setWindFromBearing(Math.round(bearing));
+      setWindStrength(clamp((dist / r) * WIND_MAX, WIND_MIN, WIND_MAX));
+    };
+    const up = () => setDraggingWind(false);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [draggingWind]);
+
   // Daylight wedge from the real sunrise/sunset azimuths.
   const riseAz = sunAt(year, arc.sunriseMin).azimuth;
   const setAz = sunAt(year, arc.sunsetMin).azimuth;
@@ -3845,6 +3946,23 @@ function Compass({
   const su = vec(sun.azimuth);
   const sx = cx + su.x * (r - 6);
   const sy = cy + su.y * (r - 6);
+  // Wind handle: at the *from* direction, distance from center ∝ strength. The
+  // arrow points downstream (the way the wind blows). Drag it to aim + speed up.
+  const windOn = windParticles > 0;
+  const wFrom = vec(windFromBearing);
+  const wRad = clamp((windStrength / WIND_MAX) * r, 12, r);
+  const whx = cx + wFrom.x * wRad; // handle (upstream)
+  const why = cy + wFrom.y * wRad;
+  const wtx = cx - wFrom.x * wRad; // downstream tip
+  const wty = cy - wFrom.y * wRad;
+  const wAng = Math.atan2(wty - why, wtx - whx);
+  const wHead = (d: number) => ({
+    x: wtx - Math.cos(wAng - d) * 9,
+    y: wty - Math.sin(wAng - d) * 9,
+  });
+  const wh1 = wHead(0.5);
+  const wh2 = wHead(-0.5);
+  const windColor = windOn ? "#1971c2" : "var(--mantine-color-dimmed)";
   return (
     <Paper withBorder p="sm" radius="md">
       <Text size="xs" fw={600} mb={4}>
@@ -3932,6 +4050,40 @@ function Compass({
             />
           </g>
         ) : null}
+        {oriented ? (
+          // Wind: arrow points the way the wind blows; grab the round handle
+          // (upstream) to aim, drag toward/away from center to change strength.
+          <g
+            style={{ cursor: "grab" }}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              setDraggingWind(true);
+            }}
+            opacity={windOn ? 1 : 0.55}
+          >
+            <line
+              x1={whx}
+              y1={why}
+              x2={wtx}
+              y2={wty}
+              stroke={windColor}
+              strokeWidth={2.5}
+              strokeLinecap="round"
+            />
+            <polygon
+              points={`${wtx},${wty} ${wh1.x},${wh1.y} ${wh2.x},${wh2.y}`}
+              fill={windColor}
+            />
+            <circle
+              cx={whx}
+              cy={why}
+              r={5.5}
+              fill={windOn ? "#74c0fc" : "var(--mantine-color-default)"}
+              stroke={windColor}
+              strokeWidth={1.5}
+            />
+          </g>
+        ) : null}
       </svg>
       {oriented ? (
         <>
@@ -3957,6 +4109,28 @@ function Compass({
               the sun to change time
             </Text>
           ) : null}
+          <Text size="xs" fw={600} mt={10}>
+            Prevailing wind
+          </Text>
+          <Text size="xs" c="dimmed" mb={2}>
+            {windParticles} particles{" "}
+            {windOn
+              ? `· from ${Math.round(windFromBearing)}° · drag the arrow to aim/speed`
+              : "· slide up to show the flow"}
+          </Text>
+          <Slider
+            size="sm"
+            min={0}
+            max={WIND_MAX_PARTICLES}
+            step={10}
+            value={windParticles}
+            onChange={setWindParticles}
+            marks={[
+              { value: 0, label: "off" },
+              { value: WIND_MAX_PARTICLES, label: String(WIND_MAX_PARTICLES) },
+            ]}
+            label={(v) => (v === 0 ? "off" : String(v))}
+          />
         </>
       ) : (
         <Text size="xs" c="dimmed" mt={4}>
@@ -3981,7 +4155,6 @@ function usePrefersReducedMotion() {
   return reduced;
 }
 
-const WIND_N = 180; // particle pool size
 const WIND_SPEED_FT_S = 26; // visual feet/sec per unit wind speed
 
 /** Trace a sparse set of streamlines (feet polylines) through the field — the
@@ -4023,6 +4196,7 @@ function WindLayer({
   ppf,
   dark,
   clipId,
+  count,
 }: {
   field: FlowField;
   originX: number;
@@ -4030,6 +4204,7 @@ function WindLayer({
   ppf: number;
   dark: boolean;
   clipId: string;
+  count: number;
 }) {
   const reduced = usePrefersReducedMotion();
   const color = dark ? "#a5d8ff" : "#1971c2";
@@ -4046,7 +4221,7 @@ function WindLayer({
   useEffect(() => {
     if (reduced) return;
     type P = { fx: number; fy: number; pfx: number; pfy: number; life: number };
-    const parts: P[] = Array.from({ length: WIND_N }, () => ({
+    const parts: P[] = Array.from({ length: count }, () => ({
       fx: 0,
       fy: 0,
       pfx: 0,
@@ -4118,7 +4293,7 @@ function WindLayer({
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [reduced]);
+  }, [reduced, count]);
 
   if (reduced) {
     return (
@@ -4143,7 +4318,7 @@ function WindLayer({
   }
   return (
     <g clipPath={`url(#${clipId})`} pointerEvents="none">
-      {Array.from({ length: WIND_N }, (_, i) => (
+      {Array.from({ length: count }, (_, i) => (
         <line
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size particle pool — index is the stable identity
           key={`wp-${i}`}
@@ -4157,173 +4332,6 @@ function WindLayer({
         />
       ))}
     </g>
-  );
-}
-
-/** Wind dial + controls: toggle the flow layer, drag the arrow to set the *from*
- * bearing (seeded to BRC's prevailing wind), and set strength. Mirrors the
- * Compass's bearing math (dial "up" = toward the Man). */
-function WindControl({
-  mapUpBearing,
-  showWind,
-  setShowWind,
-  fromBearing,
-  setFromBearing,
-  strength,
-  setStrength,
-}: {
-  mapUpBearing: number | null;
-  showWind: boolean;
-  setShowWind: (v: boolean) => void;
-  fromBearing: number;
-  setFromBearing: (n: number) => void;
-  strength: number;
-  setStrength: (n: number) => void;
-}) {
-  const S = 132;
-  const cx = S / 2;
-  const cy = S / 2;
-  const r = 48;
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const oriented = mapUpBearing != null;
-  const vec = (bearing: number) => {
-    const phi = (((bearing - (mapUpBearing ?? 0)) % 360) * Math.PI) / 180;
-    return { x: Math.sin(phi), y: -Math.cos(phi) };
-  };
-  function bearingFromPointer(clientX: number, clientY: number): number {
-    const svg = svgRef.current;
-    if (!svg) return fromBearing;
-    const rect = svg.getBoundingClientRect();
-    const x = ((clientX - rect.left) * S) / rect.width - cx;
-    const y = ((clientY - rect.top) * S) / rect.height - cy;
-    const theta = (Math.atan2(x, -y) * 180) / Math.PI;
-    return (((theta + (mapUpBearing ?? 0)) % 360) + 360) % 360;
-  }
-  // biome-ignore lint/correctness/useExhaustiveDependencies: setters are stable
-  useEffect(() => {
-    if (!dragging) return;
-    const move = (e: PointerEvent) =>
-      setFromBearing(Math.round(bearingFromPointer(e.clientX, e.clientY)));
-    const up = () => setDragging(false);
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
-    };
-  }, [dragging]);
-
-  // Wind comes FROM `fromBearing` and travels to the opposite side.
-  const from = vec(fromBearing);
-  const fx0 = cx + from.x * r;
-  const fy0 = cy + from.y * r;
-  const tx = cx - from.x * r;
-  const ty = cy - from.y * r;
-  // Arrowhead at the downstream end.
-  const ang = Math.atan2(ty - fy0, tx - fx0);
-  const ah = (d: number) => ({
-    x: tx - Math.cos(ang - d) * 10,
-    y: ty - Math.sin(ang - d) * 10,
-  });
-  const a1 = ah(0.5);
-  const a2 = ah(-0.5);
-  return (
-    <Paper withBorder p="sm" radius="md">
-      <Group justify="space-between" align="center" mb={4}>
-        <Text size="xs" fw={600}>
-          Prevailing wind
-        </Text>
-        <Switch
-          size="xs"
-          checked={showWind}
-          onChange={(e) => setShowWind(e.currentTarget.checked)}
-          disabled={!oriented}
-        />
-      </Group>
-      {oriented ? (
-        <>
-          <svg
-            ref={svgRef}
-            viewBox={`0 0 ${S} ${S}`}
-            style={{
-              width: "100%",
-              maxWidth: 150,
-              height: "auto",
-              display: "block",
-              touchAction: "none",
-              margin: "0 auto",
-              opacity: showWind ? 1 : 0.5,
-            }}
-            role="img"
-            aria-label="Wind direction"
-          >
-            <title>Wind direction</title>
-            <circle
-              cx={cx}
-              cy={cy}
-              r={r}
-              fill="var(--mantine-color-default)"
-              stroke="var(--mantine-color-default-border)"
-            />
-            <text
-              x={cx}
-              y={cy - r + 9}
-              fontSize={10}
-              fontWeight={700}
-              fill="#e03131"
-              textAnchor="middle"
-              dominantBaseline="central"
-            >
-              N
-            </text>
-            <g
-              style={{ cursor: "grab" }}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setDragging(true);
-              }}
-            >
-              <line
-                x1={fx0}
-                y1={fy0}
-                x2={tx}
-                y2={ty}
-                stroke="#1971c2"
-                strokeWidth={3}
-                strokeLinecap="round"
-              />
-              <polygon
-                points={`${tx},${ty} ${a1.x},${a1.y} ${a2.x},${a2.y}`}
-                fill="#1971c2"
-              />
-              <circle cx={fx0} cy={fy0} r={5} fill="#74c0fc" stroke="#1971c2" />
-            </g>
-          </svg>
-          <Text size="xs" c="dimmed" mt={4} ta="center">
-            from {Math.round(fromBearing)}° · drag to aim
-          </Text>
-          <Text size="xs" fw={500} mt={6}>
-            Strength
-          </Text>
-          <Slider
-            size="sm"
-            min={0.4}
-            max={2}
-            step={0.1}
-            value={strength}
-            onChange={setStrength}
-            label={(v) => `${v.toFixed(1)}×`}
-          />
-        </>
-      ) : (
-        <Text size="xs" c="dimmed" mt={4}>
-          Set the lot address (e.g. 3:00) for true north & wind.
-        </Text>
-      )}
-    </Paper>
   );
 }
 

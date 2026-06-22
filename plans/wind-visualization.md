@@ -62,6 +62,22 @@ they inherit the viewBox zoom/pan transform. Clipped to the ground view.
   It reads them through `stateRef` updated each render, so moving a building
   re-solves the field and the live particles adapt smoothly.
 
+## Follow-up tweaks (round 2)
+- [x] Shade structures are porous to wind — `kind === "shade"` excluded from
+  obstacles (blocks sun, not wind).
+- [x] Merged the wind dial INTO the orientation (sun) compass, so wind N matches
+  map N. Dial radius = wind strength; angle = *from* bearing. Removed the separate
+  WindControl + strength slider.
+- [x] Particle-count slider (0–400) doubles as on/off (0 = off); `windParticles`
+  replaces the boolean. WindLayer takes a `count` prop.
+- [x] Fixed BRC orientation: `mapUpBearingFor` was mirrored E–W. New `225 + 30·h`
+  is the exact negation of the old `135 − 30·h` (a pure sign flip — 4:30 stays N,
+  the rest mirror). 6:00 (gate, SW of Man) → up NE; 12:00 → up SW.
+- [x] Curved street/service-road now abut the lot edge (no gap), like neighbors.
+- [x] Map page fills the dashboard area (`height: calc(100vh - 88px)`, flex
+  column); the map frame + sidebar scroll internally, so zoom never adds a
+  page-level scrollbar.
+
 ## Things not to do
 - Don't persist wind to the DB (user chose client-only).
 - Don't re-render React per animation frame — mutate SVG attrs via refs.
