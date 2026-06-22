@@ -5,11 +5,35 @@
 
 ## Goal
 
-A self-hosted web app for running a Burning Man theme camp: member management,
+A self-hosted web app for running an event **theme camp**: member management,
 a visual camp-map editor tied to the database, dues/financials, onboarding,
 shared docs, announcements, a public recruit page, and Discord-based outreach.
-Built first for Cameron's camp, designed so it can later be published for other
-camps to self-host or (eventually) run as multi-camp SaaS.
+Built first for Cameron's camp (Math Camp, which attends multiple events), and
+designed so it can later be published for other camps to self-host or (eventually)
+run as multi-camp SaaS. **The app is NOT Burning-Man-specific** — Burning Man is
+one *event*, not the core (see Architecture below).
+
+## Architecture — four layers (the app is NOT Burning-Man-specific)
+
+The user's mental model; keep these seams clean so the lower layers can peel out:
+
+1. **Core app framework** — users, joining/groups, the onboarding *framework*,
+   post-event followups; the generic camp / edition / membership skeleton. Event-
+   and camp-agnostic. **This repo is this layer (the product).**
+2. **Per-camp theming** — a camp's custom structures, questions, branding (the
+   `camp-theme` package contract). Math Camp's theme lives in this repo *for now*
+   but should eventually peel out to its own package/repo.
+3. **Per-event theming + map/addressing** — events differ structurally (Burning
+   Man's BRC annular-clock layout vs UnSCruz, etc.; see decision #6). Event-
+   specific features — BRC geometry, BM ticket/pass flows, the Burning Man
+   disclaimer — belong here. The Burning-Man layer lives in this repo *for now*
+   but should also peel out. One camp can attend multiple events.
+4. **Per camp/event/year/camper data** — the application database (tenant-scoped
+   rows).
+
+Implication: don't frame the whole app as Burning-Man-specific. BM-only UI (the
+disclaimer, BRC map specifics, BM ticket/pass terminology) should ultimately be
+gated on the active *event* being Burning Man, once an event-type seam exists.
 
 ## Environment / context
 
