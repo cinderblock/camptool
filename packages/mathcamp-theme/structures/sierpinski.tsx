@@ -109,32 +109,31 @@ function flyingButtress(
   );
   const verts: Pt[] = [...V];
 
-  // --- Front extension: a flying-shade strip running ALONG the front edge (A→C,
-  // a fixed side — Mirror swaps it to A→B), hugging it on the OUTSIDE. Bases sit on
-  // the edge, apexes point outward, so the band stays adjacent to the pyramid in
-  // any rotation (rather than jutting off in a fixed direction). Partway toward C. ---
-  const C: Pt = [w, h];
-  const cl = Math.hypot(C[0] - A[0], C[1] - A[1]) || 1;
-  const uAC: Pt = [(C[0] - A[0]) / cl, (C[1] - A[1]) / cl]; // unit A→C
-  const nAC: Pt = [uAC[1], -uAC[0]]; // outward normal (away from the interior)
-  const triH = edge * SQRT3_2;
-  const onEdge = (t: number): Pt => [A[0] + uAC[0] * t, A[1] + uAC[1] * t];
-  const onOut = (t: number): Pt => [
-    A[0] + uAC[0] * t + nAC[0] * triH,
-    A[1] + uAC[1] * t + nAC[1] * triH,
-  ];
-  const bays = 3; // partway along the 40′ edge
-  for (let k = 0; k < bays; k++) {
-    const e0 = onEdge(k * edge);
-    const e1 = onEdge((k + 1) * edge);
-    const tk = onOut((k + 0.5) * edge);
-    flying.push([e0, e1, tk]); // apex out
-    sticks.push(tk);
-    verts.push(e0, e1, tk);
-    if (k < bays - 1) {
-      const tk1 = onOut((k + 1.5) * edge);
-      flying.push([e1, tk, tk1]); // inverted, fills the bay
-      verts.push(tk1);
+  // --- Front extension: CONTINUE the hexagon's triangular grid along the front
+  // edge (the d1 / A→C direction; Mirror swaps it to A→B). It STRADDLES the edge —
+  // an inner row of lattice points (O + k·a, inside the footprint) and an outer row
+  // (O + k·a + b, outside) — so the strip is the same grid as the hexagon, half
+  // over the pyramid and half flying past the edge. Sticks at the outer vertices. ---
+  const v1 = V[1];
+  const v2 = V[2];
+  if (v1 && v2) {
+    const a: Pt = [v1[0] - O[0], v1[1] - O[1]]; // grid step toward C (along the edge)
+    const b: Pt = [v2[0] - O[0], v2[1] - O[1]]; // grid step to the outer side
+    const inner = (k: number): Pt => [O[0] + k * a[0], O[1] + k * a[1]];
+    const outer = (k: number): Pt => [
+      O[0] + k * a[0] + b[0],
+      O[1] + k * a[1] + b[1],
+    ];
+    const bays = 3; // partway along the edge
+    for (let k = 0; k < bays; k++) {
+      const i0 = inner(k);
+      const o0 = outer(k);
+      const i1 = inner(k + 1);
+      const o1 = outer(k + 1);
+      flying.push([i0, o0, i1]);
+      flying.push([o0, i1, o1]);
+      sticks.push(o0); // the OUTER (flying) vertices need legs
+      verts.push(i0, o0, i1, o1);
     }
   }
 
