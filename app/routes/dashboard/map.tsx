@@ -1661,12 +1661,12 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // form (in the side rail) share one flag.
   const [lotOpen, setLotOpen] = useState(false);
 
-  // ---- Shade simulation: time of day drives the sun, which casts shadows. ----
+  // ---- Shade simulation: time of day drives the sun, which casts shadows. The
+  // sim is always on (drag the sun to the day's ends to clear the shadows). ----
   const sunYear = lot?.year ?? CURRENT_EVENT_YEAR;
   const arc = useMemo(() => dayArc(sunYear), [sunYear]);
-  const [showShade, setShowShade] = useState(true);
-  // Animation is opt-in: showing shade alone holds the sun at a fixed time; turn
-  // this on to auto-drift the sun across the day.
+  // Animation is opt-in: the sun otherwise holds at a fixed time; turn this on to
+  // auto-drift the sun across the day.
   const [animateShade, setAnimateShade] = useState(false);
   // Local minute-of-day; start mid-afternoon for a clear shade demo.
   const [timeMin, setTimeMin] = useState(() =>
@@ -1687,7 +1687,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // Auto-drift the sun slowly across the daylight arc while animation is on (and
   // the sun isn't being dragged); loop back to sunrise after sunset.
   useEffect(() => {
-    if (!showShade || !animateShade || sunDragging) return;
+    if (!animateShade || sunDragging) return;
     const id = setInterval(() => {
       setTimeMin((t) => {
         const n = t + 3;
@@ -1695,7 +1695,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       });
     }, 120);
     return () => clearInterval(id);
-  }, [showShade, animateShade, sunDragging, arc.sunriseMin, arc.sunsetMin]);
+  }, [animateShade, sunDragging, arc.sunriseMin, arc.sunsetMin]);
 
   // Reconcile the authoritative object the server returns after each mutation:
   // upsert it (a newly added/placed one gets appended + selected; an updated one
@@ -1855,7 +1855,6 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setLotOpen={setLotOpen}
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
             sun={sun}
-            showShade={showShade}
             showDoors={showDoors}
             showWind={showWind}
             windFromBearing={windFromBearing}
@@ -1909,8 +1908,6 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             timeMin={timeMin}
             setTimeMin={setTimeMin}
             setSunDragging={setSunDragging}
-            showShade={showShade}
-            setShowShade={setShowShade}
             animateShade={animateShade}
             setAnimateShade={setAnimateShade}
             windFromBearing={windFromBearing}
@@ -1919,6 +1916,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setWindStrength={setWindStrength}
             windParticles={windParticles}
             setWindParticles={setWindParticles}
+            resetWind={() => {
+              setWindFromBearing(BRC_WIND_FROM_BEARING);
+              setWindStrength(1);
+            }}
           />
           {canManage ? (
             <PendingPanel
@@ -2136,7 +2137,6 @@ function Editor({
   setLotOpen,
   mapUpBearing,
   sun,
-  showShade,
   showDoors,
   showWind,
   windFromBearing,
@@ -2164,7 +2164,6 @@ function Editor({
   setLotOpen: (v: boolean) => void;
   mapUpBearing: number | null;
   sun: { altitude: number; azimuth: number };
-  showShade: boolean;
   showDoors: boolean;
   showWind: boolean;
   windFromBearing: number;
@@ -2602,7 +2601,7 @@ function Editor({
       : { dx: 0, dy: 0 };
   const domeFx = 0.5 + toSun.dx * 0.32;
   const domeFy = 0.5 + toSun.dy * 0.32;
-  const domeShadeOn = showShade && mapUpBearing != null && sun.altitude > 0.5;
+  const domeShadeOn = mapUpBearing != null && sun.altitude > 0.5;
 
   // ---- Wind flow field (plot-local feet). Solved when the wind layer is on and
   // the lot is oriented; buildings become solid obstacles the flow goes around.
@@ -3407,7 +3406,7 @@ function Editor({
             Overlaps UNION (OR) at one opacity rather than adding up — the polygons
             are opaque inside a single group whose opacity flattens them, so two
             overlapping shadows look the same as one. */}
-            {showShade && mapUpBearing != null && sun.altitude > 0.5 ? (
+            {mapUpBearing != null && sun.altitude > 0.5 ? (
               <g
                 clipPath="url(#ground-clip)"
                 pointerEvents="none"
@@ -3514,7 +3513,7 @@ function Editor({
             {/* Self-shading: tint the faces of a 3D structure that are turned away
             from the sun (its shady/lee side), drawn over the structure. Only kinds
             that declare `shadedFaces` (e.g. the Sierpinski pyramid) participate. */}
-            {showShade && mapUpBearing != null && sun.altitude > 0.5
+            {mapUpBearing != null && sun.altitude > 0.5
               ? objects.flatMap((o) => {
                   const def = kindDef(o.kind);
                   const sd = sunDirLocal(o, sun, mapUpBearing);
@@ -3803,8 +3802,6 @@ function Compass({
   timeMin,
   setTimeMin,
   setSunDragging,
-  showShade,
-  setShowShade,
   animateShade,
   setAnimateShade,
   windFromBearing,
@@ -3813,6 +3810,7 @@ function Compass({
   setWindStrength,
   windParticles,
   setWindParticles,
+  resetWind,
 }: {
   mapUpBearing: number | null;
   frontsToMan: boolean;
@@ -3822,8 +3820,6 @@ function Compass({
   timeMin: number;
   setTimeMin: (n: number) => void;
   setSunDragging: (v: boolean) => void;
-  showShade: boolean;
-  setShowShade: (v: boolean) => void;
   animateShade: boolean;
   setAnimateShade: (v: boolean) => void;
   windFromBearing: number;
@@ -3832,6 +3828,7 @@ function Compass({
   setWindStrength: (n: number) => void;
   windParticles: number;
   setWindParticles: (n: number) => void;
+  resetWind: () => void;
 }) {
   const S = 168;
   const cx = S / 2;
@@ -4017,7 +4014,7 @@ function Compass({
             {ray(270, "var(--mantine-color-dimmed)", "W", { lw: 0.6 })}
           </>
         ) : null}
-        {oriented && showShade ? (
+        {oriented ? (
           <g
             style={{ cursor: "grab" }}
             onPointerDown={(e) => {
@@ -4099,32 +4096,33 @@ function Compass({
           <Switch
             size="xs"
             mt={8}
-            checked={showShade}
-            onChange={(e) => setShowShade(e.currentTarget.checked)}
-            label="Show shade"
+            checked={animateShade}
+            onChange={(e) => setAnimateShade(e.currentTarget.checked)}
+            label="Animate sun"
           />
-          {showShade ? (
-            <Switch
-              size="xs"
-              mt={6}
-              checked={animateShade}
-              onChange={(e) => setAnimateShade(e.currentTarget.checked)}
-              label="Animate"
-            />
-          ) : null}
-          {showShade ? (
-            <Text size="xs" c="dimmed" mt={4}>
-              {formatClock(timeMin)} · sun {Math.round(sun.altitude)}° up · drag
-              the sun to change time
-            </Text>
-          ) : null}
-          <Text size="xs" fw={600} mt={10}>
-            Prevailing wind
+          <Text size="xs" c="dimmed" mt={4}>
+            {formatClock(timeMin)} · sun {Math.round(sun.altitude)}° up · drag
+            the sun (to the day's ends to clear the shade)
           </Text>
+          <Group justify="space-between" align="center" mt={10} mb={2}>
+            <Text size="xs" fw={600}>
+              Prevailing wind
+            </Text>
+            <Button
+              variant="subtle"
+              size="compact-xs"
+              onClick={resetWind}
+              disabled={
+                windFromBearing === BRC_WIND_FROM_BEARING && windStrength === 1
+              }
+            >
+              Reset
+            </Button>
+          </Group>
           <Text size="xs" c="dimmed" mb={2}>
             {windParticles} particles{" "}
             {windOn
-              ? `· from ${Math.round(windFromBearing)}° · drag the arrow to aim/speed`
+              ? `· from ${Math.round(windFromBearing)}°`
               : "· slide up to show the flow"}
           </Text>
           <Slider
@@ -4140,6 +4138,22 @@ function Compass({
             ]}
             label={(v) => (v === 0 ? "off" : String(v))}
           />
+          {windOn ? (
+            <>
+              <Text size="xs" fw={500} mt={8}>
+                Strength
+              </Text>
+              <Slider
+                size="sm"
+                min={WIND_MIN}
+                max={WIND_MAX}
+                step={0.1}
+                value={windStrength}
+                onChange={setWindStrength}
+                label={(v) => `${v.toFixed(1)}×`}
+              />
+            </>
+          ) : null}
         </>
       ) : (
         <Text size="xs" c="dimmed" mt={4}>
