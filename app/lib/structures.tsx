@@ -146,6 +146,8 @@ const CORE_KINDS = [
     group: "Structures",
     tags: ["structure"],
     personal: true,
+    // Open shade cloth: casts only its top layer; porous to wind.
+    canopyShade: true,
   },
   {
     value: "kitchen",

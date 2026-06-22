@@ -1483,6 +1483,9 @@ function shadowPolygon(
     const len = Math.min((heights[i] ?? 0) / tan, 300);
     return { x: c.x + dir.dx * len, y: c.y + dir.dy * len };
   });
+  // An open canopy (shade cloth on legs) casts only its top layer projected to
+  // the ground — a floating shadow, not a solid extrusion connected to the base.
+  if (def.canopyShade) return [convexHull(tips)];
   return [convexHull(corners.concat(tips))];
 }
 
@@ -2615,10 +2618,10 @@ function Editor({
     const y0 = -PAD_FT;
     const y1 = lot.depthFt + PAD_FT;
     const cell = Math.max(2, Math.max(x1 - x0, y1 - y0) / 60);
-    // Shade structures are open shade cloth — they block sun, not wind — so they
-    // don't deflect the flow. Solid builds (tents, RVs, containers, …) do.
+    // Open canopies (shade cloth) block sun, not wind — so they don't deflect the
+    // flow. Solid builds (tents, RVs, containers, …) do.
     const obstacles = objects
-      .filter((o) => o.kind !== "shade")
+      .filter((o) => !kindDef(o.kind).canopyShade)
       .map((o) => {
         const ox = o.x + o.width / 2;
         const oy = o.y + o.height / 2;

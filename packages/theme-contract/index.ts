@@ -44,6 +44,11 @@ export type Kind = {
   /** A camper may declare this for themselves (Bringing / wizard). Communal
    * infrastructure is officer-placed only and stays out of the camper palette. */
   personal: boolean;
+  /** An open overhead canopy (shade cloth on legs) rather than a solid volume:
+   * it blocks sun but not wind. The shade sim casts only its top layer projected
+   * to the ground (a floating shadow, not a solid extrusion), and the wind sim
+   * treats it as porous (not an obstacle). */
+  canopyShade?: boolean;
 };
 
 /** Context handed to a custom structure's footprint renderer. Everything is in
