@@ -63,6 +63,12 @@ import {
 } from "~/lib/structures";
 import type { StructureConfig } from "~/lib/structures";
 import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
+import {
+  BRC_WIND_FROM_BEARING,
+  type FlowField,
+  sampleFlow,
+  solveFlow,
+} from "~/lib/wind";
 import { db } from "../../../db/client.server";
 import {
   mapCable,
@@ -1666,6 +1672,13 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // True while the user is dragging the compass sun (pauses the auto-drift).
   const [sunDragging, setSunDragging] = useState(false);
   const sun = useMemo(() => sunAt(sunYear, timeMin), [sunYear, timeMin]);
+
+  // ---- Prevailing-wind flow visualization (animated particles around buildings).
+  // Off by default; direction is a *from* bearing seeded to BRC's prevailing wind
+  // and adjustable on the wind dial. Client-only (not persisted).
+  const [showWind, setShowWind] = useState(false);
+  const [windFromBearing, setWindFromBearing] = useState(BRC_WIND_FROM_BEARING);
+  const [windStrength, setWindStrength] = useState(1);
   // Auto-drift the sun slowly across the daylight arc while animation is on (and
   // the sun isn't being dragged); loop back to sunrise after sunset.
   useEffect(() => {
@@ -1810,6 +1823,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             sun={sun}
             showShade={showShade}
             showDoors={showDoors}
+            showWind={showWind}
+            windFromBearing={windFromBearing}
+            windStrength={windStrength}
             fetcher={fetcher}
           />
           <GridScaleNote lot={lot} />
@@ -1855,6 +1871,15 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setShowShade={setShowShade}
             animateShade={animateShade}
             setAnimateShade={setAnimateShade}
+          />
+          <WindControl
+            mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
+            showWind={showWind}
+            setShowWind={setShowWind}
+            fromBearing={windFromBearing}
+            setFromBearing={setWindFromBearing}
+            strength={windStrength}
+            setStrength={setWindStrength}
           />
           {canManage ? (
             <PendingPanel
@@ -2074,6 +2099,9 @@ function Editor({
   sun,
   showShade,
   showDoors,
+  showWind,
+  windFromBearing,
+  windStrength,
   fetcher,
 }: {
   lot: Lot;
@@ -2098,6 +2126,9 @@ function Editor({
   sun: { altitude: number; azimuth: number };
   showShade: boolean;
   showDoors: boolean;
+  showWind: boolean;
+  windFromBearing: number;
+  windStrength: number;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
@@ -2531,6 +2562,54 @@ function Editor({
   const domeFx = 0.5 + toSun.dx * 0.32;
   const domeFy = 0.5 + toSun.dy * 0.32;
   const domeShadeOn = showShade && mapUpBearing != null && sun.altitude > 0.5;
+
+  // ---- Wind flow field (plot-local feet). Solved when the wind layer is on and
+  // the lot is oriented; buildings become solid obstacles the flow goes around.
+  const windOn = showWind && mapUpBearing != null;
+  const windField = useMemo<FlowField | null>(() => {
+    if (!windOn || mapUpBearing == null) return null;
+    // Direction the wind travels (a *from* bearing + 180°), in the plot frame.
+    const flow = bearingToPlotDelta(windFromBearing + 180, 1, mapUpBearing);
+    const cxFt = lot.frontageFt / 2;
+    const halfMax = Math.max(lot.frontageFt, rear) / 2;
+    const x0 = cxFt - halfMax - PAD_FT;
+    const x1 = cxFt + halfMax + PAD_FT;
+    const y0 = -PAD_FT;
+    const y1 = lot.depthFt + PAD_FT;
+    const cell = Math.max(2, Math.max(x1 - x0, y1 - y0) / 60);
+    const obstacles = objects.map((o) => {
+      const ox = o.x + o.width / 2;
+      const oy = o.y + o.height / 2;
+      return footprintOffsets(
+        o.kind,
+        o.width,
+        o.height,
+        o.rotation,
+        o.config,
+        o.mirrored,
+      ).map((p) => [ox + p.x, oy + p.y] as [number, number]);
+    });
+    return solveFlow({
+      x0,
+      y0,
+      x1,
+      y1,
+      cell,
+      dir: { x: flow.dx, y: flow.dy },
+      speed: windStrength,
+      obstacles,
+      iters: 40,
+    });
+  }, [
+    windOn,
+    mapUpBearing,
+    windFromBearing,
+    windStrength,
+    lot.frontageFt,
+    lot.depthFt,
+    rear,
+    objects,
+  ]);
 
   const fx = (sx: number) => (sx - originX) / ppf;
   const fy = (sy: number) => (sy - originY) / ppf;
@@ -3293,6 +3372,18 @@ function Editor({
                 )}
               </g>
             ) : null}
+            {/* Prevailing-wind flow: animated particles streaming around the
+            buildings, clipped to the ground view. */}
+            {windOn && windField ? (
+              <WindLayer
+                field={windField}
+                originX={originX}
+                originY={originY}
+                ppf={ppf}
+                dark={dark}
+                clipId="ground-clip"
+              />
+            ) : null}
             {/* Zones: labeled regions drawn under the structures. */}
             {zones.map((z) => {
               if (z.points.length < 2) return null;
@@ -3870,6 +3961,366 @@ function Compass({
       ) : (
         <Text size="xs" c="dimmed" mt={4}>
           Set the lot address (e.g. 3:00) for true north & sun.
+        </Text>
+      )}
+    </Paper>
+  );
+}
+
+/** True when the user asked the OS to reduce motion (we then show static
+ * streamlines instead of animated wind particles). */
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const m = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduced(m.matches);
+    update();
+    m.addEventListener("change", update);
+    return () => m.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
+
+const WIND_N = 180; // particle pool size
+const WIND_SPEED_FT_S = 26; // visual feet/sec per unit wind speed
+
+/** Trace a sparse set of streamlines (feet polylines) through the field — the
+ * static, reduced-motion fallback for the animated particles. */
+function traceStreamlines(field: FlowField): Array<Array<[number, number]>> {
+  const lines: Array<Array<[number, number]>> = [];
+  const seed = Math.max(2, Math.round(field.nx / 14));
+  const stepFt = field.cell * 0.7;
+  for (let j = 1; j < field.ny - 1; j += seed) {
+    for (let i = 1; i < field.nx - 1; i += seed) {
+      let fx = field.x0 + i * field.cell;
+      let fy = field.y0 + j * field.cell;
+      if (sampleFlow(field, fx, fy).solid) continue;
+      const pts: Array<[number, number]> = [[fx, fy]];
+      for (let s = 0; s < 80; s++) {
+        const v = sampleFlow(field, fx, fy);
+        const mag = Math.hypot(v.x, v.y);
+        if (v.solid || mag < 1e-3) break;
+        fx += (v.x / mag) * stepFt;
+        fy += (v.y / mag) * stepFt;
+        pts.push([fx, fy]);
+      }
+      if (pts.length > 3) lines.push(pts);
+    }
+  }
+  return lines;
+}
+
+/** Animated prevailing-wind layer: a fixed pool of particles advected through the
+ * flow field and drawn as short streaks. Animation runs imperatively in a
+ * requestAnimationFrame loop (mutating SVG attributes via refs) so it never
+ * re-renders React; it reads the latest field/transform through a ref, so moving
+ * a building updates the flow without restarting the animation. Drawn inside the
+ * map SVG, so it inherits the viewBox zoom/pan transform. */
+function WindLayer({
+  field,
+  originX,
+  originY,
+  ppf,
+  dark,
+  clipId,
+}: {
+  field: FlowField;
+  originX: number;
+  originY: number;
+  ppf: number;
+  dark: boolean;
+  clipId: string;
+}) {
+  const reduced = usePrefersReducedMotion();
+  const color = dark ? "#a5d8ff" : "#1971c2";
+  // Latest props for the rAF loop (which doesn't depend on them, so it persists).
+  const stateRef = useRef({ field, originX, originY, ppf });
+  stateRef.current = { field, originX, originY, ppf };
+  const lineRefs = useRef<Array<SVGLineElement | null>>([]);
+
+  const streamlines = useMemo(
+    () => (reduced ? traceStreamlines(field) : null),
+    [reduced, field],
+  );
+
+  useEffect(() => {
+    if (reduced) return;
+    type P = { fx: number; fy: number; pfx: number; pfy: number; life: number };
+    const parts: P[] = Array.from({ length: WIND_N }, () => ({
+      fx: 0,
+      fy: 0,
+      pfx: 0,
+      pfy: 0,
+      life: 0,
+    }));
+    const bounds = () => {
+      const f = stateRef.current.field;
+      return {
+        x0: f.x0 - f.cell,
+        y0: f.y0 - f.cell,
+        x1: f.x0 + f.nx * f.cell,
+        y1: f.y0 + f.ny * f.cell,
+      };
+    };
+    const respawn = (p: P, fresh: boolean) => {
+      const f = stateRef.current.field;
+      const b = bounds();
+      for (let t = 0; t < 8; t++) {
+        const fx = b.x0 + Math.random() * (b.x1 - b.x0);
+        const fy = b.y0 + Math.random() * (b.y1 - b.y0);
+        if (!sampleFlow(f, fx, fy).solid) {
+          p.fx = fx;
+          p.fy = fy;
+          p.pfx = fx;
+          p.pfy = fy;
+          p.life = (fresh ? Math.random() : 1) * 2.5 + 0.8;
+          return;
+        }
+      }
+      p.life = 0.0001;
+    };
+    for (const p of parts) respawn(p, true);
+
+    let raf = 0;
+    let last = 0;
+    const step = (t: number) => {
+      const dt = last ? Math.min(0.05, (t - last) / 1000) : 0.016;
+      last = t;
+      const { field: f, originX: ox, originY: oy, ppf: pf } = stateRef.current;
+      const b = bounds();
+      for (let i = 0; i < parts.length; i++) {
+        const p = parts[i];
+        if (!p) continue;
+        p.life -= dt;
+        const s = sampleFlow(f, p.fx, p.fy);
+        const spd = Math.hypot(s.x, s.y);
+        const out = p.fx < b.x0 || p.fx > b.x1 || p.fy < b.y0 || p.fy > b.y1;
+        if (p.life <= 0 || s.solid || out) {
+          respawn(p, false);
+        } else {
+          p.pfx = p.fx;
+          p.pfy = p.fy;
+          p.fx += s.x * dt * WIND_SPEED_FT_S;
+          p.fy += s.y * dt * WIND_SPEED_FT_S;
+        }
+        const ln = lineRefs.current[i];
+        if (ln) {
+          ln.setAttribute("x1", String(ox + p.pfx * pf));
+          ln.setAttribute("y1", String(oy + p.pfy * pf));
+          ln.setAttribute("x2", String(ox + p.fx * pf));
+          ln.setAttribute("y2", String(oy + p.fy * pf));
+          const op =
+            clamp(0.12 + spd * 0.5, 0, 0.85) * Math.min(1, p.life * 1.5);
+          ln.setAttribute("opacity", String(op));
+        }
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [reduced]);
+
+  if (reduced) {
+    return (
+      <g clipPath={`url(#${clipId})`} pointerEvents="none">
+        {streamlines?.map((pts, i) => (
+          <path
+            key={`wsl-${i}-${pts.length}`}
+            d={pts
+              .map(
+                ([px, py], k) =>
+                  `${k === 0 ? "M" : "L"} ${originX + px * ppf} ${originY + py * ppf}`,
+              )
+              .join(" ")}
+            fill="none"
+            stroke={color}
+            strokeWidth={1.2}
+            opacity={0.5}
+          />
+        ))}
+      </g>
+    );
+  }
+  return (
+    <g clipPath={`url(#${clipId})`} pointerEvents="none">
+      {Array.from({ length: WIND_N }, (_, i) => (
+        <line
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size particle pool — index is the stable identity
+          key={`wp-${i}`}
+          ref={(el) => {
+            lineRefs.current[i] = el;
+          }}
+          stroke={color}
+          strokeWidth={1.6}
+          strokeLinecap="round"
+          opacity={0}
+        />
+      ))}
+    </g>
+  );
+}
+
+/** Wind dial + controls: toggle the flow layer, drag the arrow to set the *from*
+ * bearing (seeded to BRC's prevailing wind), and set strength. Mirrors the
+ * Compass's bearing math (dial "up" = toward the Man). */
+function WindControl({
+  mapUpBearing,
+  showWind,
+  setShowWind,
+  fromBearing,
+  setFromBearing,
+  strength,
+  setStrength,
+}: {
+  mapUpBearing: number | null;
+  showWind: boolean;
+  setShowWind: (v: boolean) => void;
+  fromBearing: number;
+  setFromBearing: (n: number) => void;
+  strength: number;
+  setStrength: (n: number) => void;
+}) {
+  const S = 132;
+  const cx = S / 2;
+  const cy = S / 2;
+  const r = 48;
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const oriented = mapUpBearing != null;
+  const vec = (bearing: number) => {
+    const phi = (((bearing - (mapUpBearing ?? 0)) % 360) * Math.PI) / 180;
+    return { x: Math.sin(phi), y: -Math.cos(phi) };
+  };
+  function bearingFromPointer(clientX: number, clientY: number): number {
+    const svg = svgRef.current;
+    if (!svg) return fromBearing;
+    const rect = svg.getBoundingClientRect();
+    const x = ((clientX - rect.left) * S) / rect.width - cx;
+    const y = ((clientY - rect.top) * S) / rect.height - cy;
+    const theta = (Math.atan2(x, -y) * 180) / Math.PI;
+    return (((theta + (mapUpBearing ?? 0)) % 360) + 360) % 360;
+  }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setters are stable
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: PointerEvent) =>
+      setFromBearing(Math.round(bearingFromPointer(e.clientX, e.clientY)));
+    const up = () => setDragging(false);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [dragging]);
+
+  // Wind comes FROM `fromBearing` and travels to the opposite side.
+  const from = vec(fromBearing);
+  const fx0 = cx + from.x * r;
+  const fy0 = cy + from.y * r;
+  const tx = cx - from.x * r;
+  const ty = cy - from.y * r;
+  // Arrowhead at the downstream end.
+  const ang = Math.atan2(ty - fy0, tx - fx0);
+  const ah = (d: number) => ({
+    x: tx - Math.cos(ang - d) * 10,
+    y: ty - Math.sin(ang - d) * 10,
+  });
+  const a1 = ah(0.5);
+  const a2 = ah(-0.5);
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Group justify="space-between" align="center" mb={4}>
+        <Text size="xs" fw={600}>
+          Prevailing wind
+        </Text>
+        <Switch
+          size="xs"
+          checked={showWind}
+          onChange={(e) => setShowWind(e.currentTarget.checked)}
+          disabled={!oriented}
+        />
+      </Group>
+      {oriented ? (
+        <>
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${S} ${S}`}
+            style={{
+              width: "100%",
+              maxWidth: 150,
+              height: "auto",
+              display: "block",
+              touchAction: "none",
+              margin: "0 auto",
+              opacity: showWind ? 1 : 0.5,
+            }}
+            role="img"
+            aria-label="Wind direction"
+          >
+            <title>Wind direction</title>
+            <circle
+              cx={cx}
+              cy={cy}
+              r={r}
+              fill="var(--mantine-color-default)"
+              stroke="var(--mantine-color-default-border)"
+            />
+            <text
+              x={cx}
+              y={cy - r + 9}
+              fontSize={10}
+              fontWeight={700}
+              fill="#e03131"
+              textAnchor="middle"
+              dominantBaseline="central"
+            >
+              N
+            </text>
+            <g
+              style={{ cursor: "grab" }}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+            >
+              <line
+                x1={fx0}
+                y1={fy0}
+                x2={tx}
+                y2={ty}
+                stroke="#1971c2"
+                strokeWidth={3}
+                strokeLinecap="round"
+              />
+              <polygon
+                points={`${tx},${ty} ${a1.x},${a1.y} ${a2.x},${a2.y}`}
+                fill="#1971c2"
+              />
+              <circle cx={fx0} cy={fy0} r={5} fill="#74c0fc" stroke="#1971c2" />
+            </g>
+          </svg>
+          <Text size="xs" c="dimmed" mt={4} ta="center">
+            from {Math.round(fromBearing)}° · drag to aim
+          </Text>
+          <Text size="xs" fw={500} mt={6}>
+            Strength
+          </Text>
+          <Slider
+            size="sm"
+            min={0.4}
+            max={2}
+            step={0.1}
+            value={strength}
+            onChange={setStrength}
+            label={(v) => `${v.toFixed(1)}×`}
+          />
+        </>
+      ) : (
+        <Text size="xs" c="dimmed" mt={4}>
+          Set the lot address (e.g. 3:00) for true north & wind.
         </Text>
       )}
     </Paper>
