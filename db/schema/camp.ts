@@ -44,6 +44,10 @@ export const campEdition = sqliteTable(
       .references(() => camp.id, { onDelete: "cascade" }),
     year: integer("year").notNull(),
     label: text("label"),
+    // Which event this edition is for (Burning Man, UnSCruz, …). Gates the
+    // event-specific layer (BRC map provider, BM ticket/pass flows, the Burning
+    // Man disclaimer). Defaults to Burning Man — see `app/lib/events.ts`.
+    event: text("event").notNull().default("burning-man"),
     // Locked editions are read-only (e.g. last year, or "planned" once on playa).
     locked: integer("locked", { mode: "boolean" }).notNull().default(false),
     // Which edition this one was copied from (import = snapshot, not a live link).

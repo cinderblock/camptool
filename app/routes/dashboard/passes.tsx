@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { setupPassWindowFor } from "~/lib/brc";
+import { isBurningMan } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -91,6 +92,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     isOfficer,
     locked: activeEdition.locked,
+    event: activeEdition.event,
     myMembershipId: active.membership.id,
     year: activeEdition.year,
     dates,
@@ -376,8 +378,16 @@ const STATUS_COLOR: Record<string, string> = {
 type FetcherData = { ok?: string; error?: string };
 
 export default function Passes({ loaderData }: Route.ComponentProps) {
-  const { isOfficer, locked, myMembershipId, year, dates, passes, members } =
-    loaderData;
+  const {
+    isOfficer,
+    locked,
+    event,
+    myMembershipId,
+    year,
+    dates,
+    passes,
+    members,
+  } = loaderData;
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
 
@@ -560,7 +570,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
             </Card>
           </>
         ) : null}
-        <BurningManDisclaimer />
+        {isBurningMan(event) ? <BurningManDisclaimer /> : null}
       </Stack>
     </Container>
   );

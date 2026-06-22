@@ -42,6 +42,7 @@ import {
   streetLabel,
   streetOptions,
 } from "~/lib/brc";
+import { isBurningMan } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import {
@@ -634,6 +635,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     canEdit:
       hasAtLeast(active.membership.role, "member") && !activeEdition.locked,
     locked: activeEdition.locked,
+    // The event this edition is for — gates Burning-Man-specific UI.
+    event: activeEdition.event,
     canManage: canManage && !activeEdition.locked,
     // The viewer's own membership — used to decide which items they may adjust
     // (their own) and to drive the "My items" highlight.
@@ -1645,7 +1648,8 @@ function GridScaleNote({ lot }: { lot: Lot }) {
 }
 
 export default function CampMap({ loaderData }: Route.ComponentProps) {
-  const { canEdit, canManage, unplaced, lot, myMembershipId } = loaderData;
+  const { canEdit, canManage, unplaced, lot, myMembershipId, event } =
+    loaderData;
   const fetcher = useFetcher();
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1817,7 +1821,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             {lot.frontsToMan ? "" : " · mountain-facing"}
           </Text>
         </div>
-        <BurningManDisclaimer mt={0} />
+        {isBurningMan(event) ? <BurningManDisclaimer mt={0} /> : null}
       </Group>
 
       <Group

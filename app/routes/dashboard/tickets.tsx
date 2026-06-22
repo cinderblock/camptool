@@ -21,6 +21,7 @@ import { and, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
+import { isBurningMan } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -118,6 +119,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     isOfficer,
     locked: activeEdition.locked,
+    event: activeEdition.event,
     myMembershipId,
     published,
     publishedAt: activeEdition.ticketsPublishedAt,
@@ -391,6 +393,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
   const {
     isOfficer,
     locked,
+    event,
     myMembershipId,
     published,
     publishedAt,
@@ -652,7 +655,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
             ) : null}
           </>
         ) : null}
-        <BurningManDisclaimer />
+        {isBurningMan(event) ? <BurningManDisclaimer /> : null}
       </Stack>
     </Container>
   );

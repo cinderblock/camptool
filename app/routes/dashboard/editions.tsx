@@ -15,6 +15,7 @@ import {
 import { and, eq, inArray } from "drizzle-orm";
 import { Form, data, redirect } from "react-router";
 import { CURRENT_EVENT_YEAR } from "~/lib/brc";
+import { BURNING_MAN, EVENTS, eventLabel, isEvent } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
 import {
   loadCampEditions,
@@ -44,6 +45,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       id: e.id,
       year: e.year,
       label: e.label,
+      event: e.event,
       locked: e.locked,
     })),
   };
@@ -151,12 +153,16 @@ export async function action({ request }: Route.ActionArgs) {
       if (src) forkedFromId = src.id;
     }
 
+    const eventRaw = String(form.get("event") ?? BURNING_MAN);
+    const event = isEvent(eventRaw) ? eventRaw : BURNING_MAN;
+
     const id = crypto.randomUUID();
     await db.insert(campEdition).values({
       id,
       campId,
       year,
       label: labelRaw || null,
+      event,
       forkedFromId,
     });
     if (forkedFromId) await copyEditionContents(forkedFromId, id);
@@ -214,6 +220,16 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                 />
                 <Select
                   size="xs"
+                  label="Event"
+                  name="event"
+                  defaultValue={BURNING_MAN}
+                  data={EVENTS.map((e) => ({ value: e.value, label: e.label }))}
+                  allowDeselect={false}
+                  comboboxProps={{ withinPortal: true }}
+                  w={150}
+                />
+                <Select
+                  size="xs"
                   label="Copy from (optional)"
                   name="copyFromId"
                   placeholder="Start blank"
@@ -237,6 +253,7 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Year</Table.Th>
+              <Table.Th>Event</Table.Th>
               <Table.Th>Status</Table.Th>
               {canManage ? <Table.Th>Actions</Table.Th> : null}
             </Table.Tr>
@@ -253,6 +270,11 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                         viewing
                       </Badge>
                     ) : null}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm" c="dimmed">
+                      {eventLabel(e.event)}
+                    </Text>
                   </Table.Td>
                   <Table.Td>
                     {e.locked ? (

@@ -1,0 +1,1 @@
+ALTER TABLE `camp_edition` ADD `event` text DEFAULT 'burning-man' NOT NULL;

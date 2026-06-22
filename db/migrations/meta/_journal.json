@@ -176,6 +176,13 @@
       "when": 1782089624698,
       "tag": "0024_lucky_sauron",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1782168281533,
+      "tag": "0025_bitter_vargas",
+      "breakpoints": true
     }
   ]
 }
