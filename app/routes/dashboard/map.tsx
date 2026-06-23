@@ -4433,19 +4433,50 @@ const MapObjectShape = memo(
               pointerEvents="none"
             />
           ) : def.shape === "rect" ? (
-            <rect
-              x={px}
-              y={py}
-              width={w}
-              height={h}
-              rx={3}
-              fill={fill}
-              fillOpacity={0.78}
-              stroke={selected ? "#1c1c1c" : fill}
-              strokeWidth={selected ? 2 : 1}
-              style={bodyStyle}
-              onPointerDown={onBodyDown}
-            />
+            <>
+              {/* RV slide-out pop-outs (drawn under the body, attached to a side). */}
+              {o.kind === "rv" && (o.config.popoutL ?? 0) > 0 ? (
+                <rect
+                  x={px - clamp(o.config.popoutL ?? 0, 0, 4) * ppf}
+                  y={py + h * 0.2}
+                  width={clamp(o.config.popoutL ?? 0, 0, 4) * ppf}
+                  height={h * 0.6}
+                  fill={fill}
+                  fillOpacity={0.7}
+                  stroke={selected ? "#1c1c1c" : fill}
+                  strokeWidth={selected ? 2 : 1}
+                  style={bodyStyle}
+                  onPointerDown={onBodyDown}
+                />
+              ) : null}
+              {o.kind === "rv" && (o.config.popoutR ?? 0) > 0 ? (
+                <rect
+                  x={px + w}
+                  y={py + h * 0.2}
+                  width={clamp(o.config.popoutR ?? 0, 0, 4) * ppf}
+                  height={h * 0.6}
+                  fill={fill}
+                  fillOpacity={0.7}
+                  stroke={selected ? "#1c1c1c" : fill}
+                  strokeWidth={selected ? 2 : 1}
+                  style={bodyStyle}
+                  onPointerDown={onBodyDown}
+                />
+              ) : null}
+              <rect
+                x={px}
+                y={py}
+                width={w}
+                height={h}
+                rx={3}
+                fill={fill}
+                fillOpacity={0.78}
+                stroke={selected ? "#1c1c1c" : fill}
+                strokeWidth={selected ? 2 : 1}
+                style={bodyStyle}
+                onPointerDown={onBodyDown}
+              />
+            </>
           ) : def.shape === "hypar" ? (
             <>
               <rect

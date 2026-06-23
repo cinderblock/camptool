@@ -21,6 +21,39 @@ import { campStructures } from "~/theme";
 // `Kind`/`ShapeKind`/`KindTag` from `~/lib/structures` keep working.
 export type { CampStructure, Kind, KindTag, ShapeKind, StructureConfig };
 
+/** RV footprint = the body rectangle plus optional slide-out "pop-outs" on the
+ * left/right sides (config `popoutL`/`popoutR`, in feet, over the middle 60% of
+ * the length). Returned as an ordered, object-local CENTERED outline so the core
+ * uses it for keep-inside / overlap / shade / wind — the deployed slide-outs take
+ * up real space. */
+function rvFootprint(
+  w: number,
+  h: number,
+  config: StructureConfig,
+): Array<{ x: number; y: number }> {
+  const pL = Math.max(0, Math.min(4, config.popoutL ?? 0));
+  const pR = Math.max(0, Math.min(4, config.popoutR ?? 0));
+  const yS = h * 0.3; // pop-outs span the middle 60% of the length
+  const pts: Array<{ x: number; y: number }> = [{ x: w / 2, y: -h / 2 }];
+  if (pR > 0)
+    pts.push(
+      { x: w / 2, y: -yS },
+      { x: w / 2 + pR, y: -yS },
+      { x: w / 2 + pR, y: yS },
+      { x: w / 2, y: yS },
+    );
+  pts.push({ x: w / 2, y: h / 2 }, { x: -w / 2, y: h / 2 });
+  if (pL > 0)
+    pts.push(
+      { x: -w / 2, y: yS },
+      { x: -w / 2 - pL, y: yS },
+      { x: -w / 2 - pL, y: -yS },
+      { x: -w / 2, y: -yS },
+    );
+  pts.push({ x: -w / 2, y: -h / 2 });
+  return pts;
+}
+
 /** The built-in palette shipped with the open-source app. A self-hoster's
  * camp-theme package contributes additional structures (see `KINDS` below) —
  * bespoke per-camp kinds never bloat this shared list. */
@@ -105,14 +138,32 @@ const CORE_KINDS = [
     group: "Domiciles",
     tags: ["domicile", "vehicle"],
     personal: true,
-    // Slide the door along the side (length) edge (fraction of the wall).
+    footprint: rvFootprint,
     controls: [
+      // Slide the door along the side (length) edge (fraction of the wall).
       {
         key: "doorOffset",
         label: "Door position",
         min: -0.45,
         max: 0.45,
         step: 0.05,
+        default: 0,
+      },
+      // Slide-out depth (ft) on each side; 0 = retracted.
+      {
+        key: "popoutL",
+        label: "Pop-out (left)",
+        min: 0,
+        max: 4,
+        step: 0.5,
+        default: 0,
+      },
+      {
+        key: "popoutR",
+        label: "Pop-out (right)",
+        min: 0,
+        max: 4,
+        step: 0.5,
         default: 0,
       },
     ],
