@@ -53,6 +53,17 @@ const CORE_KINDS = [
     group: "Domiciles",
     tags: ["domicile"],
     personal: true,
+    // Slide the door along the front edge (fraction of the wall, 0 = centered).
+    controls: [
+      {
+        key: "doorOffset",
+        label: "Door position",
+        min: -0.45,
+        max: 0.45,
+        step: 0.05,
+        default: 0,
+      },
+    ],
   },
   // 8ft square base; the roof is a hypar with one high corner.
   {
@@ -94,6 +105,17 @@ const CORE_KINDS = [
     group: "Domiciles",
     tags: ["domicile", "vehicle"],
     personal: true,
+    // Slide the door along the side (length) edge (fraction of the wall).
+    controls: [
+      {
+        key: "doorOffset",
+        label: "Door position",
+        min: -0.45,
+        max: 0.45,
+        step: 0.05,
+        default: 0,
+      },
+    ],
   },
   {
     value: "car",

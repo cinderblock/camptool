@@ -282,8 +282,9 @@ for Math Camp). A **Man-vs-mountain frontage** checkbox flips the taper directio
 years' geometry to `CITY_GEOMETRY` as BMorg publishes each doc.
 
 Still TODO: "highlight my spot", RV pop-outs (+ generator/cleanout markers),
-off-center doors, premade/shared blocks, Borg outline import, fire-lane/marker
-overlays, true radial placement of objects, 3D/sun-shade.
+premade/shared blocks, Borg outline import, fire-lane/marker overlays, true
+radial placement of objects. (Done: 3D/sun-shade + wind sim; off-center doors —
+RV & hexayurt doors slide along their wall via a `doorOffset` config control.)
 
 **Irregular / non-rectilinear plots (deferred sub-phase).** Camps near keyholes,
 plazas, Center Camp, and other odd spots aren't a frontage×depth rectangle — they

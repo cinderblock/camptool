@@ -145,6 +145,14 @@ function Door({
   );
 }
 
+/** Shift (px) for a movable door along its wall: `offset` is a fraction of the
+ * wall (−0.5…0.5, from the panel's "Door position" control), clamped so the door
+ * (length `len`) stays fully on the wall (length `wall`). */
+function doorShift(offset: number, len: number, wall: number): number {
+  const maxFrac = Math.max(0, 0.5 - len / (2 * wall));
+  return clamp(offset, -maxFrac, maxFrac) * wall;
+}
+
 /** Hyparhut door: an opening on the RIGHT of the front (+y) edge (right jamb by
  * the 6' corner) that swings OUT — the closed leaf along the edge plus an
  * outward (away from the hut) semicircle clearance, below the front edge.
@@ -4600,7 +4608,14 @@ const MapObjectShape = memo(
           {showDoors && o.showDoor && o.kind === "rv" ? (
             <Door
               mx={px + w}
-              my={cy}
+              my={
+                cy +
+                doorShift(
+                  o.config.doorOffset ?? 0,
+                  Math.min(3 * ppf, h * 0.4),
+                  h,
+                )
+              }
               ex={0}
               ey={1}
               nx={-1}
@@ -4611,7 +4626,14 @@ const MapObjectShape = memo(
             <HyparDoor px={px} py={py} w={w} h={h} />
           ) : showDoors && o.showDoor && o.kind === "hexayurt" ? (
             <Door
-              mx={cx}
+              mx={
+                cx +
+                doorShift(
+                  o.config.doorOffset ?? 0,
+                  Math.min(3 * ppf, w * 0.5),
+                  w,
+                )
+              }
               my={py + h}
               ex={1}
               ey={0}
