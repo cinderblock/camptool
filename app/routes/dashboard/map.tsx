@@ -2624,12 +2624,13 @@ function Editor({
     if (!windOn || mapUpBearing == null) return null;
     // Direction the wind travels (a *from* bearing + 180°), in the plot frame.
     const flow = bearingToPlotDelta(windFromBearing + 180, 1, mapUpBearing);
-    const cxFt = lot.frontageFt / 2;
-    const halfMax = Math.max(lot.frontageFt, rear) / 2;
-    const x0 = cxFt - halfMax - PAD_FT;
-    const x1 = cxFt + halfMax + PAD_FT;
-    const y0 = -PAD_FT;
-    const y1 = lot.depthFt + PAD_FT;
+    // Solve over the whole VISIBLE map (the ground-clip rect, converted to feet),
+    // so particles can fade in/out at the edges you actually see rather than
+    // popping at the lot boundary.
+    const x0 = (viewL - originX) / ppf;
+    const x1 = (viewR - originX) / ppf;
+    const y0 = (MARGIN - originY) / ppf;
+    const y1 = (viewH - MARGIN - originY) / ppf;
     const cell = Math.max(2, Math.max(x1 - x0, y1 - y0) / 60);
     // Open canopies (shade cloth) block sun, not wind — so they don't deflect the
     // flow. Solid builds (tents, RVs, containers, …) do.
@@ -2663,10 +2664,13 @@ function Editor({
     mapUpBearing,
     windFromBearing,
     windStrength,
-    lot.frontageFt,
-    lot.depthFt,
-    rear,
     objects,
+    originX,
+    originY,
+    ppf,
+    viewH,
+    viewL,
+    viewR,
   ]);
 
   const fx = (sx: number) => (sx - originX) / ppf;
@@ -4164,12 +4168,19 @@ function Compass({
 
 const WIND_SPEED_FT_S = 26; // visual feet/sec per unit wind speed
 
+// Each particle is a head dot plus a short trail of `WIND_TRAIL` fading dots at
+// its recent positions (head brightest/largest, tail faint/small) — a soft "dot
+// with a fading tail" rather than a hard vector.
+const WIND_TRAIL = 6;
+const WIND_DOT_R = (k: number) => 2.2 * (1 - k * 0.12); // radius per trail index
+const WIND_DOT_FADE = (k: number) => 1 - k / WIND_TRAIL; // opacity ramp per index
+
 /** Animated prevailing-wind layer: a fixed pool of particles advected through the
- * flow field and drawn as short streaks. Animation runs imperatively in a
- * requestAnimationFrame loop (mutating SVG attributes via refs) so it never
- * re-renders React; it reads the latest field/transform through a ref, so moving
- * a building updates the flow without restarting the animation. Drawn inside the
- * map SVG, so it inherits the viewBox zoom/pan transform. */
+ * flow field, each drawn as a head dot with a fading trail. Animation runs
+ * imperatively in a requestAnimationFrame loop (mutating SVG attributes via refs)
+ * so it never re-renders React; it reads the latest field/transform through a
+ * ref, so moving a building updates the flow without restarting the animation.
+ * Drawn inside the map SVG, so it inherits the viewBox zoom/pan transform. */
 function WindLayer({
   field,
   originX,
@@ -4191,28 +4202,34 @@ function WindLayer({
   // Latest props for the rAF loop (which doesn't depend on them, so it persists).
   const stateRef = useRef({ field, originX, originY, ppf });
   stateRef.current = { field, originX, originY, ppf };
-  const lineRefs = useRef<Array<SVGLineElement | null>>([]);
+  // One ref per trail dot: index = particle*WIND_TRAIL + trailPosition.
   const dotRefs = useRef<Array<SVGCircleElement | null>>([]);
-  // Tail length in feet (fixed, so the comet look doesn't depend on frame rate).
-  const TAIL_FT = 5;
 
-  // The wind sim is opt-in (enabled via the particle slider), so we always
-  // animate — we don't downgrade to static streamlines under prefers-reduced-
-  // motion, which would otherwise silently freeze a feature the user turned on.
   useEffect(() => {
-    type P = { fx: number; fy: number; life: number };
+    // hx/hy = recent feet positions (0 = head, newest). age/life drive fade in/out.
+    type P = {
+      fx: number;
+      fy: number;
+      age: number;
+      life: number;
+      hx: number[];
+      hy: number[];
+    };
     const parts: P[] = Array.from({ length: count }, () => ({
       fx: 0,
       fy: 0,
+      age: 0,
       life: 0,
+      hx: new Array(WIND_TRAIL).fill(0),
+      hy: new Array(WIND_TRAIL).fill(0),
     }));
     const bounds = () => {
       const f = stateRef.current.field;
       return {
-        x0: f.x0 - f.cell,
-        y0: f.y0 - f.cell,
-        x1: f.x0 + f.nx * f.cell,
-        y1: f.y0 + f.ny * f.cell,
+        x0: f.x0,
+        y0: f.y0,
+        x1: f.x0 + (f.nx - 1) * f.cell,
+        y1: f.y0 + (f.ny - 1) * f.cell,
       };
     };
     const respawn = (p: P, fresh: boolean) => {
@@ -4224,7 +4241,10 @@ function WindLayer({
         if (!sampleFlow(f, fx, fy).solid) {
           p.fx = fx;
           p.fy = fy;
+          p.age = 0;
           p.life = (fresh ? Math.random() : 1) * 2.5 + 0.8;
+          p.hx.fill(fx); // collapse the trail onto the spawn point (no streak)
+          p.hy.fill(fy);
           return;
         }
       }
@@ -4239,40 +4259,50 @@ function WindLayer({
       last = t;
       const { field: f, originX: ox, originY: oy, ppf: pf } = stateRef.current;
       const b = bounds();
+      // Fade band (feet) near the domain edges, so particles ease out as they
+      // reach the edge of the visible map instead of vanishing abruptly.
+      const margin = Math.max(
+        f.cell * 4,
+        Math.min(b.x1 - b.x0, b.y1 - b.y0) * 0.07,
+      );
       for (let i = 0; i < parts.length; i++) {
         const p = parts[i];
         if (!p) continue;
         p.life -= dt;
+        p.age += dt;
         const s = sampleFlow(f, p.fx, p.fy);
         const spd = Math.hypot(s.x, s.y);
         const out = p.fx < b.x0 || p.fx > b.x1 || p.fy < b.y0 || p.fy > b.y1;
         if (p.life <= 0 || s.solid || out) {
           respawn(p, false);
         } else {
+          // Shift the trail history back one slot, record the new head.
+          for (let k = WIND_TRAIL - 1; k > 0; k--) {
+            p.hx[k] = p.hx[k - 1] ?? p.fx;
+            p.hy[k] = p.hy[k - 1] ?? p.fy;
+          }
+          p.hx[0] = p.fx;
+          p.hy[0] = p.fy;
           p.fx += s.x * dt * WIND_SPEED_FT_S;
           p.fy += s.y * dt * WIND_SPEED_FT_S;
         }
-        const ln = lineRefs.current[i];
-        const dot = dotRefs.current[i];
-        // Comet: a head dot at the particle, and a fixed-length tail pointing
-        // upstream (along −velocity), so motion reads clearly as flowing particles.
-        const inv = spd > 1e-4 ? TAIL_FT / spd : 0;
-        const hx = ox + p.fx * pf;
-        const hy = oy + p.fy * pf;
-        const tlx = ox + (p.fx - s.x * inv) * pf;
-        const tly = oy + (p.fy - s.y * inv) * pf;
-        const op = clamp(0.2 + spd * 0.45, 0, 0.9) * Math.min(1, p.life * 1.5);
-        if (ln) {
-          ln.setAttribute("x1", String(tlx));
-          ln.setAttribute("y1", String(tly));
-          ln.setAttribute("x2", String(hx));
-          ln.setAttribute("y2", String(hy));
-          ln.setAttribute("opacity", String(op * 0.7));
-        }
-        if (dot) {
-          dot.setAttribute("cx", String(hx));
-          dot.setAttribute("cy", String(hy));
-          dot.setAttribute("opacity", String(op));
+        const edge = clamp(
+          Math.min(p.fx - b.x0, b.x1 - p.fx, p.fy - b.y0, b.y1 - p.fy) / margin,
+          0,
+          1,
+        );
+        // Envelope: fade in on birth, fade out near death + near the edges.
+        const op =
+          clamp(0.15 + spd * 0.5, 0, 0.85) *
+          Math.min(1, p.age * 3) *
+          Math.min(1, p.life * 2) *
+          edge;
+        for (let k = 0; k < WIND_TRAIL; k++) {
+          const dot = dotRefs.current[i * WIND_TRAIL + k];
+          if (!dot) continue;
+          dot.setAttribute("cx", String(ox + (p.hx[k] ?? p.fx) * pf));
+          dot.setAttribute("cy", String(oy + (p.hy[k] ?? p.fy) * pf));
+          dot.setAttribute("opacity", String(op * WIND_DOT_FADE(k)));
         }
       }
       raf = requestAnimationFrame(step);
@@ -4283,28 +4313,15 @@ function WindLayer({
 
   return (
     <g clipPath={`url(#${clipId})`} pointerEvents="none">
-      {/* Each particle = a tail (line) + head (dot); positions set imperatively. */}
-      {Array.from({ length: count }, (_, i) => (
-        <line
-          // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size particle pool — index is the stable identity
-          key={`wt-${i}`}
-          ref={(el) => {
-            lineRefs.current[i] = el;
-          }}
-          stroke={color}
-          strokeWidth={1.4}
-          strokeLinecap="round"
-          opacity={0}
-        />
-      ))}
-      {Array.from({ length: count }, (_, i) => (
+      {/* particle*WIND_TRAIL dots; positions/opacity set imperatively per frame. */}
+      {Array.from({ length: count * WIND_TRAIL }, (_, i) => (
         <circle
           // biome-ignore lint/suspicious/noArrayIndexKey: fixed-size particle pool — index is the stable identity
           key={`wd-${i}`}
           ref={(el) => {
             dotRefs.current[i] = el;
           }}
-          r={1.8}
+          r={WIND_DOT_R(i % WIND_TRAIL)}
           fill={color}
           opacity={0}
         />
