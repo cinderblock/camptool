@@ -121,9 +121,10 @@ export type CampStructure = Kind & {
    * Pyramid), so the editor hides the per-object Name field — the kind's `label`
    * is the name. */
   fixedName?: boolean;
-  /** Per-object adjustable numeric settings the editor renders as sliders (e.g. the
-   * flying-buttress extension count). The chosen values are passed back through the
-   * `config` arg of `footprint`/`renderFootprint`/`shadowVolume`. */
+  /** Per-object adjustable settings the editor renders in the side panel (a slider,
+   * or a checkbox when `toggle` is set — stored as 0/1). The chosen values are
+   * passed back through the `config` arg of `footprint`/`renderFootprint`/
+   * `shadowVolume`, and read by the kind's own rendering (e.g. RV pop-outs/markers). */
   controls?: ReadonlyArray<{
     key: string;
     label: string;
@@ -131,6 +132,8 @@ export type CampStructure = Kind & {
     max: number;
     step?: number;
     default: number;
+    /** Render as an on/off checkbox (value 0 or 1) instead of a slider. */
+    toggle?: boolean;
   }>;
   /** SVG footprint, drawn in the 0,0→(w,h) feet box. Set `shape: "custom"`. */
   renderFootprint?: (ctx: FootprintCtx) => ReactNode;

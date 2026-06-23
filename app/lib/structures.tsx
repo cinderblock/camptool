@@ -166,6 +166,24 @@ const CORE_KINDS = [
         step: 0.5,
         default: 0,
       },
+      // Markers for placement planning: generator (noise/exhaust, front end) and
+      // sewer cleanout (dump access, rear end). Rotate the RV to aim them.
+      {
+        key: "generator",
+        label: "Generator",
+        min: 0,
+        max: 1,
+        default: 0,
+        toggle: true,
+      },
+      {
+        key: "cleanout",
+        label: "Cleanout",
+        min: 0,
+        max: 1,
+        default: 0,
+        toggle: true,
+      },
     ],
   },
   {

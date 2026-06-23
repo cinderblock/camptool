@@ -4476,6 +4476,58 @@ const MapObjectShape = memo(
                 style={bodyStyle}
                 onPointerDown={onBodyDown}
               />
+              {/* Generator marker (noise/exhaust) at the front end. */}
+              {o.kind === "rv" && (o.config.generator ?? 0) > 0
+                ? (() => {
+                    const s = Math.min(2.6 * ppf, w * 0.55);
+                    const gy = py + h * 0.05;
+                    return (
+                      <g pointerEvents="none">
+                        <rect
+                          x={cx - s / 2}
+                          y={gy}
+                          width={s}
+                          height={s * 0.72}
+                          rx={1}
+                          fill="#e03131"
+                          stroke="#fff"
+                          strokeWidth={0.6}
+                        />
+                        <text
+                          x={cx}
+                          y={gy + s * 0.36}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={s * 0.55}
+                          fontWeight={700}
+                          fill="#fff"
+                        >
+                          G
+                        </text>
+                      </g>
+                    );
+                  })()
+                : null}
+              {/* Sewer cleanout marker (dump access) at the rear end. */}
+              {o.kind === "rv" && (o.config.cleanout ?? 0) > 0
+                ? (() => {
+                    const r = Math.min(1.3 * ppf, w * 0.22);
+                    const ccy = py + h - h * 0.05 - r;
+                    return (
+                      <g pointerEvents="none">
+                        <circle
+                          cx={cx}
+                          cy={ccy}
+                          r={r}
+                          fill="#495057"
+                          stroke="#fff"
+                          strokeWidth={0.6}
+                        />
+                        <circle cx={cx} cy={ccy} r={r * 0.45} fill="#ced4da" />
+                      </g>
+                    );
+                  })()
+                : null}
             </>
           ) : def.shape === "hypar" ? (
             <>
@@ -5208,6 +5260,19 @@ function SidePanel({
                         JSON.stringify(config),
                       );
                   };
+                  if (c.toggle) {
+                    return (
+                      <Checkbox
+                        key={c.key}
+                        size="xs"
+                        label={c.label}
+                        checked={val > 0}
+                        onChange={(e) =>
+                          apply(e.currentTarget.checked ? 1 : 0, true)
+                        }
+                      />
+                    );
+                  }
                   return (
                     <div key={c.key}>
                       <Text size="xs" fw={500} mb={2}>
