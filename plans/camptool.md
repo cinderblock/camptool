@@ -553,7 +553,11 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   read at `/announcements` (nav link visible to everyone); officers add / pin /
   delete; read-only when the year is locked. Later: surface latest on the
   Overview, Discord cross-post.
-- Shared documents (#5).
+- [x] **Shared documents (LANDED).** `camp_document` table (migration 0031),
+  CAMP-scoped (persists across years). A titled-link library (Google Docs/Drive,
+  schedules, packing lists), grouped by category; everyone reads at `/documents`,
+  officers add/remove. Links only (URL normalized/validated) — file upload would
+  need storage infra (follow-up). **Phase 4 (Operations) complete.**
 
 **Phase 5 — Data lifecycle**
 - Import last year's data (#8); exportable database (#10).

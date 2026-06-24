@@ -2,6 +2,7 @@ export * from "./announcement";
 export * from "./auth";
 export * from "./camp";
 export * from "./discord";
+export * from "./document";
 export * from "./finance";
 export * from "./instance";
 export * from "./inventory";

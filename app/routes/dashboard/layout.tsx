@@ -116,6 +116,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     { to: "/map", label: "Map", end: false },
     { to: "/bringing", label: "Bringing", end: false },
     { to: "/supplies", label: "Supplies", end: false },
+    { to: "/documents", label: "Documents", end: false },
     { to: "/tickets", label: "Tickets", end: false },
     { to: "/passes", label: "Passes", end: false },
     ...(activeRole && hasAtLeast(activeRole, "officer")
