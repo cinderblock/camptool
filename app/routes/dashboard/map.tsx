@@ -733,6 +733,7 @@ export async function action({ request }: Route.ActionArgs) {
     "savePlacement",
     "addObject",
     "addBlock",
+    "duplicateObject",
     "placeObject",
     "unplaceObject",
     "deleteObject",
@@ -1041,6 +1042,40 @@ export async function action({ request }: Route.ActionArgs) {
       .returning();
     if (!row) return data({ error: "Item not found." }, { status: 404 });
     return data({ unplacedId: id });
+  }
+
+  if (intent === "duplicateObject") {
+    // Copy a placed object (keeping size/rotation/mirror/config) as a new camp
+    // item, offset slightly so it's visible; returns it like a fresh add.
+    const id = String(form.get("id"));
+    const [src] = await db
+      .select()
+      .from(mapObject)
+      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+      .limit(1);
+    if (!src) return data({ error: "Item not found." }, { status: 404 });
+    const {
+      id: _id,
+      createdAt: _c,
+      updatedAt: _u,
+      pendingByMembershipId: _pb,
+      pendingAt: _pa,
+      pendingPrev: _pp,
+      ...rest
+    } = src;
+    const newId = crypto.randomUUID();
+    await db.insert(mapObject).values({
+      ...rest,
+      id: newId,
+      placed: true,
+      // A duplicate is an officer-placed camp/shared item.
+      ownerMembershipId: null,
+      x: src.x + 10,
+      y: src.y + 10,
+      createdById: user.id,
+    });
+    const object = await loadObjRow(editionId, newId);
+    return data({ object });
   }
 
   if (intent === "deleteObject") {
@@ -5280,23 +5315,41 @@ function SidePanel({
                 </Text>
               </div>
               {canMeta ? (
-                <Tooltip label="Remove from map (keeps it in Unplaced)">
-                  <ActionIcon
-                    variant="subtle"
-                    color="red"
-                    onClick={() => {
-                      setObjects((prev) =>
-                        prev.filter((o) => o.id !== selected.id),
-                      );
-                      fetcher.submit(
-                        { intent: "unplaceObject", id: selected.id },
-                        { method: "post" },
-                      );
-                    }}
-                  >
-                    ✕
-                  </ActionIcon>
-                </Tooltip>
+                <Group gap={4} wrap="nowrap">
+                  <Tooltip label="Duplicate">
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      aria-label="Duplicate"
+                      onClick={() =>
+                        fetcher.submit(
+                          { intent: "duplicateObject", id: selected.id },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      ⧉
+                    </ActionIcon>
+                  </Tooltip>
+                  <Tooltip label="Remove from map (keeps it in Unplaced)">
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      aria-label="Remove from map"
+                      onClick={() => {
+                        setObjects((prev) =>
+                          prev.filter((o) => o.id !== selected.id),
+                        );
+                        fetcher.submit(
+                          { intent: "unplaceObject", id: selected.id },
+                          { method: "post" },
+                        );
+                      }}
+                    >
+                      ✕
+                    </ActionIcon>
+                  </Tooltip>
+                </Group>
               ) : null}
             </Group>
 
