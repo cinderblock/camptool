@@ -48,3 +48,33 @@ export const financeEntry = sqliteTable(
   },
   (t) => [index("finance_entry_edition").on(t.editionId)],
 );
+
+/**
+ * A camp's named contribution **tiers** for a year (e.g. "Full share · $300",
+ * "Sliding scale · suggested", "Work trade · $0"). Per-camp, **versioned per
+ * edition** so each year is independent (copy forward to seed a new year); a camp
+ * with no dues simply has none. `requirement` is the level of obligation. Money
+ * amounts are integer cents (null = not a fixed dollar amount).
+ */
+export const contributionTier = sqliteTable(
+  "contribution_tier",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id")
+      .notNull()
+      .references(() => campEdition.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    expectedCents: integer("expected_cents"),
+    // "required" | "suggested" | "optional".
+    requirement: text("requirement").notNull().default("suggested"),
+    description: text("description"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [index("contribution_tier_edition").on(t.editionId)],
+);

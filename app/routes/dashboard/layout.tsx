@@ -120,6 +120,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           { to: "/recruits", label: "Recruits", end: false },
           { to: "/inventory", label: "Inventory", end: false },
           { to: "/finances", label: "Finances", end: false },
+          { to: "/dues", label: "Dues", end: false },
         ]
       : []),
     { to: "/questions", label: "Questions", end: false },
