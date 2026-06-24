@@ -32,6 +32,7 @@ import {
 } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
+import { BLOCKS, blockById } from "~/lib/blocks";
 import {
   CURRENT_EVENT_YEAR,
   clockOptions,
@@ -731,6 +732,7 @@ export async function action({ request }: Route.ActionArgs) {
   const officerOnly = new Set([
     "savePlacement",
     "addObject",
+    "addBlock",
     "placeObject",
     "unplaceObject",
     "deleteObject",
@@ -822,6 +824,81 @@ export async function action({ request }: Route.ActionArgs) {
         ownerName: null,
         pending: null,
       } satisfies ObjRow,
+    });
+  }
+
+  if (intent === "addBlock") {
+    // Drop a premade cluster: the client sends pre-positioned items (absolute
+    // plot-local feet); we persist them all as camp/shared objects and return
+    // the rows so the client can append them.
+    let raw: unknown;
+    try {
+      raw = JSON.parse(String(form.get("items") ?? "[]"));
+    } catch {
+      raw = [];
+    }
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return data({ error: "Empty block." }, { status: 400 });
+    }
+    const rows = raw
+      .slice(0, 20)
+      .map((it) => {
+        const kind = String((it as { kind?: unknown }).kind ?? "");
+        if (!isKind(kind)) return null;
+        const def = kindDef(kind);
+        const n = (v: unknown, d: number) => {
+          const x = Number(v);
+          return Number.isFinite(x) ? x : d;
+        };
+        const nm = (it as { name?: unknown }).name;
+        return {
+          id: crypto.randomUUID(),
+          campId,
+          editionId,
+          name: nm ? String(nm) : null,
+          kind,
+          placed: true,
+          x: n((it as { x?: unknown }).x, 0),
+          y: n((it as { y?: unknown }).y, 0),
+          width: Math.max(1, n((it as { width?: unknown }).width, def.w)),
+          height: Math.max(1, n((it as { height?: unknown }).height, def.h)),
+          rotation: n((it as { rotation?: unknown }).rotation, 0),
+          tallFt: kindHeight(kind),
+          showDoor: true,
+          mirrored: false,
+          color: null,
+          notes: null,
+          createdById: user.id,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    if (rows.length === 0) {
+      return data({ error: "No valid items." }, { status: 400 });
+    }
+    await db.insert(mapObject).values(rows);
+    return data({
+      objects: rows.map(
+        (row) =>
+          ({
+            id: row.id,
+            name: row.name,
+            kind: row.kind,
+            x: row.x,
+            y: row.y,
+            width: row.width,
+            height: row.height,
+            rotation: row.rotation,
+            tallFt: row.tallFt,
+            showDoor: row.showDoor,
+            mirrored: row.mirrored,
+            config: {},
+            color: row.color,
+            notes: row.notes,
+            ownerMembershipId: null,
+            ownerName: null,
+            pending: null,
+          }) satisfies ObjRow,
+      ),
     });
   }
 
@@ -1725,6 +1802,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
     const d = fetcher.data as
       | {
           object?: ObjRow;
+          objects?: ObjRow[];
           deletedId?: string;
           unplacedId?: string;
           zone?: ZoneRow;
@@ -1735,6 +1813,15 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       | undefined;
     if (!d || d === lastSynced.current) return;
     lastSynced.current = d;
+    // A premade block returns several new objects at once — append them all.
+    if (d.objects && d.objects.length > 0) {
+      const fresh = d.objects;
+      setObjects((prev) => {
+        const have = new Set(prev.map((o) => o.id));
+        return [...prev, ...fresh.filter((o) => !have.has(o.id))];
+      });
+      return;
+    }
     // Deleted (gone for good) or unplaced (back to the tray) both leave the map.
     const removedId = d.deletedId ?? d.unplacedId;
     if (removedId) {
@@ -1964,6 +2051,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           {canManage ? (
             <UnplacedTray unplaced={unplaced} fetcher={fetcher} />
           ) : null}
+          {canManage ? <BlockPalette /> : null}
           {canManage ? <Legend /> : null}
           {selectedZoneId ? (
             <ZonePanel
@@ -2084,6 +2172,41 @@ function UnplacedTray({
           })}
         </Stack>
       )}
+    </Paper>
+  );
+}
+
+/** Premade blocks — drag one onto the map to drop a pre-arranged cluster of
+ * objects (officer-only; the items can then be fine-tuned individually). */
+function BlockPalette() {
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Text size="xs" fw={600} mb={6}>
+        Blocks — drag onto the map
+      </Text>
+      <Stack gap={6}>
+        {BLOCKS.map((b) => (
+          <Group
+            key={b.id}
+            gap={6}
+            wrap="nowrap"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("application/camptool-block-id", b.id);
+              e.dataTransfer.effectAllowed = "copy";
+            }}
+            style={{
+              cursor: "grab",
+              border: "1px solid var(--mantine-color-default-border)",
+              borderRadius: 6,
+              padding: "4px 8px",
+              userSelect: "none",
+            }}
+          >
+            <Text size="xs">{b.label}</Text>
+          </Group>
+        ))}
+      </Stack>
     </Paper>
   );
 }
@@ -3037,9 +3160,70 @@ function Editor({
     );
   }
 
+  // Drop a premade block: position every item relative to the (clamped) drop
+  // point so the whole cluster lands inside the lot, then persist them together.
+  function placeBlock(blockId: string, fxFeet: number, fyFeet: number) {
+    const block = blockById(blockId);
+    if (!block) return;
+    const items = block.items.map((it) => {
+      const def = kindDef(it.kind);
+      return {
+        kind: it.kind,
+        dx: it.dx,
+        dy: it.dy,
+        w: it.w ?? def.w,
+        h: it.h ?? def.h,
+        rotation: it.rotation ?? 0,
+        name: it.name,
+      };
+    });
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const it of items) {
+      minX = Math.min(minX, it.dx - it.w / 2);
+      maxX = Math.max(maxX, it.dx + it.w / 2);
+      minY = Math.min(minY, it.dy - it.h / 2);
+      maxY = Math.max(maxY, it.dy + it.h / 2);
+    }
+    const c = fitCenterInsideLot(
+      fxFeet,
+      fyFeet,
+      [
+        { x: minX, y: minY },
+        { x: maxX, y: minY },
+        { x: maxX, y: maxY },
+        { x: minX, y: maxY },
+      ],
+      lot.frontageFt,
+      lot.depthFt,
+      rear,
+    );
+    const abs = items.map((it) => ({
+      kind: it.kind,
+      name: it.name,
+      width: it.w,
+      height: it.h,
+      rotation: it.rotation,
+      x: round(c.x + it.dx - it.w / 2),
+      y: round(c.y + it.dy - it.h / 2),
+    }));
+    fetcher.submit(
+      { intent: "addBlock", items: JSON.stringify(abs) },
+      { method: "post" },
+    );
+  }
+
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     const p = svgPoint(e);
+    // A premade block dropped from the Blocks palette.
+    const blockId = e.dataTransfer.getData("application/camptool-block-id");
+    if (blockId) {
+      placeBlock(blockId, fx(p.x), fy(p.y));
+      return;
+    }
     // Dropping a declared (unplaced) item from the tray places it here.
     const placeId = e.dataTransfer.getData("application/camptool-place-id");
     if (placeId) {
