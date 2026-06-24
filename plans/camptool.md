@@ -540,7 +540,14 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
 — the camp never handles funds; checkout is the vendor's via the purchase link.)
 
 **Phase 4 — Operations**
-- Dues/financials with per-field view/edit permissions (#3).
+- [x] **Finances ledger (LANDED).** `finance_entry` table (migration 0026):
+  donations in / spends out, integer cents, edition-scoped, optional member +
+  category + date. **Officer-only** route `/finances` (loader 403s non-officers;
+  not shared with all campers — per Cameron's ask, the camp has no dues but wants
+  internal donation/spend tracking). Summary cards (in / out / net) + add form +
+  ledger table; read-only when the year is locked. Reframes the old
+  "dues/financials" item. Later: per-field visibility if they ever want to share a
+  summary with members; CSV export.
 - Shared documents (#5); announcements (#6).
 
 **Phase 5 — Data lifecycle**

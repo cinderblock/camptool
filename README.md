@@ -67,6 +67,11 @@ per-date quota (e.g. 2 Monday, 4 Tuesday, 8 Wednesday) and grant passes to
 members; members request a date, and the quota is enforced. Both are scoped to
 the active year and go read-only when that year is locked.
 
+An officer-only **Finances** page tracks the camp's money for the year — donations
+in and spends out (with optional member, category, and date) — and shows running
+totals (in / out / net balance). It's deliberately not shared with all campers,
+and goes read-only when the year is locked.
+
 The deployment owner is a **super admin** (the first account to register; more
 can be granted in-app) with a **Site admin** page that controls two
 instance-wide lockdowns: turning off **new camp creation** (only super admins can

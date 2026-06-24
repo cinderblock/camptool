@@ -1,4 +1,9 @@
-import { type RouteConfig, index, layout, route } from "@react-router/dev/routes";
+import {
+  type RouteConfig,
+  index,
+  layout,
+  route,
+} from "@react-router/dev/routes";
 
 export default [
   // Public / full-screen routes (no app shell).
@@ -23,6 +28,7 @@ export default [
     route("supplies", "routes/dashboard/supplies.tsx"),
     route("tickets", "routes/dashboard/tickets.tsx"),
     route("passes", "routes/dashboard/passes.tsx"),
+    route("finances", "routes/dashboard/finances.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),
     route("questions", "routes/dashboard/questions.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),

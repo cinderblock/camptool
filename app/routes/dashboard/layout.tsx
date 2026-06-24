@@ -119,13 +119,12 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
       ? [
           { to: "/recruits", label: "Recruits", end: false },
           { to: "/inventory", label: "Inventory", end: false },
+          { to: "/finances", label: "Finances", end: false },
         ]
       : []),
     { to: "/questions", label: "Questions", end: false },
     { to: "/onboarding", label: "Onboarding", end: false },
-    ...(superAdmin
-      ? [{ to: "/admin", label: "Site admin", end: false }]
-      : []),
+    ...(superAdmin ? [{ to: "/admin", label: "Site admin", end: false }] : []),
   ];
   const [opened, { toggle }] = useDisclosure();
   const navigate = useNavigate();
