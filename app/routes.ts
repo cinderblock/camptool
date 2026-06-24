@@ -12,6 +12,8 @@ export default [
   route("i/:token", "routes/i.$token.tsx"),
   route("impersonate", "routes/impersonate.tsx"),
   route("start", "routes/start.tsx"),
+  // Super-admin DB backup download (resource route; self-gated).
+  route("export-db", "routes/export-db.tsx"),
   route("api/auth/*", "routes/api.auth.$.tsx"),
   // The app itself lives at the root behind a pathless layout (the shell). The
   // layout loader requires a logged-in user, so "/" is either the overview or a

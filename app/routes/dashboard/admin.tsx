@@ -127,6 +127,22 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
             <AddAdminForm />
           </Stack>
         </Card>
+
+        <Card withBorder radius="md" padding="lg">
+          <Stack gap="md">
+            <Title order={4}>Database backup</Title>
+            <Text size="sm" c="dimmed">
+              Download a complete snapshot of the database (every camp's data)
+              as a SQLite <code>.db</code> file. Safe to take while the app is
+              running; keep backups somewhere private.
+            </Text>
+            <div>
+              <Button component="a" href="/export-db" variant="light">
+                Download backup
+              </Button>
+            </div>
+          </Stack>
+        </Card>
       </Stack>
     </Container>
   );

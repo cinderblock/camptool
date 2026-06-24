@@ -18,7 +18,9 @@ sqlite.exec("PRAGMA journal_mode = WAL;");
 sqlite.exec("PRAGMA foreign_keys = ON;");
 
 export const db = drizzle({ client: sqlite, schema });
-export { schema };
+// The raw bun:sqlite handle + resolved path — used by the admin DB backup
+// (super-admin only). `sqlite.serialize()` yields a consistent whole-db snapshot.
+export { schema, sqlite, dbPath };
 
 // Apply pending migrations on startup so a self-hoster never has to run a
 // separate command. Idempotent: drizzle tracks applied migrations in-db.

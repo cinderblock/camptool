@@ -560,7 +560,12 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   need storage infra (follow-up). **Phase 4 (Operations) complete.**
 
 **Phase 5 — Data lifecycle**
-- Import last year's data (#8); exportable database (#10).
+- [x] **Database backup download (LANDED).** `/export-db` resource route streams a
+  consistent whole-DB SQLite snapshot (`sqlite.serialize()`, WAL-safe) as a
+  `.db` download. **Super-admin only** (the file holds every camp's data), gated
+  in the route + offered via a "Download backup" button on the Site admin page.
+  Next: restore/import a backup (admin-only, riskier — file swap + restart).
+- Import last year's data (#8).
 - Discord/email reminder campaigns + scheduled DMs (#9).
 
 ## BRC city geometry reference (for the map editor, Phase 3)
