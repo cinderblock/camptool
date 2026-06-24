@@ -281,8 +281,9 @@ for Math Camp). A **Man-vs-mountain frontage** checkbox flips the taper directio
 `inner_radius_ft` is now a manual *override* of the derived radius. Add later
 years' geometry to `CITY_GEOMETRY` as BMorg publishes each doc.
 
-Still TODO: "highlight my spot", premade/shared blocks, Borg outline import,
-true radial placement of objects. (Done: fire-access overlay — a toggle shading
+Still TODO: premade/shared blocks, Borg outline import, true radial placement of
+objects. (Done: "find my spot" — a toolbar button pans/zooms the map to fit the
+viewer's own items; fire-access overlay — a toggle shading
 the lot by 125′ hose reach from the street/alley (green) with any beyond-reach
 gap (needing an internal fire lane) in red; 3D/sun-shade
 + wind sim; off-center doors — RV & hexayurt doors slide along their wall via

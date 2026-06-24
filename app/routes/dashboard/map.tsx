@@ -2473,6 +2473,50 @@ function Editor({
   const renderW = Math.max(1, VIEW_W * fitScale * zoom);
   const renderH = Math.max(1, viewH * fitScale * zoom);
 
+  const hasMine = objects.some((o) => o.ownerMembershipId === myMembershipId);
+  // Pan + zoom the frame so the viewer's own items fill ~80% of it.
+  function focusMine() {
+    const el = frameRef.current;
+    const mine = objects.filter((o) => o.ownerMembershipId === myMembershipId);
+    if (!el || mine.length === 0) return;
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const o of mine) {
+      minX = Math.min(minX, o.x);
+      minY = Math.min(minY, o.y);
+      maxX = Math.max(maxX, o.x + o.width);
+      maxY = Math.max(maxY, o.y + o.height);
+    }
+    const pad = 10; // feet of breathing room around the items
+    const bw = Math.max(1, maxX - minX + 2 * pad);
+    const bh = Math.max(1, maxY - minY + 2 * pad);
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    // bbox px size at zoom Z = bw·ppf·fitScale·Z; fit it to ~80% of the frame.
+    const target = clamp(
+      Math.min(
+        (cw * 0.8) / (bw * ppf * fitScale),
+        (ch * 0.8) / (bh * ppf * fitScale),
+      ),
+      ZOOM_MIN,
+      ZOOM_MAX,
+    );
+    const vbcx = originX + ((minX + maxX) / 2) * ppf;
+    const vbcy = originY + ((minY + maxY) / 2) * ppf;
+    const left = vbcx * fitScale * target - cw / 2;
+    const top = vbcy * fitScale * target - ch / 2;
+    if (target === zoom) {
+      el.scrollLeft = left;
+      el.scrollTop = top;
+    } else {
+      // Apply the scroll once the resized svg commits (see the zoom layout effect).
+      pendingScroll.current = { left, top };
+      setZoom(target);
+    }
+  }
+
   // Surroundings swaths (px), drawn in the annotation pad: the street the camp
   // fronts (a wide band, not a thin line), the rear service road, and neighbor
   // lots on either side. Axis-aligned bands (the wedge taper is visually small).
@@ -3182,6 +3226,18 @@ function Editor({
           wrap="nowrap"
           style={{ position: "absolute", top: 8, right: 8, zIndex: 5 }}
         >
+          <Tooltip
+            label={hasMine ? "Find my spot" : "You have no items placed"}
+          >
+            <ActionIcon
+              variant="default"
+              aria-label="Find my spot"
+              disabled={!hasMine}
+              onClick={focusMine}
+            >
+              ◎
+            </ActionIcon>
+          </Tooltip>
           <Tooltip label="Zoom out">
             <ActionIcon
               variant="default"
