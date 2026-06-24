@@ -1,7 +1,9 @@
 import {
   ActionIcon,
+  Anchor,
   Autocomplete,
   Badge,
+  Checkbox,
   Container,
   Group,
   NumberInput,
@@ -20,11 +22,11 @@ import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
-import { data, useFetcher } from "react-router";
+import { Link, data, useFetcher } from "react-router";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { financeEntry, membership, user } from "../../../db/schema";
+import { camp, financeEntry, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/finances";
 
 export function meta(_: Route.MetaArgs) {
@@ -103,6 +105,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     locked: activeEdition.locked,
     year: activeEdition.year,
+    tracksDues: active.camp.tracksDues,
     entries,
     members,
     categories,
@@ -119,13 +122,23 @@ export async function action({ request }: Route.ActionArgs) {
   if (!hasAtLeast(active.membership.role, "officer")) {
     return data({ error: "Officers manage finances." }, { status: 403 });
   }
-  if (activeEdition.locked) {
-    return data({ error: "This year is locked." }, { status: 403 });
-  }
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   const form = await request.formData();
   const intent = String(form.get("intent"));
+
+  // Camp-level setting (not edition data) — allowed even when the year is locked.
+  if (intent === "setTracksDues") {
+    await db
+      .update(camp)
+      .set({ tracksDues: form.get("tracksDues") === "true" })
+      .where(eq(camp.id, campId));
+    return data({ ok: true });
+  }
+
+  if (activeEdition.locked) {
+    return data({ error: "This year is locked." }, { status: 403 });
+  }
 
   if (intent === "deleteEntry") {
     const id = String(form.get("id"));
@@ -173,8 +186,10 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Finances({ loaderData }: Route.ComponentProps) {
-  const { locked, year, entries, members, categories, totals } = loaderData;
+  const { locked, year, tracksDues, entries, members, categories, totals } =
+    loaderData;
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const duesFetcher = useFetcher();
 
   const [kind, setKind] = useState("donation");
   const [amount, setAmount] = useState<number | string>("");
@@ -265,6 +280,37 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
             </Text>
           </Paper>
         </SimpleGrid>
+
+        <Paper withBorder p="sm" radius="md">
+          <Group justify="space-between" wrap="nowrap">
+            <Checkbox
+              size="xs"
+              label="Track member dues & contribution tiers"
+              checked={tracksDues}
+              onChange={(e) =>
+                duesFetcher.submit(
+                  {
+                    intent: "setTracksDues",
+                    tracksDues: e.currentTarget.checked ? "true" : "false",
+                  },
+                  { method: "post" },
+                )
+              }
+            />
+            {tracksDues ? (
+              <Anchor component={Link} to="/dues" size="xs">
+                Open Dues →
+              </Anchor>
+            ) : null}
+          </Group>
+          {!tracksDues ? (
+            <Text size="xs" c="dimmed" mt={4}>
+              Off by default — turn this on only if your camp has dues. It adds
+              a Dues page (officer-only) for contribution tiers and per-member
+              tracking.
+            </Text>
+          ) : null}
+        </Paper>
 
         {locked ? null : (
           <Paper withBorder p="md" radius="md">

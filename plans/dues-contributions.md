@@ -27,6 +27,10 @@ must NOT alter old years' data.
   rewrite history.
 - **Officer-only**, like finances. Not shown to all campers (a later, optional
   slice could show a member their own status).
+- **Whole feature hideable per camp.** `camp.tracksDues` (default **false**) gates
+  the Dues nav link AND the route (loader redirects to /finances when off). Camps
+  with no dues never see it. Officers turn it on with a checkbox on the Finances
+  page (a camp-level setting, allowed even when the year is locked). Migration 0029.
 
 ## Data model
 

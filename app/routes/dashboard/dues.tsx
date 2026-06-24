@@ -19,7 +19,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq, sql } from "drizzle-orm";
 import { useEffect, useState } from "react";
-import { Form, data, useFetcher } from "react-router";
+import { Form, data, redirect, useFetcher } from "react-router";
 import { hasAtLeast } from "~/lib/permissions";
 import { loadCampEditions, requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -59,6 +59,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
   }
+  // Camps that don't track dues never see this page (turn it on from Finances).
+  if (!active.camp.tracksDues) throw redirect("/finances");
   const tiers = (
     await db
       .select()

@@ -24,6 +24,11 @@ export const camp = sqliteTable("camp", {
   slug: text("slug").unique(),
   logo: text("logo"),
   metadata: text("metadata"),
+  // Whether this camp tracks member dues / contribution tiers. Off by default —
+  // camps with no dues never see the Dues feature (hidden from nav + route).
+  tracksDues: integer("tracks_dues", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .default(now),

@@ -204,6 +204,13 @@
       "when": 1782334413518,
       "tag": "0028_gorgeous_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1782334985900,
+      "tag": "0029_sharp_silver_samurai",
+      "breakpoints": true
     }
   ]
 }

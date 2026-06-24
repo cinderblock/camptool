@@ -1,0 +1,1 @@
+ALTER TABLE `camp` ADD `tracks_dues` integer DEFAULT false NOT NULL;
