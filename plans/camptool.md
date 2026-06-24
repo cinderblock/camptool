@@ -565,7 +565,14 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   `.db` download. **Super-admin only** (the file holds every camp's data), gated
   in the route + offered via a "Download backup" button on the Site admin page.
   Next: restore/import a backup (admin-only, riskier — file swap + restart).
-- Import last year's data (#8).
+- [x] **Import last year — re-commit model, NOT a wholesale copy (LANDED).**
+  Locked decision (Cameron): copying a year must not bulk-duplicate. (a) The
+  officer "copy a year" on /editions now copies ONLY the lot setup (placement),
+  not the placed map objects/occupants — the map is redrawn each year.
+  (b) Campers re-commit their own gear; the Bringing page shows "Bringing the same
+  as <lastyear>?" (their items from the most recent prior edition) with a one-click
+  "Bring these again" that re-declares them fresh + UNPLACED for this year (keeps
+  size/name/config; officers re-place). Shown only before they've added anything.
 - Discord/email reminder campaigns + scheduled DMs (#9).
 
 ## BRC city geometry reference (for the map editor, Phase 3)

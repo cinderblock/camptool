@@ -12,7 +12,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Form, data, redirect } from "react-router";
 import { CURRENT_EVENT_YEAR } from "~/lib/brc";
 import { BURNING_MAN, EVENTS, eventLabel, isEvent } from "~/lib/events";
@@ -23,12 +23,7 @@ import {
   setEditionCookie,
 } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import {
-  campEdition,
-  mapObject,
-  mapObjectOccupant,
-  placement,
-} from "../../../db/schema";
+import { campEdition, placement } from "../../../db/schema";
 import type { Route } from "./+types/editions";
 
 export function meta(_: Route.MetaArgs) {
@@ -51,7 +46,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
-/** Copy a source edition's lot + objects (+ occupants) into a fresh edition. */
+/** Copy a source edition's **lot setup** (placement geometry) into a fresh
+ * edition — NOT the placed map objects or campers' declarations. A new year's map
+ * is redrawn and campers re-commit what they're bringing (with a "same as last
+ * year" shortcut on the Bringing page), so we only carry the lot as a starting
+ * point the officer can adjust. */
 async function copyEditionContents(sourceId: string, targetId: string) {
   const [lot] = await db
     .select()
@@ -63,38 +62,6 @@ async function copyEditionContents(sourceId: string, targetId: string) {
     await db
       .insert(placement)
       .values({ ...rest, id: crypto.randomUUID(), editionId: targetId });
-  }
-
-  const objects = await db
-    .select()
-    .from(mapObject)
-    .where(eq(mapObject.editionId, sourceId));
-  const idMap = new Map<string, string>();
-  for (const o of objects) {
-    const newId = crypto.randomUUID();
-    idMap.set(o.id, newId);
-    const { createdAt: _c, updatedAt: _u, ...rest } = o;
-    await db
-      .insert(mapObject)
-      .values({ ...rest, id: newId, editionId: targetId });
-  }
-
-  if (idMap.size > 0) {
-    const occupants = await db
-      .select()
-      .from(mapObjectOccupant)
-      .where(inArray(mapObjectOccupant.objectId, [...idMap.keys()]));
-    for (const occ of occupants) {
-      const newObjectId = idMap.get(occ.objectId);
-      if (!newObjectId) continue;
-      await db.insert(mapObjectOccupant).values({
-        id: crypto.randomUUID(),
-        campId: occ.campId,
-        editionId: targetId,
-        objectId: newObjectId,
-        membershipId: occ.membershipId,
-      });
-    }
   }
 }
 
@@ -199,8 +166,10 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
           <Text c="dimmed" size="sm">
             Each year is its own edition of the camp — the map and everyone's
             inventory are scoped to it. Editing this year never changes a past
-            one. Lock a year to make it read-only; copy a year to start the next
-            from last year's layout.
+            one. Lock a year to make it read-only. Copying a year brings forward
+            only the lot setup as a starting point — the map is redrawn and
+            campers re-commit what they're bringing (with a one-click "same as
+            last year" on the Bringing page).
           </Text>
         </div>
 
@@ -230,7 +199,7 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                 />
                 <Select
                   size="xs"
-                  label="Copy from (optional)"
+                  label="Copy lot setup from (optional)"
                   name="copyFromId"
                   placeholder="Start blank"
                   clearable

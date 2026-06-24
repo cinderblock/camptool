@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Badge,
+  Button,
   Container,
   Group,
   NumberInput,
@@ -17,7 +18,7 @@ import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
 import { db } from "../../../db/client.server";
-import { mapObject } from "../../../db/schema";
+import { campEdition, mapObject } from "../../../db/schema";
 import type { Route } from "./+types/bringing";
 
 export function meta(_: Route.MetaArgs) {
@@ -44,6 +45,44 @@ export async function loader({ request }: Route.LoaderArgs) {
         eq(mapObject.ownerMembershipId, active.membership.id),
       ),
     );
+  // "Same as last year": the caller's items from the most recent PRIOR edition
+  // (year < this one). We DON'T copy anything automatically — campers re-commit
+  // each year; this just offers a one-click way to re-declare the same things.
+  const prior = await db
+    .select({
+      kind: mapObject.kind,
+      name: mapObject.name,
+      width: mapObject.width,
+      height: mapObject.height,
+      year: campEdition.year,
+    })
+    .from(mapObject)
+    .innerJoin(campEdition, eq(mapObject.editionId, campEdition.id))
+    .where(
+      and(
+        eq(mapObject.ownerMembershipId, active.membership.id),
+        eq(mapObject.campId, active.camp.id),
+      ),
+    );
+  const priorYears = prior
+    .map((p) => p.year)
+    .filter((y) => y < activeEdition.year);
+  const lastYearNum = priorYears.length ? Math.max(...priorYears) : null;
+  const lastYear =
+    lastYearNum != null
+      ? {
+          year: lastYearNum,
+          items: prior
+            .filter((p) => p.year === lastYearNum)
+            .map((p) => ({
+              kind: p.kind,
+              name: p.name,
+              width: p.width,
+              height: p.height,
+            })),
+        }
+      : null;
+
   return {
     locked: activeEdition.locked,
     items: rows.map((r) => ({
@@ -54,6 +93,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       height: r.height,
       placed: r.placed,
     })) satisfies Item[],
+    lastYear,
   };
 }
 
@@ -130,11 +170,59 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
+  if (intent === "bringSameAsLastYear") {
+    // Re-derive the source server-side (don't trust the client): the caller's
+    // items from the most recent prior edition. Re-declares them fresh + unplaced
+    // for this year (size/name/config kept; the map is redrawn, so no position).
+    const prior = await db
+      .select({
+        kind: mapObject.kind,
+        name: mapObject.name,
+        width: mapObject.width,
+        height: mapObject.height,
+        tallFt: mapObject.tallFt,
+        config: mapObject.config,
+        mirrored: mapObject.mirrored,
+        year: campEdition.year,
+      })
+      .from(mapObject)
+      .innerJoin(campEdition, eq(mapObject.editionId, campEdition.id))
+      .where(
+        and(eq(mapObject.ownerMembershipId, mid), eq(mapObject.campId, campId)),
+      );
+    const years = prior
+      .map((p) => p.year)
+      .filter((y) => y < activeEdition.year);
+    if (years.length === 0) {
+      return data({ error: "Nothing from a prior year." }, { status: 400 });
+    }
+    const lastYear = Math.max(...years);
+    const src = prior.filter((p) => p.year === lastYear);
+    await db.insert(mapObject).values(
+      src.map((s) => ({
+        id: crypto.randomUUID(),
+        campId,
+        editionId,
+        ownerMembershipId: mid,
+        kind: s.kind,
+        name: s.name,
+        width: s.width,
+        height: s.height,
+        tallFt: s.tallFt,
+        config: s.config,
+        mirrored: s.mirrored,
+        placed: false,
+        createdById: user.id,
+      })),
+    );
+    return data({ ok: true, added: src.length });
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
 export default function Bringing({ loaderData }: Route.ComponentProps) {
-  const { items, locked } = loaderData;
+  const { items, locked, lastYear } = loaderData;
   const fetcher = useFetcher();
 
   function add(kind: string, size?: AddSize) {
@@ -154,6 +242,49 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
             camp map. Sizes are in feet — set them as accurately as you can.
           </Text>
         </div>
+
+        {/* A returning camper re-commits each year; this just makes re-declaring
+        last year's gear one click. Shown only before they've added anything. */}
+        {!locked && lastYear && items.length === 0 ? (
+          <Paper
+            withBorder
+            p="md"
+            radius="md"
+            bg="var(--mantine-color-default-hover)"
+          >
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <div style={{ minWidth: 0 }}>
+                <Text fw={600} size="sm">
+                  Bringing the same as {lastYear.year}?
+                </Text>
+                <Text size="xs" c="dimmed" mt={2}>
+                  Last year you brought:{" "}
+                  {lastYear.items
+                    .map(
+                      (it) =>
+                        `${it.name ? `${it.name} ` : ""}${kindDef(it.kind).label} (${Math.round(it.width)}×${Math.round(it.height)}′)`,
+                    )
+                    .join(", ")}
+                  . Add them again to re-declare for this year (officers
+                  re-place them on the new map).
+                </Text>
+              </div>
+              <Button
+                size="xs"
+                onClick={() =>
+                  fetcher.submit(
+                    { intent: "bringSameAsLastYear" },
+                    { method: "post" },
+                  )
+                }
+                loading={fetcher.state !== "idle"}
+                style={{ flex: "0 0 auto" }}
+              >
+                Bring these again
+              </Button>
+            </Group>
+          </Paper>
+        ) : null}
 
         {locked ? (
           <Paper
