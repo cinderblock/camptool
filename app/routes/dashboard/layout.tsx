@@ -104,6 +104,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const nav = [
     { to: "/", label: "Overview", end: true },
     { to: "/guide", label: "How it works", end: false },
+    { to: "/announcements", label: "Announcements", end: false },
     ...(showFinishSetup
       ? [{ to: "/start", label: "Finish setup", end: false }]
       : []),

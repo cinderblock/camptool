@@ -548,7 +548,12 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   ledger table; read-only when the year is locked. Reframes the old
   "dues/financials" item. Later: per-field visibility if they ever want to share a
   summary with members; CSV export.
-- Shared documents (#5); announcements (#6).
+- [x] **Announcements (LANDED).** `announcement` table (migration 0030),
+  edition-scoped, pinned-floats-to-top. Officer-posted camp news that ALL members
+  read at `/announcements` (nav link visible to everyone); officers add / pin /
+  delete; read-only when the year is locked. Later: surface latest on the
+  Overview, Discord cross-post.
+- Shared documents (#5).
 
 **Phase 5 — Data lifecycle**
 - Import last year's data (#8); exportable database (#10).

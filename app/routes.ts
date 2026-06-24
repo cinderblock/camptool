@@ -19,6 +19,7 @@ export default [
   layout("routes/dashboard/layout.tsx", [
     index("routes/dashboard/index.tsx"),
     route("guide", "routes/dashboard/guide.tsx"),
+    route("announcements", "routes/dashboard/announcements.tsx"),
     route("members", "routes/dashboard/members.tsx"),
     route("invite", "routes/dashboard/invite.tsx"),
     route("editions", "routes/dashboard/editions.tsx"),
