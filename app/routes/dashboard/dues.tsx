@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Container,
   Group,
   NumberInput,
@@ -16,13 +17,19 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { useEffect, useState } from "react";
 import { Form, data, useFetcher } from "react-router";
 import { hasAtLeast } from "~/lib/permissions";
 import { loadCampEditions, requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { contributionTier } from "../../../db/schema";
+import {
+  contributionTier,
+  financeEntry,
+  memberRequirement,
+  membership,
+  user,
+} from "../../../db/schema";
 import type { Route } from "./+types/dues";
 
 export function meta(_: Route.MetaArgs) {
@@ -68,6 +75,62 @@ export async function loader({ request }: Route.LoaderArgs) {
       label: e.label ? `${e.year} · ${e.label}` : String(e.year),
     }));
 
+  // Roster: each member, their assigned tier/waive, and what they've paid (sum of
+  // their donation entries for this edition).
+  const members = (
+    await db
+      .select({ id: membership.id, name: user.name })
+      .from(membership)
+      .innerJoin(user, eq(membership.userId, user.id))
+      .where(eq(membership.organizationId, active.camp.id))
+  ).sort((a, b) => a.name.localeCompare(b.name));
+
+  const reqs = await db
+    .select({
+      membershipId: memberRequirement.membershipId,
+      tierId: memberRequirement.tierId,
+      waived: memberRequirement.waived,
+    })
+    .from(memberRequirement)
+    .where(eq(memberRequirement.editionId, activeEdition.id));
+  const reqByMember = new Map(reqs.map((r) => [r.membershipId, r]));
+
+  const paidRows = await db
+    .select({
+      memberId: financeEntry.memberId,
+      cents: sql<number>`sum(${financeEntry.amountCents})`,
+    })
+    .from(financeEntry)
+    .where(
+      and(
+        eq(financeEntry.editionId, activeEdition.id),
+        eq(financeEntry.kind, "donation"),
+      ),
+    )
+    .groupBy(financeEntry.memberId);
+  const paidByMember = new Map(
+    paidRows
+      .filter((r) => r.memberId)
+      .map((r) => [r.memberId as string, Number(r.cents) || 0]),
+  );
+
+  const tierById = new Map(tiers.map((t) => [t.id, t]));
+  const roster = members.map((m) => {
+    const req = reqByMember.get(m.id);
+    const tier = req?.tierId ? tierById.get(req.tierId) : undefined;
+    const waived = req?.waived ?? false;
+    const expectedCents = waived ? 0 : (tier?.expectedCents ?? null);
+    const paidCents = paidByMember.get(m.id) ?? 0;
+    return {
+      membershipId: m.id,
+      name: m.name,
+      tierId: req?.tierId ?? null,
+      waived,
+      expectedCents,
+      paidCents,
+    };
+  });
+
   return {
     locked: activeEdition.locked,
     year: activeEdition.year,
@@ -79,6 +142,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       description: t.description,
     })),
     otherEditions,
+    roster,
   };
 }
 
@@ -164,12 +228,55 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true, copied: src.length });
   }
 
+  if (intent === "setMemberTier" || intent === "setMemberWaived") {
+    const membershipId = String(form.get("membershipId") ?? "");
+    // Only members of this camp.
+    const [m] = await db
+      .select({ id: membership.id })
+      .from(membership)
+      .where(
+        and(
+          eq(membership.id, membershipId),
+          eq(membership.organizationId, campId),
+        ),
+      )
+      .limit(1);
+    if (!m) return data({ error: "Unknown member." }, { status: 404 });
+
+    const set: { tierId?: string | null; waived?: boolean; updatedAt: Date } = {
+      updatedAt: new Date(),
+    };
+    if (intent === "setMemberTier") {
+      const tierId = String(form.get("tierId") ?? "");
+      set.tierId = tierId || null;
+    } else {
+      set.waived = form.get("waived") === "true";
+    }
+    await db
+      .insert(memberRequirement)
+      .values({
+        id: crypto.randomUUID(),
+        campId,
+        editionId,
+        membershipId,
+        tierId: set.tierId ?? null,
+        waived: set.waived ?? false,
+      })
+      .onConflictDoUpdate({
+        target: [memberRequirement.editionId, memberRequirement.membershipId],
+        set,
+      });
+    return data({ ok: true });
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
 export default function Dues({ loaderData }: Route.ComponentProps) {
-  const { locked, year, tiers, otherEditions } = loaderData;
+  const { locked, year, tiers, otherEditions, roster } = loaderData;
   const fetcher = useFetcher<{ error?: string; ok?: boolean }>();
+  // Separate fetcher for roster edits so they don't clear the add-tier form.
+  const rosterFetcher = useFetcher();
   const [name, setName] = useState("");
   const [amount, setAmount] = useState<number | string>("");
   const [requirement, setRequirement] = useState("suggested");
@@ -382,6 +489,136 @@ export default function Dues({ loaderData }: Route.ComponentProps) {
             </Text>
           </Card>
         ) : null}
+
+        <div>
+          <Group justify="space-between" align="flex-end" mb={6}>
+            <Title order={3}>Members</Title>
+            {(() => {
+              const expected = roster.reduce(
+                (s, r) => s + (r.expectedCents ?? 0),
+                0,
+              );
+              const paid = roster.reduce((s, r) => s + r.paidCents, 0);
+              return (
+                <Text size="xs" c="dimmed">
+                  {usd(expected)} expected · {usd(paid)} collected ·{" "}
+                  {usd(Math.max(0, expected - paid))} outstanding
+                </Text>
+              );
+            })()}
+          </Group>
+          <Paper withBorder p={0} radius="md">
+            {roster.length === 0 ? (
+              <Text size="sm" c="dimmed" p="md">
+                No members yet.
+              </Text>
+            ) : (
+              <Table.ScrollContainer minWidth={640}>
+                <Table verticalSpacing="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Member</Table.Th>
+                      <Table.Th>Tier</Table.Th>
+                      <Table.Th ta="right">Expected</Table.Th>
+                      <Table.Th ta="right">Paid</Table.Th>
+                      <Table.Th>Status</Table.Th>
+                      {locked ? null : <Table.Th>Waive</Table.Th>}
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {roster.map((r) => {
+                      const owes =
+                        r.expectedCents != null
+                          ? r.expectedCents - r.paidCents
+                          : null;
+                      return (
+                        <Table.Tr key={r.membershipId}>
+                          <Table.Td>
+                            <Text size="sm">{r.name}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            <Select
+                              size="xs"
+                              placeholder="—"
+                              data={tiers.map((t) => ({
+                                value: t.id,
+                                label: t.name,
+                              }))}
+                              value={r.tierId}
+                              disabled={locked}
+                              clearable
+                              comboboxProps={{ withinPortal: true }}
+                              w={150}
+                              onChange={(v) =>
+                                rosterFetcher.submit(
+                                  {
+                                    intent: "setMemberTier",
+                                    membershipId: r.membershipId,
+                                    tierId: v ?? "",
+                                  },
+                                  { method: "post" },
+                                )
+                              }
+                            />
+                          </Table.Td>
+                          <Table.Td ta="right">
+                            <Text size="sm">{usd(r.expectedCents)}</Text>
+                          </Table.Td>
+                          <Table.Td ta="right">
+                            <Text size="sm">{usd(r.paidCents)}</Text>
+                          </Table.Td>
+                          <Table.Td>
+                            {r.waived ? (
+                              <Badge size="sm" variant="light" color="gray">
+                                waived
+                              </Badge>
+                            ) : r.expectedCents == null ? (
+                              <Text size="xs" c="dimmed">
+                                —
+                              </Text>
+                            ) : owes != null && owes <= 0 ? (
+                              <Badge size="sm" variant="light" color="teal">
+                                paid
+                              </Badge>
+                            ) : (
+                              <Badge size="sm" variant="light" color="orange">
+                                owes {usd(owes)}
+                              </Badge>
+                            )}
+                          </Table.Td>
+                          {locked ? null : (
+                            <Table.Td>
+                              <Checkbox
+                                size="xs"
+                                checked={r.waived}
+                                onChange={(e) =>
+                                  rosterFetcher.submit(
+                                    {
+                                      intent: "setMemberWaived",
+                                      membershipId: r.membershipId,
+                                      waived: e.currentTarget.checked
+                                        ? "true"
+                                        : "false",
+                                    },
+                                    { method: "post" },
+                                  )
+                                }
+                              />
+                            </Table.Td>
+                          )}
+                        </Table.Tr>
+                      );
+                    })}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            )}
+          </Paper>
+          <Text size="xs" c="dimmed" mt={6}>
+            "Paid" is the sum of each member's donations on the Finances page
+            for {year}.
+          </Text>
+        </div>
       </Stack>
     </Container>
   );

@@ -47,9 +47,12 @@ must NOT alter old years' data.
 1. [ ] **Tier config, versioned per edition.** `contribution_tier` table +
    migration; officer-only `/dues` page: list/add/edit/delete this year's tiers +
    "copy tiers from <year>"; read-only when locked. ← FIRST
-2. [ ] **Member roster + assignment.** `member_requirement` table; assign each
-   member a tier (or override/waive); roster showing expected vs paid (from
-   donations) vs outstanding.
+2. [x] **Member roster + assignment (LANDED).** `member_requirement` table
+   (migration 0028, unique per edition+member); the /dues page now lists every
+   member with a tier Select + Waive checkbox, and shows expected (from tier) vs
+   paid (sum of their donations) vs outstanding, with a per-year totals line.
+   Assignments upsert via onConflictDoUpdate. (Override amount + per-tier payment
+   links deferred to slice 3.)
 3. [ ] Polish: link a donation to a tier; member-visible own-status; CSV export;
    non-money requirements (work hours) if wanted.
 

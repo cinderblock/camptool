@@ -5,7 +5,13 @@
  * CENTS to avoid float drift.
  */
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { user } from "./auth";
 import { camp, campEdition, membership } from "./camp";
 
@@ -77,4 +83,42 @@ export const contributionTier = sqliteTable(
       .default(now),
   },
   (t) => [index("contribution_tier_edition").on(t.editionId)],
+);
+
+/**
+ * What a given member is expected to contribute for a year — their assigned
+ * `contribution_tier` (or `waived`). Edition-scoped (one row per member per year,
+ * independent across years). "Paid" isn't stored here — it's derived from the
+ * member's `finance_entry` donations for the edition.
+ */
+export const memberRequirement = sqliteTable(
+  "member_requirement",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id")
+      .notNull()
+      .references(() => campEdition.id, { onDelete: "cascade" }),
+    membershipId: text("membership_id")
+      .notNull()
+      .references(() => membership.id, { onDelete: "cascade" }),
+    // The assigned tier (null = unassigned). Cleared if the tier is deleted.
+    tierId: text("tier_id").references(() => contributionTier.id, {
+      onDelete: "set null",
+    }),
+    // Waived = nothing expected this year regardless of tier (comp / work trade).
+    waived: integer("waived", { mode: "boolean" }).notNull().default(false),
+    notes: text("notes"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [
+    uniqueIndex("member_requirement_unique").on(t.editionId, t.membershipId),
+  ],
 );
