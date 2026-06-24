@@ -1122,6 +1122,9 @@ const PAD_FT = 50;
 // rear service alley ~20ft.
 const STREET_W_FT = 45;
 const SERVICE_ROAD_W_FT = 20;
+// BRC fire-hose reach: a lane may dead-end as long as hose reaches 125′ to every
+// camp border (see the plan's fire-lane note).
+const FIRE_REACH_FT = 125;
 const SURROUND_GAP_FT = 3;
 // Map zoom range (1 = fit the whole lot to the frame).
 const ZOOM_MIN = 1;
@@ -1669,6 +1672,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [highlight, setHighlight] = useState<string>("none");
   // Global door visibility — master switch over each object's own showDoor flag.
   const [showDoors, setShowDoors] = useState(true);
+  // Fire-access overlay: shade the lot by 125′ hose reach from the street/alley.
+  const [showFire, setShowFire] = useState(false);
   // Lot config form: hidden by default, revealed by the toolbar gear (it's a
   // once-at-setup form). Lifted here so the gear (in the map toolbar) and the
   // form (in the side rail) share one flag.
@@ -1870,6 +1875,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
             sun={sun}
             showDoors={showDoors}
+            showFire={showFire}
             showWind={showWind}
             windFromBearing={windFromBearing}
             windStrength={windStrength}
@@ -1912,6 +1918,19 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               checked={showDoors}
               onChange={(e) => setShowDoors(e.currentTarget.checked)}
             />
+            <Checkbox
+              mt={6}
+              size="xs"
+              label="Fire access (125′)"
+              checked={showFire}
+              onChange={(e) => setShowFire(e.currentTarget.checked)}
+            />
+            {showFire ? (
+              <Text size="xs" c="dimmed" mt={4}>
+                Green = within 125′ hose reach of the street/alley. Red = beyond
+                reach (needs an internal fire lane). Assumes rear-alley access.
+              </Text>
+            ) : null}
           </Paper>
           <Compass
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
@@ -2152,6 +2171,7 @@ function Editor({
   mapUpBearing,
   sun,
   showDoors,
+  showFire,
   showWind,
   windFromBearing,
   windStrength,
@@ -2179,6 +2199,7 @@ function Editor({
   mapUpBearing: number | null;
   sun: { altitude: number; azimuth: number };
   showDoors: boolean;
+  showFire: boolean;
   showWind: boolean;
   windFromBearing: number;
   windStrength: number;
@@ -3419,6 +3440,63 @@ function Editor({
                 </>
               )}
             </g>
+            {/* Fire-access overlay (clipped to the lot): green = within 125′ hose
+            reach of the street frontage or the rear alley; red = beyond both
+            (an internal fire lane would be required). Measured by depth. */}
+            {showFire ? (
+              <g clipPath={`url(#${clipId})`} pointerEvents="none">
+                <rect
+                  x={viewL}
+                  y={originY}
+                  width={viewR - viewL}
+                  height={Math.min(FIRE_REACH_FT, lot.depthFt) * ppf}
+                  fill="#2f9e44"
+                  opacity={0.1}
+                />
+                {lot.depthFt > FIRE_REACH_FT ? (
+                  <rect
+                    x={viewL}
+                    y={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                    width={viewR - viewL}
+                    height={FIRE_REACH_FT * ppf}
+                    fill="#2f9e44"
+                    opacity={0.1}
+                  />
+                ) : null}
+                {lot.depthFt > 2 * FIRE_REACH_FT ? (
+                  <rect
+                    x={viewL}
+                    y={originY + FIRE_REACH_FT * ppf}
+                    width={viewR - viewL}
+                    height={(lot.depthFt - 2 * FIRE_REACH_FT) * ppf}
+                    fill="#e03131"
+                    opacity={0.18}
+                  />
+                ) : null}
+                <line
+                  x1={viewL}
+                  y1={originY + FIRE_REACH_FT * ppf}
+                  x2={viewR}
+                  y2={originY + FIRE_REACH_FT * ppf}
+                  stroke="#e8590c"
+                  strokeWidth={1}
+                  strokeDasharray="5 4"
+                  opacity={0.7}
+                />
+                {lot.depthFt > FIRE_REACH_FT ? (
+                  <line
+                    x1={viewL}
+                    y1={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                    x2={viewR}
+                    y2={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                    stroke="#e8590c"
+                    strokeWidth={1}
+                    strokeDasharray="5 4"
+                    opacity={0.7}
+                  />
+                ) : null}
+              </g>
+            ) : null}
             {/* Shade simulation: each object casts a shadow away from the sun,
             clipped to the whole ground view so it can fall onto neighbors/roads.
             Overlaps UNION (OR) at one opacity rather than adding up — the polygons

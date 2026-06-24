@@ -282,7 +282,9 @@ for Math Camp). A **Man-vs-mountain frontage** checkbox flips the taper directio
 years' geometry to `CITY_GEOMETRY` as BMorg publishes each doc.
 
 Still TODO: "highlight my spot", premade/shared blocks, Borg outline import,
-fire-lane/marker overlays, true radial placement of objects. (Done: 3D/sun-shade
+true radial placement of objects. (Done: fire-access overlay — a toggle shading
+the lot by 125′ hose reach from the street/alley (green) with any beyond-reach
+gap (needing an internal fire lane) in red; 3D/sun-shade
 + wind sim; off-center doors — RV & hexayurt doors slide along their wall via
 `doorOffset`; RV pop-outs — `popoutL`/`popoutR` slide-out depth that extends the
 drawn body AND the real footprint, so spacing / shade / wind account for them; RV
