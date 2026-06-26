@@ -551,13 +551,18 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
 - [x] **Announcements (LANDED).** `announcement` table (migration 0030),
   edition-scoped, pinned-floats-to-top. Officer-posted camp news that ALL members
   read at `/announcements` (nav link visible to everyone); officers add / pin /
-  delete; read-only when the year is locked. Later: surface latest on the
-  Overview, Discord cross-post.
+  delete; read-only when the year is locked. Latest 3 now surface on the Overview
+  home. Later: Discord cross-post.
 - [x] **Shared documents (LANDED).** `camp_document` table (migration 0031),
   CAMP-scoped (persists across years). A titled-link library (Google Docs/Drive,
   schedules, packing lists), grouped by category; everyone reads at `/documents`,
   officers add/remove. Links only (URL normalized/validated) — file upload would
   need storage infra (follow-up). **Phase 4 (Operations) complete.**
+
+**Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
+the active year — finish setup (members), declare what you're bringing, dues owed
+(their own, if the camp tracks dues), and pending map-change approvals (officers) —
+plus the latest 3 announcements. Ties the app together on the landing page.
 
 **Phase 5 — Data lifecycle**
 - [x] **Database backup download (LANDED).** `/export-db` resource route streams a
