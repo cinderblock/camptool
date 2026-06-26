@@ -225,6 +225,13 @@
       "when": 1782336024421,
       "tag": "0031_tiresome_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1782435395358,
+      "tag": "0032_silent_inertia",
+      "breakpoints": true
     }
   ]
 }

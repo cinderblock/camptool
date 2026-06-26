@@ -10,4 +10,5 @@ export * from "./map";
 export * from "./question";
 export * from "./recruit";
 export * from "./season";
+export * from "./telemetry";
 export * from "./ticket";

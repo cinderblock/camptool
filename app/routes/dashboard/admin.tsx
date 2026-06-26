@@ -12,6 +12,7 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import { desc, eq } from "drizzle-orm";
 import { useEffect, useRef } from "react";
 import { data, redirect, useFetcher } from "react-router";
 import {
@@ -23,6 +24,8 @@ import {
   setInstanceSettings,
 } from "~/lib/instance.server";
 import { requireUser } from "~/lib/session.server";
+import { db } from "../../../db/client.server";
+import { clientError, user as userTable } from "../../../db/schema";
 import type { Route } from "./+types/admin";
 
 export function meta(_: Route.MetaArgs) {
@@ -38,6 +41,29 @@ export async function loader({ request }: Route.LoaderArgs) {
     listSuperAdmins(),
   ]);
 
+  const recentErrors = (
+    await db
+      .select({
+        id: clientError.id,
+        kind: clientError.kind,
+        message: clientError.message,
+        url: clientError.url,
+        userName: userTable.name,
+        createdAt: clientError.createdAt,
+      })
+      .from(clientError)
+      .leftJoin(userTable, eq(clientError.userId, userTable.id))
+      .orderBy(desc(clientError.createdAt))
+      .limit(25)
+  ).map((e) => ({
+    id: e.id,
+    kind: e.kind,
+    message: e.message,
+    url: e.url,
+    userName: e.userName,
+    at: e.createdAt.toISOString(),
+  }));
+
   return {
     settings,
     currentUserId: session.user.id,
@@ -46,6 +72,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       name: a.name,
       email: a.email,
     })),
+    recentErrors,
   };
 }
 
@@ -84,7 +111,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
-  const { settings, admins, currentUserId } = loaderData;
+  const { settings, admins, currentUserId, recentErrors } = loaderData;
 
   return (
     <Container size="sm">
@@ -141,6 +168,63 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
                 Download backup
               </Button>
             </div>
+          </Stack>
+        </Card>
+
+        <Card withBorder radius="md" padding="lg">
+          <Stack gap="md">
+            <Title order={4}>Recent client errors</Title>
+            <Text size="sm" c="dimmed">
+              JavaScript errors forwarded from users' browsers (latest 25).
+            </Text>
+            {recentErrors.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                No errors logged. 🎉
+              </Text>
+            ) : (
+              <Table.ScrollContainer minWidth={560}>
+                <Table verticalSpacing="xs">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>When</Table.Th>
+                      <Table.Th>Kind</Table.Th>
+                      <Table.Th>Message</Table.Th>
+                      <Table.Th>Where</Table.Th>
+                      <Table.Th>Who</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {recentErrors.map((e) => (
+                      <Table.Tr key={e.id}>
+                        <Table.Td style={{ whiteSpace: "nowrap" }}>
+                          {new Date(e.at).toLocaleString()}
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge size="xs" variant="light" color="red">
+                            {e.kind}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" lineClamp={2}>
+                            {e.message}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">
+                            {e.url ?? ""}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">
+                            {e.userName ?? "—"}
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            )}
           </Stack>
         </Card>
       </Stack>

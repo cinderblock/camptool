@@ -15,6 +15,8 @@ export default [
   // Super-admin DB backup download (resource route; self-gated).
   route("export-db", "routes/export-db.tsx"),
   route("api/auth/*", "routes/api.auth.$.tsx"),
+  // Browser error forwarding (telemetry.client.ts → client_error table).
+  route("api/log-error", "routes/api.log-error.tsx"),
   // The app itself lives at the root behind a pathless layout (the shell). The
   // layout loader requires a logged-in user, so "/" is either the overview or a
   // redirect to /login — there is no "/dashboard" segment.

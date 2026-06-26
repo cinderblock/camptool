@@ -4,6 +4,7 @@ import {
   mantineHtmlProps,
 } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
+import { useEffect } from "react";
 import {
   Links,
   Meta,
@@ -11,11 +12,13 @@ import {
   Scripts,
   ScrollRestoration,
   isRouteErrorResponse,
+  useLocation,
 } from "react-router";
 
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 
+import { installTelemetry, pushCrumb } from "~/lib/telemetry.client";
 import type { Route } from "./+types/root";
 
 // Mantine's body background only resolves once its CSS + ColorSchemeScript run.
@@ -63,6 +66,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const location = useLocation();
+  // Install client error forwarding once, and breadcrumb each navigation.
+  useEffect(() => {
+    installTelemetry();
+  }, []);
+  useEffect(() => {
+    pushCrumb("nav", location.pathname + location.search);
+  }, [location.pathname, location.search]);
   return <Outlet />;
 }
 
