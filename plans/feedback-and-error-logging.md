@@ -33,13 +33,16 @@ Server:
 
 ## Slices
 
-1. [ ] **A — Client error logging.** `client_error` table + migration;
-   `/api/log-error` resource route; telemetry.client module + root wiring; recent
+1. [x] **A — Client error logging (LANDED).** `client_error` table (migration
+   0032); `/api/log-error` resource route (best-effort, capped, never errors back);
+   `telemetry.client.ts` (breadcrumb buffer + window error / unhandledrejection /
+   console.error handlers, deduped + flood-capped) wired in `root.tsx`; recent-25
    errors list on Site admin.
-2. [ ] **B — Feedback form.** `feedback` table + migration; a global "Feedback"
-   button in the app header → modal (type select; bug → doing/trying/expected/
-   actual template; else a message); `/api/feedback` action capturing breadcrumbs
-   + metadata; feedback list on Site admin.
+2. [x] **B — Feedback form (LANDED).** `feedback` table (migration 0032);
+   `FeedbackButton` in the app header → modal (type select; bug → doing/trying/
+   expected/actual template; else a message); `/api/feedback` action captures
+   breadcrumbs + url + viewport + user agent + session user/camp; feedback list on
+   Site admin. Both done.
 
 ## Notes / gotchas
 - Don't let the error forwarder loop (a failed POST must not log an error).

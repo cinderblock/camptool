@@ -25,7 +25,7 @@ import {
 } from "~/lib/instance.server";
 import { requireUser } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { clientError, user as userTable } from "../../../db/schema";
+import { clientError, feedback, user as userTable } from "../../../db/schema";
 import type { Route } from "./+types/admin";
 
 export function meta(_: Route.MetaArgs) {
@@ -64,6 +64,34 @@ export async function loader({ request }: Route.LoaderArgs) {
     at: e.createdAt.toISOString(),
   }));
 
+  const recentFeedback = (
+    await db
+      .select({
+        id: feedback.id,
+        kind: feedback.kind,
+        title: feedback.title,
+        body: feedback.body,
+        details: feedback.details,
+        url: feedback.url,
+        userName: userTable.name,
+        createdAt: feedback.createdAt,
+      })
+      .from(feedback)
+      .leftJoin(userTable, eq(feedback.userId, userTable.id))
+      .orderBy(desc(feedback.createdAt))
+      .limit(25)
+  ).map((f) => ({
+    id: f.id,
+    kind: f.kind,
+    summary:
+      f.title ||
+      [f.body, f.details].filter(Boolean).join(" — ").slice(0, 200) ||
+      "(no text)",
+    url: f.url,
+    userName: f.userName,
+    at: f.createdAt.toISOString(),
+  }));
+
   return {
     settings,
     currentUserId: session.user.id,
@@ -73,6 +101,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       email: a.email,
     })),
     recentErrors,
+    recentFeedback,
   };
 }
 
@@ -111,7 +140,8 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
-  const { settings, admins, currentUserId, recentErrors } = loaderData;
+  const { settings, admins, currentUserId, recentErrors, recentFeedback } =
+    loaderData;
 
   return (
     <Container size="sm">
@@ -168,6 +198,68 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
                 Download backup
               </Button>
             </div>
+          </Stack>
+        </Card>
+
+        <Card withBorder radius="md" padding="lg">
+          <Stack gap="md">
+            <Title order={4}>User feedback</Title>
+            <Text size="sm" c="dimmed">
+              Bug reports and suggestions sent via the Feedback button (latest
+              25).
+            </Text>
+            {recentFeedback.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                No feedback yet.
+              </Text>
+            ) : (
+              <Table.ScrollContainer minWidth={560}>
+                <Table verticalSpacing="xs">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>When</Table.Th>
+                      <Table.Th>Type</Table.Th>
+                      <Table.Th>Summary</Table.Th>
+                      <Table.Th>Who</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {recentFeedback.map((f) => (
+                      <Table.Tr key={f.id}>
+                        <Table.Td style={{ whiteSpace: "nowrap" }}>
+                          {new Date(f.at).toLocaleDateString()}
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge
+                            size="xs"
+                            variant="light"
+                            color={
+                              f.kind === "bug"
+                                ? "red"
+                                : f.kind === "compliment"
+                                  ? "teal"
+                                  : "blue"
+                            }
+                          >
+                            {f.kind}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" lineClamp={2}>
+                            {f.summary}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">
+                            {f.userName ?? "—"}
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            )}
           </Stack>
         </Card>
 

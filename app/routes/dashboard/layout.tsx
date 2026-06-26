@@ -22,6 +22,7 @@ import {
   useNavigate,
 } from "react-router";
 import { redirect } from "react-router";
+import { FeedbackButton } from "~/components/FeedbackButton";
 import { authClient, signOut } from "~/lib/auth-client";
 import { isSuperAdmin } from "~/lib/instance.server";
 import { hasAtLeast } from "~/lib/permissions";
@@ -203,6 +204,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                 ) : null}
               </Group>
             ) : null}
+            <FeedbackButton />
             <Menu position="bottom-end" withinPortal>
               <Menu.Target>
                 <UnstyledButton>
