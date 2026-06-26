@@ -44,6 +44,16 @@ Server:
    breadcrumbs + url + viewport + user agent + session user/camp; feedback list on
    Site admin. Both done.
 
+## Dev telemetry API (for tracing — LANDED)
+Token-gated read APIs so a developer/agent can pull telemetry from the live
+deployment (can't reach the firefly FS, so it's an HTTP API):
+- `GET /api/dev/errors?token=…` — filters: `limit`, `since` (ms/ISO/"24h"/"7d"),
+  `kind`, `q` (message substring), `group=1` (aggregate by message+source w/ counts).
+  Returns full rows incl. stack + parsed breadcrumbs.
+- `GET /api/dev/feedback?token=…` — `limit`, `since`, `kind`; full rows + metadata.
+- Auth: `DEV_API_TOKEN` env var (constant-time compare); unset ⇒ endpoints 404.
+  Pass `?token=` or `Authorization: Bearer …`. Ops must set the var (like CAMP_THEME).
+
 ## Notes / gotchas
 - Don't let the error forwarder loop (a failed POST must not log an error).
 - Cap payload sizes server-side; rate/flood guard.

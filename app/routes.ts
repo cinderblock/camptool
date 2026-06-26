@@ -19,6 +19,9 @@ export default [
   route("api/log-error", "routes/api.log-error.tsx"),
   // User feedback submissions (FeedbackButton → feedback table).
   route("api/feedback", "routes/api.feedback.tsx"),
+  // Dev-only telemetry read APIs (token-gated via DEV_API_TOKEN; for tracing).
+  route("api/dev/errors", "routes/api.dev.errors.tsx"),
+  route("api/dev/feedback", "routes/api.dev.feedback.tsx"),
   // The app itself lives at the root behind a pathless layout (the shell). The
   // layout loader requires a logged-in user, so "/" is either the overview or a
   // redirect to /login — there is no "/dashboard" segment.
