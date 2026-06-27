@@ -703,8 +703,8 @@ function DateRowView({
   const grantable = members.filter((m) => !heldBy.has(m.id));
   return (
     <Paper withBorder p="sm" radius="sm">
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <div>
+      <Group justify="space-between" wrap="wrap" align="flex-start">
+        <div style={{ minWidth: 0 }}>
           <Text fw={600} size="sm">
             {fmtDate(d.date, d.label)}
           </Text>

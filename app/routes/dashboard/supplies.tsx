@@ -475,7 +475,7 @@ function ItemRow({
     );
 
   return (
-    <Group gap="sm" wrap="nowrap" align="center">
+    <Group gap="sm" wrap="wrap" align="center">
       {canManage && !locked ? (
         <>
           <NumberInput

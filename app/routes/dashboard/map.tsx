@@ -6,6 +6,7 @@ import {
   Checkbox,
   Collapse,
   ColorInput,
+  Flex,
   Group,
   NumberInput,
   Paper,
@@ -21,6 +22,7 @@ import {
   Tooltip,
   useComputedColorScheme,
 } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import { and, eq } from "drizzle-orm";
 import {
   memo,
@@ -1773,6 +1775,9 @@ function GridScaleNote({ lot }: { lot: Lot }) {
 export default function CampMap({ loaderData }: Route.ComponentProps) {
   const { canEdit, canManage, unplaced, lot, myMembershipId, event } =
     loaderData;
+  // On phones the map + side rail stack vertically and the page scrolls
+  // naturally instead of the desktop fixed-height, two-pane / inner-scroll model.
+  const isNarrow = useMediaQuery("(max-width: 768px)");
   const fetcher = useFetcher();
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1933,8 +1938,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "calc(100vh - 88px)",
-        minHeight: 0,
+        // Desktop: fill the viewport and keep scrolling inside the map/rail.
+        // Mobile: let the stacked map + rail grow and the page scroll normally.
+        height: isNarrow ? "auto" : "calc(100vh - 88px)",
+        minHeight: isNarrow ? "calc(100vh - 88px)" : 0,
       }}
     >
       <Group
@@ -1959,17 +1966,17 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         {isBurningMan(event) ? <BurningManDisclaimer mt={0} /> : null}
       </Group>
 
-      <Group
+      <Flex
         align="stretch"
         gap="lg"
-        wrap="nowrap"
+        direction={{ base: "column", md: "row" }}
         style={{ flex: 1, minHeight: 0 }}
       >
         <div
           style={{
             flex: "1 1 auto",
             minWidth: 0,
-            height: "100%",
+            height: isNarrow ? "70vh" : "100%",
             display: "flex",
             flexDirection: "column",
             minHeight: 0,
@@ -2008,11 +2015,11 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         </div>
         <Stack
           gap="md"
+          w={{ base: "100%", md: 320 }}
           style={{
-            flex: "0 0 320px",
-            width: 320,
-            height: "100%",
-            overflowY: "auto",
+            flex: isNarrow ? "0 0 auto" : "0 0 320px",
+            height: isNarrow ? "auto" : "100%",
+            overflowY: isNarrow ? "visible" : "auto",
             paddingRight: 4,
           }}
         >
@@ -2118,7 +2125,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             fetcher={fetcher}
           />
         </Stack>
-      </Group>
+      </Flex>
     </div>
   );
 }
@@ -3316,7 +3323,6 @@ function Editor({
           gap="xs"
           p={6}
           justify="space-between"
-          wrap="nowrap"
           style={{
             borderBottom: "1px solid var(--mantine-color-default-border)",
           }}

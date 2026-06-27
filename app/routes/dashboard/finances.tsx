@@ -282,7 +282,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
         </SimpleGrid>
 
         <Paper withBorder p="sm" radius="md">
-          <Group justify="space-between" wrap="nowrap">
+          <Group justify="space-between" wrap="wrap">
             <Checkbox
               size="xs"
               label="Track member dues & contribution tiers"

@@ -179,12 +179,17 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
 
         {applyUrl ? (
           <Card withBorder padding="md" radius="md">
-            <Group justify="space-between" wrap="nowrap">
-              <div>
+            <Group justify="space-between" wrap="wrap">
+              <div style={{ minWidth: 0 }}>
                 <Text fw={600} size="sm">
                   Public application link
                 </Text>
-                <Anchor href={applyUrl} target="_blank" size="sm">
+                <Anchor
+                  href={applyUrl}
+                  target="_blank"
+                  size="sm"
+                  style={{ wordBreak: "break-all" }}
+                >
                   {applyUrl}
                 </Anchor>
               </div>

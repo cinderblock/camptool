@@ -349,7 +349,7 @@ function ItemRow({
 
   return (
     <Paper withBorder p="md" radius="md">
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
+      <Group justify="space-between" wrap="wrap" align="flex-start">
         <Group gap="sm" wrap="nowrap" align="center">
           <ShapeSwatch kind={def} size={22} />
           <div>
@@ -377,7 +377,7 @@ function ItemRow({
           </div>
         </Group>
 
-        <Group gap="sm" wrap="nowrap" align="flex-end">
+        <Group gap="sm" wrap="wrap" align="flex-end">
           <TextInput
             size="xs"
             label="Name"

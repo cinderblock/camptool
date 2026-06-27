@@ -701,14 +701,14 @@ function BringingStep({ data: d }: { data: LoaderData }) {
             const def = kindDef(item.kind);
             return (
               <Paper key={item.id} withBorder p="sm" radius="md">
-                <Group justify="space-between" wrap="nowrap" align="flex-end">
+                <Group justify="space-between" wrap="wrap" align="flex-end">
                   <Group gap="sm" wrap="nowrap" align="center">
                     <ShapeSwatch kind={def} size={20} />
                     <Text fw={600} size="sm">
                       {def.label}
                     </Text>
                   </Group>
-                  <Group gap="sm" wrap="nowrap" align="flex-end">
+                  <Group gap="sm" wrap="wrap" align="flex-end">
                     <TextInput
                       size="xs"
                       label="Name"

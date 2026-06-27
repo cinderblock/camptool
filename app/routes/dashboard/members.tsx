@@ -219,7 +219,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                   type="email"
                   label="Add a recruit by email"
                   placeholder="person@example.com"
-                  w={320}
+                  w={{ base: "100%", xs: 320 }}
                   required
                 />
                 <Button type="submit" loading={addFetcher.state !== "idle"}>

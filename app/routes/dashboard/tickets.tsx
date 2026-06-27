@@ -8,6 +8,7 @@ import {
   NumberInput,
   Paper,
   Select,
+  SimpleGrid,
   Stack,
   Table,
   Text,
@@ -565,11 +566,11 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
               <Text fw={600} mb="xs">
                 Allocation · {tickets.length} total
               </Text>
-              <Group gap="lg" mb="md">
+              <SimpleGrid cols={{ base: 3, xs: 3 }} spacing="lg" mb="md">
                 <Stat label="available" value={available} color="gray" />
                 <Stat label="assigned" value={assigned} color="blue" />
                 <Stat label="unpurchased" value={unpurchased} color="orange" />
-              </Group>
+              </SimpleGrid>
               {locked ? null : (
                 <Stack gap="md">
                   <SaleWindowForm
@@ -696,7 +697,7 @@ function RequestForm({ fetcher }: { fetcher: ReturnType<typeof useFetcher> }) {
           name="note"
           label="Request a ticket"
           placeholder="optional note — e.g. low-income"
-          w={320}
+          w={{ base: "100%", xs: 320 }}
         />
         <Button type="submit" loading={fetcher.state !== "idle"}>
           Request
