@@ -353,3 +353,28 @@ preview for the user to open before deploy.
    there a 4th ground footprint to draw? (Assumed: open/shaded center.)
 3. Pi-stick: just a center dot+π glyph, or do you want its separate long shadow
    modeled too? (Assumed: glyph now, shadow later.)
+
+## Hypar Shade — 40′×40′ saddle canopy (LANDED 2026-06-28)
+
+Math Camp's second custom structure (`packages/mathcamp-theme/structures/hypar-shade.tsx`),
+a sibling to the Sierpinski pyramid but a `canopyShade` (open shade cloth on legs).
+The roof is a hyperbolic paraboloid centered on the middle: one diagonal's corners
+at **10′**, the other diagonal at **6′**, every edge midpoint + the center at **8′**,
+straight (ruled) edges. Modeled as `z = 8 + 2·(2x/w)(2y/h)` over the centered square.
+
+- **Cast ground shade is geometrically exact** via `shadowVolume`: a hypar is a
+  doubly-ruled bilinear surface, so its silhouette is exactly the quadrilateral of
+  the four corners projected away from the sun — four vertices (at z = height/peak)
+  suffice, no tessellation. Goes through `volumeShadow` (the `def.shadowVolume`
+  branch precedes the generic `canopyShade` tips path in `shadowPolygon`), and
+  since all four verts are elevated it reads as the floating canopy shadow.
+- **Sun-reactive color** via `shadedFaces`: a 6×6 Lambert-shaded facet grid. The
+  bright/dark band rotates as the sun crosses the sky (verified: E↔W flips the
+  top-bottom gradient; rotating the sun 90° swings it to the other axis).
+- `renderFootprint` draws a top-down height map (cells tinted by height → the
+  saddle reads as 3D from above) + the two diagonals (solid = 10′ ridge, dashed =
+  6′) + corner height tags + center label. `rigid` + `fixedTall` (tallFt = 10),
+  square footprint = bounding box (no custom `footprint`).
+- Verified: typecheck + build green; numeric check of corner heights, shadow quad,
+  and shade-flips-with-sun. Registered in `packages/mathcamp-theme/index.ts`.
+  Not yet placed live on the running map (same pending visual step as the pyramid).

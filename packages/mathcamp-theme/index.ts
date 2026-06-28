@@ -7,10 +7,11 @@
  * structures live here so they never bloat the shared open-source palette.
  */
 import type { CampTheme } from "@camptool/theme-contract";
+import { hyparShade } from "./structures/hypar-shade";
 import { sierpinskiPyramid } from "./structures/sierpinski";
 
 const theme: CampTheme = {
-  structures: [sierpinskiPyramid],
+  structures: [sierpinskiPyramid, hyparShade],
 };
 
 export default theme;
