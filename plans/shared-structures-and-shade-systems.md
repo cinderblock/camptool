@@ -62,8 +62,12 @@ sunset, path lights, the pyramid's rainbow top). Most new *kinds* are core
 ## Progress log
 
 - [x] Plan written; two forks locked (per-edition bans, incremental PRs).
-- [ ] **A — new shared kinds** (IN PROGRESS).
-- [ ] B — per-edition banned kinds.
+- [x] **A — new shared kinds** — LANDED + deployed (commit 8b5c99d, Deploy to
+      firefly green 2026-06-28). carport, popup, shower, evap pond, fresh/grey
+      water tanks (round), trash/recycling, toy hauler (ramp), Airstream. New
+      Shade/Water/Services groups; canopy behavior generalized to any
+      `canopyShade` kind. NOT yet browser-verified live (visual check pending).
+- [ ] B — per-edition banned kinds (NEXT).
 - [ ] C — water-pipe cable types + in-camp lanes/roads/walkways.
 - [ ] D — snap-to-structure shades.
 - [ ] E — night mode + path lights + pyramid rainbow.
