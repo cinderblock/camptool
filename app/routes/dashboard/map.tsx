@@ -8,6 +8,7 @@ import {
   ColorInput,
   Flex,
   Group,
+  Menu,
   NumberInput,
   Paper,
   SegmentedControl,
@@ -48,6 +49,13 @@ import {
 } from "~/lib/brc";
 import { isBurningMan } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
+import {
+  DEFAULT_ROAD_CUTBACK,
+  ROAD_KINDS,
+  roadKindDef,
+  roadKindLabel,
+  roadOutline,
+} from "~/lib/roads";
 import { requireActiveEdition } from "~/lib/session.server";
 import {
   AMP_OPTIONS,
@@ -79,6 +87,7 @@ import { db } from "../../../db/client.server";
 import {
   mapCable,
   mapObject,
+  mapRoad,
   mapZone,
   membership,
   placement,
@@ -496,6 +505,17 @@ type CableRow = {
   notes: string | null;
 };
 
+type RoadRow = {
+  id: string;
+  name: string | null;
+  kind: string;
+  color: string;
+  width: number;
+  cutback: number;
+  points: ZonePt[];
+  notes: string | null;
+};
+
 /** Parse the stored points JSON into a clean {x,y}[] (bad data → []). */
 function parseZonePoints(json: string): ZonePt[] {
   try {
@@ -655,6 +675,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from(mapCable)
     .where(eq(mapCable.editionId, editionId));
 
+  const roadRows = await db
+    .select()
+    .from(mapRoad)
+    .where(eq(mapRoad.editionId, editionId));
+
   const canManage = hasAtLeast(active.membership.role, "officer");
   // Declared-but-unplaced items (the officer placement queue), with owner names.
   const unplacedRows = canManage
@@ -726,6 +751,16 @@ export async function loader({ request }: Route.LoaderArgs) {
       gauge: c.gauge,
       notes: c.notes,
     })) satisfies CableRow[],
+    roads: roadRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      kind: r.kind,
+      color: r.color,
+      width: r.width,
+      cutback: r.cutback,
+      points: parseZonePoints(r.points),
+      notes: r.notes,
+    })) satisfies RoadRow[],
   };
 }
 
@@ -782,6 +817,9 @@ export async function action({ request }: Route.ActionArgs) {
     "addCable",
     "updateCable",
     "deleteCable",
+    "addRoad",
+    "updateRoad",
+    "deleteRoad",
   ]);
   if (officerOnly.has(intent) && !canManage) {
     return data({ error: "Officers manage the map." }, { status: 403 });
@@ -1260,6 +1298,84 @@ export async function action({ request }: Route.ActionArgs) {
       .delete(mapCable)
       .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)));
     return data({ deletedCableId: id });
+  }
+
+  if (intent === "addRoad") {
+    const id = crypto.randomUUID();
+    const kind = String(form.get("kind") ?? "fire-lane");
+    const def = roadKindDef(kind);
+    const row = {
+      id,
+      campId,
+      editionId,
+      name: str("name"),
+      kind,
+      color: String(form.get("color") ?? def.color),
+      width: form.get("width")
+        ? Math.max(2, num("width", def.width))
+        : def.width,
+      cutback: form.get("cutback")
+        ? Math.max(0, num("cutback"))
+        : DEFAULT_ROAD_CUTBACK,
+      points: String(form.get("points") ?? "[]"),
+      notes: str("notes"),
+      createdById: user.id,
+    };
+    await db.insert(mapRoad).values(row);
+    return data({
+      road: {
+        id,
+        name: row.name,
+        kind: row.kind,
+        color: row.color,
+        width: row.width,
+        cutback: row.cutback,
+        points: parseZonePoints(row.points),
+        notes: row.notes,
+      } satisfies RoadRow,
+    });
+  }
+
+  if (intent === "updateRoad") {
+    const id = String(form.get("id"));
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+    if (form.has("name")) set.name = str("name");
+    if (form.has("kind")) set.kind = String(form.get("kind"));
+    if (form.has("color")) set.color = String(form.get("color"));
+    if (form.has("width")) set.width = Math.max(2, num("width", 20));
+    if (form.has("cutback")) set.cutback = Math.max(0, num("cutback"));
+    if (form.has("points")) set.points = String(form.get("points"));
+    if (form.has("notes")) set.notes = str("notes");
+    await db
+      .update(mapRoad)
+      .set(set)
+      .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)));
+    const [r] = await db
+      .select()
+      .from(mapRoad)
+      .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)))
+      .limit(1);
+    if (!r) return data({ error: "Road not found." }, { status: 404 });
+    return data({
+      road: {
+        id: r.id,
+        name: r.name,
+        kind: r.kind,
+        color: r.color,
+        width: r.width,
+        cutback: r.cutback,
+        points: parseZonePoints(r.points),
+        notes: r.notes,
+      } satisfies RoadRow,
+    });
+  }
+
+  if (intent === "deleteRoad") {
+    const id = String(form.get("id"));
+    await db
+      .delete(mapRoad)
+      .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)));
+    return data({ deletedRoadId: id });
   }
 
   return data({ error: "Unknown action." }, { status: 400 });
@@ -1828,6 +1944,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [cables, setCables] = useState<CableRow[]>(loaderData.cables);
   const [selectedCableId, setSelectedCableId] = useState<string | null>(null);
+  const [roads, setRoads] = useState<RoadRow[]>(loaderData.roads);
+  const [selectedRoadId, setSelectedRoadId] = useState<string | null>(null);
   // Highlight filter: dims everything that doesn't match the chosen category.
   const [highlight, setHighlight] = useState<string>("none");
   // Global door visibility — master switch over each object's own showDoor flag.
@@ -1892,6 +2010,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           deletedZoneId?: string;
           cable?: CableRow;
           deletedCableId?: string;
+          road?: RoadRow;
+          deletedRoadId?: string;
         }
       | undefined;
     if (!d || d === lastSynced.current) return;
@@ -1953,6 +2073,23 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           : prev.map((c) => (c.id === cable.id ? cable : c)),
       );
       if (isNew) setSelectedCableId(cable.id);
+      return;
+    }
+    if (d.deletedRoadId) {
+      const gone = d.deletedRoadId;
+      setRoads((prev) => prev.filter((r) => r.id !== gone));
+      setSelectedRoadId((s) => (s === gone ? null : s));
+      return;
+    }
+    if (d.road) {
+      const road = d.road;
+      const isNew = !roads.some((r) => r.id === road.id);
+      setRoads((prev) =>
+        isNew
+          ? [...prev, road]
+          : prev.map((r) => (r.id === road.id ? road : r)),
+      );
+      if (isNew) setSelectedRoadId(road.id);
     }
   }, [fetcher.data]);
 
@@ -2038,6 +2175,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setCables={setCables}
             selectedCableId={selectedCableId}
             setSelectedCableId={setSelectedCableId}
+            roads={roads}
+            setRoads={setRoads}
+            selectedRoadId={selectedRoadId}
+            setSelectedRoadId={setSelectedRoadId}
             canEdit={canEdit}
             canManage={canManage}
             myMembershipId={myMembershipId}
@@ -2153,6 +2294,15 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               cables={cables}
               selectedCableId={selectedCableId}
               setCables={setCables}
+              canManage={canManage}
+              fetcher={fetcher}
+            />
+          ) : null}
+          {selectedRoadId ? (
+            <RoadPanel
+              roads={roads}
+              selectedRoadId={selectedRoadId}
+              setRoads={setRoads}
               canManage={canManage}
               fetcher={fetcher}
             />
@@ -2378,6 +2528,10 @@ function Editor({
   setCables,
   selectedCableId,
   setSelectedCableId,
+  roads,
+  setRoads,
+  selectedRoadId,
+  setSelectedRoadId,
   canEdit,
   canManage,
   myMembershipId,
@@ -2407,6 +2561,10 @@ function Editor({
   setCables: React.Dispatch<React.SetStateAction<CableRow[]>>;
   selectedCableId: string | null;
   setSelectedCableId: (id: string | null) => void;
+  roads: RoadRow[];
+  setRoads: React.Dispatch<React.SetStateAction<RoadRow[]>>;
+  selectedRoadId: string | null;
+  setSelectedRoadId: (id: string | null) => void;
   canEdit: boolean;
   canManage: boolean;
   myMembershipId: string;
@@ -2505,7 +2663,11 @@ function Editor({
   const [cableDragging, setCableDragging] = useState(false);
   // Drawing collects plot-local feet vertices for a zone (closed polygon) or a
   // power line (open polyline). `drawMode` is which, or null when not drawing.
-  const [drawMode, setDrawMode] = useState<"zone" | "cable" | null>(null);
+  const [drawMode, setDrawMode] = useState<"zone" | "cable" | "road" | null>(
+    null,
+  );
+  // Which road kind the current road draw will create (chosen on the draw button).
+  const [roadDraftKind, setRoadDraftKind] = useState<string>("fire-lane");
   const [draftPoints, setDraftPoints] = useState<ZonePt[]>([]);
   // Grid snap (feet) for drawing/editing zone + cable vertices. Node snapping on
   // power lines still wins over the grid.
@@ -2660,6 +2822,7 @@ function Editor({
       if (e.key === "Enter") {
         e.preventDefault();
         if (drawMode === "cable") finishCable();
+        else if (drawMode === "road") finishRoad();
         else finishZone();
       } else if (e.key === "Escape") {
         e.preventDefault();
@@ -3038,6 +3201,7 @@ function Editor({
     setSelectedId(o.id);
     setSelectedZoneId(null);
     setSelectedCableId(null);
+    setSelectedRoadId(null);
     if (!editable(o)) return;
     e.preventDefault();
     const p = svgPoint(e);
@@ -3071,6 +3235,7 @@ function Editor({
     setSelectedId(null);
     setSelectedZoneId(null);
     setSelectedCableId(null);
+    setSelectedRoadId(null);
   }
 
   // ---- Zones & cables -----------------------------------------------------
@@ -3125,15 +3290,36 @@ function Editor({
     setDrawMode(null);
     setDraftPoints([]);
   }
+  function finishRoad() {
+    if (draftPoints.length < 2) return;
+    fetcher.submit(
+      {
+        intent: "addRoad",
+        kind: roadDraftKind,
+        points: JSON.stringify(draftPoints),
+      },
+      { method: "post" },
+    );
+    setDrawMode(null);
+    setDraftPoints([]);
+  }
   function selectZone(id: string) {
     setSelectedId(null);
     setSelectedCableId(null);
+    setSelectedRoadId(null);
     setSelectedZoneId(id);
   }
   function selectCable(id: string) {
     setSelectedId(null);
     setSelectedZoneId(null);
+    setSelectedRoadId(null);
     setSelectedCableId(id);
+  }
+  function selectRoad(id: string) {
+    setSelectedId(null);
+    setSelectedZoneId(null);
+    setSelectedCableId(null);
+    setSelectedRoadId(id);
   }
 
   function commitCable(c: CableRow) {
@@ -3425,6 +3611,32 @@ function Editor({
                   Cancel
                 </Button>
               </>
+            ) : drawMode === "road" ? (
+              <>
+                <Text size="xs" c="dimmed">
+                  Click to route the{" "}
+                  {roadKindLabel(roadDraftKind).toLowerCase()} centerline ·
+                  corners auto-cut back 45°
+                  {draftPoints.length >= 2
+                    ? ` · ${feetInches(pathLengthFt(draftPoints))}`
+                    : ""}
+                </Text>
+                <Button
+                  size="compact-xs"
+                  color="gray"
+                  onClick={finishRoad}
+                  disabled={draftPoints.length < 2}
+                >
+                  Finish ({draftPoints.length})
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  onClick={cancelDraw}
+                >
+                  Cancel
+                </Button>
+              </>
             ) : (
               <>
                 <Button
@@ -3434,6 +3646,7 @@ function Editor({
                     setSelectedId(null);
                     setSelectedZoneId(null);
                     setSelectedCableId(null);
+                    setSelectedRoadId(null);
                     setDraftPoints([]);
                     setDrawMode("zone");
                   }}
@@ -3448,12 +3661,38 @@ function Editor({
                     setSelectedId(null);
                     setSelectedZoneId(null);
                     setSelectedCableId(null);
+                    setSelectedRoadId(null);
                     setDraftPoints([]);
                     setDrawMode("cable");
                   }}
                 >
                   + Draw power line
                 </Button>
+                <Menu shadow="md" position="bottom-start">
+                  <Menu.Target>
+                    <Button size="compact-xs" variant="light" color="gray">
+                      + Draw road
+                    </Button>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    {ROAD_KINDS.map((rk) => (
+                      <Menu.Item
+                        key={rk.value}
+                        onClick={() => {
+                          setSelectedId(null);
+                          setSelectedZoneId(null);
+                          setSelectedCableId(null);
+                          setSelectedRoadId(null);
+                          setRoadDraftKind(rk.value);
+                          setDraftPoints([]);
+                          setDrawMode("road");
+                        }}
+                      >
+                        {rk.label} · {rk.width}′
+                      </Menu.Item>
+                    ))}
+                  </Menu.Dropdown>
+                </Menu>
               </>
             )}
           </Group>
@@ -3831,6 +4070,46 @@ function Editor({
                 ) : null}
               </g>
             ) : null}
+            {/* In-camp roads / lanes: a width band around the centerline with 45°
+            corner cutbacks (BM's turn allowance). Ground features drawn under the
+            structures + shadows; the dashed centerline shows the route. */}
+            {roads.map((r) => {
+              if (r.points.length < 2) return null;
+              const band = roadOutline(r.points, r.width, r.cutback);
+              if (band.length < 3) return null;
+              const pts = band
+                .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                .join(" ");
+              const center = r.points
+                .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                .join(" ");
+              const sel = r.id === selectedRoadId;
+              return (
+                <g key={`road-${r.id}`}>
+                  <polygon
+                    points={pts}
+                    fill={r.color}
+                    fillOpacity={sel ? 0.4 : 0.24}
+                    stroke={r.color}
+                    strokeWidth={sel ? 2 : 1.2}
+                    style={{ cursor: "pointer" }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      selectRoad(r.id);
+                    }}
+                  />
+                  <polyline
+                    points={center}
+                    fill="none"
+                    stroke={r.color}
+                    strokeWidth={1}
+                    strokeDasharray="7 6"
+                    opacity={0.7}
+                    pointerEvents="none"
+                  />
+                </g>
+              );
+            })}
             {/* Shade simulation: each object casts a shadow away from the sun,
             clipped to the whole ground view so it can fall onto neighbors/roads.
             Overlaps UNION (OR) at one opacity rather than adding up — the polygons
@@ -4166,6 +4445,34 @@ function Editor({
                     addDraftPoint(e);
                   }}
                 />
+                {/* Road draft: preview the width band with its 45° corner cutbacks
+                so the officer sees the real footprint as they route it. */}
+                {drawMode === "road" && draftPoints.length > 1
+                  ? (() => {
+                      const rk = roadKindDef(roadDraftKind);
+                      const band = roadOutline(
+                        draftPoints,
+                        rk.width,
+                        DEFAULT_ROAD_CUTBACK,
+                      );
+                      if (band.length < 3) return null;
+                      return (
+                        <polygon
+                          points={band
+                            .map(
+                              (p) =>
+                                `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                            )
+                            .join(" ")}
+                          fill={rk.color}
+                          fillOpacity={0.18}
+                          stroke={rk.color}
+                          strokeWidth={1}
+                          pointerEvents="none"
+                        />
+                      );
+                    })()
+                  : null}
                 {draftPoints.length > 1 ? (
                   <polyline
                     points={draftPoints
@@ -4173,9 +4480,19 @@ function Editor({
                         (p) => `${originX + p.x * ppf},${originY + p.y * ppf}`,
                       )
                       .join(" ")}
-                    fill={drawMode === "cable" ? "none" : "#fa5252"}
+                    fill={
+                      drawMode === "cable" || drawMode === "road"
+                        ? "none"
+                        : "#fa5252"
+                    }
                     fillOpacity={0.1}
-                    stroke={drawMode === "cable" ? "#fab005" : "#fa5252"}
+                    stroke={
+                      drawMode === "cable"
+                        ? "#fab005"
+                        : drawMode === "road"
+                          ? "#495057"
+                          : "#fa5252"
+                    }
                     strokeWidth={drawMode === "cable" ? 2.5 : 2}
                     strokeDasharray="4 3"
                     strokeLinejoin="round"
@@ -4188,7 +4505,13 @@ function Editor({
                     cx={originX + p.x * ppf}
                     cy={originY + p.y * ppf}
                     r={3}
-                    fill={drawMode === "cable" ? "#fab005" : "#fa5252"}
+                    fill={
+                      drawMode === "cable"
+                        ? "#fab005"
+                        : drawMode === "road"
+                          ? "#495057"
+                          : "#fa5252"
+                    }
                     pointerEvents="none"
                   />
                 ))}
@@ -6152,6 +6475,147 @@ function CablePanel({
           autosize
           minRows={2}
           value={cable.notes ?? ""}
+          disabled={!canManage}
+          onChange={(e) => patch({ notes: e.currentTarget.value })}
+          onBlur={(e) => commit({ notes: e.currentTarget.value })}
+        />
+      </Stack>
+    </Paper>
+  );
+}
+
+function RoadPanel({
+  roads,
+  selectedRoadId,
+  setRoads,
+  canManage,
+  fetcher,
+}: {
+  roads: RoadRow[];
+  selectedRoadId: string;
+  setRoads: React.Dispatch<React.SetStateAction<RoadRow[]>>;
+  canManage: boolean;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const road = roads.find((r) => r.id === selectedRoadId) ?? null;
+  if (!road) return null;
+  const patch = (fields: Partial<RoadRow>) =>
+    setRoads((prev) =>
+      prev.map((r) => (r.id === road.id ? { ...r, ...fields } : r)),
+    );
+  const commit = (fields: Record<string, string>) =>
+    fetcher.submit(
+      { intent: "updateRoad", id: road.id, ...fields },
+      { method: "post" },
+    );
+  const lenFt = pathLengthFt(road.points);
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Group justify="space-between" mb="xs">
+        <Text fw={600} size="sm">
+          {roadKindLabel(road.kind)}
+        </Text>
+        {canManage ? (
+          <Tooltip label="Delete">
+            <ActionIcon
+              variant="subtle"
+              color="red"
+              onClick={() => {
+                setRoads((prev) => prev.filter((r) => r.id !== road.id));
+                fetcher.submit(
+                  { intent: "deleteRoad", id: road.id },
+                  { method: "post" },
+                );
+              }}
+            >
+              ✕
+            </ActionIcon>
+          </Tooltip>
+        ) : null}
+      </Group>
+      <Stack gap="sm">
+        <Paper bg="gray.0" p="xs" radius="sm">
+          <Text size="xs" c="dimmed">
+            Centerline length
+          </Text>
+          <Text fw={700} size="lg">
+            {feetInches(lenFt)}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {road.width}′ wide · 45° cutback {road.cutback}′ at square corners
+          </Text>
+        </Paper>
+        <Select
+          size="xs"
+          label="Type"
+          value={road.kind}
+          disabled={!canManage}
+          allowDeselect={false}
+          data={ROAD_KINDS.map((k) => ({ value: k.value, label: k.label }))}
+          onChange={(v) => {
+            if (!v) return;
+            // Switching type resets width + color to that type's defaults.
+            const def = roadKindDef(v);
+            patch({ kind: v, width: def.width, color: def.color });
+            commit({
+              kind: v,
+              width: String(def.width),
+              color: def.color,
+            });
+          }}
+        />
+        <Group grow>
+          <NumberInput
+            size="xs"
+            label="Width (ft)"
+            min={2}
+            value={road.width}
+            disabled={!canManage}
+            onChange={(v) => patch({ width: Number(v) || road.width })}
+            onBlur={(e) =>
+              commit({
+                width: String(Number(e.currentTarget.value) || road.width),
+              })
+            }
+          />
+          <NumberInput
+            size="xs"
+            label="Corner cutback (ft)"
+            min={0}
+            value={road.cutback}
+            disabled={!canManage}
+            onChange={(v) => patch({ cutback: Number(v) || 0 })}
+            onBlur={(e) =>
+              commit({ cutback: String(Number(e.currentTarget.value) || 0) })
+            }
+          />
+        </Group>
+        <Text size="xs" c="dimmed">
+          BM's turn allowance for a 90° corner is a triangle with 20-ft legs.
+        </Text>
+        <TextInput
+          size="xs"
+          label="Name"
+          placeholder="e.g. main fire lane"
+          value={road.name ?? ""}
+          disabled={!canManage}
+          onChange={(e) => patch({ name: e.currentTarget.value })}
+          onBlur={(e) => commit({ name: e.currentTarget.value })}
+        />
+        <ColorInput
+          size="xs"
+          label="Color"
+          value={road.color}
+          disabled={!canManage}
+          onChange={(v) => patch({ color: v })}
+          onChangeEnd={(v) => commit({ color: v })}
+        />
+        <Textarea
+          size="xs"
+          label="Notes"
+          autosize
+          minRows={2}
+          value={road.notes ?? ""}
           disabled={!canManage}
           onChange={(e) => patch({ notes: e.currentTarget.value })}
           onBlur={(e) => commit({ notes: e.currentTarget.value })}

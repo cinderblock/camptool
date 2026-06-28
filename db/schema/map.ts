@@ -227,3 +227,43 @@ export const mapCable = sqliteTable(
   },
   (t) => [index("map_cable_edition").on(t.editionId)],
 );
+
+/** An in-camp road / lane drawn on the lot: a fire lane, service road, or access
+ * walkway. Like a cable it's an **open centerline** polyline (JSON plot-local feet
+ * points), but it has a real `width` (feet) and is rendered as a band. At ~90°
+ * corners the band is chamfered at 45° by `cutback` feet — Burning Man's published
+ * "turn allowance" (a triangle with 20-ft legs) so fire/service trucks can swing
+ * the corner. Width + cutback default per kind but are officer-overridable. */
+export const mapRoad = sqliteTable(
+  "map_road",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id").references(() => campEdition.id, {
+      onDelete: "cascade",
+    }),
+    name: text("name"),
+    // "fire-lane" | "service-road" | "walkway" (free text; UI offers presets).
+    kind: text("kind").notNull().default("fire-lane"),
+    color: text("color").notNull().default("#868e96"),
+    // Road width (feet) — the band drawn around the centerline.
+    width: real("width").notNull().default(20),
+    // 45° corner cutback length (feet) at ~90° turns. BM's turn allowance = 20ft.
+    cutback: real("cutback").notNull().default(20),
+    // JSON: array of plot-local feet points (the centerline), e.g. [{"x":10,"y":20},…].
+    points: text("points").notNull().default("[]"),
+    notes: text("notes"),
+    createdById: text("created_by_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [index("map_road_edition").on(t.editionId)],
+);
