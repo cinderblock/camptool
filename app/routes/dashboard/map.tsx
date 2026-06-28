@@ -402,6 +402,37 @@ function KindGlyph({
     );
   }
 
+  // Towed trailers (no cab): tandem axles + a hitch tongue at the front (-y).
+  if (kind === "airstream" || kind === "toy-hauler") {
+    return (
+      <g pointerEvents="none">
+        {wheels([0.6, 0.74])}
+        <polygon
+          points={`${X(0.42)},${py} ${X(0.58)},${py} ${X(0.5)},${py - h * 0.05}`}
+          {...line}
+          fill={dark}
+          fillOpacity={0.3}
+        />
+        {kind === "airstream" ? (
+          // Ribbed rounded shell hint.
+          [0.2, 0.34, 0.48, 0.62].map((f) => (
+            <line
+              key={f}
+              x1={X(0.1)}
+              y1={Y(f)}
+              x2={X(0.9)}
+              y2={Y(f)}
+              {...line}
+            />
+          ))
+        ) : (
+          // Toy hauler: garage line near the rear.
+          <line x1={X(0.1)} y1={Y(0.5)} x2={X(0.9)} y2={Y(0.5)} {...line} />
+        )}
+      </g>
+    );
+  }
+
   return null;
 }
 
@@ -3009,7 +3040,7 @@ function Editor({
     const fyp = fy(p.y);
     const shade = [...objects]
       .reverse()
-      .find((o) => o.kind === "shade" && containsPoint(o, fxp, fyp));
+      .find((o) => kindDef(o.kind).canopyShade && containsPoint(o, fxp, fyp));
     if (shade) {
       // startDrag selects it (and only drags if this viewer may edit it).
       startDrag(e, shade, "move");
@@ -3859,11 +3890,13 @@ function Editor({
                 </g>
               );
             })}
-            {/* Shade is a canopy: render it last so it sits over the items beneath. */}
+            {/* Canopies (shade/carport/popup/…) render last so they sit over the
+            items beneath them. */}
             {[...objects]
               .sort(
                 (a, b) =>
-                  Number(a.kind === "shade") - Number(b.kind === "shade"),
+                  Number(!!kindDef(a.kind).canopyShade) -
+                  Number(!!kindDef(b.kind).canopyShade),
               )
               .map((o) => (
                 <MapObjectShape
@@ -4760,11 +4793,11 @@ const MapObjectShape = memo(
     // Editable items drag (move cursor); everything else is still selectable for
     // read-only details (pointer cursor).
     const bodyStyle = { cursor: editable ? "move" : "pointer" } as const;
-    // Shade is a translucent canopy drawn over the items beneath it. Its body is
-    // click-through (pointer-events none) so clicking a block under it grabs the
-    // block; clicking an empty part of the shade falls through to the canvas,
-    // which hit-tests shades and selects this one (see onCanvasDown).
-    const isShade = o.kind === "shade";
+    // A canopy (shade/carport/popup/…) is a translucent overhead drawn over the
+    // items beneath it. Its body is click-through (pointer-events none) so clicking
+    // a block under it grabs the block; clicking an empty part falls through to the
+    // canvas, which hit-tests canopies and selects this one (see onCanvasDown).
+    const isShade = def.canopyShade === true;
     // Show the owner's first name on sleeping structures (domiciles), drawn
     // upright outside the rotated group (the center cx,cy is rotation-invariant).
     const isDomicile = hasTag(o.kind, "domicile");
@@ -4822,6 +4855,39 @@ const MapObjectShape = memo(
                   onPointerDown={onBodyDown}
                 />
               ) : null}
+              {/* Toy-hauler fold-down rear ramp (apron off the +y/rear edge), with
+              tread slats. Drawn under the body so the body sits over the hinge. */}
+              {o.kind === "toy-hauler" && (o.config.ramp ?? 0) > 0
+                ? (() => {
+                    const rampPx = Math.min(o.width, 8) * ppf;
+                    return (
+                      <g pointerEvents="none">
+                        <rect
+                          x={px}
+                          y={py + h}
+                          width={w}
+                          height={rampPx}
+                          fill={fill}
+                          fillOpacity={0.45}
+                          stroke={selected ? "#1c1c1c" : fill}
+                          strokeWidth={selected ? 1.5 : 0.75}
+                        />
+                        {[0.25, 0.5, 0.75].map((f) => (
+                          <line
+                            key={f}
+                            x1={px}
+                            y1={py + h + rampPx * f}
+                            x2={px + w}
+                            y2={py + h + rampPx * f}
+                            stroke="#1c1c1c"
+                            strokeOpacity={0.3}
+                            strokeWidth={0.6}
+                          />
+                        ))}
+                      </g>
+                    );
+                  })()
+                : null}
               <rect
                 x={px}
                 y={py}

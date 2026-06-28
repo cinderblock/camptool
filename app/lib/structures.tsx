@@ -8,6 +8,7 @@
  */
 import type {
   CampStructure,
+  FootprintCtx,
   Kind,
   KindTag,
   ShapeKind,
@@ -51,6 +52,126 @@ function rvFootprint(
       { x: -w / 2, y: -yS },
     );
   pts.push({ x: -w / 2, y: -h / 2 });
+  return pts;
+}
+
+/** A round water-tank footprint: an object-local CENTERED circle (16-gon, like
+ * the dome) so a vertical tank casts a real cylindrical shadow and is overlap-
+ * tested as a circle, not a square. */
+function tankFootprint(w: number, h: number): Array<{ x: number; y: number }> {
+  const n = 16;
+  return Array.from({ length: n }, (_, i) => {
+    const a = (i / n) * 2 * Math.PI;
+    return { x: (Math.cos(a) * w) / 2, y: (Math.sin(a) * h) / 2 };
+  });
+}
+
+/** A round water tank drawn top-down (in the 0,0→w,h feet box): the tank wall, a
+ * translucent lid ring, and a center fill cap — color-coded by `base` (blue =
+ * fresh, grey = greywater). */
+function tankRenderFootprint(base: string) {
+  return function TankFootprint({ w, h, selected }: FootprintCtx): ReactNode {
+    const cx = w / 2;
+    const cy = h / 2;
+    return (
+      <g>
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={w / 2}
+          ry={h / 2}
+          fill={base}
+          fillOpacity={0.88}
+          stroke={selected ? "#1c1c1c" : base}
+          strokeWidth={selected ? 0.5 : 0.3}
+        />
+        <ellipse
+          cx={cx}
+          cy={cy}
+          rx={w * 0.42}
+          ry={h * 0.42}
+          fill="#ffffff"
+          fillOpacity={0.18}
+          stroke="#1c1c1c"
+          strokeOpacity={0.22}
+          strokeWidth={0.18}
+          pointerEvents="none"
+        />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={Math.min(w, h) * 0.13}
+          fill="#1c1c1c"
+          fillOpacity={0.3}
+          pointerEvents="none"
+        />
+      </g>
+    );
+  };
+}
+
+/** Legend/tray icon for a round water tank (color-coded). */
+function tankRenderIcon(base: string) {
+  return function tankIcon(size: number): ReactNode {
+    const c = size / 2;
+    const r = size * 0.36;
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        style={{ display: "block", flex: "0 0 auto" }}
+        aria-hidden="true"
+      >
+        <circle
+          cx={c}
+          cy={c}
+          r={r}
+          fill={base}
+          fillOpacity={0.9}
+          stroke="#1c1c1c"
+          strokeOpacity={0.4}
+          strokeWidth={size * 0.03}
+        />
+        <circle
+          cx={c}
+          cy={c}
+          r={r * 0.5}
+          fill="none"
+          stroke="#1c1c1c"
+          strokeOpacity={0.25}
+          strokeWidth={size * 0.02}
+        />
+        <circle
+          cx={c}
+          cy={c}
+          r={size * 0.06}
+          fill="#1c1c1c"
+          fillOpacity={0.35}
+        />
+      </svg>
+    );
+  };
+}
+
+/** Toy-hauler footprint: the trailer body plus, when the rear ramp is folded
+ * DOWN (`config.ramp`), an apron extending past the rear (+y) edge — so the
+ * deployed ramp takes real space for spacing / shade / overlap. Centered, like
+ * the other footprints; the rear is the +y end (front = the towing/-y end). */
+function toyHaulerFootprint(
+  w: number,
+  h: number,
+  config: StructureConfig,
+): Array<{ x: number; y: number }> {
+  const ramp = (config.ramp ?? 0) > 0 ? Math.min(w, 8) : 0; // ~ trailer width, ≤ 8ft
+  const pts: Array<{ x: number; y: number }> = [
+    { x: -w / 2, y: -h / 2 },
+    { x: w / 2, y: -h / 2 },
+    { x: w / 2, y: h / 2 },
+  ];
+  if (ramp > 0)
+    pts.push({ x: w / 2, y: h / 2 + ramp }, { x: -w / 2, y: h / 2 + ramp });
+  pts.push({ x: -w / 2, y: h / 2 });
   return pts;
 }
 
@@ -234,10 +355,41 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: false,
     rigid: false,
-    group: "Structures",
+    group: "Shade",
     tags: ["structure"],
     personal: true,
     // Open shade cloth: casts only its top layer; porous to wind.
+    canopyShade: true,
+  },
+  // A peaked/gabled carport canopy — open shade sized to cover a vehicle.
+  {
+    value: "carport",
+    label: "Carport",
+    color: "#f08c00",
+    w: 12,
+    h: 20,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Shade",
+    tags: ["structure"],
+    personal: true,
+    canopyShade: true,
+  },
+  // A pop-up / EZ-up canopy (standard 10×10, also 10×20). Quick shade; note some
+  // events (e.g. Burning Man) disallow them — see the per-edition ban list.
+  {
+    value: "popup",
+    label: "Pop-up canopy",
+    color: "#ffa94d",
+    w: 10,
+    h: 10,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Shade",
+    tags: ["structure"],
+    personal: true,
     canopyShade: true,
   },
   {
@@ -309,6 +461,123 @@ const CORE_KINDS = [
     tags: ["structure"],
     personal: false,
   },
+  // A solar/sun shower or shower stall.
+  {
+    value: "shower",
+    label: "Shower",
+    color: "#3bc9db",
+    w: 4,
+    h: 4,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Water",
+    tags: ["structure"],
+    personal: true,
+  },
+  // A black-lined greywater evaporation pond (shallow ground feature).
+  {
+    value: "evap-pond",
+    label: "Evap pond",
+    color: "#212529",
+    w: 8,
+    h: 8,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Water",
+    tags: ["structure"],
+    personal: true,
+  },
+  // OSS fresh-water tank — round vertical poly tank (250-gal ≈ 3′ dia × 5.5′).
+  {
+    value: "water-tank-fresh",
+    label: "Fresh water tank",
+    color: "#4dabf7",
+    w: 3,
+    h: 3,
+    shape: "custom",
+    vehicle: false,
+    rigid: true,
+    group: "Water",
+    tags: ["structure"],
+    personal: true,
+    footprint: tankFootprint,
+    renderFootprint: tankRenderFootprint("#4dabf7"),
+    renderIcon: tankRenderIcon("#4dabf7"),
+  },
+  // OSS greywater tank — same round tank, grey-coded.
+  {
+    value: "water-tank-grey",
+    label: "Grey water tank",
+    color: "#868e96",
+    w: 3,
+    h: 3,
+    shape: "custom",
+    vehicle: false,
+    rigid: true,
+    group: "Water",
+    tags: ["structure"],
+    personal: true,
+    footprint: tankFootprint,
+    renderFootprint: tankRenderFootprint("#868e96"),
+    renderIcon: tankRenderIcon("#868e96"),
+  },
+  // A camp trash & recycling area.
+  {
+    value: "trash",
+    label: "Trash / recycling",
+    color: "#2f9e44",
+    w: 8,
+    h: 6,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Services",
+    tags: ["structure"],
+    personal: false,
+  },
+  // Toy hauler — a trailer with a fold-down rear ramp (config `ramp`). Fixed
+  // width, length resizes; the deployed ramp extends the footprint (toyHaulerFootprint).
+  {
+    value: "toy-hauler",
+    label: "Toy hauler",
+    color: "#1c7ed6",
+    w: 8,
+    h: 30,
+    shape: "rect",
+    vehicle: true,
+    rigid: false,
+    group: "Domiciles",
+    tags: ["domicile", "vehicle"],
+    personal: true,
+    footprint: toyHaulerFootprint,
+    controls: [
+      {
+        key: "ramp",
+        label: "Rear ramp down",
+        min: 0,
+        max: 1,
+        default: 0,
+        toggle: true,
+      },
+    ],
+  },
+  // Airstream — iconic rounded travel trailer. Fixed 8′ width; length resizes
+  // across the model range (~16′–34′; default ≈ 25′).
+  {
+    value: "airstream",
+    label: "Airstream",
+    color: "#adb5bd",
+    w: 8,
+    h: 25,
+    shape: "rect",
+    vehicle: true,
+    rigid: false,
+    group: "Domiciles",
+    tags: ["domicile", "vehicle"],
+    personal: true,
+  },
   {
     value: "structure",
     label: "Other",
@@ -351,6 +620,15 @@ const KIND_HEIGHTS: Record<string, number> = {
   truck: 11,
   van: 8,
   shade: 10,
+  carport: 10,
+  popup: 8,
+  shower: 7,
+  "evap-pond": 0.5, // shallow ground feature — negligible shadow
+  "water-tank-fresh": 5.5,
+  "water-tank-grey": 5.5,
+  trash: 4,
+  "toy-hauler": 10,
+  airstream: 9.5,
   kitchen: 8,
   art: 12,
   power: 4,
@@ -394,7 +672,15 @@ export const KIND_GROUPS: ReadonlyArray<{
   group: string;
   kinds: readonly Kind[];
 }> = (() => {
-  const order = ["Domiciles", "Vehicles", "Structures", "Power"];
+  const order = [
+    "Domiciles",
+    "Vehicles",
+    "Shade",
+    "Structures",
+    "Power",
+    "Water",
+    "Services",
+  ];
   const seen = new Set<string>();
   const groups: Array<{ group: string; kinds: Kind[] }> = [];
   const ensure = (g: string) => {
@@ -552,7 +838,7 @@ export function KindIcon({
   const X = (f: number) => px + w * f;
   const Y = (f: number) => py + h * f;
   const minWH = Math.min(w, h);
-  const isShade = kind.value === "shade";
+  const isCanopy = kind.canopyShade === true;
 
   const wheels = (fracs: number[]) => {
     const ww = Math.max(1.2, w * 0.16);
@@ -654,11 +940,11 @@ export function KindIcon({
         height={h}
         rx={2.5}
         fill={c}
-        fillOpacity={isShade ? 0.25 : 0.85}
+        fillOpacity={isCanopy ? 0.25 : 0.85}
         stroke={c}
-        strokeOpacity={isShade ? 1 : 0.55}
-        strokeWidth={isShade ? 1.25 : 0.75}
-        strokeDasharray={isShade ? "3 2" : undefined}
+        strokeOpacity={isCanopy ? 1 : 0.55}
+        strokeWidth={isCanopy ? 1.25 : 0.75}
+        strokeDasharray={isCanopy ? "3 2" : undefined}
       />
     );
 
@@ -773,6 +1059,84 @@ export function KindIcon({
         stroke={dark}
         strokeOpacity={0.35}
         strokeWidth={0.4}
+      />
+    );
+  } else if (kind.value === "carport") {
+    // Peaked roof: a ridge down the length with slope lines to the eaves.
+    detail = (
+      <g stroke={dark} strokeOpacity={0.5} strokeWidth={0.7} fill="none">
+        <line x1={cx} y1={py} x2={cx} y2={py + h} />
+        <line x1={px} y1={py} x2={cx} y2={py + h * 0.12} />
+        <line x1={px + w} y1={py} x2={cx} y2={py + h * 0.12} />
+        <line x1={px} y1={py + h} x2={cx} y2={py + h * 0.88} />
+        <line x1={px + w} y1={py + h} x2={cx} y2={py + h * 0.88} />
+      </g>
+    );
+  } else if (kind.value === "popup") {
+    // Canopy with a scalloped valance + center pole dot.
+    detail = (
+      <g stroke={dark} strokeOpacity={0.5} strokeWidth={0.6} fill="none">
+        <path
+          d={`M ${px} ${Y(0.78)} Q ${X(0.25)} ${Y(0.92)} ${X(0.5)} ${Y(0.78)} Q ${X(0.75)} ${Y(0.92)} ${px + w} ${Y(0.78)}`}
+        />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={minWH * 0.06}
+          fill={dark}
+          fillOpacity={0.5}
+          stroke="none"
+        />
+      </g>
+    );
+  } else if (kind.value === "shower") {
+    // Shower head + droplets.
+    detail = (
+      <g stroke={dark} strokeOpacity={0.55} strokeWidth={0.6} fill="none">
+        <line x1={cx} y1={py + h * 0.1} x2={cx} y2={Y(0.32)} />
+        <ellipse
+          cx={cx}
+          cy={Y(0.36)}
+          rx={w * 0.26}
+          ry={h * 0.07}
+          fill={dark}
+          fillOpacity={0.45}
+          stroke="none"
+        />
+        {[0.36, 0.5, 0.64].map((f) => (
+          <line
+            key={f}
+            x1={X(f)}
+            y1={Y(0.5)}
+            x2={X(f)}
+            y2={Y(0.74)}
+            strokeDasharray="0.8 1.2"
+          />
+        ))}
+      </g>
+    );
+  } else if (kind.value === "evap-pond") {
+    // Wavy water lines on the dark pond.
+    detail = (
+      <g stroke="#74c0fc" strokeOpacity={0.7} strokeWidth={0.7} fill="none">
+        {[0.38, 0.56, 0.74].map((f) => (
+          <path
+            key={f}
+            d={`M ${px + w * 0.12} ${Y(f)} q ${w * 0.19} ${-h * 0.08} ${w * 0.38} 0 q ${w * 0.19} ${h * 0.08} ${w * 0.38} 0`}
+          />
+        ))}
+      </g>
+    );
+  } else if (kind.value === "trash") {
+    // Recycling triangle of arrows.
+    detail = (
+      <polygon
+        points={`${X(0.5)},${Y(0.24)} ${X(0.74)},${Y(0.66)} ${X(0.26)},${Y(0.66)}`}
+        fill="none"
+        stroke="#fff"
+        strokeOpacity={0.95}
+        strokeWidth={1}
+        strokeLinejoin="round"
       />
     );
   }
