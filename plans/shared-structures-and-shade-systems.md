@@ -76,7 +76,7 @@ sunset, path lights, the pyramid's rainbow top). Most new *kinds* are core
       "!" flag on the map (not deleted). Helpers in `app/lib/bans.ts`. NOT yet
       browser-verified; migration applies on the deploy restart. Existing editions
       keep NULL (nothing banned) until an officer sets the list.
-- [~] **C — linear utilities (split).**
+- [x] **C — linear utilities (both parts done).**
   - [x] **C2: in-camp roads** — built (migration 0034 adds `map_road`). Fire lane /
         service road / access walkway, each a centerline polyline + predefined width
         (20/20/6 ft). Rendered as a width band with **45° corner cutbacks** baked into
@@ -86,8 +86,10 @@ sunset, path lights, the pyramid's rainbow top). Most new *kinds* are core
         (per kind), draft band preview, RoadPanel (type/width/cutback/name/color/notes/
         delete), officer-managed, read-only when locked. Per-vertex drag editing
         DEFERRED (redraw to fix). NOT browser-verified yet.
-  - [ ] **C1: water-pipe cable types** (fresh/grey) — extend `map_cable` with a
-        `kind`. NEXT (small follow-up).
+  - [x] **C1: water-pipe cable types** — `map_cable.kind` (migration 0035):
+        power / fresh water / grey water. "+ Draw line/pipe" menu picks the kind;
+        CablePanel has a Type select (reseeds color; amps/gauge shown only for
+        power). NOT browser-verified.
 - [ ] D — snap-to-structure shades.
 - [ ] E — night mode + path lights + pyramid rainbow.
 

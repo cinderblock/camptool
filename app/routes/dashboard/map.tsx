@@ -498,12 +498,27 @@ type ZoneRow = {
 type CableRow = {
   id: string;
   name: string | null;
+  kind: string;
   color: string;
   points: ZonePt[];
   amps: number | null;
   gauge: string | null;
   notes: string | null;
 };
+
+/** Cable kinds: a power cable or a water pipe (fresh / grey). Amps/gauge apply
+ * only to power; each kind seeds a default color. */
+const CABLE_KINDS = [
+  { value: "power", label: "Power", color: "#fab005" },
+  { value: "water-fresh", label: "Fresh water", color: "#4dabf7" },
+  { value: "water-grey", label: "Grey water", color: "#868e96" },
+] as const;
+function cableKindDef(kind: string): (typeof CABLE_KINDS)[number] {
+  return CABLE_KINDS.find((k) => k.value === kind) ?? CABLE_KINDS[0];
+}
+function cableKindLabel(kind: string): string {
+  return cableKindDef(kind).label;
+}
 
 type RoadRow = {
   id: string;
@@ -745,6 +760,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     cables: cableRows.map((c) => ({
       id: c.id,
       name: c.name,
+      kind: c.kind,
       color: c.color,
       points: parseZonePoints(c.points),
       amps: c.amps,
@@ -1234,12 +1250,14 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "addCable") {
     const id = crypto.randomUUID();
+    const kind = String(form.get("kind") ?? "power");
     const row = {
       id,
       campId,
       editionId,
       name: str("name"),
-      color: String(form.get("color") ?? "#fab005"),
+      kind,
+      color: String(form.get("color") ?? cableKindDef(kind).color),
       points: String(form.get("points") ?? "[]"),
       amps: form.get("amps") ? num("amps") : null,
       gauge: str("gauge"),
@@ -1251,6 +1269,7 @@ export async function action({ request }: Route.ActionArgs) {
       cable: {
         id,
         name: row.name,
+        kind: row.kind,
         color: row.color,
         points: parseZonePoints(row.points),
         amps: row.amps,
@@ -1264,6 +1283,7 @@ export async function action({ request }: Route.ActionArgs) {
     const id = String(form.get("id"));
     const set: Record<string, unknown> = { updatedAt: new Date() };
     if (form.has("name")) set.name = str("name");
+    if (form.has("kind")) set.kind = String(form.get("kind"));
     if (form.has("color")) set.color = String(form.get("color"));
     if (form.has("points")) set.points = String(form.get("points"));
     if (form.has("amps")) set.amps = form.get("amps") ? num("amps") : null;
@@ -1283,6 +1303,7 @@ export async function action({ request }: Route.ActionArgs) {
       cable: {
         id: c.id,
         name: c.name,
+        kind: c.kind,
         color: c.color,
         points: parseZonePoints(c.points),
         amps: c.amps,
@@ -2668,6 +2689,8 @@ function Editor({
   );
   // Which road kind the current road draw will create (chosen on the draw button).
   const [roadDraftKind, setRoadDraftKind] = useState<string>("fire-lane");
+  // Which cable kind the current cable draw will create (power / water pipe).
+  const [cableDraftKind, setCableDraftKind] = useState<string>("power");
   const [draftPoints, setDraftPoints] = useState<ZonePt[]>([]);
   // Grid snap (feet) for drawing/editing zone + cable vertices. Node snapping on
   // power lines still wins over the grid.
@@ -3282,7 +3305,8 @@ function Editor({
     fetcher.submit(
       {
         intent: "addCable",
-        color: "#fab005",
+        kind: cableDraftKind,
+        color: cableKindDef(cableDraftKind).color,
         points: JSON.stringify(draftPoints),
       },
       { method: "post" },
@@ -3653,21 +3677,31 @@ function Editor({
                 >
                   + Draw zone
                 </Button>
-                <Button
-                  size="compact-xs"
-                  variant="light"
-                  color="yellow"
-                  onClick={() => {
-                    setSelectedId(null);
-                    setSelectedZoneId(null);
-                    setSelectedCableId(null);
-                    setSelectedRoadId(null);
-                    setDraftPoints([]);
-                    setDrawMode("cable");
-                  }}
-                >
-                  + Draw power line
-                </Button>
+                <Menu shadow="md" position="bottom-start">
+                  <Menu.Target>
+                    <Button size="compact-xs" variant="light" color="yellow">
+                      + Draw line/pipe
+                    </Button>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    {CABLE_KINDS.map((ck) => (
+                      <Menu.Item
+                        key={ck.value}
+                        onClick={() => {
+                          setSelectedId(null);
+                          setSelectedZoneId(null);
+                          setSelectedCableId(null);
+                          setSelectedRoadId(null);
+                          setCableDraftKind(ck.value);
+                          setDraftPoints([]);
+                          setDrawMode("cable");
+                        }}
+                      >
+                        {ck.label}
+                      </Menu.Item>
+                    ))}
+                  </Menu.Dropdown>
+                </Menu>
                 <Menu shadow="md" position="bottom-start">
                   <Menu.Target>
                     <Button size="compact-xs" variant="light" color="gray">
@@ -6383,7 +6417,8 @@ function CablePanel({
     <Paper withBorder p="md" radius="md">
       <Group justify="space-between" mb="xs">
         <Text fw={600} size="sm">
-          Power line
+          {cable.kind === "power" ? "Power line" : cableKindLabel(cable.kind)}
+          {cable.kind === "power" ? "" : " pipe"}
         </Text>
         {canManage ? (
           <Tooltip label="Delete">
@@ -6421,6 +6456,29 @@ function CablePanel({
             drag a dashed + to add one, double-click a handle to remove it.
           </Text>
         ) : null}
+        <Select
+          size="xs"
+          label="Type"
+          value={cable.kind}
+          disabled={!canManage}
+          allowDeselect={false}
+          data={CABLE_KINDS.map((k) => ({ value: k.value, label: k.label }))}
+          onChange={(v) => {
+            if (!v) return;
+            // Switching type reseeds the color; clear amps/gauge for water pipes.
+            const def = cableKindDef(v);
+            const fields: Partial<CableRow> = { kind: v, color: def.color };
+            const out: Record<string, string> = { kind: v, color: def.color };
+            if (v !== "power") {
+              fields.amps = null;
+              fields.gauge = null;
+              out.amps = "";
+              out.gauge = "";
+            }
+            patch(fields);
+            commit(out);
+          }}
+        />
         <TextInput
           size="xs"
           label="Name"
@@ -6430,37 +6488,39 @@ function CablePanel({
           onChange={(e) => patch({ name: e.currentTarget.value })}
           onBlur={(e) => commit({ name: e.currentTarget.value })}
         />
-        <Group grow>
-          <Select
-            size="xs"
-            label="Amps"
-            placeholder="—"
-            value={cable.amps != null ? String(cable.amps) : null}
-            disabled={!canManage}
-            data={AMP_OPTIONS.map((a) => ({ value: a, label: `${a} A` }))}
-            clearable
-            onChange={(v) => {
-              patch({ amps: v ? Number(v) : null });
-              commit({ amps: v ?? "" });
-            }}
-          />
-          <Select
-            size="xs"
-            label="Gauge"
-            placeholder="—"
-            value={cable.gauge}
-            disabled={!canManage}
-            data={GAUGE_OPTIONS.map((g) => ({
-              value: g.value,
-              label: g.label,
-            }))}
-            clearable
-            onChange={(v) => {
-              patch({ gauge: v });
-              commit({ gauge: v ?? "" });
-            }}
-          />
-        </Group>
+        {cable.kind === "power" ? (
+          <Group grow>
+            <Select
+              size="xs"
+              label="Amps"
+              placeholder="—"
+              value={cable.amps != null ? String(cable.amps) : null}
+              disabled={!canManage}
+              data={AMP_OPTIONS.map((a) => ({ value: a, label: `${a} A` }))}
+              clearable
+              onChange={(v) => {
+                patch({ amps: v ? Number(v) : null });
+                commit({ amps: v ?? "" });
+              }}
+            />
+            <Select
+              size="xs"
+              label="Gauge"
+              placeholder="—"
+              value={cable.gauge}
+              disabled={!canManage}
+              data={GAUGE_OPTIONS.map((g) => ({
+                value: g.value,
+                label: g.label,
+              }))}
+              clearable
+              onChange={(v) => {
+                patch({ gauge: v });
+                commit({ gauge: v ?? "" });
+              }}
+            />
+          </Group>
+        ) : null}
         <ColorInput
           size="xs"
           label="Color"

@@ -208,6 +208,9 @@ export const mapCable = sqliteTable(
       onDelete: "cascade",
     }),
     name: text("name"),
+    // "power" | "water-fresh" | "water-grey" — a power cable or a water pipe.
+    // The amps/gauge fields apply only to power.
+    kind: text("kind").notNull().default("power"),
     color: text("color").notNull().default("#fab005"),
     // JSON: array of plot-local feet points, e.g. [{"x":10,"y":20},…]. Open path.
     points: text("points").notNull().default("[]"),

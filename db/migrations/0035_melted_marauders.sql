@@ -1,0 +1,1 @@
+ALTER TABLE `map_cable` ADD `kind` text DEFAULT 'power' NOT NULL;
