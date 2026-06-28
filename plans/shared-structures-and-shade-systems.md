@@ -67,8 +67,16 @@ sunset, path lights, the pyramid's rainbow top). Most new *kinds* are core
       water tanks (round), trash/recycling, toy hauler (ramp), Airstream. New
       Shade/Water/Services groups; canopy behavior generalized to any
       `canopyShade` kind. NOT yet browser-verified live (visual check pending).
-- [ ] B — per-edition banned kinds (NEXT).
-- [ ] C — water-pipe cable types + in-camp lanes/roads/walkways.
+- [x] **B — per-edition banned kinds** — built (migration 0033 adds
+      `camp_edition.banned_kinds`). Officer toggle list on /editions for the active
+      year; new editions seed from the event (BM → pop-ups banned, via
+      `defaultBannedKinds`). Palette/picker hide banned kinds (map Legend + SidePanel
+      Kind select, camper AddStructures on Bringing + wizard); addObject/addBlock +
+      bringing addItem 403 a banned kind; already-placed banned objects get an amber
+      "!" flag on the map (not deleted). Helpers in `app/lib/bans.ts`. NOT yet
+      browser-verified; migration applies on the deploy restart. Existing editions
+      keep NULL (nothing banned) until an officer sets the list.
+- [ ] C — water-pipe cable types + in-camp lanes/roads/walkways (NEXT).
 - [ ] D — snap-to-structure shades.
 - [ ] E — night mode + path lights + pyramid rainbow.
 

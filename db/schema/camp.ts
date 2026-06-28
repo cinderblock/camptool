@@ -55,6 +55,12 @@ export const campEdition = sqliteTable(
     event: text("event").notNull().default("burning-man"),
     // Locked editions are read-only (e.g. last year, or "planned" once on playa).
     locked: integer("locked", { mode: "boolean" }).notNull().default(false),
+    // Structure kinds disallowed for THIS edition (a JSON array of kind `value`s),
+    // e.g. Burning Man bans pop-up canopies but a smaller event allows them. The
+    // palette hides these and add-actions reject them; existing placed objects of a
+    // now-banned kind are flagged, not deleted. NULL/"" = nothing banned. Seeded
+    // from the event default on create (see `defaultBannedKinds`), officer-editable.
+    bannedKinds: text("banned_kinds"),
     // Which edition this one was copied from (import = snapshot, not a live link).
     forkedFromId: text("forked_from_id").references(
       (): AnySQLiteColumn => campEdition.id,

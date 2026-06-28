@@ -14,6 +14,11 @@ import {
 } from "@mantine/core";
 import { and, eq } from "drizzle-orm";
 import { Form, data, redirect } from "react-router";
+import {
+  defaultBannedKinds,
+  parseBannedKinds,
+  serializeBannedKinds,
+} from "~/lib/bans";
 import { CURRENT_EVENT_YEAR } from "~/lib/brc";
 import { BURNING_MAN, EVENTS, eventLabel, isEvent } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
@@ -22,6 +27,7 @@ import {
   requireActiveCamp,
   setEditionCookie,
 } from "~/lib/session.server";
+import { KIND_GROUPS, isKind } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { campEdition, placement } from "../../../db/schema";
 import type { Route } from "./+types/editions";
@@ -42,6 +48,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       label: e.label,
       event: e.event,
       locked: e.locked,
+      bannedKinds: parseBannedKinds(e.bannedKinds),
     })),
   };
 }
@@ -131,6 +138,9 @@ export async function action({ request }: Route.ActionArgs) {
       label: labelRaw || null,
       event,
       forkedFromId,
+      // Seed disallowed structures from the event (e.g. BM bans pop-ups); officers
+      // can adjust on this page afterward.
+      bannedKinds: serializeBannedKinds(defaultBannedKinds(event)),
     });
     if (forkedFromId) await copyEditionContents(forkedFromId, id);
 
@@ -152,11 +162,39 @@ export async function action({ request }: Route.ActionArgs) {
     return redirect("/editions");
   }
 
+  if (intent === "setBannedKinds") {
+    const editionId = String(form.get("editionId"));
+    const [owned] = await db
+      .select({ id: campEdition.id, locked: campEdition.locked })
+      .from(campEdition)
+      .where(and(eq(campEdition.id, editionId), eq(campEdition.campId, campId)))
+      .limit(1);
+    if (!owned) return data({ error: "Unknown year." }, { status: 404 });
+    if (owned.locked) {
+      return data({ error: "This year is locked." }, { status: 403 });
+    }
+    const kinds = form
+      .getAll("kind")
+      .map(String)
+      .filter((k) => isKind(k));
+    await db
+      .update(campEdition)
+      .set({ bannedKinds: serializeBannedKinds(kinds) })
+      .where(eq(campEdition.id, editionId));
+    return redirect("/editions");
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
 export default function Editions({ loaderData }: Route.ComponentProps) {
   const { editions, activeEditionId, canManage } = loaderData;
+  const activeEdition = editions.find((e) => e.id === activeEditionId) ?? null;
+  const activeLabel = activeEdition
+    ? activeEdition.label
+      ? `${activeEdition.year} · ${activeEdition.label}`
+      : String(activeEdition.year)
+    : "";
 
   return (
     <Container size="md">
@@ -215,6 +253,70 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                 </Button>
               </Group>
             </Form>
+          </Card>
+        ) : null}
+
+        {canManage && activeEdition ? (
+          <Card withBorder padding="md" radius="md">
+            <Stack gap="sm">
+              <div>
+                <Title order={4}>Disallowed structures · {activeLabel}</Title>
+                <Text c="dimmed" size="sm">
+                  Checked kinds are hidden from the palette and rejected on add
+                  for this year. Burning Man, for example, disallows pop-up
+                  canopies. Already-placed items of a disallowed kind stay on
+                  the map but are flagged for an officer to resolve.
+                </Text>
+              </div>
+              {activeEdition.locked ? (
+                <Text size="sm" c="dimmed">
+                  This year is locked — unlock it to change the disallowed list.
+                </Text>
+              ) : (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="setBannedKinds" />
+                  <input
+                    type="hidden"
+                    name="editionId"
+                    value={activeEdition.id}
+                  />
+                  <Stack gap="sm">
+                    {KIND_GROUPS.map((grp) => {
+                      const bannable = grp.kinds.filter(
+                        (k) => k.value !== "structure",
+                      );
+                      if (bannable.length === 0) return null;
+                      return (
+                        <div key={grp.group}>
+                          <Text size="xs" fw={700} c="dimmed">
+                            {grp.group}
+                          </Text>
+                          <Group gap="md" mt={6}>
+                            {bannable.map((k) => (
+                              <Checkbox
+                                key={k.value}
+                                name="kind"
+                                value={k.value}
+                                label={k.label}
+                                size="xs"
+                                defaultChecked={activeEdition.bannedKinds.includes(
+                                  k.value,
+                                )}
+                              />
+                            ))}
+                          </Group>
+                        </div>
+                      );
+                    })}
+                    <Group>
+                      <Button type="submit" size="xs">
+                        Save disallowed list
+                      </Button>
+                    </Group>
+                  </Stack>
+                </Form>
+              )}
+            </Stack>
           </Card>
         ) : null}
 

@@ -34,6 +34,7 @@ import {
 } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
+import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { BLOCKS, blockById } from "~/lib/blocks";
 import {
   CURRENT_EVENT_YEAR,
@@ -679,6 +680,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     locked: activeEdition.locked,
     // The event this edition is for — gates Burning-Man-specific UI.
     event: activeEdition.event,
+    // Structure kinds disallowed this edition: hidden from the palette/picker,
+    // rejected on add, and flagged on any already-placed object.
+    bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
     canManage: canManage && !activeEdition.locked,
     // The viewer's own membership — used to decide which items they may adjust
     // (their own) and to drive the "My items" highlight.
@@ -816,6 +820,12 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "addObject") {
     const kind = String(form.get("kind") ?? "structure");
+    if (isKindBanned(activeEdition.bannedKinds, kind)) {
+      return data(
+        { error: `${kindDef(kind).label} isn't allowed this year.` },
+        { status: 403 },
+      );
+    }
     const def = kindDef(kind);
     const row = {
       id: crypto.randomUUID(),
@@ -879,6 +889,7 @@ export async function action({ request }: Route.ActionArgs) {
       .map((it) => {
         const kind = String((it as { kind?: unknown }).kind ?? "");
         if (!isKind(kind)) return null;
+        if (isKindBanned(activeEdition.bannedKinds, kind)) return null;
         const def = kindDef(kind);
         const n = (v: unknown, d: number) => {
           const x = Number(v);
@@ -1806,6 +1817,7 @@ function GridScaleNote({ lot }: { lot: Lot }) {
 export default function CampMap({ loaderData }: Route.ComponentProps) {
   const { canEdit, canManage, unplaced, lot, myMembershipId, event } =
     loaderData;
+  const bannedKinds = loaderData.bannedKinds;
   // On phones the map + side rail stack vertically and the page scrolls
   // naturally instead of the desktop fixed-height, two-pane / inner-scroll model.
   const isNarrow = useMediaQuery("(max-width: 768px)");
@@ -2029,6 +2041,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             canEdit={canEdit}
             canManage={canManage}
             myMembershipId={myMembershipId}
+            bannedKinds={bannedKinds}
             highlight={highlight}
             lotOpen={lotOpen}
             setLotOpen={setLotOpen}
@@ -2125,7 +2138,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             <UnplacedTray unplaced={unplaced} fetcher={fetcher} />
           ) : null}
           {canManage ? <BlockPalette /> : null}
-          {canManage ? <Legend /> : null}
+          {canManage ? <Legend bannedKinds={bannedKinds} /> : null}
           {selectedZoneId ? (
             <ZonePanel
               zones={zones}
@@ -2152,6 +2165,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             canEdit={canEdit}
             canManage={canManage}
             myMembershipId={myMembershipId}
+            bannedKinds={bannedKinds}
             lotOpen={lotOpen}
             fetcher={fetcher}
           />
@@ -2285,15 +2299,21 @@ function BlockPalette() {
 }
 
 /** Draggable palette — icons grouped by category; drag one onto the map to
- * place that kind. Names show as tooltips so the grid of icons stays compact. */
-function Legend() {
+ * place that kind. Names show as tooltips so the grid of icons stays compact.
+ * Kinds disallowed this edition (`bannedKinds`) are dropped from the palette. */
+function Legend({ bannedKinds }: { bannedKinds: string[] }) {
+  const banned = new Set(bannedKinds);
+  const groups = KIND_GROUPS.map((grp) => ({
+    ...grp,
+    kinds: grp.kinds.filter((k) => !banned.has(k.value)),
+  })).filter((grp) => grp.kinds.length > 0);
   return (
     <Paper withBorder p="sm" radius="md">
       <Text size="xs" fw={600} mb={8}>
         Legend — drag onto the map
       </Text>
       <Stack gap={8}>
-        {KIND_GROUPS.map((grp) => (
+        {groups.map((grp) => (
           <div key={grp.group}>
             <Text size="xs" c="dimmed" fw={600} tt="uppercase" mb={4}>
               {grp.group}
@@ -2361,6 +2381,7 @@ function Editor({
   canEdit,
   canManage,
   myMembershipId,
+  bannedKinds,
   highlight,
   lotOpen,
   setLotOpen,
@@ -2389,6 +2410,7 @@ function Editor({
   canEdit: boolean;
   canManage: boolean;
   myMembershipId: string;
+  bannedKinds: string[];
   highlight: string;
   lotOpen: boolean;
   setLotOpen: (v: boolean) => void;
@@ -3920,6 +3942,41 @@ function Editor({
                   onRotateDown={(e) => startDrag(e, o, "rotate")}
                 />
               ))}
+            {/* Flag any placed object whose kind is disallowed this year (banned
+            after it was placed): a small amber "!" badge so an officer can resolve
+            it, rather than silently deleting the object. */}
+            {bannedKinds.length > 0
+              ? objects
+                  .filter((o) => bannedKinds.includes(o.kind))
+                  .map((o) => {
+                    const bx = originX + (o.x + o.width / 2) * ppf;
+                    const by = originY + o.y * ppf;
+                    return (
+                      <g key={`ban-${o.id}`} pointerEvents="none">
+                        <title>{`${kindDef(o.kind).label} isn't allowed this year`}</title>
+                        <circle
+                          cx={bx}
+                          cy={by}
+                          r={7}
+                          fill="#e8590c"
+                          stroke="#fff"
+                          strokeWidth={1.5}
+                        />
+                        <text
+                          x={bx}
+                          y={by}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={10}
+                          fontWeight={800}
+                          fill="#fff"
+                        >
+                          !
+                        </text>
+                      </g>
+                    );
+                  })
+              : null}
             {/* Self-shading: tint the faces of a 3D structure that are turned away
             from the sun (its shady/lee side), drawn over the structure. Only kinds
             that declare `shadedFaces` (e.g. the Sierpinski pyramid) participate. */}
@@ -5330,6 +5387,7 @@ function SidePanel({
   canEdit,
   canManage,
   myMembershipId,
+  bannedKinds,
   lotOpen,
   fetcher,
 }: {
@@ -5340,6 +5398,8 @@ function SidePanel({
   canEdit: boolean;
   canManage: boolean;
   myMembershipId: string;
+  // Structure kinds disallowed this edition (filtered out of the Kind picker).
+  bannedKinds: string[];
   // Lot config visibility — toggled by the map toolbar gear (lifted to CampMap).
   lotOpen: boolean;
   fetcher: ReturnType<typeof useFetcher>;
@@ -5490,7 +5550,17 @@ function SidePanel({
               label="Kind"
               value={selected.kind}
               disabled={!canMeta}
-              data={KINDS.map((k) => ({ value: k.value, label: k.label }))}
+              // Hide kinds disallowed this year, but keep the selected one visible
+              // even if it's now banned (so a flagged object still shows its kind).
+              data={KINDS.filter(
+                (k) =>
+                  !bannedKinds.includes(k.value) || k.value === selected.kind,
+              ).map((k) => ({
+                value: k.value,
+                label: bannedKinds.includes(k.value)
+                  ? `${k.label} (not allowed)`
+                  : k.label,
+              }))}
               allowDeselect={false}
               onChange={(v) => {
                 if (!v) return;

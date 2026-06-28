@@ -21,6 +21,7 @@ import { useState } from "react";
 import { data, useFetcher, useNavigate } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { QuestionField } from "~/components/QuestionField";
+import { parseBannedKinds } from "~/lib/bans";
 import { weeksUntilEvent } from "~/lib/brc";
 import type { QuestionType } from "~/lib/questions";
 import { parseOptions } from "~/lib/questions";
@@ -215,6 +216,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   return {
     locked: activeEdition.locked,
+    bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
     userName: authUser.name,
     year: activeEdition.year,
     weeksToEvent: weeksUntilEvent(activeEdition.year),
@@ -690,7 +692,9 @@ function BringingStep({ data: d }: { data: LoaderData }) {
       <Text size="sm" c="dimmed">
         What are you bringing? Add each structure or vehicle and give its size.
       </Text>
-      {!d.locked ? <AddStructures onAdd={add} /> : null}
+      {!d.locked ? (
+        <AddStructures onAdd={add} bannedKinds={d.bannedKinds} />
+      ) : null}
       {d.items.length === 0 ? (
         <Text c="dimmed" size="sm">
           Nothing yet — add what you're bringing above.

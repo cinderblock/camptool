@@ -15,6 +15,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
+import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
 import { db } from "../../../db/client.server";
@@ -85,6 +86,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   return {
     locked: activeEdition.locked,
+    bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
     items: rows.map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -124,6 +126,12 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "addItem") {
     const kind = String(form.get("kind") ?? "tent");
+    if (isKindBanned(activeEdition.bannedKinds, kind)) {
+      return data(
+        { error: `${kindDef(kind).label} isn't allowed this year.` },
+        { status: 403 },
+      );
+    }
     const def = kindDef(kind);
     // Rigid kinds keep their fixed footprint; sizable ones may carry a
     // camper-picked width/height from the size prompt.
@@ -222,7 +230,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Bringing({ loaderData }: Route.ComponentProps) {
-  const { items, locked, lastYear } = loaderData;
+  const { items, locked, lastYear, bannedKinds } = loaderData;
   const fetcher = useFetcher();
 
   function add(kind: string, size?: AddSize) {
@@ -303,7 +311,7 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
             <Text fw={600} size="sm" mb="xs">
               Add an item
             </Text>
-            <AddStructures onAdd={add} />
+            <AddStructures onAdd={add} bannedKinds={bannedKinds} />
           </Paper>
         )}
 

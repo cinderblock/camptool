@@ -20,13 +20,17 @@ export type AddSize = { width?: number; height?: number };
 export function AddStructures({
   onAdd,
   disabled,
+  bannedKinds,
 }: {
   onAdd: (kind: string, size?: AddSize) => void;
   disabled?: boolean;
+  /** Kinds disallowed this edition — dropped from the palette. */
+  bannedKinds?: string[];
 }) {
+  const banned = new Set(bannedKinds);
   return (
     <Group gap="xs">
-      {CAMPER_KINDS.map((k) => (
+      {CAMPER_KINDS.filter((k) => !banned.has(k.value)).map((k) => (
         <AddButton key={k.value} kind={k} onAdd={onAdd} disabled={disabled} />
       ))}
     </Group>
