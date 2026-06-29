@@ -90,7 +90,12 @@ sunset, path lights, the pyramid's rainbow top). Most new *kinds* are core
         power / fresh water / grey water. "+ Draw line/pipe" menu picks the kind;
         CablePanel has a Type select (reseeds color; amps/gauge shown only for
         power). NOT browser-verified.
-- [ ] D — snap-to-structure shades.
+- [x] **D — snap-to-structure shades** — editor-only (no schema). Dragging a
+      `canopyShade` object snaps its footprint corners onto nearby objects'
+      vertices/edges within 4 ft (corner→vertex and corner→edge; closest wins), with
+      a green ring marking the live snap target and a "Snap shades" toolbar toggle.
+      Helpers `objWorldCorners`/`nearestOnSeg`/`snapToStructures` in map.tsx. NOT
+      browser-verified.
 - [ ] E — night mode + path lights + pyramid rainbow.
 
 ## Findings / gotchas

@@ -1587,6 +1587,81 @@ function footprintLocal(o: ObjRow): Array<[number, number]> {
   return footprintOutline(o.kind, o.width, o.height, o.config, o.mirrored);
 }
 
+/** An object's footprint corners in WORLD plot-local feet, at a given center —
+ * its real outline (rect / hexagon / custom), rotated + mirrored. */
+function objWorldCorners(o: ObjRow, cx: number, cy: number): ZonePt[] {
+  return footprintLocal(o).map(([lx, ly]) => {
+    const v = rotateVec(lx, ly, o.rotation);
+    return { x: cx + v.x, y: cy + v.y };
+  });
+}
+
+/** Nearest point on segment a→b to p (feet). */
+function nearestOnSeg(p: ZonePt, a: ZonePt, b: ZonePt): ZonePt {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby || 1;
+  const t = Math.max(
+    0,
+    Math.min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2),
+  );
+  return { x: a.x + abx * t, y: a.y + aby * t };
+}
+
+/**
+ * Snap a (shade) object's footprint to nearby structures: find the smallest shift
+ * that lands one of its corners on another object's vertex or edge within
+ * `threshold` feet, and return the shifted object plus the snap target (for a
+ * visual hint), or the object unchanged when nothing is close. Corner→vertex and
+ * corner→edge candidates are considered; the closest wins.
+ */
+function snapToStructures(
+  o: ObjRow,
+  others: ObjRow[],
+  threshold: number,
+): { obj: ObjRow; hint: ZonePt | null } {
+  const cx = o.x + o.width / 2;
+  const cy = o.y + o.height / 2;
+  const corners = objWorldCorners(o, cx, cy);
+  let best: { dx: number; dy: number; dist: number; target: ZonePt } | null =
+    null;
+  for (const other of others) {
+    if (other.id === o.id) continue;
+    const oc = objWorldCorners(
+      other,
+      other.x + other.width / 2,
+      other.y + other.height / 2,
+    );
+    if (oc.length === 0) continue;
+    for (const c of corners) {
+      for (let i = 0; i < oc.length; i++) {
+        const v = oc[i] as ZonePt;
+        // Corner → vertex.
+        const vdx = v.x - c.x;
+        const vdy = v.y - c.y;
+        const vd = Math.hypot(vdx, vdy);
+        if (vd <= threshold && (!best || vd < best.dist)) {
+          best = { dx: vdx, dy: vdy, dist: vd, target: v };
+        }
+        // Corner → edge (v → next).
+        const b = oc[(i + 1) % oc.length] as ZonePt;
+        const np = nearestOnSeg(c, v, b);
+        const edx = np.x - c.x;
+        const edy = np.y - c.y;
+        const ed = Math.hypot(edx, edy);
+        if (ed <= threshold && (!best || ed < best.dist)) {
+          best = { dx: edx, dy: edy, dist: ed, target: np };
+        }
+      }
+    }
+  }
+  if (!best) return { obj: o, hint: null };
+  return {
+    obj: { ...o, x: o.x + best.dx, y: o.y + best.dy },
+    hint: best.target,
+  };
+}
+
 /** Above-ground height (ft) at each footprint corner, aligned with
  * footprintLocal, so a sloped roof casts a warped shadow. The hyparhut's roof is
  * a hyperbolic paraboloid measured per corner; every other kind is a flat height. */
@@ -2696,6 +2771,10 @@ function Editor({
   // power lines still wins over the grid.
   const [gridSnap, setGridSnap] = useState<number>(1);
   const snapGrid = (v: number) => Math.round(v / gridSnap) * gridSnap;
+  // Shade snapping: while dragging a canopy/shade, snap its corners to nearby
+  // structures' vertices/edges. `snapHint` marks the live snap target (a ring).
+  const [snapStructures, setSnapStructures] = useState(true);
+  const [snapHint, setSnapHint] = useState<ZonePt | null>(null);
 
   // Officers edit anything; a member may move/resize/rotate only their own
   // items (those edits become pending approval, handled server-side).
@@ -3427,7 +3506,15 @@ function Editor({
     const d = drag.current;
     if (!d) return;
     const p = svgPoint(e);
-    const next = applyDrag(d, fx(p.x), fy(p.y));
+    let next = applyDrag(d, fx(p.x), fy(p.y));
+    // Snap a dragged shade/canopy to nearby structures' vertices/edges.
+    if (d.mode === "move" && snapStructures && kindDef(next.kind).canopyShade) {
+      const snapped = snapToStructures(next, objects, 4);
+      next = snapped.obj;
+      setSnapHint(snapped.hint);
+    } else if (snapHint) {
+      setSnapHint(null);
+    }
     liveObj.current = next;
     setObjects((prev) => prev.map((o) => (o.id === d.id ? next : o)));
   }
@@ -3438,6 +3525,7 @@ function Editor({
     drag.current = null;
     liveObj.current = null;
     setDragging(false);
+    setSnapHint(null);
     if (d && o) commit(o);
   }
 
@@ -3749,6 +3837,14 @@ function Editor({
                 </Group>
               </Tooltip>
             ) : null}
+            <Tooltip label="Snap a dragged shade onto nearby structures">
+              <Checkbox
+                size="xs"
+                label="Snap shades"
+                checked={snapStructures}
+                onChange={(e) => setSnapStructures(e.currentTarget.checked)}
+              />
+            </Tooltip>
             <Tooltip label={lotOpen ? "Hide lot settings" : "Lot settings"}>
               <ActionIcon
                 variant={lotOpen ? "light" : "subtle"}
@@ -4464,6 +4560,26 @@ function Editor({
                 </g>
               );
             })}
+            {/* Shade-snap hint: a ring on the structure vertex/edge the dragged
+            shade is snapping to. */}
+            {snapHint ? (
+              <g pointerEvents="none">
+                <circle
+                  cx={originX + snapHint.x * ppf}
+                  cy={originY + snapHint.y * ppf}
+                  r={6}
+                  fill="none"
+                  stroke="#2f9e44"
+                  strokeWidth={2}
+                />
+                <circle
+                  cx={originX + snapHint.x * ppf}
+                  cy={originY + snapHint.y * ppf}
+                  r={2}
+                  fill="#2f9e44"
+                />
+              </g>
+            ) : null}
             {/* Draw mode: a full overlay captures every click as a vertex. */}
             {drawMode ? (
               <>
