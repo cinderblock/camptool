@@ -107,6 +107,10 @@ export const mapObject = sqliteTable(
     // keyed by a CampStructure `controls` entry — e.g. the Sierpinski pyramid's
     // flying-buttress extension count). NULL = use each control's default.
     config: text("config"),
+    // Linked-block id: objects sharing a `group_id` are "stuck" together — moving
+    // or rotating any member moves the whole block (relative layout preserved).
+    // NULL = not linked. Officers link/unlink a multi-selection.
+    groupId: text("group_id"),
     color: text("color"),
     notes: text("notes"),
     // Pending-approval workflow: an owner-member may move/resize/rotate their own

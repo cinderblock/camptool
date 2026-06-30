@@ -37,9 +37,19 @@ All in `app/routes/dashboard/map.tsx` (no schema):
 on the existing call site (map.tsx ~5384) — NOT our code. Master is 4-arg and our
 call is 4-arg, so our commit is consistent; do NOT stage sun.ts or change that call.
 
-## PR2 — linked groups (TODO)
+## PR2 — linked groups (DONE, code complete; not yet deployed/browser-tested)
 
-- `map_object.group_id` (nullable text) migration. "Link selected" sets a shared
-  uuid on the multi-selection; "Unlink" clears it. Selecting any linked member
-  selects the whole group. Linked groups move/rotate together by default (reuse the
-  group gesture). Show a faint hull/!badge for a linked block. Read-only when locked.
+- `map_object.group_id` (nullable text), migration 0036. Added to `ObjRow`/`objCols`/
+  `toObjRow` + the addObject/addBlock returns.
+- **Link/Unlink:** the multi-select banner gets "🔗 Link as block" (sets a fresh
+  client-generated uuid on the selection) and "Unlink" (clears it). Officer-only,
+  batched via `linkObjects`/`unlinkObjects` actions (client supplies the uuid so the
+  optimistic update matches).
+- **Atomic blocks:** `expandGroups()` expands any selection touching a linked member
+  to the whole block — applied on plain click, shift-click (toggles the whole block),
+  and marquee — so a block always selects + moves/rotates together.
+- **Visual:** a faint dashed purple hull around every linked block at rest (≥2
+  members).
+
+Still TODO (optional polish): read-only gate when the edition is locked (link
+buttons already officer-gated); a chain badge; unlink from the side panel.

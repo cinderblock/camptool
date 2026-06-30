@@ -1,0 +1,1 @@
+ALTER TABLE `map_object` ADD `group_id` text;

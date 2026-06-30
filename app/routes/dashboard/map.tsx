@@ -476,6 +476,9 @@ type ObjRow = {
   config: StructureConfig;
   color: string | null;
   notes: string | null;
+  // Linked-block id: objects sharing this are moved/rotated together. NULL = not
+  // linked.
+  groupId: string | null;
   // The camper who brought this (NULL = shared/communal camp item).
   ownerMembershipId: string | null;
   ownerName: string | null;
@@ -582,6 +585,7 @@ const objSelect = {
   config: mapObject.config,
   color: mapObject.color,
   notes: mapObject.notes,
+  groupId: mapObject.groupId,
   ownerMembershipId: mapObject.ownerMembershipId,
   ownerName: user.name,
   pendingAt: mapObject.pendingAt,
@@ -603,6 +607,7 @@ type ObjSelectRow = {
   config: string | null;
   color: string | null;
   notes: string | null;
+  groupId: string | null;
   ownerMembershipId: string | null;
   ownerName: string | null;
   pendingAt: Date | null;
@@ -642,6 +647,7 @@ function toObjRow(r: ObjSelectRow): ObjRow {
     config: parseConfig(r.config),
     color: r.color,
     notes: r.notes,
+    groupId: r.groupId,
     ownerMembershipId: r.ownerMembershipId,
     ownerName: r.ownerName,
     pending: parsePending(r.pendingAt, r.pendingPrev),
@@ -823,6 +829,8 @@ export async function action({ request }: Route.ActionArgs) {
     "addBlock",
     "updateObjects",
     "unplaceObjects",
+    "linkObjects",
+    "unlinkObjects",
     "duplicateObject",
     "placeObject",
     "unplaceObject",
@@ -920,6 +928,7 @@ export async function action({ request }: Route.ActionArgs) {
         config: {},
         color: row.color,
         notes: row.notes,
+        groupId: null,
         ownerMembershipId: null,
         ownerName: null,
         pending: null,
@@ -995,6 +1004,7 @@ export async function action({ request }: Route.ActionArgs) {
             config: {},
             color: row.color,
             notes: row.notes,
+            groupId: null,
             ownerMembershipId: null,
             ownerName: null,
             pending: null,
@@ -1030,6 +1040,33 @@ export async function action({ request }: Route.ActionArgs) {
           rotation: Number(o.rotation) || 0,
           updatedAt: new Date(),
         })
+        .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+    }
+    return data({ ok: true });
+  }
+
+  if (intent === "linkObjects" || intent === "unlinkObjects") {
+    // Link a multi-selection into one block (shared group_id, client-supplied so
+    // its optimistic update matches) or unlink (clear it). Officer-only, batched.
+    let raw: unknown;
+    try {
+      raw = JSON.parse(String(form.get("ids") ?? "[]"));
+    } catch {
+      raw = [];
+    }
+    if (!Array.isArray(raw)) {
+      return data({ error: "Bad payload." }, { status: 400 });
+    }
+    const groupId =
+      intent === "linkObjects"
+        ? String(form.get("groupId") ?? "") || null
+        : null;
+    for (const v of raw.slice(0, 300)) {
+      const id = String(v ?? "");
+      if (!id) continue;
+      await db
+        .update(mapObject)
+        .set({ groupId, updatedAt: new Date() })
         .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
     }
     return data({ ok: true });
@@ -2479,6 +2516,59 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 the box to rotate the group. Arrows nudge · Space/R rotate · Del
                 unplaces. Shift-click or box-drag to change the selection.
               </Text>
+              {canManage ? (
+                <Group gap="xs" mt="xs">
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    onClick={() => {
+                      const groupId = crypto.randomUUID();
+                      setObjects((prev) =>
+                        prev.map((o) =>
+                          selectedIds.includes(o.id) ? { ...o, groupId } : o,
+                        ),
+                      );
+                      fetcher.submit(
+                        {
+                          intent: "linkObjects",
+                          groupId,
+                          ids: JSON.stringify(selectedIds),
+                        },
+                        { method: "post" },
+                      );
+                    }}
+                  >
+                    🔗 Link as block
+                  </Button>
+                  {objects.some(
+                    (o) => selectedIds.includes(o.id) && o.groupId,
+                  ) ? (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="gray"
+                      onClick={() => {
+                        setObjects((prev) =>
+                          prev.map((o) =>
+                            selectedIds.includes(o.id)
+                              ? { ...o, groupId: null }
+                              : o,
+                          ),
+                        );
+                        fetcher.submit(
+                          {
+                            intent: "unlinkObjects",
+                            ids: JSON.stringify(selectedIds),
+                          },
+                          { method: "post" },
+                        );
+                      }}
+                    >
+                      Unlink
+                    </Button>
+                  ) : null}
+                </Group>
+              ) : null}
             </Paper>
           ) : null}
           <SidePanel
@@ -3551,6 +3641,21 @@ function Editor({
     setDragging(true);
   }
 
+  // Expand a set of ids to include every member of any linked block touched, so
+  // a "stuck" block always selects + moves as a whole.
+  function expandGroups(ids: string[]): string[] {
+    const groups = new Set<string>();
+    for (const id of ids) {
+      const o = objects.find((x) => x.id === id);
+      if (o?.groupId) groups.add(o.groupId);
+    }
+    if (groups.size === 0) return ids;
+    const set = new Set(ids);
+    for (const o of objects)
+      if (o.groupId && groups.has(o.groupId)) set.add(o.id);
+    return [...set];
+  }
+
   function startDrag(
     e: React.PointerEvent,
     o: ObjRow,
@@ -3563,31 +3668,36 @@ function Editor({
     setSelectedCableId(null);
     setSelectedRoadId(null);
 
-    // Shift-click toggles this object in the multi-selection (no drag).
+    // Shift-click toggles this object (or its whole linked block) in the selection.
     if (mode === "move" && e.shiftKey) {
+      const grp = expandGroups([o.id]);
       setSelectedIds((prev) =>
         prev.includes(o.id)
-          ? prev.filter((id) => id !== o.id)
-          : [...prev, o.id],
+          ? prev.filter((id) => !grp.includes(id))
+          : Array.from(new Set([...prev, ...grp])),
       );
       setSelectedId(o.id);
       return;
     }
 
-    // Pressing an object that's already part of a multi-selection drags the whole
-    // group (officers only); pressing a different object selects just it.
-    const inGroup = selectedIds.length > 1 && selectedIds.includes(o.id);
-    if (inGroup) {
-      setSelectedId(o.id);
+    // The working selection: keep the current multi-selection if this object is in
+    // it; otherwise select this object — expanded to its whole linked block.
+    let workIds: string[];
+    if (selectedIds.length > 1 && selectedIds.includes(o.id)) {
+      workIds = selectedIds;
     } else {
-      selectOnly(o.id);
+      workIds = expandGroups([o.id]);
+      setSelectedIds(workIds);
     }
+    setSelectedId(o.id);
     if (!editable(o)) return;
     e.preventDefault();
     const p = svgPoint(e);
 
-    if (inGroup && mode === "move" && canManage) {
-      const items = objects.filter((x) => selectedIds.includes(x.id));
+    // A multi-object working set (an explicit selection or a linked block) moves
+    // together (officers only).
+    if (workIds.length > 1 && mode === "move" && canManage) {
+      const items = objects.filter((x) => workIds.includes(x.id));
       groupDrag.current = {
         mode: "move",
         startFx: fx(p.x),
@@ -3674,13 +3784,15 @@ function Editor({
     const xHi = Math.max(m.x0, m.x1);
     const yLo = Math.min(m.y0, m.y1);
     const yHi = Math.max(m.y0, m.y1);
-    const boxed = objects
-      .filter((o) => {
-        const cx = o.x + o.width / 2;
-        const cy = o.y + o.height / 2;
-        return cx >= xLo && cx <= xHi && cy >= yLo && cy <= yHi;
-      })
-      .map((o) => o.id);
+    const boxed = expandGroups(
+      objects
+        .filter((o) => {
+          const cx = o.x + o.width / 2;
+          const cy = o.y + o.height / 2;
+          return cx >= xLo && cx <= xHi && cy >= yLo && cy <= yHi;
+        })
+        .map((o) => o.id),
+    );
     setSelectedIds((prev) => {
       const ids = m.additive ? Array.from(new Set([...prev, ...boxed])) : boxed;
       setSelectedId(ids[ids.length - 1] ?? null);
@@ -5019,6 +5131,55 @@ function Editor({
                   })}
               </>
             ) : null}
+            {/* Linked blocks: a faint dashed hull around each set of "stuck"
+            objects, so the blocks read even when nothing is selected. */}
+            {(() => {
+              const groups = new Map<string, ObjRow[]>();
+              for (const o of objects) {
+                if (!o.groupId) continue;
+                const arr = groups.get(o.groupId);
+                if (arr) arr.push(o);
+                else groups.set(o.groupId, [o]);
+              }
+              const out = [];
+              for (const [gid, members] of groups) {
+                if (members.length < 2) continue;
+                let xLo = Number.POSITIVE_INFINITY;
+                let xHi = Number.NEGATIVE_INFINITY;
+                let yLo = Number.POSITIVE_INFINITY;
+                let yHi = Number.NEGATIVE_INFINITY;
+                for (const o of members) {
+                  for (const p of objWorldCorners(
+                    o,
+                    o.x + o.width / 2,
+                    o.y + o.height / 2,
+                  )) {
+                    if (p.x < xLo) xLo = p.x;
+                    if (p.x > xHi) xHi = p.x;
+                    if (p.y < yLo) yLo = p.y;
+                    if (p.y > yHi) yHi = p.y;
+                  }
+                }
+                const pad = 1.5;
+                out.push(
+                  <rect
+                    key={`grp-${gid}`}
+                    x={originX + (xLo - pad) * ppf}
+                    y={originY + (yLo - pad) * ppf}
+                    width={(xHi - xLo + 2 * pad) * ppf}
+                    height={(yHi - yLo + 2 * pad) * ppf}
+                    rx={6}
+                    fill="none"
+                    stroke="#7048e8"
+                    strokeOpacity={0.5}
+                    strokeWidth={1}
+                    strokeDasharray="2 4"
+                    pointerEvents="none"
+                  />,
+                );
+              }
+              return out;
+            })()}
             {/* Multi-select group box + a single rotate handle (rotates the whole
             selection about its centroid). Per-object handles are hidden while >1
             is selected (see soleSelected). */}
