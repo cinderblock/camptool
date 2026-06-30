@@ -821,6 +821,8 @@ export async function action({ request }: Route.ActionArgs) {
     "savePlacement",
     "addObject",
     "addBlock",
+    "updateObjects",
+    "unplaceObjects",
     "duplicateObject",
     "placeObject",
     "unplaceObject",
@@ -999,6 +1001,60 @@ export async function action({ request }: Route.ActionArgs) {
           }) satisfies ObjRow,
       ),
     });
+  }
+
+  if (intent === "updateObjects") {
+    // Batch geometry update for a multi-select group move/rotate (officer-only —
+    // gated by the officerOnly set). One request so the single fetcher doesn't
+    // cancel rapid per-object submits.
+    let raw: unknown;
+    try {
+      raw = JSON.parse(String(form.get("items") ?? "[]"));
+    } catch {
+      raw = [];
+    }
+    if (!Array.isArray(raw)) {
+      return data({ error: "Bad payload." }, { status: 400 });
+    }
+    for (const it of raw.slice(0, 300)) {
+      const o = it as Record<string, unknown>;
+      const id = String(o.id ?? "");
+      if (!id) continue;
+      await db
+        .update(mapObject)
+        .set({
+          x: Number(o.x) || 0,
+          y: Number(o.y) || 0,
+          width: Math.max(1, Number(o.width) || 1),
+          height: Math.max(1, Number(o.height) || 1),
+          rotation: Number(o.rotation) || 0,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+    }
+    return data({ ok: true });
+  }
+
+  if (intent === "unplaceObjects") {
+    // Batch unplace (send a multi-select group back to the tray) in one request.
+    let raw: unknown;
+    try {
+      raw = JSON.parse(String(form.get("ids") ?? "[]"));
+    } catch {
+      raw = [];
+    }
+    if (!Array.isArray(raw)) {
+      return data({ error: "Bad payload." }, { status: 400 });
+    }
+    for (const v of raw.slice(0, 300)) {
+      const id = String(v ?? "");
+      if (!id) continue;
+      await db
+        .update(mapObject)
+        .set({ placed: false, updatedAt: new Date() })
+        .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+    }
+    return data({ ok: true });
   }
 
   if (intent === "updateObject") {
@@ -2036,6 +2092,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const fetcher = useFetcher();
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Multi-selection: all currently-selected object ids (includes the primary
+  // `selectedId`, which drives the side panel). Drag/rotate act on the whole set.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [zones, setZones] = useState<ZoneRow[]>(loaderData.zones);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [cables, setCables] = useState<CableRow[]>(loaderData.cables);
@@ -2127,6 +2186,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
     if (removedId) {
       setObjects((prev) => prev.filter((o) => o.id !== removedId));
       setSelectedId((s) => (s === removedId ? null : s));
+      setSelectedIds((prev) => prev.filter((id) => id !== removedId));
       return;
     }
     if (d.object) {
@@ -2135,7 +2195,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       setObjects((prev) =>
         isNew ? [...prev, obj] : prev.map((o) => (o.id === obj.id ? obj : o)),
       );
-      if (isNew) setSelectedId(obj.id);
+      if (isNew) {
+        setSelectedId(obj.id);
+        setSelectedIds([obj.id]);
+      }
       return;
     }
     if (d.deletedZoneId) {
@@ -2265,6 +2328,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setObjects={setObjects}
             selectedId={selectedId}
             setSelectedId={setSelectedId}
+            selectedIds={selectedIds}
+            setSelectedIds={setSelectedIds}
             zones={zones}
             selectedZoneId={selectedZoneId}
             setSelectedZoneId={setSelectedZoneId}
@@ -2403,6 +2468,18 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               canManage={canManage}
               fetcher={fetcher}
             />
+          ) : null}
+          {selectedIds.length > 1 ? (
+            <Paper withBorder p="sm" radius="md" bg="blue.0">
+              <Text size="sm" fw={600}>
+                {selectedIds.length} items selected
+              </Text>
+              <Text size="xs" c="dimmed">
+                Drag any one to move them together; use the round handle above
+                the box to rotate the group. Arrows nudge · Space/R rotate · Del
+                unplaces. Shift-click or box-drag to change the selection.
+              </Text>
+            </Paper>
           ) : null}
           <SidePanel
             lot={lot}
@@ -2618,6 +2695,8 @@ function Editor({
   setObjects,
   selectedId,
   setSelectedId,
+  selectedIds,
+  setSelectedIds,
   zones,
   selectedZoneId,
   setSelectedZoneId,
@@ -2651,6 +2730,8 @@ function Editor({
   setObjects: React.Dispatch<React.SetStateAction<ObjRow[]>>;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
+  selectedIds: string[];
+  setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
   zones: ZoneRow[];
   selectedZoneId: string | null;
   setSelectedZoneId: (id: string | null) => void;
@@ -2781,6 +2862,51 @@ function Editor({
   // structures' vertices/edges. `snapHint` marks the live snap target (a ring).
   const [snapStructures, setSnapStructures] = useState(true);
   const [snapHint, setSnapHint] = useState<ZonePt | null>(null);
+  // Multi-select group gesture: move or rotate every selected object at once
+  // (rotation pivots about the selection centroid). Captured at gesture start.
+  const groupDrag = useRef<{
+    mode: "move" | "rotate";
+    startFx: number;
+    startFy: number;
+    cx: number;
+    cy: number;
+    items: { id: string; x: number; y: number; rotation: number }[];
+  } | null>(null);
+  // Latest geometry of the group being dragged (committed on pointer-up).
+  const liveGroup = useRef<
+    | {
+        id: string;
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        rotation: number;
+      }[]
+    | null
+  >(null);
+  // Marquee (rubber-band) selection: drag on empty canvas to box-select. The ref
+  // holds the live rect (read on pointer-up, avoiding a stale-state closure); the
+  // `marqueeRect` state is just for rendering the box.
+  const marquee = useRef<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    additive: boolean;
+  } | null>(null);
+  const [marqueeRect, setMarqueeRect] = useState<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const [marqueeing, setMarqueeing] = useState(false);
+
+  // Select exactly one object (or clear), keeping the multi-selection in sync.
+  const selectOnly = (id: string | null) => {
+    setSelectedId(id);
+    setSelectedIds(id ? [id] : []);
+  };
 
   // Officers edit anything; a member may move/resize/rotate only their own
   // items (those edits become pending approval, handled server-side).
@@ -2810,6 +2936,21 @@ function Editor({
       window.removeEventListener("pointercancel", up);
     };
   }, [dragging]);
+
+  // Window-driven marquee (rubber-band) selection gesture.
+  useEffect(() => {
+    if (!marqueeing) return;
+    const move = (e: PointerEvent) => onMarqueeMove(e);
+    const up = () => endMarquee();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [marqueeing]);
 
   // Same window-driven gesture, for dragging a selected cable's vertex handle.
   useEffect(() => {
@@ -2847,80 +2988,125 @@ function Editor({
         });
         return;
       }
-      if (!selectedId) return;
-      const obj = objects.find((o) => o.id === selectedId);
-      if (!obj) return;
       if (e.key === "Escape") {
-        setSelectedId(null);
+        selectOnly(null);
         return;
       }
-      // Delete/Backspace removes the item from the map → back to the Unplaced
-      // tray (it isn't destroyed). Officer-only, like the other map edits.
+      if (!selectedIds.length) return;
+      const sel = objects.filter((o) => selectedIds.includes(o.id));
+      if (sel.length === 0) return;
+
+      // Delete/Backspace sends the selection back to the Unplaced tray (not
+      // destroyed). Officer-only. Batched so all of a group persist.
       if (e.key === "Delete" || e.key === "Backspace") {
         if (!canManage) return;
         e.preventDefault();
-        setObjects((prev) => prev.filter((o) => o.id !== selectedId));
+        const ids = sel.map((o) => o.id);
+        setObjects((prev) => prev.filter((o) => !ids.includes(o.id)));
         fetcher.submit(
-          { intent: "unplaceObject", id: selectedId },
+          { intent: "unplaceObjects", ids: JSON.stringify(ids) },
           { method: "post" },
         );
-        setSelectedId(null);
+        selectOnly(null);
         return;
       }
-      if (!editable(obj)) return;
+
+      const isGroup = sel.length > 1;
+      // Group transforms are an officer feature; a single item still follows the
+      // member-own edit rule.
+      if (isGroup ? !canManage : !editable(sel[0] as ObjRow)) return;
+
+      const rearW = rearWidthOf(lot, frontageRadiusOf(lot));
       const step = e.shiftKey ? 10 : 1;
-      let next: ObjRow | null = null;
-      if (e.key === " " || e.code === "Space") {
-        // Space rotates 90° (Shift = the other way).
-        next = {
-          ...obj,
-          rotation: Math.round(obj.rotation + (e.shiftKey ? -90 : 90)),
-        };
-      } else if (e.key === "r" || e.key === "R") {
-        next = {
-          ...obj,
-          rotation: Math.round(obj.rotation + (e.shiftKey ? -15 : 15)),
-        };
-      } else if (
-        e.key === "ArrowLeft" ||
-        e.key === "ArrowRight" ||
-        e.key === "ArrowUp" ||
-        e.key === "ArrowDown"
-      ) {
-        // Nudge, then force the whole footprint inside the lot trapezoid.
-        const rearW = rearWidthOf(lot, frontageRadiusOf(lot));
-        const dx =
-          e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
-        const dy =
-          e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-        const c = fitCenterInsideLot(
-          obj.x + dx + obj.width / 2,
-          obj.y + dy + obj.height / 2,
+      const rotate =
+        e.key === " " || e.code === "Space"
+          ? e.shiftKey
+            ? -90
+            : 90
+          : e.key === "r" || e.key === "R"
+            ? e.shiftKey
+              ? -15
+              : 15
+            : null;
+      const dx =
+        e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+      const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+      if (rotate === null && dx === 0 && dy === 0) return;
+      e.preventDefault();
+
+      const fitInside = (o: ObjRow, nx: number, ny: number): ZonePt =>
+        fitCenterInsideLot(
+          nx,
+          ny,
           footprintOffsets(
-            obj.kind,
-            obj.width,
-            obj.height,
-            obj.rotation,
-            obj.config,
-            obj.mirrored,
+            o.kind,
+            o.width,
+            o.height,
+            o.rotation,
+            o.config,
+            o.mirrored,
           ),
           lot.frontageFt,
           lot.depthFt,
           rearW,
         );
-        next = { ...obj, x: c.x - obj.width / 2, y: c.y - obj.height / 2 };
+
+      if (rotate !== null && isGroup) {
+        // Rotate the whole group about its centroid.
+        const c = groupCentroid(sel);
+        const rad = (rotate * Math.PI) / 180;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        const next = sel.map((o) => {
+          const ox = o.x + o.width / 2 - c.x;
+          const oy = o.y + o.height / 2 - c.y;
+          const ncx = c.x + ox * cos - oy * sin;
+          const ncy = c.y + ox * sin + oy * cos;
+          return {
+            ...o,
+            x: ncx - o.width / 2,
+            y: ncy - o.height / 2,
+            rotation: Math.round(o.rotation + rotate),
+          };
+        });
+        const m = new Map(next.map((n) => [n.id, n]));
+        setObjects((prev) => prev.map((o) => m.get(o.id) ?? o));
+        commitGroup(next);
+        return;
       }
-      if (!next) return;
-      e.preventDefault();
-      const committed = next;
-      setObjects((prev) =>
-        prev.map((o) => (o.id === selectedId ? committed : o)),
-      );
-      commit(committed);
+
+      // Move/rotate each selected object (single or group), clamped to the lot.
+      const next = sel.map((o) => {
+        const rotation =
+          rotate !== null ? Math.round(o.rotation + rotate) : o.rotation;
+        const c = fitInside(
+          { ...o, rotation },
+          o.x + dx + o.width / 2,
+          o.y + dy + o.height / 2,
+        );
+        return {
+          ...o,
+          rotation,
+          x: c.x - o.width / 2,
+          y: c.y - o.height / 2,
+        };
+      });
+      const m = new Map(next.map((n) => [n.id, n]));
+      setObjects((prev) => prev.map((o) => m.get(o.id) ?? o));
+      if (isGroup) commitGroup(next);
+      else if (next[0]) commit(next[0]);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canEdit, canManage, selectedId, objects, lot.frontageFt, lot.depthFt]);
+  }, [
+    canEdit,
+    canManage,
+    selectedId,
+    selectedIds,
+    objects,
+    lot.frontageFt,
+    lot.depthFt,
+  ]);
 
   // While drawing: Enter finishes (zone ≥3 pts, cable ≥2 pts), Escape cancels.
   // biome-ignore lint/correctness/useExhaustiveDependencies: finish/cancel are stable closures
@@ -3298,6 +3484,73 @@ function Editor({
     );
   }
 
+  // Persist a whole multi-select group in one request (so the single fetcher
+  // doesn't cancel rapid per-object submits).
+  function commitGroup(
+    items: {
+      id: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      rotation: number;
+    }[],
+  ) {
+    fetcher.submit(
+      {
+        intent: "updateObjects",
+        items: JSON.stringify(
+          items.map((o) => ({
+            id: o.id,
+            x: round(o.x),
+            y: round(o.y),
+            width: round(o.width),
+            height: round(o.height),
+            rotation: Math.round(o.rotation),
+          })),
+        ),
+      },
+      { method: "post" },
+    );
+  }
+
+  // Centroid (plot-local feet) of a set of objects, by their centers.
+  function groupCentroid(items: ObjRow[]): ZonePt {
+    let sx = 0;
+    let sy = 0;
+    for (const o of items) {
+      sx += o.x + o.width / 2;
+      sy += o.y + o.height / 2;
+    }
+    const n = Math.max(1, items.length);
+    return { x: sx / n, y: sy / n };
+  }
+
+  // Begin a group rotate (about the selection centroid) from the group handle.
+  function startGroupRotate(e: React.PointerEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!canManage) return;
+    const items = objects.filter((x) => selectedIds.includes(x.id));
+    if (items.length < 2) return;
+    const c = groupCentroid(items);
+    const p = svgPoint(e);
+    groupDrag.current = {
+      mode: "rotate",
+      startFx: fx(p.x),
+      startFy: fy(p.y),
+      cx: c.x,
+      cy: c.y,
+      items: items.map((x) => ({
+        id: x.id,
+        x: x.x,
+        y: x.y,
+        rotation: x.rotation,
+      })),
+    };
+    setDragging(true);
+  }
+
   function startDrag(
     e: React.PointerEvent,
     o: ObjRow,
@@ -3306,13 +3559,52 @@ function Editor({
     // A press always selects (so anyone can open read-only details); it only
     // starts a drag when the viewer may edit this item.
     e.stopPropagation();
-    setSelectedId(o.id);
     setSelectedZoneId(null);
     setSelectedCableId(null);
     setSelectedRoadId(null);
+
+    // Shift-click toggles this object in the multi-selection (no drag).
+    if (mode === "move" && e.shiftKey) {
+      setSelectedIds((prev) =>
+        prev.includes(o.id)
+          ? prev.filter((id) => id !== o.id)
+          : [...prev, o.id],
+      );
+      setSelectedId(o.id);
+      return;
+    }
+
+    // Pressing an object that's already part of a multi-selection drags the whole
+    // group (officers only); pressing a different object selects just it.
+    const inGroup = selectedIds.length > 1 && selectedIds.includes(o.id);
+    if (inGroup) {
+      setSelectedId(o.id);
+    } else {
+      selectOnly(o.id);
+    }
     if (!editable(o)) return;
     e.preventDefault();
     const p = svgPoint(e);
+
+    if (inGroup && mode === "move" && canManage) {
+      const items = objects.filter((x) => selectedIds.includes(x.id));
+      groupDrag.current = {
+        mode: "move",
+        startFx: fx(p.x),
+        startFy: fy(p.y),
+        cx: 0,
+        cy: 0,
+        items: items.map((x) => ({
+          id: x.id,
+          x: x.x,
+          y: x.y,
+          rotation: x.rotation,
+        })),
+      };
+      setDragging(true);
+      return;
+    }
+
     drag.current = {
       mode,
       id: o.id,
@@ -3340,10 +3632,60 @@ function Editor({
       startDrag(e, shade, "move");
       return;
     }
-    setSelectedId(null);
+    // Empty-canvas press: begin a marquee (rubber-band) selection. A plain click
+    // (no drag) clears the selection on pointer-up; Shift keeps the existing one
+    // and adds the boxed objects.
     setSelectedZoneId(null);
     setSelectedCableId(null);
     setSelectedRoadId(null);
+    marquee.current = {
+      x0: fxp,
+      y0: fyp,
+      x1: fxp,
+      y1: fyp,
+      additive: e.shiftKey,
+    };
+    setMarqueeRect(null);
+    setMarqueeing(true);
+  }
+
+  function onMarqueeMove(e: { clientX: number; clientY: number }) {
+    const m = marquee.current;
+    if (!m) return;
+    const p = svgPoint(e);
+    m.x1 = fx(p.x);
+    m.y1 = fy(p.y);
+    setMarqueeRect({ x0: m.x0, y0: m.y0, x1: m.x1, y1: m.y1 });
+  }
+
+  function endMarquee() {
+    const m = marquee.current;
+    marquee.current = null;
+    setMarqueeing(false);
+    setMarqueeRect(null);
+    if (!m) return;
+    const dragged = Math.abs(m.x1 - m.x0) > 1 || Math.abs(m.y1 - m.y0) > 1;
+    if (!dragged) {
+      // A plain click on empty space clears (Shift keeps the current selection).
+      if (!m.additive) selectOnly(null);
+      return;
+    }
+    const xLo = Math.min(m.x0, m.x1);
+    const xHi = Math.max(m.x0, m.x1);
+    const yLo = Math.min(m.y0, m.y1);
+    const yHi = Math.max(m.y0, m.y1);
+    const boxed = objects
+      .filter((o) => {
+        const cx = o.x + o.width / 2;
+        const cy = o.y + o.height / 2;
+        return cx >= xLo && cx <= xHi && cy >= yLo && cy <= yHi;
+      })
+      .map((o) => o.id);
+    setSelectedIds((prev) => {
+      const ids = m.additive ? Array.from(new Set([...prev, ...boxed])) : boxed;
+      setSelectedId(ids[ids.length - 1] ?? null);
+      return ids;
+    });
   }
 
   // ---- Zones & cables -----------------------------------------------------
@@ -3413,19 +3755,19 @@ function Editor({
     setDraftPoints([]);
   }
   function selectZone(id: string) {
-    setSelectedId(null);
+    selectOnly(null);
     setSelectedCableId(null);
     setSelectedRoadId(null);
     setSelectedZoneId(id);
   }
   function selectCable(id: string) {
-    setSelectedId(null);
+    selectOnly(null);
     setSelectedZoneId(null);
     setSelectedRoadId(null);
     setSelectedCableId(id);
   }
   function selectRoad(id: string) {
-    setSelectedId(null);
+    selectOnly(null);
     setSelectedZoneId(null);
     setSelectedCableId(null);
     setSelectedRoadId(id);
@@ -3509,6 +3851,63 @@ function Editor({
   }
 
   function onMove(e: { clientX: number; clientY: number }) {
+    // Group gesture (multi-select move/rotate) takes precedence.
+    const g = groupDrag.current;
+    if (g) {
+      const p = svgPoint(e);
+      const curx = fx(p.x);
+      const cury = fy(p.y);
+      const byId = new Map(objects.map((o) => [o.id, o]));
+      const next: NonNullable<typeof liveGroup.current> = [];
+      if (g.mode === "move") {
+        const dx = curx - g.startFx;
+        const dy = cury - g.startFy;
+        for (const it of g.items) {
+          const o = byId.get(it.id);
+          if (!o) continue;
+          next.push({
+            id: it.id,
+            x: it.x + dx,
+            y: it.y + dy,
+            width: o.width,
+            height: o.height,
+            rotation: it.rotation,
+          });
+        }
+      } else {
+        const a0 = Math.atan2(g.startFy - g.cy, g.startFx - g.cx);
+        const a1 = Math.atan2(cury - g.cy, curx - g.cx);
+        const rad = a1 - a0;
+        const deg = (rad * 180) / Math.PI;
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        for (const it of g.items) {
+          const o = byId.get(it.id);
+          if (!o) continue;
+          const ox = it.x + o.width / 2 - g.cx;
+          const oy = it.y + o.height / 2 - g.cy;
+          const ncx = g.cx + ox * cos - oy * sin;
+          const ncy = g.cy + ox * sin + oy * cos;
+          next.push({
+            id: it.id,
+            x: ncx - o.width / 2,
+            y: ncy - o.height / 2,
+            width: o.width,
+            height: o.height,
+            rotation: it.rotation + deg,
+          });
+        }
+      }
+      liveGroup.current = next;
+      const m = new Map(next.map((n) => [n.id, n]));
+      setObjects((prev) =>
+        prev.map((o) => {
+          const n = m.get(o.id);
+          return n ? { ...o, x: n.x, y: n.y, rotation: n.rotation } : o;
+        }),
+      );
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const p = svgPoint(e);
@@ -3526,6 +3925,15 @@ function Editor({
   }
 
   function endDrag() {
+    const g = groupDrag.current;
+    if (g) {
+      const items = liveGroup.current;
+      groupDrag.current = null;
+      liveGroup.current = null;
+      setDragging(false);
+      if (items && items.length > 0) commitGroup(items);
+      return;
+    }
     const d = drag.current;
     const o = liveObj.current;
     drag.current = null;
@@ -4348,7 +4756,10 @@ function Editor({
                   originX={originX}
                   originY={originY}
                   ppf={ppf}
-                  selected={o.id === selectedId}
+                  selected={selectedIds.includes(o.id)}
+                  soleSelected={
+                    selectedIds.length === 1 && selectedIds[0] === o.id
+                  }
                   editable={editable(o)}
                   dim={highlight !== "none" && !matches(o)}
                   showDoors={showDoors}
@@ -4607,6 +5018,89 @@ function Editor({
                     );
                   })}
               </>
+            ) : null}
+            {/* Multi-select group box + a single rotate handle (rotates the whole
+            selection about its centroid). Per-object handles are hidden while >1
+            is selected (see soleSelected). */}
+            {selectedIds.length > 1
+              ? (() => {
+                  const sel = objects.filter((o) => selectedIds.includes(o.id));
+                  if (sel.length < 2) return null;
+                  let xLo = Number.POSITIVE_INFINITY;
+                  let xHi = Number.NEGATIVE_INFINITY;
+                  let yLo = Number.POSITIVE_INFINITY;
+                  let yHi = Number.NEGATIVE_INFINITY;
+                  for (const o of sel) {
+                    for (const p of objWorldCorners(
+                      o,
+                      o.x + o.width / 2,
+                      o.y + o.height / 2,
+                    )) {
+                      if (p.x < xLo) xLo = p.x;
+                      if (p.x > xHi) xHi = p.x;
+                      if (p.y < yLo) yLo = p.y;
+                      if (p.y > yHi) yHi = p.y;
+                    }
+                  }
+                  const bx = originX + xLo * ppf;
+                  const by = originY + yLo * ppf;
+                  const bw = (xHi - xLo) * ppf;
+                  const bh = (yHi - yLo) * ppf;
+                  const hx = bx + bw / 2;
+                  return (
+                    <g>
+                      <rect
+                        x={bx}
+                        y={by}
+                        width={bw}
+                        height={bh}
+                        fill="none"
+                        stroke="#1971c2"
+                        strokeWidth={1.5}
+                        strokeDasharray="6 4"
+                        pointerEvents="none"
+                      />
+                      {canManage ? (
+                        <>
+                          <line
+                            x1={hx}
+                            y1={by}
+                            x2={hx}
+                            y2={by - 22}
+                            stroke="#1971c2"
+                            strokeWidth={1}
+                            pointerEvents="none"
+                          />
+                          <circle
+                            cx={hx}
+                            cy={by - 22}
+                            r={6}
+                            fill="#fff"
+                            stroke="#1971c2"
+                            strokeWidth={1.5}
+                            style={{ cursor: "grab" }}
+                            onPointerDown={startGroupRotate}
+                          />
+                        </>
+                      ) : null}
+                    </g>
+                  );
+                })()
+              : null}
+            {/* Marquee (rubber-band) selection box. */}
+            {marqueeRect ? (
+              <rect
+                x={originX + Math.min(marqueeRect.x0, marqueeRect.x1) * ppf}
+                y={originY + Math.min(marqueeRect.y0, marqueeRect.y1) * ppf}
+                width={Math.abs(marqueeRect.x1 - marqueeRect.x0) * ppf}
+                height={Math.abs(marqueeRect.y1 - marqueeRect.y0) * ppf}
+                fill="#1971c2"
+                fillOpacity={0.1}
+                stroke="#1971c2"
+                strokeWidth={1}
+                strokeDasharray="4 3"
+                pointerEvents="none"
+              />
             ) : null}
             {/* Shade-snap hint: a ring on the structure vertex/edge the dragged
             shade is snapping to. */}
@@ -5361,6 +5855,7 @@ const MapObjectShape = memo(
     originY,
     ppf,
     selected,
+    soleSelected,
     editable,
     dim,
     showDoors,
@@ -5375,6 +5870,9 @@ const MapObjectShape = memo(
     originY: number;
     ppf: number;
     selected: boolean;
+    /** This is the ONLY selected object (so it shows resize/rotate handles; a
+     * multi-selection shows a single group handle instead). */
+    soleSelected: boolean;
     editable: boolean;
     dim: boolean;
     showDoors: boolean;
@@ -5819,7 +6317,7 @@ const MapObjectShape = memo(
               pointerEvents="none"
             />
           ) : null}
-          {selected && editable ? (
+          {soleSelected && editable ? (
             <>
               <line
                 x1={cx}
@@ -5894,6 +6392,7 @@ const MapObjectShape = memo(
   (prev, next) =>
     prev.o === next.o &&
     prev.selected === next.selected &&
+    prev.soleSelected === next.soleSelected &&
     prev.editable === next.editable &&
     prev.dim === next.dim &&
     prev.overflow === next.overflow &&
