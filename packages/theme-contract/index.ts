@@ -76,6 +76,10 @@ export type FootprintCtx = {
    * flying-buttress extension count). Missing keys fall back to the control's
    * `default`. */
   config: StructureConfig;
+  /** True when the map's sun simulation is below the horizon (night). Lets a
+   * structure render a night-only treatment — e.g. the Sierpinski pyramid lighting
+   * its apex tetra in an animated rainbow after dark. */
+  night?: boolean;
 };
 
 /** Per-object adjustable numeric settings (see `CampStructure.controls`). */

@@ -96,7 +96,13 @@ sunset, path lights, the pyramid's rainbow top). Most new *kinds* are core
       a green ring marking the live snap target and a "Snap shades" toolbar toggle.
       Helpers `objWorldCorners`/`nearestOnSeg`/`snapToStructures` in map.tsx. NOT
       browser-verified.
-- [ ] E — night mode + path lights + pyramid rainbow.
+- [x] **E — night mode** — the shade sim now runs the full 24h. The Compass got a
+      day↔night scrubber (0–24h) + "Animate sun" loops through night; `nightFactor`
+      = how far the sun is below the horizon drives a dusk→night wash over the map.
+      New core **path-light** kind (Services group) glows warmly after dark
+      (`#path-glow` radial). `FootprintCtx.night` added to the contract; the
+      Sierpinski pyramid's apex tetra lights an **animated SMIL rainbow** at night.
+      NOT browser-verified.
 
 ## Findings / gotchas
 

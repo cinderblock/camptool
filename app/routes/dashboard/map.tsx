@@ -2076,18 +2076,19 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [windFromBearing, setWindFromBearing] = useState(BRC_WIND_FROM_BEARING);
   const [windStrength, setWindStrength] = useState(1);
   const showWind = windParticles > 0;
-  // Auto-drift the sun slowly across the daylight arc while animation is on (and
-  // the sun isn't being dragged); loop back to sunrise after sunset.
+  // Auto-drift the sun while animation is on (and it isn't being dragged) across
+  // the FULL day — through night too, so the night-lighting effects play — looping
+  // back to midnight after a full 24h.
   useEffect(() => {
     if (!animateShade || sunDragging) return;
     const id = setInterval(() => {
       setTimeMin((t) => {
-        const n = t + 3;
-        return n > arc.sunsetMin ? arc.sunriseMin : n;
+        const n = t + 6;
+        return n >= 1440 ? 0 : n;
       });
     }, 120);
     return () => clearInterval(id);
-  }, [animateShade, sunDragging, arc.sunriseMin, arc.sunsetMin]);
+  }, [animateShade, sunDragging]);
 
   // Reconcile the authoritative object the server returns after each mutation:
   // upsert it (a newly added/placed one gets appended + selected; an updated one
@@ -2679,6 +2680,11 @@ function Editor({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
+  // Night-lighting sim: how far the sun is below the horizon drives a dusk→night
+  // overlay and turns on path lights / the pyramid's after-dark rainbow. 0 = sun
+  // up; 1 = full night (sun ≥ 6° below the horizon).
+  const nightFactor = Math.max(0, Math.min(1, -sun.altitude / 6));
+  const isNight = nightFactor > 0.05;
   // Map zoom: 1 fits the whole lot in the frame, >1 scales it up (the frame
   // scrolls to pan). The buttons step it; the wheel zooms toward the cursor.
   const [zoom, setZoom] = useState(1);
@@ -3936,6 +3942,12 @@ function Editor({
           >
             <title>Camp layout</title>
             <defs>
+              {/* Path-light glow: warm pool of light fading out, for the night sim. */}
+              <radialGradient id="path-glow" cx="0.5" cy="0.5" r="0.5">
+                <stop offset="0" stopColor="#fff3bf" stopOpacity={0.95} />
+                <stop offset="0.35" stopColor="#ffe066" stopOpacity={0.55} />
+                <stop offset="1" stopColor="#ffe066" stopOpacity={0} />
+              </radialGradient>
               {/* Hypar roof: bright at the high front-right corner (by the door) →
               dark toward the low back-left, matching the per-corner heights. */}
               <linearGradient
@@ -4346,6 +4358,7 @@ function Editor({
                     lot.depthFt,
                     rear,
                   )}
+                  night={isNight}
                   onBodyDown={(e) => startDrag(e, o, "move")}
                   onResizeDown={(e) => startDrag(e, o, "resize")}
                   onRotateDown={(e) => startDrag(e, o, "rotate")}
@@ -4560,6 +4573,41 @@ function Editor({
                 </g>
               );
             })}
+            {/* Night-lighting sim: a dusk→night wash over the whole map, then path
+            lights glow warmly on top of it (and the pyramid's apex rainbow, drawn
+            inside the structure, shows through). */}
+            {isNight ? (
+              <>
+                <rect
+                  x={0}
+                  y={0}
+                  width={VIEW_W}
+                  height={viewH}
+                  fill="#0a1230"
+                  opacity={nightFactor * 0.6}
+                  pointerEvents="none"
+                />
+                {objects
+                  .filter((o) => o.kind === "path-light")
+                  .map((o) => {
+                    const gx = originX + (o.x + o.width / 2) * ppf;
+                    const gy = originY + (o.y + o.height / 2) * ppf;
+                    const rad = Math.max(16, 9 * ppf); // ~9ft pool of light
+                    return (
+                      <g key={`glow-${o.id}`} pointerEvents="none">
+                        <circle
+                          cx={gx}
+                          cy={gy}
+                          r={rad}
+                          fill="url(#path-glow)"
+                          opacity={nightFactor}
+                        />
+                        <circle cx={gx} cy={gy} r={2.4} fill="#fff9db" />
+                      </g>
+                    );
+                  })}
+              </>
+            ) : null}
             {/* Shade-snap hint: a ring on the structure vertex/edge the dragged
             shade is snapping to. */}
             {snapHint ? (
@@ -5041,9 +5089,32 @@ function Compass({
             label="Animate sun"
           />
           <Text size="xs" c="dimmed" mt={4}>
-            {formatClock(timeMin)} · sun {Math.round(sun.altitude)}° up · drag
-            the sun (to the day's ends to clear the shade)
+            {formatClock(timeMin)} ·{" "}
+            {sun.altitude > 0
+              ? `sun ${Math.round(sun.altitude)}° up`
+              : "night — lights on"}{" "}
+            · drag the dial or scrub below
           </Text>
+          {/* Full-day scrubber: covers night too (sun drops below the horizon at
+          the ends), driving the night-lighting effects. */}
+          <Slider
+            size="xs"
+            mt={6}
+            min={0}
+            max={1439}
+            step={3}
+            value={timeMin}
+            onChange={setTimeMin}
+            onPointerDown={() => setSunDragging(true)}
+            onChangeEnd={() => setSunDragging(false)}
+            label={(v) => formatClock(v)}
+            marks={[
+              { value: Math.round(arc.sunriseMin) },
+              { value: Math.round(arc.noonMin) },
+              { value: Math.round(arc.sunsetMin) },
+            ]}
+            styles={{ markLabel: { display: "none" } }}
+          />
           <Group justify="space-between" align="center" mt={10} mb={2}>
             <Text size="xs" fw={600}>
               Prevailing wind
@@ -5294,6 +5365,7 @@ const MapObjectShape = memo(
     dim,
     showDoors,
     overflow,
+    night,
     onBodyDown,
     onResizeDown,
     onRotateDown,
@@ -5308,6 +5380,8 @@ const MapObjectShape = memo(
     showDoors: boolean;
     /** The object's footprint crosses the lot border (center is still inside). */
     overflow: boolean;
+    /** The night-lighting sim is active (sun below the horizon). */
+    night: boolean;
     onBodyDown: (e: React.PointerEvent) => void;
     onResizeDown: (e: React.PointerEvent) => void;
     onRotateDown: (e: React.PointerEvent) => void;
@@ -5642,6 +5716,7 @@ const MapObjectShape = memo(
                 rotation: o.rotation,
                 mirror: o.mirrored,
                 config: o.config,
+                night,
               })}
             </g>
           ) : (
@@ -5823,6 +5898,7 @@ const MapObjectShape = memo(
     prev.dim === next.dim &&
     prev.overflow === next.overflow &&
     prev.showDoors === next.showDoors &&
+    prev.night === next.night &&
     prev.originX === next.originX &&
     prev.originY === next.originY &&
     prev.ppf === next.ppf,

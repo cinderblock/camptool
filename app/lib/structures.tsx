@@ -537,6 +537,21 @@ const CORE_KINDS = [
     tags: ["structure"],
     personal: false,
   },
+  // A path light / luminaire marker — placed along walkways; glows after dark in
+  // the night-lighting sim. Small fixed footprint.
+  {
+    value: "path-light",
+    label: "Path light",
+    color: "#ffd43b",
+    w: 1,
+    h: 1,
+    shape: "rect",
+    vehicle: false,
+    rigid: true,
+    group: "Services",
+    tags: ["structure"],
+    personal: false,
+  },
   // Toy hauler — a trailer with a fold-down rear ramp (config `ramp`). Fixed
   // width, length resizes; the deployed ramp extends the footprint (toyHaulerFootprint).
   {
@@ -627,6 +642,7 @@ const KIND_HEIGHTS: Record<string, number> = {
   "water-tank-fresh": 5.5,
   "water-tank-grey": 5.5,
   trash: 4,
+  "path-light": 3,
   "toy-hauler": 10,
   airstream: 9.5,
   kitchen: 8,
@@ -1138,6 +1154,35 @@ export function KindIcon({
         strokeWidth={1}
         strokeLinejoin="round"
       />
+    );
+  } else if (kind.value === "path-light") {
+    // Glowing bulb with rays.
+    detail = (
+      <g>
+        <circle
+          cx={cx}
+          cy={cy}
+          r={minWH * 0.22}
+          fill="#fff59d"
+          stroke={dark}
+          strokeOpacity={0.4}
+          strokeWidth={0.4}
+        />
+        {[0, 45, 90, 135, 180, 225, 270, 315].map((a) => {
+          const r = (a * Math.PI) / 180;
+          return (
+            <line
+              key={a}
+              x1={cx + Math.cos(r) * minWH * 0.3}
+              y1={cy + Math.sin(r) * minWH * 0.3}
+              x2={cx + Math.cos(r) * minWH * 0.42}
+              y2={cy + Math.sin(r) * minWH * 0.42}
+              stroke="#f59f00"
+              strokeWidth={0.7}
+            />
+          );
+        })}
+      </g>
     );
   }
 

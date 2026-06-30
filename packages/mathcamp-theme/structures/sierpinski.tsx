@@ -208,6 +208,7 @@ function renderFootprint({
   rotation,
   mirror,
   config,
+  night,
 }: FootprintCtx): ReactNode {
   const A: Pt = [w / 2, 0]; // base corner (footprint top)
   const B: Pt = [0, h]; // base corner (bottom-left)
@@ -291,6 +292,33 @@ function renderFootprint({
           rotation={rotation}
         />
       ))}
+      {/* After dark, the smallest top tetra at the apex glows in an animated
+          rainbow (the night-lighting sim). A soft pulsing halo + a hue-cycling
+          triangle, both via SMIL so it animates with no external CSS. */}
+      {night ? (
+        <g>
+          <circle cx={G[0]} cy={G[1]} r={edge * 0.18} fill="#ffffff">
+            <animate
+              attributeName="opacity"
+              values="0.2;0.55;0.2"
+              dur="2.4s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          <polygon
+            points={`${G[0]},${G[1] - edge * 0.13} ${G[0] - edge * 0.113},${G[1] + edge * 0.065} ${G[0] + edge * 0.113},${G[1] + edge * 0.065}`}
+            stroke="#1c1c1c"
+            strokeWidth={0.12}
+          >
+            <animate
+              attributeName="fill"
+              values="#ff2d2d;#ff9f1c;#ffe600;#2ecc40;#1f9bff;#9b59ff;#ff2d2d"
+              dur="3s"
+              repeatCount="indefinite"
+            />
+          </polygon>
+        </g>
+      ) : null}
       {/* Pi stick at the apex (over the centroid, where the 3 faces meet). */}
       <circle
         cx={G[0]}
