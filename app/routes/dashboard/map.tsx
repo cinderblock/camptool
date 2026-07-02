@@ -3057,6 +3057,16 @@ function Editor({
   const editable = (o: ObjRow) =>
     canManage || (canEdit && o.ownerMembershipId === myMembershipId);
 
+  // Drag-resizing is narrower than editing. A person knows their own tent's
+  // size, so you shouldn't casually drag someone else's to a wrong dimension —
+  // even officers, who arrange the camp, shouldn't resize others' domiciles by
+  // eye. The corner handle is therefore limited to your own items and
+  // unowned/shared objects; an officer can still correct a size via the numeric
+  // width/height inputs in the properties panel.
+  const resizable = (o: ObjRow) =>
+    editable(o) &&
+    (o.ownerMembershipId === null || o.ownerMembershipId === myMembershipId);
+
   // Highlight filter: an object matches the active category (or all when "none").
   const matches = (o: ObjRow) => {
     if (highlight === "none") return true;
@@ -4927,6 +4937,7 @@ function Editor({
                     selectedIds.length === 1 && selectedIds[0] === o.id
                   }
                   editable={editable(o)}
+                  resizable={resizable(o)}
                   dim={highlight !== "none" && !matches(o)}
                   showDoors={showDoors}
                   overflow={objectOverflowsLot(
@@ -6065,6 +6076,7 @@ const MapObjectShape = memo(
     selected,
     soleSelected,
     editable,
+    resizable,
     dim,
     showDoors,
     overflow,
@@ -6082,6 +6094,9 @@ const MapObjectShape = memo(
      * multi-selection shows a single group handle instead). */
     soleSelected: boolean;
     editable: boolean;
+    /** Whether the corner drag-resize handle is offered (owner-only; see the
+     * `resizable` helper). Move/rotate follow `editable` instead. */
+    resizable: boolean;
     dim: boolean;
     showDoors: boolean;
     /** The object's footprint crosses the lot border (center is still inside). */
@@ -6545,9 +6560,11 @@ const MapObjectShape = memo(
                 style={{ cursor: "grab" }}
                 onPointerDown={onRotateDown}
               />
-              {def.vehicle || def.rigid || def.shape === "dome" ? null : (
+              {resizable &&
+              !(def.vehicle || def.rigid || def.shape === "dome") ? (
                 // Domes stay round: no corner-drag (which would skew w≠h); the
-                // diameter is set in the properties panel instead.
+                // diameter is set in the properties panel instead. The handle is
+                // owner-only — you don't drag-resize someone else's tent.
                 <rect
                   x={px + w - 6}
                   y={py + h - 6}
@@ -6559,7 +6576,7 @@ const MapObjectShape = memo(
                   style={{ cursor: "nwse-resize" }}
                   onPointerDown={onResizeDown}
                 />
-              )}
+              ) : null}
             </>
           ) : null}
         </g>
@@ -6602,6 +6619,7 @@ const MapObjectShape = memo(
     prev.selected === next.selected &&
     prev.soleSelected === next.soleSelected &&
     prev.editable === next.editable &&
+    prev.resizable === next.resizable &&
     prev.dim === next.dim &&
     prev.overflow === next.overflow &&
     prev.showDoors === next.showDoors &&
