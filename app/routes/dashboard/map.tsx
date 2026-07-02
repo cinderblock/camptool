@@ -1931,6 +1931,9 @@ function shadowPolygon(
   mapUpBearing: number,
 ): ZonePt[][] {
   if (sun.altitude <= 0.5) return [];
+  // A path light is a point luminaire (no real volume) → never casts shade, even
+  // if an older row still carries a stored height.
+  if (o.kind === "path-light") return [];
   const def = kindDef(o.kind);
   if (def.shape === "dome") {
     const d = domeShadow(o, sun, mapUpBearing);
@@ -4464,8 +4467,8 @@ function Editor({
             <defs>
               {/* Path-light glow: warm pool of light fading out, for the night sim. */}
               <radialGradient id="path-glow" cx="0.5" cy="0.5" r="0.5">
-                <stop offset="0" stopColor="#fff3bf" stopOpacity={0.95} />
-                <stop offset="0.35" stopColor="#ffe066" stopOpacity={0.55} />
+                <stop offset="0" stopColor="#fff3bf" stopOpacity={0.4} />
+                <stop offset="0.4" stopColor="#ffe066" stopOpacity={0.14} />
                 <stop offset="1" stopColor="#ffe066" stopOpacity={0} />
               </radialGradient>
               {/* Hypar roof: bright at the high front-right corner (by the door) →
@@ -5115,7 +5118,7 @@ function Editor({
                   .map((o) => {
                     const gx = originX + (o.x + o.width / 2) * ppf;
                     const gy = originY + (o.y + o.height / 2) * ppf;
-                    const rad = Math.max(16, 9 * ppf); // ~9ft pool of light
+                    const rad = Math.max(7, 4 * ppf); // ~4ft dim pool
                     return (
                       <g key={`glow-${o.id}`} pointerEvents="none">
                         <circle
@@ -5123,9 +5126,15 @@ function Editor({
                           cy={gy}
                           r={rad}
                           fill="url(#path-glow)"
-                          opacity={nightFactor}
+                          opacity={nightFactor * 0.65}
                         />
-                        <circle cx={gx} cy={gy} r={2.4} fill="#fff9db" />
+                        <circle
+                          cx={gx}
+                          cy={gy}
+                          r={1.4}
+                          fill="#fff9db"
+                          opacity={0.8}
+                        />
                       </g>
                     );
                   })}

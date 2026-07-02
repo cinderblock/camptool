@@ -642,7 +642,8 @@ const KIND_HEIGHTS: Record<string, number> = {
   "water-tank-fresh": 5.5,
   "water-tank-grey": 5.5,
   trash: 4,
-  "path-light": 3,
+  // A point luminaire: no real volume, so it casts no shade (height 0).
+  "path-light": 0,
   "toy-hauler": 10,
   airstream: 9.5,
   kitchen: 8,
