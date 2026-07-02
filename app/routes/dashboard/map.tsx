@@ -2168,7 +2168,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const sun = useMemo(() => sunAt(sunYear, timeMin), [sunYear, timeMin]);
 
   // ---- Prevailing-wind flow visualization (animated particles around buildings).
-  // The particle-count slider doubles as the on/off control (0 = off); direction
+  // Density is picked from discrete Off/Low/Med/High levels (0 = off); direction
   // + strength live on the orientation dial (a *from* bearing seeded to BRC's
   // prevailing wind, distance-from-center = strength). Client-only (not persisted).
   const [windParticles, setWindParticles] = useState(0);
@@ -5493,7 +5493,14 @@ function Compass({
   // Wind speed maps to the wind handle's distance from the dial center.
   const WIND_MIN = 0.4;
   const WIND_MAX = 2;
-  const WIND_MAX_PARTICLES = 400;
+  // Particle count is picked from a few discrete levels rather than a slider.
+  const WIND_OFF = { label: "Off", count: 0 };
+  const WIND_LEVELS: { label: string; count: number }[] = [
+    WIND_OFF,
+    { label: "Low", count: 100 },
+    { label: "Med", count: 250 },
+    { label: "High", count: 400 },
+  ];
   const vec = (bearing: number) => {
     const phi = (((bearing - (mapUpBearing ?? 0)) % 360) * Math.PI) / 180;
     return { x: Math.sin(phi), y: -Math.cos(phi) };
@@ -5555,7 +5562,7 @@ function Compass({
     if (!draggingSun) return;
     const move = (e: PointerEvent) => {
       const b = bearingFromPointer(e.clientX, e.clientY);
-      setTimeMin(minuteForAzimuth(year, arc.sunriseMin, arc.sunsetMin, b));
+      setTimeMin(minuteForAzimuth(year, b));
     };
     const up = () => {
       setDraggingSun(false);
@@ -5757,28 +5764,8 @@ function Compass({
             {sun.altitude > 0
               ? `sun ${Math.round(sun.altitude)}° up`
               : "night — lights on"}{" "}
-            · drag the dial or scrub below
+            · drag the sun around the dial
           </Text>
-          {/* Full-day scrubber: covers night too (sun drops below the horizon at
-          the ends), driving the night-lighting effects. */}
-          <Slider
-            size="xs"
-            mt={6}
-            min={0}
-            max={1439}
-            step={3}
-            value={timeMin}
-            onChange={setTimeMin}
-            onPointerDown={() => setSunDragging(true)}
-            onChangeEnd={() => setSunDragging(false)}
-            label={(v) => formatClock(v)}
-            marks={[
-              { value: Math.round(arc.sunriseMin) },
-              { value: Math.round(arc.noonMin) },
-              { value: Math.round(arc.sunsetMin) },
-            ]}
-            styles={{ markLabel: { display: "none" } }}
-          />
           <Group justify="space-between" align="center" mt={10} mb={2}>
             <Text size="xs" fw={600}>
               Prevailing wind
@@ -5794,24 +5781,24 @@ function Compass({
               Reset
             </Button>
           </Group>
-          <Text size="xs" c="dimmed" mb={2}>
-            {windParticles} particles{" "}
+          <Text size="xs" c="dimmed" mb={4}>
             {windOn
-              ? `· from ${Math.round(windFromBearing)}°`
-              : "· slide up to show the flow"}
+              ? `${windParticles} particles · from ${Math.round(windFromBearing)}°`
+              : "Off — pick a level to show the flow"}
           </Text>
-          <Slider
-            size="sm"
-            min={0}
-            max={WIND_MAX_PARTICLES}
-            step={10}
-            value={windParticles}
-            onChange={setWindParticles}
-            marks={[
-              { value: 0, label: "off" },
-              { value: WIND_MAX_PARTICLES, label: String(WIND_MAX_PARTICLES) },
-            ]}
-            label={(v) => (v === 0 ? "off" : String(v))}
+          <SegmentedControl
+            size="xs"
+            fullWidth
+            value={
+              (WIND_LEVELS.find((l) => l.count === windParticles) ?? WIND_OFF)
+                .label
+            }
+            onChange={(label) =>
+              setWindParticles(
+                (WIND_LEVELS.find((l) => l.label === label) ?? WIND_OFF).count,
+              )
+            }
+            data={WIND_LEVELS.map((l) => l.label)}
           />
         </>
       ) : (

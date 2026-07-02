@@ -116,18 +116,15 @@ export function dayArc(year: number): {
   return { sunriseMin, sunsetMin, noonMin };
 }
 
-/** Invert azimuth → local minute: the daylight minute whose sun azimuth is
- * closest to `azimuthDeg`. Azimuth is monotonic across the day at this latitude,
- * so a closest-match scan is robust (and clamps to the ends off-arc). */
-export function minuteForAzimuth(
-  year: number,
-  sunriseMin: number,
-  sunsetMin: number,
-  azimuthDeg: number,
-): number {
-  let best = sunriseMin;
+/** Invert azimuth → local minute: the minute of the day whose sun azimuth is
+ * closest to `azimuthDeg`. The sun sweeps the full circle once per day (daylight
+ * across the south, then swinging back through the north below the horizon at
+ * night), so scanning the whole day lets a drag reach any time — including night —
+ * making the dial draggable all the way around. */
+export function minuteForAzimuth(year: number, azimuthDeg: number): number {
+  let best = 0;
   let bestDiff = Number.POSITIVE_INFINITY;
-  for (let m = sunriseMin; m <= sunsetMin; m += 2) {
+  for (let m = 0; m <= 1440; m += 2) {
     const az = sunAt(year, m).azimuth;
     let d = Math.abs(az - azimuthDeg);
     if (d > 180) d = 360 - d;
