@@ -239,6 +239,26 @@ function renderFootprint({
   const bt = flyingButtress(w, h, buttressExt(config));
   return (
     <g>
+      {/* After dark the pyramid casts a big, soft, DIM pool of light on the
+          ground around it (drawn behind everything so it reads as spill light). */}
+      {night ? (
+        <>
+          <defs>
+            <radialGradient id="pyramid-night-glow" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0" stopColor="#e8dcff" stopOpacity={0.32} />
+              <stop offset="0.5" stopColor="#b9a8ff" stopOpacity={0.11} />
+              <stop offset="1" stopColor="#b9a8ff" stopOpacity={0} />
+            </radialGradient>
+          </defs>
+          <circle
+            cx={G[0]}
+            cy={G[1]}
+            r={w * 1.4}
+            fill="url(#pyramid-night-glow)"
+            pointerEvents="none"
+          />
+        </>
+      ) : null}
       {/* Geometry reflects under mirror (x→w−x); text stays upright (drawn after,
           outside this group). */}
       <g transform={mirror ? `translate(${w} 0) scale(-1 1)` : undefined}>
@@ -292,33 +312,56 @@ function renderFootprint({
           rotation={rotation}
         />
       ))}
-      {/* After dark, the smallest top tetra at the apex glows in an animated
-          rainbow (the night-lighting sim). A soft pulsing halo + a hue-cycling
-          triangle, both via SMIL so it animates with no external CSS. */}
-      {night ? (
-        <g>
-          <circle cx={G[0]} cy={G[1]} r={edge * 0.18} fill="#ffffff">
-            <animate
-              attributeName="opacity"
-              values="0.2;0.55;0.2"
-              dur="2.4s"
-              repeatCount="indefinite"
-            />
-          </circle>
-          <polygon
-            points={`${G[0]},${G[1] - edge * 0.13} ${G[0] - edge * 0.113},${G[1] + edge * 0.065} ${G[0] + edge * 0.113},${G[1] + edge * 0.065}`}
-            stroke="#1c1c1c"
-            strokeWidth={0.12}
-          >
-            <animate
-              attributeName="fill"
-              values="#ff2d2d;#ff9f1c;#ffe600;#2ecc40;#1f9bff;#9b59ff;#ff2d2d"
-              dur="3s"
-              repeatCount="indefinite"
-            />
-          </polygon>
-        </g>
-      ) : null}
+      {/* After dark, the smallest top tetra lights up in an animated rainbow —
+          drawn as the top-down 2D view of a tetrahedron's EDGES: the equilateral
+          base perimeter (3 sticks) + each base vertex to the apex, which projects
+          onto the centroid (3 spokes) = 6 sticks. Each hue-cycles via SMIL, phase-
+          staggered so the color flows around the frame. */}
+      {night
+        ? (() => {
+            // Small top tetra base = equilateral triangle (edge = w/4); its
+            // circumradius = edge/√3. One vertex points up (−y), toward the
+            // pyramid apex, matching the big triangle.
+            const R = w / 4 / Math.sqrt(3);
+            const v = [0, 1, 2].map((k) => {
+              const a = (-90 + 120 * k) * (Math.PI / 180);
+              return [G[0] + Math.cos(a) * R, G[1] + Math.sin(a) * R] as Pt;
+            });
+            const v0 = v[0] as Pt;
+            const v1 = v[1] as Pt;
+            const v2 = v[2] as Pt;
+            const sticks: [Pt, Pt][] = [
+              [v0, v1], // base perimeter
+              [v1, v2],
+              [v2, v0],
+              [G, v0], // spokes to the apex-over-centroid
+              [G, v1],
+              [G, v2],
+            ];
+            return (
+              <g strokeLinecap="round">
+                {sticks.map((s, i) => (
+                  <line
+                    key={`tetra-${i}-${s[0][0].toFixed(1)}`}
+                    x1={s[0][0]}
+                    y1={s[0][1]}
+                    x2={s[1][0]}
+                    y2={s[1][1]}
+                    strokeWidth={0.5}
+                  >
+                    <animate
+                      attributeName="stroke"
+                      values="#ff2d2d;#ff9f1c;#ffe600;#2ecc40;#1f9bff;#9b59ff;#ff2d2d"
+                      dur="3s"
+                      begin={`-${(i * 0.5).toFixed(1)}s`}
+                      repeatCount="indefinite"
+                    />
+                  </line>
+                ))}
+              </g>
+            );
+          })()
+        : null}
       {/* Pi stick at the apex (over the centroid, where the 3 faces meet). */}
       <circle
         cx={G[0]}
