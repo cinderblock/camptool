@@ -1516,6 +1516,57 @@ const SURROUND_GAP_FT = 3;
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 8;
 
+// The map's large ground/pavement/neighbor fills are scheme-dependent. If we
+// switched them off a JS boolean (`useComputedColorScheme`) they'd render in the
+// light values on the very first paint — Mantine only resolves the real scheme in
+// an effect, after the server HTML (light) is already on screen — a visible white
+// flash on a dark device. Instead we expose them as CSS variables keyed off the
+// `data-mantine-color-scheme` attribute, which ColorSchemeScript sets
+// synchronously before first paint (same technique as root.tsx's earlyColorScheme
+// CSS). The media query is the no-JS / pre-script baseline; the attribute rules
+// let Mantine's explicit choice override the system preference. The palette shades
+// (`--mantine-color-dark-*`, `-gray-*`) are scheme-independent and defined by
+// Mantine's stylesheet (render-blocking in <head>), so they resolve on first paint
+// too. Keep these values in sync with the *Fill definitions below.
+const MAP_GROUND = "var(--ct-map-ground)";
+const MAP_PAVEMENT = "var(--ct-map-pavement)";
+const MAP_NEIGHBOR = "var(--ct-map-neighbor)";
+const mapSchemeVars = (dark: boolean) => ({
+  "--ct-map-ground": dark
+    ? "var(--mantine-color-dark-4)"
+    : "var(--mantine-color-default)",
+  "--ct-map-pavement": dark
+    ? "var(--mantine-color-dark-5)"
+    : "var(--mantine-color-gray-3)",
+  "--ct-map-neighbor": dark
+    ? "var(--mantine-color-dark-6)"
+    : "var(--mantine-color-gray-1)",
+});
+const MAP_SCHEME_CSS = `
+:root {
+${Object.entries(mapSchemeVars(false))
+  .map(([k, v]) => `  ${k}: ${v};`)
+  .join("\n")}
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+${Object.entries(mapSchemeVars(true))
+  .map(([k, v]) => `    ${k}: ${v};`)
+  .join("\n")}
+  }
+}
+html[data-mantine-color-scheme="light"] {
+${Object.entries(mapSchemeVars(false))
+  .map(([k, v]) => `  ${k}: ${v};`)
+  .join("\n")}
+}
+html[data-mantine-color-scheme="dark"] {
+${Object.entries(mapSchemeVars(true))
+  .map(([k, v]) => `  ${k}: ${v};`)
+  .join("\n")}
+}
+`;
+
 function rotateVec(vx: number, vy: number, deg: number) {
   const r = (deg * Math.PI) / 180;
   const cos = Math.cos(r);
@@ -3301,12 +3352,10 @@ function Editor({
     viewH - MARGIN,
     roadBandTop + SERVICE_ROAD_W_FT * ppf,
   );
-  const pavementFill = dark
-    ? "var(--mantine-color-dark-5)"
-    : "var(--mantine-color-gray-3)";
-  const neighborFill = dark
-    ? "var(--mantine-color-dark-6)"
-    : "var(--mantine-color-gray-1)";
+  // Scheme-aware via CSS (see MAP_SCHEME_CSS) so they don't flash light on the
+  // first paint before Mantine's JS resolves the color scheme.
+  const pavementFill = MAP_PAVEMENT;
+  const neighborFill = MAP_NEIGHBOR;
   const neighbors = [
     { id: "L", x0: viewL, x1: lotLeftPx - gapPx },
     { id: "R", x0: lotRightPx + gapPx, x1: viewR },
@@ -3436,9 +3485,8 @@ function Editor({
   const shadeOpacity = (dark ? 0.85 : 0.36) * sunStrength;
   // In dark mode the lot ground is a lighter dark-surface (so a near-black shadow
   // clearly stands out against it); in light mode it stays the default white-ish.
-  const groundFill = dark
-    ? "var(--mantine-color-dark-4)"
-    : "var(--mantine-color-default)";
+  // Scheme-aware via CSS (see MAP_SCHEME_CSS) to avoid a first-paint white flash.
+  const groundFill = MAP_GROUND;
   const shadowFill = dark ? "#000000" : "#1c1c1c";
   // Sun direction in the plot plane (toward the sun), used to offset the dome's
   // spherical-shading highlight toward the sun. Faint near the horizon.
@@ -4198,6 +4246,9 @@ function Editor({
         width: "100%",
       }}
     >
+      {/* Scheme-dependent map fills as CSS vars, resolved before first paint to
+      avoid a white flash on dark-mode initial load (see MAP_SCHEME_CSS). */}
+      <style>{MAP_SCHEME_CSS}</style>
       {canManage ? (
         <Group
           gap="xs"
