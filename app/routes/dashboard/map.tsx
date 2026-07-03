@@ -2348,18 +2348,14 @@ async function exportMapJpeg(opts: {
     document.body.removeChild(holder);
   }
 
-  // Lighten the cast shadows: the live view uses a near-black shadow (heavy in
-  // dark mode), but a printed layout reads best with a soft grey.
-  for (const g of Array.from(clone.querySelectorAll("[data-map-shadow]"))) {
-    (g as SVGElement).style.opacity = "0.5";
-    for (const poly of Array.from(g.querySelectorAll("polygon"))) {
-      (poly as SVGElement).style.fill = "#adb5bd";
-    }
+  // Drop the sun-cast shadows entirely — a submission layout wants a clean plan
+  // view, not the shade sim.
+  for (const el of Array.from(clone.querySelectorAll("[data-map-shadow]"))) {
+    el.remove();
   }
-
-  // Strip campers' personal (occupant) names — BM only needs the camp + the
-  // single submission contact, not everyone's names.
-  for (const el of Array.from(clone.querySelectorAll("[data-personal-name]"))) {
+  // Drop every object name (given + occupant) — BM only needs the camp + the
+  // single submission contact, not per-item labels.
+  for (const el of Array.from(clone.querySelectorAll("[data-map-label]"))) {
     el.remove();
   }
   clone.removeAttribute("style"); // root sizes from width/height attrs below
@@ -7231,6 +7227,8 @@ const MapObjectShape = memo(
             // readable from the bottom, or from the right for a length-dominant
             // (taller-than-wide) object.
             transform={`rotate(${labelAngle} ${cx} ${cy})`}
+            // Tagged so the BM export can drop object names (given + occupant).
+            data-map-label="1"
           >
             {showName ? (
               <text
@@ -7252,8 +7250,6 @@ const MapObjectShape = memo(
                 fontSize={showName ? 13 : 15}
                 fontWeight={showName ? 400 : 600}
                 fill={showName ? "#868e96" : "#1c1c1c"}
-                // Personal (occupant) name — stripped from the BM export for privacy.
-                data-personal-name="1"
               >
                 {ownerFirst}
               </text>
