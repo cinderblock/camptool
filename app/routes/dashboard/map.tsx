@@ -2322,6 +2322,12 @@ async function exportMapJpeg(opts: {
   // of the viewer's theme — see BurningManExport.onExport.
   const clone = live.cloneNode(true) as SVGSVGElement;
   inlineComputedStyles(live, clone);
+  // Strip campers' personal (occupant) names from the submission image — BM only
+  // needs the camp + the single submission contact, not everyone's names. Done
+  // after inlining so the live↔clone tree walk stays aligned.
+  for (const el of Array.from(clone.querySelectorAll("[data-personal-name]"))) {
+    el.remove();
+  }
   clone.removeAttribute("style"); // root sizes from width/height attrs below
   const vb = live.viewBox.baseVal;
   const mw = vb.width || live.clientWidth || 1000;
@@ -6737,6 +6743,12 @@ const MapObjectShape = memo(
     // name (domiciles) is shown secondarily beneath it.
     const showName = !!o.name && bigEnough;
     const showOwner = isDomicile && !!ownerFirst && bigEnough;
+    // Label orientation: align with the object's dominant (longer) axis — a
+    // length-dominant (taller-than-wide) object reads along its length (+90°) —
+    // then rotate with the object and fold into (−90°, 90°] so the text is never
+    // upside down (readable from the bottom, or the right when vertical).
+    let labelAngle = (((o.rotation + (h > w ? 90 : 0)) % 360) + 360) % 360;
+    if (labelAngle > 90 && labelAngle <= 270) labelAngle -= 180;
     return (
       <g opacity={dim ? 0.28 : undefined}>
         <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
@@ -7189,6 +7201,11 @@ const MapObjectShape = memo(
           <g
             style={{ pointerEvents: "none", userSelect: "none" }}
             textAnchor="middle"
+            // Run the label along the object's dominant (longer) axis, rotated
+            // with it — then fold the angle so it's never upside down: always
+            // readable from the bottom, or from the right for a length-dominant
+            // (taller-than-wide) object.
+            transform={`rotate(${labelAngle} ${cx} ${cy})`}
           >
             {showName ? (
               <text
@@ -7210,6 +7227,8 @@ const MapObjectShape = memo(
                 fontSize={showName ? 13 : 15}
                 fontWeight={showName ? 400 : 600}
                 fill={showName ? "#868e96" : "#1c1c1c"}
+                // Personal (occupant) name — stripped from the BM export for privacy.
+                data-personal-name="1"
               >
                 {ownerFirst}
               </text>
