@@ -424,9 +424,6 @@ function footprint(
   ];
 }
 
-/** Feet the Pi-symbol stick rises above the tetra apex. */
-const PI_STICK_FT = 6;
-
 /**
  * Solid-tetrahedron silhouette for the shade sim (centered local feet; z = a
  * fraction of tallFt). It's covered in shade cloth → a SOLID, so the cast shadow
@@ -444,36 +441,13 @@ function shadowVolume(
   config: Record<string, number>,
 ): ShadowVertex[][] {
   const apexY = (2 * h) / 3 - h / 2; // base centroid, centered
-  const tetraH = w * Math.sqrt(2 / 3); // apex height (ft), edge = w
-  const piZ = (tetraH + PI_STICK_FT) / tetraH; // π height as a fraction of tallFt (≈1.18)
   // The flying-buttress canopy floats at the peak of a 10′ tetra (8′2″); as a
   // fraction of the full tetra height that's 10/w.
   const flyZ = 10 / w;
   const bt = flyingButtress(w, h, buttressExt(config));
-
-  // The Pi sign (~6′ tall) as a flat π glyph at height `piZ`, centered over the
-  // apex/centroid. All at one height, so the whole glyph translates rigidly to the
-  // ground (a clean, readable Pi shadow). Top bar + two legs = 3 convex strokes,
-  // each cast as its own shadow so the open middle stays unshaded.
-  const HW = 3; // glyph half-width (6′ wide)
-  const HH = 3; // glyph half-height (6′ tall)
-  const T = 0.9; // stroke thickness
-  const LX = 2.0; // leg centerline offset from center
-  const cy = apexY;
-  const bar = (
-    x0: number,
-    y0: number,
-    x1: number,
-    y1: number,
-  ): ShadowVertex[] => [
-    { x: x0, y: y0, z: piZ },
-    { x: x1, y: y0, z: piZ },
-    { x: x1, y: y1, z: piZ },
-    { x: x0, y: y1, z: piZ },
-  ];
-
   return [
-    // Part 1 — the solid tetra (base corners + apex): one hull.
+    // Part 1 — the solid tetra (base corners + apex): one hull. (The Pi sign's
+    // shadow is drawn separately, sun-aware, in `shadedFaces`.)
     [
       { x: 0, y: -h / 2, z: 0 }, // top corner, ground
       { x: -w / 2, y: h / 2, z: 0 }, // bottom-left, ground
@@ -483,11 +457,89 @@ function shadowVolume(
     // Part 2 — the flying-buttress canopy (separate flat shade at 8′2″): its own
     // hull, so it casts a distinct shadow rather than merging with the tetra.
     bt.verts.map((p) => ({ x: p[0] - w / 2, y: p[1] - h / 2, z: flyZ })),
-    // Parts 3–5 — the Pi glyph strokes (top bar + left/right legs).
-    bar(-HW, cy - HH, HW, cy - HH + T),
-    bar(-LX - T / 2, cy - HH + T, -LX + T / 2, cy + HH),
-    bar(LX - T / 2, cy - HH + T, LX + T / 2, cy + HH),
   ];
+}
+
+/**
+ * The Pi sign's ground shadow, as filled polygons in the footprint (0,0→w,h)
+ * frame — a **swoopy lowercase π** projected by the sun. The sign rides a vertical
+ * stick above the apex, so it's a billboard facing the sun: its shadow always
+ * points radially away from the pyramid with the **legs toward the pyramid** and
+ * the bar thrown farther, stretching as the sun lowers. Returned from
+ * `shadedFaces` (which is sun-aware) so it needs no core changes. `[]` if the sun
+ * is too high (negligible shadow).
+ */
+function piShadow(
+  w: number,
+  h: number,
+  sun: SunDir,
+): { points: { x: number; y: number }[]; shade: number }[] {
+  const cosAlt = Math.hypot(sun.x, sun.y);
+  if (cosAlt < 0.06) return []; // sun ~overhead → no meaningful shadow
+  const tanAlt = sun.up / cosAlt;
+  const anti = { x: -sun.x / cosAlt, y: -sun.y / cosAlt }; // away from the sun
+  const perp = { x: -anti.y, y: anti.x };
+  const G = { x: w / 2, y: (2 * h) / 3 }; // apex over the centroid
+  const tetraH = w * Math.sqrt(2 / 3);
+  const SIGN_FT = 7; // sign height
+  const WIDTH_FT = 7; // sign width
+  const base = Math.min(tetraH / tanAlt, 400); // apex ground-shadow distance
+  const len = Math.min(SIGN_FT / tanAlt, 260); // the sign's shadow length
+  // Glyph (gx ∈ [−1,1] across, gy ∈ [0,1] from legs=0 near the pyramid to bar=1
+  // far) → footprint feet.
+  const P = (gx: number, gy: number) => ({
+    x: G.x + anti.x * (base + gy * len) + perp.x * ((gx * WIDTH_FT) / 2),
+    y: G.y + anti.y * (base + gy * len) + perp.y * ((gx * WIDTH_FT) / 2),
+  });
+  const SHADE = 0.4;
+  // A stroke = a ribbon around a centerline, offset a fixed width IN FEET (uniform
+  // thickness regardless of how far the sun stretches the glyph).
+  const stroke = (
+    center: [number, number][],
+    halfFt: number,
+  ): { points: { x: number; y: number }[]; shade: number } => {
+    const c = center.map(([gx, gy]) => P(gx, gy));
+    const left: { x: number; y: number }[] = [];
+    const right: { x: number; y: number }[] = [];
+    for (let i = 0; i < c.length; i++) {
+      const a = c[Math.max(0, i - 1)] as { x: number; y: number };
+      const b = c[Math.min(c.length - 1, i + 1)] as { x: number; y: number };
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const l = Math.hypot(dx, dy) || 1;
+      const nx = (-dy / l) * halfFt;
+      const ny = (dx / l) * halfFt;
+      const p = c[i] as { x: number; y: number };
+      left.push({ x: p.x + nx, y: p.y + ny });
+      right.push({ x: p.x - nx, y: p.y - ny });
+    }
+    return { points: [...left, ...right.reverse()], shade: SHADE };
+  };
+  // Swoopy lowercase π: a gently waved top bar + two legs that flare out at the
+  // feet, the right one curling up (the classic π tail).
+  const bar: [number, number][] = [
+    [-0.95, 0.86],
+    [-0.5, 0.93],
+    [0, 0.9],
+    [0.5, 0.94],
+    [0.95, 0.87],
+  ];
+  const legL: [number, number][] = [
+    [-0.4, 0.9],
+    [-0.5, 0.6],
+    [-0.62, 0.32],
+    [-0.8, 0.1],
+    [-0.98, 0.03],
+  ];
+  const legR: [number, number][] = [
+    [0.4, 0.9],
+    [0.52, 0.6],
+    [0.68, 0.32],
+    [0.88, 0.12],
+    [1.02, 0.22],
+    [1.05, 0.42],
+  ];
+  return [stroke(bar, 0.6), stroke(legL, 0.55), stroke(legR, 0.55)];
 }
 
 // --- 3D helpers for slant-face lighting (footprint x,y + up = z). ---
@@ -523,7 +575,7 @@ function shadedFaces(w: number, h: number, sun: SunDir) {
     { p: B, q: C, wedge: [B, C, G] },
     { p: C, q: A, wedge: [C, A, G] },
   ];
-  return faces.map((f) => {
+  const wedges = faces.map((f) => {
     let n = cross3(sub3(f.q, f.p), sub3(D, f.p));
     // Orient the normal outward (away from the base centroid G).
     const m: V3 = [
@@ -537,6 +589,8 @@ function shadedFaces(w: number, h: number, sun: SunDir) {
     const shade = (1 - lambert) * MAX_SHADE;
     return { points: f.wedge.map((v) => ({ x: v[0], y: v[1] })), shade };
   });
+  // Plus the Pi sign's sun-projected ground shadow (a swoopy lowercase π).
+  return [...wedges, ...piShadow(w, h, sun)];
 }
 
 /** Regular 40′-edge tetra height = edge·√(2/3). */
