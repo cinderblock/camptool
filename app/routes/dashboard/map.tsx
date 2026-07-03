@@ -23,6 +23,7 @@ import {
   Title,
   Tooltip,
   useComputedColorScheme,
+  useMantineColorScheme,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { and, eq } from "drizzle-orm";
@@ -2316,6 +2317,9 @@ async function exportMapJpeg(opts: {
 }) {
   const live = document.getElementById("camp-map-svg") as SVGSVGElement | null;
   if (!live) throw new Error("Map SVG not found on the page.");
+  // NOTE: the caller forces the light color scheme + a re-render before calling
+  // this, so BM layouts export on a light background (readable in B/W) regardless
+  // of the viewer's theme — see BurningManExport.onExport.
   const clone = live.cloneNode(true) as SVGSVGElement;
   inlineComputedStyles(live, clone);
   clone.removeAttribute("style"); // root sizes from width/height attrs below
@@ -2424,27 +2428,47 @@ function BurningManExport({
   const [version, setVersion] = useState(mapStatus ?? "");
   const [abbrev, setAbbrev] = useState(deriveAbbrev(campName));
 
+  const { colorScheme, setColorScheme } = useMantineColorScheme();
   const cleanAbbrev = deriveAbbrev(abbrev);
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const dd = String(now.getDate()).padStart(2, "0");
+  // ISO date only (YYYY-MM-DD) — never MM/DD/YY.
+  const isoDate = `${now.getFullYear()}-${mm}-${dd}`;
   const filename = `${cleanAbbrev}_${mm}_${dd}.jpg`;
   const filenameOk = cleanAbbrev.length > 0 && filename.length <= 20;
+
+  // "First «playa» Last": drop the playa name in between the first and last name.
+  const displayName = (() => {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    const first = parts[0] ?? "";
+    const last = parts.slice(1).join(" ");
+    return [first, playa ? `"${playa}"` : "", last].filter(Boolean).join(" ");
+  })();
 
   const onExport = async () => {
     setBusy(true);
     setErr(null);
+    // BM layouts must read on a light background (B/W-safe). Force light + let the
+    // map re-render (some fills are theme-derived in JS, not just CSS vars), then
+    // restore the viewer's scheme after.
+    const prevScheme = colorScheme;
     try {
       // Persist the contact for next time (camp-scoped).
       fetcher.submit(
         { intent: "setPlacementContact", name, playa, email, phone },
         { method: "post" },
       );
+      setColorScheme("light");
+      // Wait for the re-render + paint to land before we snapshot the SVG.
+      await new Promise<void>((res) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => res())),
+      );
       const contactLines = [
-        `Contact: ${name}${playa ? ` "${playa}"` : ""}`,
+        `Contact: ${displayName}`,
         [email, phone].filter(Boolean).join("   ·   "),
       ];
-      const dateVersion = `Date: ${mm}/${dd}/${now.getFullYear()}${
+      const dateVersion = `Date: ${isoDate}${
         version ? `      Version: ${version}` : ""
       }`;
       await exportMapJpeg({
@@ -2458,6 +2482,7 @@ function BurningManExport({
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
+      setColorScheme(prevScheme);
       setBusy(false);
     }
   };
