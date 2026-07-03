@@ -9,6 +9,7 @@ import {
   Flex,
   Group,
   Menu,
+  Modal,
   NumberInput,
   Paper,
   SegmentedControl,
@@ -85,6 +86,7 @@ import {
 } from "~/lib/wind";
 import { db } from "../../../db/client.server";
 import {
+  camp,
   campEdition,
   mapCable,
   mapObject,
@@ -712,7 +714,11 @@ async function loadObjRow(
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const {
+    user: account,
+    active,
+    activeEdition,
+  } = await requireActiveEdition(request);
   const editionId = activeEdition.id;
 
   const [lot] = await db
@@ -785,6 +791,16 @@ export async function loader({ request }: Route.LoaderArgs) {
       ownerName: u.ownerName,
     })),
     campName: active.camp.name,
+    // Placement/submission contact for the map export. Stored on the camp
+    // (persists across years); `account` seeds a first-time export from the
+    // signed-in officer's name/email.
+    contact: {
+      name: active.camp.placementContactName ?? "",
+      playa: active.camp.placementContactPlaya ?? "",
+      email: active.camp.placementContactEmail ?? "",
+      phone: active.camp.placementContactPhone ?? "",
+    },
+    account: { name: account.name ?? "", email: account.email ?? "" },
     lot: lot
       ? {
           streetLetter: lot.streetLetter,
@@ -870,6 +886,7 @@ export async function action({ request }: Route.ActionArgs) {
   const officerOnly = new Set([
     "savePlacement",
     "setMapStatus",
+    "setPlacementContact",
     "addObject",
     "addBlock",
     "updateObjects",
@@ -934,6 +951,24 @@ export async function action({ request }: Route.ActionArgs) {
       .update(campEdition)
       .set({ mapStatus: raw === "" ? null : raw.slice(0, 60) })
       .where(eq(campEdition.id, editionId));
+    return data({ ok: true });
+  }
+
+  if (intent === "setPlacementContact") {
+    // Camp-scoped submission contact for the map export (persists across years).
+    const clean = (k: string) => {
+      const v = String(form.get(k) ?? "").trim();
+      return v === "" ? null : v.slice(0, 120);
+    };
+    await db
+      .update(camp)
+      .set({
+        placementContactName: clean("name"),
+        placementContactPlaya: clean("playa"),
+        placementContactEmail: clean("email"),
+        placementContactPhone: clean("phone"),
+      })
+      .where(eq(camp.id, campId));
     return data({ ok: true });
   }
 
@@ -2228,6 +2263,286 @@ function GridScaleNote({ lot }: { lot: Lot }) {
   );
 }
 
+/** Copy every element's *computed* presentation styles onto a clone, so a
+ * serialized copy of the map SVG rasterizes with the right colors even though the
+ * live SVG relies on CSS variables (Mantine palette + the map scheme vars). */
+function inlineComputedStyles(src: Element, dst: Element) {
+  const cs = window.getComputedStyle(src);
+  const PROPS = [
+    "fill",
+    "fill-opacity",
+    "stroke",
+    "stroke-width",
+    "stroke-opacity",
+    "stroke-dasharray",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "opacity",
+    "color",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "text-anchor",
+    "dominant-baseline",
+    "letter-spacing",
+    "text-transform",
+    "display",
+  ];
+  let style = "";
+  for (const p of PROPS) {
+    const v = cs.getPropertyValue(p);
+    if (v) style += `${p}:${v};`;
+  }
+  dst.setAttribute("style", style);
+  const s = src.children;
+  const d = dst.children;
+  for (let i = 0; i < s.length; i++) {
+    const si = s[i];
+    const di = d[i];
+    if (si && di) inlineComputedStyles(si, di);
+  }
+}
+
+/** Render the live map SVG to a single-page portrait JPEG (8.5×11 @ 200dpi) with
+ * a header block (camp name, dimensions, contact, date + version), then trigger a
+ * download. Client-only. Follows Burning Man's layout-file conventions. */
+async function exportMapJpeg(opts: {
+  filename: string;
+  campName: string;
+  dims: string;
+  contactLines: string[];
+  dateVersion: string;
+}) {
+  const live = document.getElementById("camp-map-svg") as SVGSVGElement | null;
+  if (!live) throw new Error("Map SVG not found on the page.");
+  const clone = live.cloneNode(true) as SVGSVGElement;
+  inlineComputedStyles(live, clone);
+  clone.removeAttribute("style"); // root sizes from width/height attrs below
+  const vb = live.viewBox.baseVal;
+  const mw = vb.width || live.clientWidth || 1000;
+  const mh = vb.height || live.clientHeight || 1000;
+  clone.setAttribute("width", String(mw));
+  clone.setAttribute("height", String(mh));
+  const xml = new XMLSerializer().serializeToString(clone);
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
+  const img = new Image();
+  await new Promise<void>((res, rej) => {
+    img.onload = () => res();
+    img.onerror = () => rej(new Error("Could not rasterize the map."));
+    img.src = url;
+  });
+
+  // 8.5×11 inch portrait at 200dpi.
+  const CW = 1700;
+  const CH = 2200;
+  const M = 80;
+  const canvas = document.createElement("canvas");
+  canvas.width = CW;
+  canvas.height = CH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not supported in this browser.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, CW, CH);
+  ctx.fillStyle = "#000000";
+  ctx.textBaseline = "top";
+
+  let y = M;
+  ctx.font = "bold 72px system-ui, sans-serif";
+  ctx.fillText(opts.campName, M, y);
+  y += 90;
+  ctx.font = "bold 40px system-ui, sans-serif";
+  ctx.fillText(opts.dims, M, y);
+  y += 54;
+  ctx.font = "28px system-ui, sans-serif";
+  for (const line of opts.contactLines) {
+    if (line) {
+      ctx.fillText(line, M, y);
+      y += 40;
+    }
+  }
+  ctx.fillText(opts.dateVersion, M, y);
+  y += 56;
+
+  // Fit the map into the remaining box, preserving aspect, centered horizontally.
+  const boxY = y;
+  const boxW = CW - 2 * M;
+  const boxH = CH - M - boxY;
+  const scale = Math.min(boxW / mw, boxH / mh);
+  const dw = mw * scale;
+  const dh = mh * scale;
+  ctx.drawImage(img, M + (boxW - dw) / 2, boxY, dw, dh);
+
+  const blob = await new Promise<Blob | null>((res) =>
+    canvas.toBlob((b) => res(b), "image/jpeg", 0.92),
+  );
+  if (!blob) throw new Error("Failed to encode the image.");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = opts.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+/** Sanitize a camp name into a filename-safe abbreviation (lowercase, no spaces,
+ * ≤10 chars) so `<abbr>_mm_dd.jpg` stays within BM's 20-char filename limit. */
+function deriveAbbrev(campName: string) {
+  return campName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 10);
+}
+
+/** Officer + Burning-Man export: a dialog that collects/persists the submission
+ * contact, then renders the map to a BM-compliant portrait JPEG. */
+function BurningManExport({
+  campName,
+  lotLocation,
+  dims,
+  mapStatus,
+  contact,
+  account,
+  fetcher,
+}: {
+  campName: string;
+  lotLocation: string;
+  dims: string;
+  mapStatus: string | null;
+  contact: { name: string; playa: string; email: string; phone: string };
+  account: { name: string; email: string };
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [name, setName] = useState(contact.name || account.name);
+  const [playa, setPlaya] = useState(contact.playa);
+  const [email, setEmail] = useState(contact.email || account.email);
+  const [phone, setPhone] = useState(contact.phone);
+  const [version, setVersion] = useState(mapStatus ?? "");
+  const [abbrev, setAbbrev] = useState(deriveAbbrev(campName));
+
+  const cleanAbbrev = deriveAbbrev(abbrev);
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const filename = `${cleanAbbrev}_${mm}_${dd}.jpg`;
+  const filenameOk = cleanAbbrev.length > 0 && filename.length <= 20;
+
+  const onExport = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      // Persist the contact for next time (camp-scoped).
+      fetcher.submit(
+        { intent: "setPlacementContact", name, playa, email, phone },
+        { method: "post" },
+      );
+      const contactLines = [
+        `Contact: ${name}${playa ? ` "${playa}"` : ""}`,
+        [email, phone].filter(Boolean).join("   ·   "),
+      ];
+      const dateVersion = `Date: ${mm}/${dd}/${now.getFullYear()}${
+        version ? `      Version: ${version}` : ""
+      }`;
+      await exportMapJpeg({
+        filename,
+        campName,
+        dims: `${dims}${lotLocation ? ` · ${lotLocation}` : ""}`,
+        contactLines,
+        dateVersion,
+      });
+      setOpen(false);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Button variant="default" size="xs" onClick={() => setOpen(true)}>
+        Export for BM
+      </Button>
+      <Modal
+        opened={open}
+        onClose={() => setOpen(false)}
+        title="Export layout for Burning Man"
+        size="lg"
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            Renders the current map to a single-page portrait JPEG with your
+            camp name, dimensions, and contact info — following BMorg's
+            layout-file rules. Set a clear day (drag the sun) and a Map
+            status/version first. Fuel and battery safety zones export
+            automatically if placed.
+          </Text>
+          <Group grow>
+            <TextInput
+              label="First + last name"
+              value={name}
+              onChange={(e) => setName(e.currentTarget.value)}
+            />
+            <TextInput
+              label="Playa name (optional)"
+              value={playa}
+              onChange={(e) => setPlaya(e.currentTarget.value)}
+            />
+          </Group>
+          <Group grow>
+            <TextInput
+              label="Email"
+              value={email}
+              onChange={(e) => setEmail(e.currentTarget.value)}
+            />
+            <TextInput
+              label="Phone"
+              value={phone}
+              onChange={(e) => setPhone(e.currentTarget.value)}
+            />
+          </Group>
+          <Group grow>
+            <TextInput
+              label="Version"
+              placeholder="e.g. FINAL v2"
+              value={version}
+              onChange={(e) => setVersion(e.currentTarget.value)}
+            />
+            <TextInput
+              label="Filename abbreviation"
+              description={`Saves as ${filename}`}
+              error={
+                filenameOk
+                  ? undefined
+                  : "Needs 1–10 letters/numbers, no spaces."
+              }
+              value={abbrev}
+              onChange={(e) => setAbbrev(e.currentTarget.value)}
+            />
+          </Group>
+          {err ? (
+            <Text size="sm" c="red">
+              {err}
+            </Text>
+          ) : null}
+          <Group justify="flex-end" mt="xs">
+            <Button variant="default" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={onExport} loading={busy} disabled={!filenameOk}>
+              Export JPEG
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
+  );
+}
+
 /** Officer control for the free-text map "doneness" label (the watermark shown
  * over the map + used as the export's version tag). Preset chips apply instantly;
  * the text field saves on Enter / the Save button. Empty clears the overlay. */
@@ -2534,6 +2849,23 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           <Button variant="default" size="xs" onClick={() => window.print()}>
             Print
           </Button>
+          {canManage && isBurningMan(event) ? (
+            <BurningManExport
+              campName={loaderData.campName}
+              lotLocation={
+                lot.street
+                  ? lot.street
+                  : lot.streetLetter && lot.year
+                    ? streetLabel(lot.year, lot.streetLetter)
+                    : ""
+              }
+              dims={`${lot.frontageFt}′ × ${lot.depthFt}′`}
+              mapStatus={mapStatus}
+              contact={loaderData.contact}
+              account={loaderData.account}
+              fetcher={fetcher}
+            />
+          ) : null}
         </Group>
       </Group>
 
@@ -4666,6 +4998,7 @@ function Editor({
         <Box ref={frameRef} style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
           <svg
             ref={svgRef}
+            id="camp-map-svg"
             viewBox={`0 0 ${VIEW_W} ${viewH}`}
             width={renderW}
             height={renderH}

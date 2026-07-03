@@ -97,9 +97,29 @@ officers can produce a submission-ready file:
       `.camp-map-print` column, forces a portrait `@page`, and shows a print-only
       caption (camp name · dims · address · status). Watermark prints via the SVG.
       NOT yet browser-verified (print preview).
-- [ ] Phase C — fuel-storage + battery structure kinds (auto safety rings)
-- [ ] Phase D — persist placement contact (camp-scoped)
-- [ ] Phase E — Export for Burning Man (canvas → portrait JPG, filename rules)
+- [x] Phase C — `fuel-storage` + `battery` kinds (Power group). Fuel draws
+      10/20/50′ rings; battery draws a safety ring when its `kwh` control ≥100
+      (radius = `safetyFt`, default 20′). Rings render in plot-local feet under
+      the markers, so they print + export. Committed 8e33fe0.
+- [x] Phase D — `camp.placement_contact_{name,playa,email,phone}` (migration
+      0038); loader returns `contact` + `account` fallback; officer action
+      `setPlacementContact`. Camp-scoped (persists across years).
+- [x] Phase E — `BurningManExport` dialog (officer + isBurningMan). Persists the
+      contact, then `exportMapJpeg` clones `#camp-map-svg`, inlines *computed*
+      styles (so CSS-var fills resolve), rasterizes via an SVG data-URL Image onto
+      an 8.5×11 @200dpi portrait canvas with a header (camp name, dims, contact,
+      date+version), and downloads `<abbr>_mm_dd.jpg` (abbrev ≤10 → filename ≤20).
+      typecheck/build/lint green. NOT yet browser-verified — the SVG→canvas
+      color/quality path especially needs eyeballing.
+
+## Findings / gotchas
+- **SVG export loses CSS variables.** The map fills use `var(--mantine-color-*)`
+  and the scheme vars; a naive serialize→`<img>` renders them wrong. Fix:
+  `inlineComputedStyles` copies each element's *computed* fill/stroke/etc onto a
+  clone before serializing, so colors resolve. Watch for `text-transform` (may not
+  apply when rasterizing) and any future external-image refs (would taint canvas).
+- Export uses the CURRENT map state (sun/night/highlight). Officers should set a
+  clear day + no highlight before exporting — noted in the dialog copy.
 
 ## Things not to do
 - Don't add an icon library import (`@tabler/...`) — this project has none; use

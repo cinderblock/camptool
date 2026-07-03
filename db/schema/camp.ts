@@ -29,6 +29,13 @@ export const camp = sqliteTable("camp", {
   tracksDues: integer("tracks_dues", { mode: "boolean" })
     .notNull()
     .default(false),
+  // Placement/submission contact for the camp's map export (e.g. Burning Man
+  // requires a name/email/phone on the layout). Camp-scoped — persists across
+  // years — and officer-editable via the map export dialog. All nullable.
+  placementContactName: text("placement_contact_name"),
+  placementContactPlaya: text("placement_contact_playa"),
+  placementContactEmail: text("placement_contact_email"),
+  placementContactPhone: text("placement_contact_phone"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .default(now),
