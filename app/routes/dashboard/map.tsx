@@ -23,7 +23,6 @@ import {
   Title,
   Tooltip,
   useComputedColorScheme,
-  useMantineColorScheme,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { and, eq } from "drizzle-orm";
@@ -1646,12 +1645,16 @@ ${Object.entries(mapSchemeVars(true))
   .join("\n")}
   }
 }
-html[data-mantine-color-scheme="light"] {
+/* Attribute selector (not html-scoped) so an off-screen wrapper carrying
+   data-mantine-color-scheme="light" can scope these vars to its subtree — the
+   BM export renders a light copy there without touching the live page. On the
+   live page the attribute only sits on <html>, so behavior is unchanged. */
+[data-mantine-color-scheme="light"] {
 ${Object.entries(mapSchemeVars(false))
   .map(([k, v]) => `  ${k}: ${v};`)
   .join("\n")}
 }
-html[data-mantine-color-scheme="dark"] {
+[data-mantine-color-scheme="dark"] {
 ${Object.entries(mapSchemeVars(true))
   .map(([k, v]) => `  ${k}: ${v};`)
   .join("\n")}
@@ -2264,45 +2267,43 @@ function GridScaleNote({ lot }: { lot: Lot }) {
   );
 }
 
-/** Copy every element's *computed* presentation styles onto a clone, so a
- * serialized copy of the map SVG rasterizes with the right colors even though the
- * live SVG relies on CSS variables (Mantine palette + the map scheme vars). */
-function inlineComputedStyles(src: Element, dst: Element) {
-  const cs = window.getComputedStyle(src);
-  const PROPS = [
-    "fill",
-    "fill-opacity",
-    "stroke",
-    "stroke-width",
-    "stroke-opacity",
-    "stroke-dasharray",
-    "stroke-linecap",
-    "stroke-linejoin",
-    "opacity",
-    "color",
-    "font-family",
-    "font-size",
-    "font-weight",
-    "font-style",
-    "text-anchor",
-    "dominant-baseline",
-    "letter-spacing",
-    "text-transform",
-    "display",
-  ];
-  let style = "";
-  for (const p of PROPS) {
+const INLINE_STYLE_PROPS = [
+  "fill",
+  "fill-opacity",
+  "stroke",
+  "stroke-width",
+  "stroke-opacity",
+  "stroke-dasharray",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "opacity",
+  "color",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "text-anchor",
+  "dominant-baseline",
+  "letter-spacing",
+  "text-transform",
+  "display",
+];
+
+/** Bake each element's *computed* presentation styles into its inline style, so a
+ * serialized copy rasterizes with the right colors even though the map relies on
+ * CSS variables (Mantine palette + the map scheme vars). Operates in place on a
+ * node that is already attached to the document (so getComputedStyle resolves) —
+ * the export attaches its clone under an off-screen light-scheme wrapper first, so
+ * the resolved values are the LIGHT ones without touching the live page. */
+function inlineComputedStyles(el: Element) {
+  const cs = window.getComputedStyle(el);
+  let style = el.getAttribute("style") ?? "";
+  for (const p of INLINE_STYLE_PROPS) {
     const v = cs.getPropertyValue(p);
-    if (v) style += `${p}:${v};`;
+    if (v) style += `;${p}:${v}`;
   }
-  dst.setAttribute("style", style);
-  const s = src.children;
-  const d = dst.children;
-  for (let i = 0; i < s.length; i++) {
-    const si = s[i];
-    const di = d[i];
-    if (si && di) inlineComputedStyles(si, di);
-  }
+  el.setAttribute("style", style);
+  for (const child of Array.from(el.children)) inlineComputedStyles(child);
 }
 
 /** Render the live map SVG to a single-page portrait JPEG (8.5×11 @ 200dpi) with
@@ -2317,21 +2318,35 @@ async function exportMapJpeg(opts: {
 }) {
   const live = document.getElementById("camp-map-svg") as SVGSVGElement | null;
   if (!live) throw new Error("Map SVG not found on the page.");
-  // NOTE: the caller forces the light color scheme + a re-render before calling
-  // this, so BM layouts export on a light background (readable in B/W) regardless
-  // of the viewer's theme — see BurningManExport.onExport.
+  const vb = live.viewBox.baseVal;
+  const mw = vb.width || live.clientWidth || 1000;
+  const mh = vb.height || live.clientHeight || 1000;
   const clone = live.cloneNode(true) as SVGSVGElement;
-  inlineComputedStyles(live, clone);
-  // Strip campers' personal (occupant) names from the submission image — BM only
-  // needs the camp + the single submission contact, not everyone's names. Done
-  // after inlining so the live↔clone tree walk stays aligned.
+
+  // BM layouts must read on a light background (B/W-safe), regardless of the
+  // viewer's theme. Rather than flip the live page, attach the clone under an
+  // OFF-SCREEN wrapper carrying data-mantine-color-scheme="light": the map's
+  // scheme vars (Mantine palette + --ct-map-*) resolve to their light values in
+  // that subtree, so getComputedStyle reads light. The live page is untouched.
+  const holder = document.createElement("div");
+  holder.setAttribute("data-mantine-color-scheme", "light");
+  holder.style.cssText =
+    "position:fixed;left:-100000px;top:0;pointer-events:none;opacity:0;";
+  holder.appendChild(clone);
+  document.body.appendChild(holder);
+  try {
+    inlineComputedStyles(clone);
+  } finally {
+    holder.removeChild(clone);
+    document.body.removeChild(holder);
+  }
+
+  // Strip campers' personal (occupant) names — BM only needs the camp + the
+  // single submission contact, not everyone's names.
   for (const el of Array.from(clone.querySelectorAll("[data-personal-name]"))) {
     el.remove();
   }
   clone.removeAttribute("style"); // root sizes from width/height attrs below
-  const vb = live.viewBox.baseVal;
-  const mw = vb.width || live.clientWidth || 1000;
-  const mh = vb.height || live.clientHeight || 1000;
   clone.setAttribute("width", String(mw));
   clone.setAttribute("height", String(mh));
   const xml = new XMLSerializer().serializeToString(clone);
@@ -2434,7 +2449,6 @@ function BurningManExport({
   const [version, setVersion] = useState(mapStatus ?? "");
   const [abbrev, setAbbrev] = useState(deriveAbbrev(campName));
 
-  const { colorScheme, setColorScheme } = useMantineColorScheme();
   const cleanAbbrev = deriveAbbrev(abbrev);
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
@@ -2455,20 +2469,11 @@ function BurningManExport({
   const onExport = async () => {
     setBusy(true);
     setErr(null);
-    // BM layouts must read on a light background (B/W-safe). Force light + let the
-    // map re-render (some fills are theme-derived in JS, not just CSS vars), then
-    // restore the viewer's scheme after.
-    const prevScheme = colorScheme;
     try {
       // Persist the contact for next time (camp-scoped).
       fetcher.submit(
         { intent: "setPlacementContact", name, playa, email, phone },
         { method: "post" },
-      );
-      setColorScheme("light");
-      // Wait for the re-render + paint to land before we snapshot the SVG.
-      await new Promise<void>((res) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => res())),
       );
       const contactLines = [
         `Contact: ${displayName}`,
@@ -2477,6 +2482,8 @@ function BurningManExport({
       const dateVersion = `Date: ${isoDate}${
         version ? `      Version: ${version}` : ""
       }`;
+      // exportMapJpeg renders a LIGHT copy off-screen — it never touches the
+      // live page's color scheme.
       await exportMapJpeg({
         filename,
         campName,
@@ -2488,7 +2495,6 @@ function BurningManExport({
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      setColorScheme(prevScheme);
       setBusy(false);
     }
   };
