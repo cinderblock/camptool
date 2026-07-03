@@ -260,6 +260,13 @@
       "when": 1782847267705,
       "tag": "0036_flimsy_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1783036372100,
+      "tag": "0037_workable_beast",
+      "breakpoints": true
     }
   ]
 }

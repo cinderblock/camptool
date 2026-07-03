@@ -1,0 +1,1 @@
+ALTER TABLE `camp_edition` ADD `map_status` text;

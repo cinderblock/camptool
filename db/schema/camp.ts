@@ -55,6 +55,10 @@ export const campEdition = sqliteTable(
     event: text("event").notNull().default("burning-man"),
     // Locked editions are read-only (e.g. last year, or "planned" once on playa).
     locked: integer("locked", { mode: "boolean" }).notNull().default(false),
+    // Free-text "doneness" label shown as a watermark over the map (e.g. "DRAFT",
+    // "NOT FINAL", "FINAL v2"). NULL/"" = no overlay. Independent of `locked`
+    // (locked = read-only; this is just a human label / the export's version tag).
+    mapStatus: text("map_status"),
     // Structure kinds disallowed for THIS edition (a JSON array of kind `value`s),
     // e.g. Burning Man bans pop-up canopies but a smaller event allows them. The
     // palette hides these and add-actions reject them; existing placed objects of a

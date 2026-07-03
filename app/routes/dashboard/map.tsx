@@ -85,6 +85,7 @@ import {
 } from "~/lib/wind";
 import { db } from "../../../db/client.server";
 import {
+  campEdition,
   mapCable,
   mapObject,
   mapRoad,
@@ -98,6 +99,47 @@ import type { Route } from "./+types/map";
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Camp map · CampTool" }];
 }
+
+/** Print stylesheet for the map page. Classic isolation: hide all page ink, then
+ * reveal only the map column (`.camp-map-print`) and lay it out as a single
+ * portrait page. The status watermark is part of the SVG, so it prints for free.
+ * A print-only caption (`.camp-map-print-caption`) identifies the sheet. */
+const MAP_PRINT_CSS = `
+@media print {
+  @page { size: portrait; margin: 0.5in; }
+  body { background: #fff !important; }
+  body * { visibility: hidden !important; }
+  .camp-map-print, .camp-map-print * { visibility: visible !important; }
+  .camp-map-page { height: auto !important; min-height: 0 !important; }
+  .camp-map-print {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .camp-map-print * {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .camp-map-print svg {
+    width: 100% !important;
+    height: auto !important;
+    max-width: 100% !important;
+    max-height: none !important;
+  }
+  .camp-map-print-caption {
+    display: block !important;
+    margin: 0 0 8px 0;
+    font-size: 12pt;
+    color: #000;
+  }
+}
+.camp-map-print-caption { display: none; }
+`;
 
 /** Door symbol: opening gap + leaf + swing arc, centered on an edge. Swings
  * OUT (away from the interior). (mx,my) = edge midpoint; (ex,ey) = unit along
@@ -724,6 +766,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     canEdit:
       hasAtLeast(active.membership.role, "member") && !activeEdition.locked,
     locked: activeEdition.locked,
+    // Free-text "doneness" label shown as a watermark over the map (officer-set).
+    mapStatus: activeEdition.mapStatus,
     // The event this edition is for — gates Burning-Man-specific UI.
     event: activeEdition.event,
     // Structure kinds disallowed this edition: hidden from the palette/picker,
@@ -825,6 +869,7 @@ export async function action({ request }: Route.ActionArgs) {
   // only adjust their own already-placed items (handled in updateObject).
   const officerOnly = new Set([
     "savePlacement",
+    "setMapStatus",
     "addObject",
     "addBlock",
     "updateObjects",
@@ -879,6 +924,16 @@ export async function action({ request }: Route.ActionArgs) {
         .insert(placement)
         .values({ id: crypto.randomUUID(), campId, editionId, ...values });
     }
+    return data({ ok: true });
+  }
+
+  if (intent === "setMapStatus") {
+    // Free-text doneness label ("DRAFT"/"FINAL v2"/…). Trim; empty clears it.
+    const raw = String(form.get("mapStatus") ?? "").trim();
+    await db
+      .update(campEdition)
+      .set({ mapStatus: raw === "" ? null : raw.slice(0, 60) })
+      .where(eq(campEdition.id, editionId));
     return data({ ok: true });
   }
 
@@ -2173,10 +2228,84 @@ function GridScaleNote({ lot }: { lot: Lot }) {
   );
 }
 
+/** Officer control for the free-text map "doneness" label (the watermark shown
+ * over the map + used as the export's version tag). Preset chips apply instantly;
+ * the text field saves on Enter / the Save button. Empty clears the overlay. */
+function MapStatusControl({
+  status,
+  fetcher,
+}: {
+  status: string;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const [val, setVal] = useState(status);
+  // Reconcile when the server value changes (e.g. after a save revalidates).
+  useEffect(() => {
+    setVal(status);
+  }, [status]);
+  const save = (next: string) =>
+    fetcher.submit(
+      { intent: "setMapStatus", mapStatus: next },
+      { method: "post" },
+    );
+  const PRESETS = ["DRAFT", "NOT FINAL", "FINAL"];
+  const dirty = val.trim() !== status.trim();
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Text size="xs" fw={600} mb={6}>
+        Map status
+      </Text>
+      <Group gap={6} mb={8}>
+        {PRESETS.map((p) => (
+          <Button
+            key={p}
+            size="compact-xs"
+            variant={status.trim() === p ? "filled" : "light"}
+            onClick={() => {
+              setVal(p);
+              save(p);
+            }}
+          >
+            {p}
+          </Button>
+        ))}
+      </Group>
+      <TextInput
+        size="xs"
+        placeholder="e.g. FINAL v2 (or blank for none)"
+        value={val}
+        maxLength={60}
+        onChange={(e) => setVal(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            save(val);
+          }
+        }}
+      />
+      <Group justify="space-between" mt={8}>
+        <Text size="xs" c="dimmed">
+          Shown as a watermark over the map.
+        </Text>
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          disabled={!dirty}
+          onClick={() => save(val)}
+        >
+          Save
+        </Button>
+      </Group>
+    </Paper>
+  );
+}
+
 export default function CampMap({ loaderData }: Route.ComponentProps) {
   const { canEdit, canManage, unplaced, lot, myMembershipId, event } =
     loaderData;
   const bannedKinds = loaderData.bannedKinds;
+  // Free-text "doneness" label overlaid on the map (officer-set, null = none).
+  const mapStatus = loaderData.mapStatus?.trim() || null;
   // On phones the map + side rail stack vertically and the page scrolls
   // naturally instead of the desktop fixed-height, two-pane / inner-scroll model.
   const isNarrow = useMediaQuery("(max-width: 768px)");
@@ -2366,6 +2495,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
     // all scrolling INSIDE the map frame / sidebar, so zooming never adds a second
     // page-level scrollbar.
     <div
+      className="camp-map-page"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -2375,6 +2505,11 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         minHeight: isNarrow ? "calc(100vh - 88px)" : 0,
       }}
     >
+      {/* Print isolation: hide everything, reveal only the map column, force a
+      single portrait page. The status watermark lives inside the SVG, so it
+      prints for free. See MAP_PRINT_CSS. */}
+      {/** biome-ignore lint/security/noDangerouslySetInnerHtml: static, no user input */}
+      <style dangerouslySetInnerHTML={{ __html: MAP_PRINT_CSS }} />
       <Group
         justify="space-between"
         align="flex-end"
@@ -2394,7 +2529,12 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             {lot.frontsToMan ? "" : " · mountain-facing"}
           </Text>
         </div>
-        {isBurningMan(event) ? <BurningManDisclaimer mt={0} /> : null}
+        <Group gap="xs" align="center" wrap="nowrap">
+          {isBurningMan(event) ? <BurningManDisclaimer mt={0} /> : null}
+          <Button variant="default" size="xs" onClick={() => window.print()}>
+            Print
+          </Button>
+        </Group>
       </Group>
 
       <Flex
@@ -2404,6 +2544,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         style={{ flex: 1, minHeight: 0 }}
       >
         <div
+          className="camp-map-print"
           style={{
             flex: "1 1 auto",
             minWidth: 0,
@@ -2413,6 +2554,12 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             minHeight: 0,
           }}
         >
+          {/* Print-only caption: identifies the printout (screen-hidden). */}
+          <div className="camp-map-print-caption">
+            <strong>{loaderData.campName}</strong> — {lot.frontageFt}′ ×{" "}
+            {lot.depthFt}′{lot.address ? ` @ ${lot.address}` : ""}
+            {mapStatus ? ` · ${mapStatus}` : ""}
+          </div>
           <Editor
             lot={lot}
             objects={objects}
@@ -2436,6 +2583,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             canManage={canManage}
             myMembershipId={myMembershipId}
             bannedKinds={bannedKinds}
+            mapStatus={mapStatus}
             highlight={highlight}
             lotOpen={lotOpen}
             setLotOpen={setLotOpen}
@@ -2461,6 +2609,12 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             paddingRight: 4,
           }}
         >
+          {canManage ? (
+            <MapStatusControl
+              status={loaderData.mapStatus ?? ""}
+              fetcher={fetcher}
+            />
+          ) : null}
           <Paper withBorder p="sm" radius="md">
             <Text size="xs" fw={600} mb={6}>
               Highlight
@@ -2856,6 +3010,7 @@ function Editor({
   canManage,
   myMembershipId,
   bannedKinds,
+  mapStatus,
   highlight,
   lotOpen,
   setLotOpen,
@@ -2891,6 +3046,8 @@ function Editor({
   canManage: boolean;
   myMembershipId: string;
   bannedKinds: string[];
+  /** Free-text doneness label drawn as a watermark over the map (null = none). */
+  mapStatus: string | null;
   highlight: string;
   lotOpen: boolean;
   setLotOpen: (v: boolean) => void;
@@ -5440,6 +5597,38 @@ function Editor({
                   />
                 ))}
               </>
+            ) : null}
+            {/* Doneness watermark (officer-set): a big translucent diagonal label
+            so a viewer instantly reads the map's status. Drawn last (on top) but
+            click-through, and repeated top/center/bottom so it reads even when the
+            middle is busy. Part of the SVG so it prints AND exports. */}
+            {mapStatus ? (
+              <g pointerEvents="none">
+                {[0.22, 0.5, 0.78].map((fy) => (
+                  <text
+                    key={fy}
+                    x={VIEW_W / 2}
+                    y={viewH * fy}
+                    transform={`rotate(-28 ${VIEW_W / 2} ${viewH * fy})`}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={Math.max(28, Math.min(VIEW_W, viewH) * 0.11)}
+                    fontWeight={800}
+                    fill="#e03131"
+                    fillOpacity={0.14}
+                    stroke="#e03131"
+                    strokeOpacity={0.1}
+                    strokeWidth={1}
+                    style={{
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      userSelect: "none",
+                    }}
+                  >
+                    {mapStatus}
+                  </text>
+                ))}
+              </g>
             ) : null}
           </svg>
         </Box>
