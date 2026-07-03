@@ -2348,9 +2348,11 @@ async function exportMapJpeg(opts: {
     document.body.removeChild(holder);
   }
 
-  // Drop the sun-cast shadows entirely — a submission layout wants a clean plan
-  // view, not the shade sim.
-  for (const el of Array.from(clone.querySelectorAll("[data-map-shadow]"))) {
+  // Drop all sun effects — the cast shadows AND the self-shading / Pi-sign
+  // ground shadow — for a clean overhead plan, not the shade sim.
+  for (const el of Array.from(
+    clone.querySelectorAll("[data-map-shadow],[data-map-shade]"),
+  )) {
     el.remove();
   }
   // Drop every object name (given + occupant) — BM only needs the camp + the
@@ -5590,8 +5592,12 @@ function Editor({
             {/* Self-shading: tint the faces of a 3D structure that are turned away
             from the sun (its shady/lee side), drawn over the structure. Only kinds
             that declare `shadedFaces` (e.g. the Sierpinski pyramid) participate. */}
-            {mapUpBearing != null && sun.altitude > 0.5
-              ? objects.flatMap((o) => {
+            {mapUpBearing != null && sun.altitude > 0.5 ? (
+              // Tagged so the BM export drops all sun shading — the lee-face
+              // tints AND the pyramid's Pi-sign ground shadow — for a clean
+              // overhead plan.
+              <g data-map-shade="1">
+                {objects.flatMap((o) => {
                   const def = kindDef(o.kind);
                   const sd = sunDirLocal(o, sun, mapUpBearing);
                   if (!sd) return [];
@@ -5629,8 +5635,9 @@ function Editor({
                       pointerEvents="none"
                     />
                   ));
-                })
-              : null}
+                })}
+              </g>
+            ) : null}
             {/* Geodesic domes: a spherical shading overlay whose lit side tracks
             the sun, so a dome reads as a 3D sphere. */}
             {domeShadeOn
