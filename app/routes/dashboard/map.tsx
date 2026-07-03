@@ -2326,12 +2326,19 @@ async function exportMapJpeg(opts: {
   // BM layouts must read on a light background (B/W-safe), regardless of the
   // viewer's theme. Rather than flip the live page, attach the clone under an
   // OFF-SCREEN wrapper carrying data-mantine-color-scheme="light": the map's
-  // scheme vars (Mantine palette + --ct-map-*) resolve to their light values in
-  // that subtree, so getComputedStyle reads light. The live page is untouched.
+  // own --ct-map-* scheme vars resolve to their light values there. Mantine's
+  // *semantic* palette vars (default/text/border/dimmed) are html-scoped, so they
+  // wouldn't flip in a detached subtree — pin their light values on the wrapper so
+  // the ground/borders/labels resolve light too. The live page is untouched.
   const holder = document.createElement("div");
   holder.setAttribute("data-mantine-color-scheme", "light");
-  holder.style.cssText =
-    "position:fixed;left:-100000px;top:0;pointer-events:none;opacity:0;";
+  holder.style.cssText = [
+    "position:fixed;left:-100000px;top:0;pointer-events:none;opacity:0",
+    "--mantine-color-default:#ffffff",
+    "--mantine-color-text:#1a1b1e",
+    "--mantine-color-default-border:#dee2e6",
+    "--mantine-color-dimmed:#868e96",
+  ].join(";");
   holder.appendChild(clone);
   document.body.appendChild(holder);
   try {
@@ -2339,6 +2346,15 @@ async function exportMapJpeg(opts: {
   } finally {
     holder.removeChild(clone);
     document.body.removeChild(holder);
+  }
+
+  // Lighten the cast shadows: the live view uses a near-black shadow (heavy in
+  // dark mode), but a printed layout reads best with a soft grey.
+  for (const g of Array.from(clone.querySelectorAll("[data-map-shadow]"))) {
+    (g as SVGElement).style.opacity = "0.5";
+    for (const poly of Array.from(g.querySelectorAll("polygon"))) {
+      (poly as SVGElement).style.fill = "#adb5bd";
+    }
   }
 
   // Strip campers' personal (occupant) names — BM only needs the camp + the
@@ -5373,6 +5389,9 @@ function Editor({
                 clipPath="url(#ground-clip)"
                 pointerEvents="none"
                 opacity={shadeOpacity}
+                // Tagged so the BM export can lighten the (near-black) cast
+                // shadows for a print-friendly layout — see exportMapJpeg.
+                data-map-shadow="1"
               >
                 {objects.flatMap((o) =>
                   shadowPolygon(o, sun, mapUpBearing).map((poly, i) => (
