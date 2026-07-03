@@ -362,27 +362,10 @@ function renderFootprint({
             );
           })()
         : null}
-      {/* Pi stick at the apex (over the centroid, where the 3 faces meet). */}
-      <circle
-        cx={G[0]}
-        cy={G[1]}
-        r={edge * 0.055}
-        fill="#fff"
-        stroke="#1c1c1c"
-        strokeWidth={0.25}
-      />
-      <text
-        x={G[0]}
-        y={G[1] + fs * 0.36}
-        transform={`rotate(${-rotation} ${G[0]} ${G[1]})`}
-        textAnchor="middle"
-        fontSize={fs}
-        fontWeight={700}
-        fill="#1c1c1c"
-        style={{ pointerEvents: "none", userSelect: "none" }}
-      >
-        π
-      </text>
+      {/* No top-down Pi marker: the real Pi sign rides a vertical stick above the
+          apex, facing outward for ground-level viewers — invisible from straight
+          above. Its presence shows instead as the Pi-shaped SHADOW cast on the
+          ground (see the Pi strokes in `shadowVolume`). */}
     </g>
   );
 }
@@ -450,9 +433,10 @@ const PI_STICK_FT = 6;
  * is the convex hull of the four tetra vertices: the three ground corners (the
  * 40′ footprint triangle, z=0) plus the apex directly over the base centroid at
  * full height (z=1). The fractal voids don't pass light, and the convex hull of a
- * Sierpinski tetrahedron is the full tetrahedron. Plus the **Pi-symbol stick**,
- * ~6′ above the apex (also over the centroid), as a higher vertex (z>1) so its
- * shadow projects to the ground and the cast-shadow spike reaches it.
+ * Sierpinski tetrahedron is the full tetrahedron. Plus the **Pi-symbol sign** on
+ * a vertical stick ~6′ above the apex: modeled as three elevated flat strokes (the
+ * π glyph — top bar + two legs) so the core projects a Pi-SHAPED shaded area onto
+ * the ground that slides + lengthens with the sun, instead of a top-down marker.
  */
 function shadowVolume(
   w: number,
@@ -466,18 +450,43 @@ function shadowVolume(
   // fraction of the full tetra height that's 10/w.
   const flyZ = 10 / w;
   const bt = flyingButtress(w, h, buttressExt(config));
+
+  // The Pi sign (~6′ tall) as a flat π glyph at height `piZ`, centered over the
+  // apex/centroid. All at one height, so the whole glyph translates rigidly to the
+  // ground (a clean, readable Pi shadow). Top bar + two legs = 3 convex strokes,
+  // each cast as its own shadow so the open middle stays unshaded.
+  const HW = 3; // glyph half-width (6′ wide)
+  const HH = 3; // glyph half-height (6′ tall)
+  const T = 0.9; // stroke thickness
+  const LX = 2.0; // leg centerline offset from center
+  const cy = apexY;
+  const bar = (
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): ShadowVertex[] => [
+    { x: x0, y: y0, z: piZ },
+    { x: x1, y: y0, z: piZ },
+    { x: x1, y: y1, z: piZ },
+    { x: x0, y: y1, z: piZ },
+  ];
+
   return [
-    // Part 1 — the solid tetra (base corners + apex + Pi stick): one hull.
+    // Part 1 — the solid tetra (base corners + apex): one hull.
     [
       { x: 0, y: -h / 2, z: 0 }, // top corner, ground
       { x: -w / 2, y: h / 2, z: 0 }, // bottom-left, ground
       { x: w / 2, y: h / 2, z: 0 }, // bottom-right, ground
       { x: 0, y: apexY, z: 1 }, // tetra apex, full height
-      { x: 0, y: apexY, z: piZ }, // Pi symbol, 6′ above the apex
     ],
     // Part 2 — the flying-buttress canopy (separate flat shade at 8′2″): its own
     // hull, so it casts a distinct shadow rather than merging with the tetra.
     bt.verts.map((p) => ({ x: p[0] - w / 2, y: p[1] - h / 2, z: flyZ })),
+    // Parts 3–5 — the Pi glyph strokes (top bar + left/right legs).
+    bar(-HW, cy - HH, HW, cy - HH + T),
+    bar(-LX - T / 2, cy - HH + T, -LX + T / 2, cy + HH),
+    bar(LX - T / 2, cy - HH + T, LX + T / 2, cy + HH),
   ];
 }
 
