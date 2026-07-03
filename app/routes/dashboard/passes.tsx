@@ -26,7 +26,13 @@ import { isBurningMan } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { membership, setupPass, setupPassDate, user } from "../../../db/schema";
+import {
+  membership,
+  participation,
+  setupPass,
+  setupPassDate,
+  user,
+} from "../../../db/schema";
 import type { Route } from "./+types/passes";
 
 export function meta(_: Route.MetaArgs) {
@@ -41,7 +47,9 @@ type DateRow = {
 };
 type PassRow = {
   id: string;
-  passDateId: string;
+  // NULL while a request is unbound — the officer picks the "on or after"
+  // date row at grant time.
+  passDateId: string | null;
   membershipId: string;
   holderName: string | null;
   status: string;
@@ -89,15 +97,31 @@ export async function loader({ request }: Route.LoaderArgs) {
       ).sort((a, b) => a.name.localeCompare(b.name))
     : [];
 
+  // Planned arrivals (from onboarding) — shown next to requests so officers
+  // can pick a pass date that covers each requester's arrival.
+  const arrivalRows = await db
+    .select({
+      membershipId: participation.membershipId,
+      arrivalDate: participation.arrivalDate,
+    })
+    .from(participation)
+    .where(eq(participation.editionId, editionId));
+  const arrivals: Record<string, string> = {};
+  for (const r of arrivalRows) {
+    if (r.arrivalDate) arrivals[r.membershipId] = r.arrivalDate;
+  }
+
   return {
     isOfficer,
     locked: activeEdition.locked,
     event: activeEdition.event,
     myMembershipId: active.membership.id,
+    myArrival: arrivals[active.membership.id] ?? null,
     year: activeEdition.year,
     dates,
     passes,
     members,
+    arrivals: isOfficer ? arrivals : {},
   };
 }
 
@@ -143,33 +167,33 @@ export async function action({ request }: Route.ActionArgs) {
     return granted.length < d.quota;
   }
 
-  // --- Member self-service (any role) -------------------------------------
-  if (intent === "requestPass") {
-    const passDateId = str("passDateId");
-    if (!passDateId) return data({ error: "Pick a date." }, { status: 400 });
-    const [existing] = await db
-      .select({ id: setupPass.id })
+  // Does this member already hold an active (requested or granted) pass this
+  // year? One pass per person — requests are unbound (no date) until granted.
+  async function activePassFor(membershipId: string) {
+    const rows = await db
+      .select({ id: setupPass.id, status: setupPass.status })
       .from(setupPass)
       .where(
         and(
-          eq(setupPass.passDateId, passDateId),
-          eq(setupPass.membershipId, myMid),
+          eq(setupPass.editionId, editionId),
+          eq(setupPass.membershipId, membershipId),
         ),
-      )
-      .limit(1);
-    if (existing) {
+      );
+    return rows.find((r) => r.status !== "denied") ?? null;
+  }
+
+  // --- Member self-service (any role) -------------------------------------
+  if (intent === "requestPass") {
+    if (await activePassFor(myMid)) {
       return data(
-        { error: "You already have a pass for that date." },
-        {
-          status: 409,
-        },
+        { error: "You already have a pass or a pending request." },
+        { status: 409 },
       );
     }
     await db.insert(setupPass).values({
       id: crypto.randomUUID(),
       campId,
       editionId,
-      passDateId,
       membershipId: myMid,
       status: "requested",
       note: str("note"),
@@ -275,20 +299,19 @@ export async function action({ request }: Route.ActionArgs) {
     if (!(await hasRoom(passDateId))) {
       return data({ error: "That date is at its quota." }, { status: 409 });
     }
-    const [existing] = await db
-      .select({ id: setupPass.id })
-      .from(setupPass)
-      .where(
-        and(
-          eq(setupPass.passDateId, passDateId),
-          eq(setupPass.membershipId, targetMid),
-        ),
-      )
-      .limit(1);
+    const existing = await activePassFor(targetMid);
+    if (existing?.status === "granted") {
+      return data(
+        { error: "They already have a granted pass." },
+        { status: 409 },
+      );
+    }
     if (existing) {
+      // Resolve their open request with this date.
       await db
         .update(setupPass)
         .set({
+          passDateId,
           status: "granted",
           resolvedByMembershipId: myMid,
           resolvedAt: new Date(),
@@ -312,18 +335,30 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "approvePass") {
     const id = String(form.get("id"));
+    // The request is unbound — the officer picks the "on or after" date here.
+    const passDateId = str("passDateId");
+    if (!passDateId) {
+      return data({ error: "Pick an on-or-after date." }, { status: 400 });
+    }
     const [p] = await db
-      .select({ passDateId: setupPass.passDateId })
+      .select({ id: setupPass.id })
       .from(setupPass)
       .where(and(eq(setupPass.id, id), eq(setupPass.editionId, editionId)))
       .limit(1);
     if (!p) return data({ error: "Not found." }, { status: 404 });
-    if (!(await hasRoom(p.passDateId))) {
+    const [d] = await db
+      .select({ id: setupPassDate.id })
+      .from(setupPassDate)
+      .where(ownDate(passDateId))
+      .limit(1);
+    if (!d) return data({ error: "Unknown date." }, { status: 400 });
+    if (!(await hasRoom(passDateId))) {
       return data({ error: "That date is at its quota." }, { status: 409 });
     }
     await db
       .update(setupPass)
       .set({
+        passDateId,
         status: "granted",
         resolvedByMembershipId: myMid,
         resolvedAt: new Date(),
@@ -383,10 +418,12 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
     locked,
     event,
     myMembershipId,
+    myArrival,
     year,
     dates,
     passes,
     members,
+    arrivals,
   } = loaderData;
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
@@ -397,10 +434,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
   const dateById = new Map(dates.map((d) => [d.id, d]));
 
   const myPasses = passes.filter((p) => p.membershipId === myMembershipId);
-  const myDateIds = new Set(myPasses.map((p) => p.passDateId));
-  const openDates = dates.filter(
-    (d) => grantedFor(d.id) < d.quota && !myDateIds.has(d.id),
-  );
+  const myActive = myPasses.find((p) => p.status !== "denied");
   const pending = passes.filter((p) => p.status === "requested");
 
   return (
@@ -409,8 +443,8 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Setup access passes</Title>
           <Text c="dimmed" size="sm">
-            Early-arrival passes the camp allocates per day. Each pass is tied
-            to an entry date.
+            Early-arrival passes the camp allocates. Each pass admits you on or
+            after its date — an earlier-dated pass covers a later arrival.
           </Text>
         </div>
 
@@ -439,7 +473,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
             ) : (
               <Stack gap="xs">
                 {myPasses.map((p) => {
-                  const d = dateById.get(p.passDateId);
+                  const d = p.passDateId ? dateById.get(p.passDateId) : null;
                   return (
                     <Group key={p.id} gap="xs">
                       <Badge
@@ -447,7 +481,11 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
                         variant="light"
                         color={STATUS_COLOR[p.status] ?? "gray"}
                       >
-                        {d ? fmtDate(d.date, d.label) : "—"} · {p.status}
+                        {d
+                          ? `Arrive ${fmtDate(d.date, d.label)} or later · ${p.status}`
+                          : p.status === "requested"
+                            ? "Requested — awaiting a date"
+                            : p.status}
                       </Badge>
                       {!locked && p.status === "requested" ? (
                         <Button
@@ -470,12 +508,8 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
               </Stack>
             )}
 
-            {!locked && openDates.length > 0 ? (
-              <RequestPassForm fetcher={fetcher} openDates={openDates} />
-            ) : !locked ? (
-              <Text size="sm" c="dimmed">
-                No dates open for request right now.
-              </Text>
+            {!locked && !myActive ? (
+              <RequestPassForm fetcher={fetcher} myArrival={myArrival} />
             ) : null}
           </Stack>
         </Card>
@@ -489,65 +523,29 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
                   Pending requests · {pending.length}
                 </Text>
                 <Stack gap="xs">
-                  {pending.map((p) => {
-                    const d = dateById.get(p.passDateId);
-                    return (
-                      <Group key={p.id} justify="space-between" wrap="nowrap">
-                        <div>
-                          <Text size="sm" fw={500}>
-                            {p.holderName ?? "Unknown"} —{" "}
-                            {d ? fmtDate(d.date, d.label) : "—"}
-                          </Text>
-                          {p.note ? (
-                            <Text size="xs" c="dimmed">
-                              “{p.note}”
-                            </Text>
-                          ) : null}
-                        </div>
-                        {locked ? null : (
-                          <Group gap={4} wrap="nowrap">
-                            <Button
-                              size="compact-xs"
-                              variant="light"
-                              color="green"
-                              onClick={() =>
-                                fetcher.submit(
-                                  { intent: "approvePass", id: p.id },
-                                  { method: "post" },
-                                )
-                              }
-                            >
-                              Grant
-                            </Button>
-                            <Button
-                              size="compact-xs"
-                              variant="subtle"
-                              color="red"
-                              onClick={() =>
-                                fetcher.submit(
-                                  { intent: "denyPass", id: p.id },
-                                  { method: "post" },
-                                )
-                              }
-                            >
-                              Deny
-                            </Button>
-                          </Group>
-                        )}
-                      </Group>
-                    );
-                  })}
+                  {pending.map((p) => (
+                    <PendingRequestRow
+                      key={p.id}
+                      p={p}
+                      arrival={arrivals[p.membershipId] ?? null}
+                      dates={dates}
+                      grantedFor={grantedFor}
+                      fetcher={fetcher}
+                      locked={locked}
+                    />
+                  ))}
                 </Stack>
               </Card>
             ) : null}
 
             <Card withBorder padding="md" radius="md">
               <Text fw={600} mb="xs">
-                Entry dates &amp; quotas
+                Pass dates &amp; quotas
               </Text>
               {dates.length === 0 ? (
                 <Text size="sm" c="dimmed" mb="sm">
-                  No dates yet. Add the camp's per-day allocation below.
+                  No dates yet. Add the camp's allocation below — each date is
+                  the earliest day its passes admit entry.
                 </Text>
               ) : (
                 <Stack gap="sm" mb="md">
@@ -578,40 +576,137 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
 
 function RequestPassForm({
   fetcher,
-  openDates,
+  myArrival,
 }: {
   fetcher: ReturnType<typeof useFetcher>;
-  openDates: DateRow[];
+  myArrival: string | null;
 }) {
-  const [dateId, setDateId] = useState<string | null>(null);
+  const [note, setNote] = useState("");
   return (
-    <Group align="flex-end">
-      <Select
-        label="Request a pass"
-        placeholder="pick a date"
-        w={220}
-        data={openDates.map((d) => ({
-          value: d.id,
-          label: fmtDate(d.date, d.label),
-        }))}
-        value={dateId}
-        onChange={setDateId}
-        searchable
-      />
-      <Button
-        disabled={!dateId}
-        loading={fetcher.state !== "idle"}
-        onClick={() => {
-          if (dateId)
-            fetcher.submit(
-              { intent: "requestPass", passDateId: dateId },
-              { method: "post" },
-            );
-          setDateId(null);
-        }}
-      >
-        Request
-      </Button>
+    <Stack gap="xs">
+      <Text size="sm" c="dimmed">
+        Arriving before gates open? Request a pass and an officer will assign
+        you one that covers your arrival
+        {myArrival
+          ? ` (you plan to arrive ${dayjs(myArrival).format("ddd, MMM D")})`
+          : ""}
+        .
+      </Text>
+      <Group align="flex-end">
+        <TextInput
+          label="Note (optional)"
+          placeholder="e.g. helping with build from Tuesday"
+          value={note}
+          onChange={(e) => setNote(e.currentTarget.value)}
+          w={{ base: "100%", xs: 320 }}
+        />
+        <Button
+          loading={fetcher.state !== "idle"}
+          onClick={() => {
+            fetcher.submit({ intent: "requestPass", note }, { method: "post" });
+            setNote("");
+          }}
+        >
+          Request a pass
+        </Button>
+      </Group>
+    </Stack>
+  );
+}
+
+/** An unbound request in the officer queue: shows the requester's planned
+ * arrival and lets the officer pick the "on or after" date row to grant. */
+function PendingRequestRow({
+  p,
+  arrival,
+  dates,
+  grantedFor,
+  fetcher,
+  locked,
+}: {
+  p: PassRow;
+  arrival: string | null;
+  dates: DateRow[];
+  grantedFor: (dateId: string) => number;
+  fetcher: ReturnType<typeof useFetcher>;
+  locked: boolean;
+}) {
+  const open = dates.filter((d) => grantedFor(d.id) < d.quota);
+  // Best default: the latest date that still covers their arrival (least
+  // early-entry burn), else whatever the request already carried.
+  const covering = arrival ? open.filter((d) => d.date <= arrival) : [];
+  const suggested = covering.at(-1)?.id ?? p.passDateId;
+  const [dateId, setDateId] = useState<string | null>(
+    suggested && open.some((d) => d.id === suggested) ? suggested : null,
+  );
+  return (
+    <Group justify="space-between" wrap="wrap" align="flex-end">
+      <div>
+        <Text size="sm" fw={500}>
+          {p.holderName ?? "Unknown"}
+          {arrival ? (
+            <Text span size="xs" c="dimmed">
+              {" "}
+              — arriving {dayjs(arrival).format("ddd, MMM D")}
+            </Text>
+          ) : (
+            <Text span size="xs" c="dimmed">
+              {" "}
+              — no arrival date set
+            </Text>
+          )}
+        </Text>
+        {p.note ? (
+          <Text size="xs" c="dimmed">
+            “{p.note}”
+          </Text>
+        ) : null}
+      </div>
+      {locked ? null : (
+        <Group gap={4} wrap="nowrap" align="flex-end">
+          <Select
+            size="xs"
+            w={210}
+            placeholder="on or after…"
+            data={open.map((d) => ({
+              value: d.id,
+              label: `On or after ${fmtDate(d.date, d.label)}${
+                arrival && d.date > arrival ? " (after their arrival!)" : ""
+              }`,
+            }))}
+            value={dateId}
+            onChange={setDateId}
+          />
+          <Button
+            size="compact-xs"
+            variant="light"
+            color="green"
+            disabled={!dateId}
+            onClick={() => {
+              if (dateId)
+                fetcher.submit(
+                  { intent: "approvePass", id: p.id, passDateId: dateId },
+                  { method: "post" },
+                );
+            }}
+          >
+            Grant
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="red"
+            onClick={() =>
+              fetcher.submit(
+                { intent: "denyPass", id: p.id },
+                { method: "post" },
+              )
+            }
+          >
+            Deny
+          </Button>
+        </Group>
+      )}
     </Group>
   );
 }
@@ -634,7 +729,7 @@ function AddDateForm({
   return (
     <Group align="flex-end">
       <DateInput
-        label="Entry date"
+        label="On-or-after date"
         placeholder="pick a date"
         value={date}
         onChange={setDate as (v: Date | null) => void}
@@ -706,7 +801,7 @@ function DateRowView({
       <Group justify="space-between" wrap="wrap" align="flex-start">
         <div style={{ minWidth: 0 }}>
           <Text fw={600} size="sm">
-            {fmtDate(d.date, d.label)}
+            On or after {fmtDate(d.date, d.label)}
           </Text>
           <Group gap={6} mt={2}>
             <Badge size="sm" variant="light" color="green">

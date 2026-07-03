@@ -62,10 +62,12 @@ Man–event feature today). A **Tickets** page manages the camp's Direct Group S
 (guaranteed) allocation — individual
 priced tickets (tier + price, any mix of free/cheap/expensive) that officers
 assign to members and mark paid; members can request one. A **Passes** page
-handles early-arrival **Setup Access Passes**: officers define entry dates with a
-per-date quota (e.g. 2 Monday, 4 Tuesday, 8 Wednesday) and grant passes to
-members; members request a date, and the quota is enforced. Both are scoped to
-the active year and go read-only when that year is locked.
+handles early-arrival **Setup Access Passes**: officers define "on or after"
+dates with a per-date quota (e.g. 2 valid from Monday, 4 from Wednesday);
+members request a pass (onboarding files the request automatically for anyone
+arriving before gates open) and an officer grants each one a date that covers
+the requester's planned arrival, quota-enforced. Both are scoped to the active
+year and go read-only when that year is locked.
 
 An officer-only **Finances** page tracks the camp's money for the year — donations
 in and spends out (with optional member, category, and date) — and shows running

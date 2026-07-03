@@ -958,6 +958,21 @@ placement page.)
       fields map to existing features (Bringing inventory, RSVP, passes, tickets);
       only the free-form remainder is the new bank. Camp's actual questions get
       entered as DATA via admin, not committed. See section below.
+- [x] Member removal + arrival date + "on or after" SAPs (2026-07-03; code
+      green, E2E-tested over HTTP against a scratch server, NOT browser-tested;
+      task plan `plans/arrival-sap-and-removal.md`). (1) **Remove member**:
+      officer+ can remove anyone they strictly outrank from `/members` (confirm
+      modal; direct membership delete — cascades clear per-year rows, owned
+      items go communal). (2) **Arrival date in onboarding**:
+      `participation.arrival_date` (migration 0039); the `/start` RSVP step
+      asks "when do you plan to arrive?" (event-window-bounded picker); a
+      pre-gate-open arrival prompts "you'll need a Setup Access Pass — request
+      one?" which files the request automatically. (3) **SAP "on or after"
+      dates**: a `setup_pass_date` now means "N passes valid on or after this
+      date"; requests are UNBOUND (`setup_pass.pass_date_id` nullable) and an
+      officer picks the on-or-after date at grant time — the `/passes` pending
+      queue shows each requester's planned arrival and defaults to the latest
+      date that still covers it. One active pass per member, enforced in code.
 - [x] Dark mode follows the system (2026-06-15, browser-verified) — `root.tsx` now
       passes `defaultColorScheme="auto"` to both `ColorSchemeScript` and
       `MantineProvider`, so a dark-mode device renders dark out of the box (and

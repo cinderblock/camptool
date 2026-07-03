@@ -37,6 +37,9 @@ export const participation = sqliteTable(
       .references(() => membership.id, { onDelete: "cascade" }),
     // unknown (default) -> coming | maybe | not_coming.
     status: text("status").notNull().default("unknown"),
+    // Planned arrival, ISO YYYY-MM-DD; collected during onboarding. Arriving
+    // before gate-open needs a Setup Access Pass (see setup_pass).
+    arrivalDate: text("arrival_date"),
     note: text("note"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()

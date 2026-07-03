@@ -4,6 +4,7 @@ import {
   Card,
   Container,
   Group,
+  Modal,
   Select,
   Stack,
   Table,
@@ -13,7 +14,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Form, data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
@@ -179,6 +180,37 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: `Added ${u.name} as a recruit.` });
   }
 
+  if (intent === "removeMember") {
+    const memberId = String(form.get("memberId"));
+    const [target] = await db
+      .select()
+      .from(membership)
+      .where(
+        and(eq(membership.id, memberId), eq(membership.organizationId, campId)),
+      );
+    if (!target) return data({ error: "Member not found." }, { status: 404 });
+    if (target.userId === actor.id) {
+      return data({ error: "You can't remove yourself." }, { status: 400 });
+    }
+    if (rankOf(actorRole) <= rankOf(target.role)) {
+      return data(
+        { error: "You can only remove members ranked below you." },
+        { status: 403 },
+      );
+    }
+
+    const [u] = await db
+      .select({ name: user.name })
+      .from(user)
+      .where(eq(user.id, target.userId));
+    // Direct delete rather than auth.api.removeMember: the better-auth ACL
+    // grants member:delete only to admin, and the rank check above is the real
+    // authorization (same pattern as invite redemption). FK cascades clear
+    // their per-year rows; items they owned become communal (owner set null).
+    await db.delete(membership).where(eq(membership.id, memberId));
+    return data({ ok: `Removed ${u?.name ?? "member"} from the camp.` });
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
@@ -195,11 +227,19 @@ export default function Members({ loaderData }: Route.ComponentProps) {
   } = loaderData;
   const roleFetcher = useFetcher<FetcherData>();
   const addFetcher = useFetcher<FetcherData>();
+  const removeFetcher = useFetcher<FetcherData>();
   const addFormRef = useRef<HTMLFormElement>(null);
+  const [removeTarget, setRemoveTarget] = useState<{
+    memberId: string;
+    name: string;
+  } | null>(null);
 
   useFetcherNotifications(roleFetcher.data, roleFetcher.state);
   useFetcherNotifications(addFetcher.data, addFetcher.state, () =>
     addFormRef.current?.reset(),
+  );
+  useFetcherNotifications(removeFetcher.data, removeFetcher.state, () =>
+    setRemoveTarget(null),
   );
 
   const roleOptions = assignableRoles.map((r) => ({ value: r, label: r }));
@@ -320,23 +360,46 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                     {canManage ? (
                       <Table.Td>
                         {editable ? (
-                          <Form method="post" action="/impersonate">
-                            <input type="hidden" name="intent" value="start" />
-                            <input
-                              type="hidden"
-                              name="targetUserId"
-                              value={m.userId}
-                            />
-                            <input type="hidden" name="campId" value={campId} />
+                          <Group gap="xs" wrap="nowrap">
+                            <Form method="post" action="/impersonate">
+                              <input
+                                type="hidden"
+                                name="intent"
+                                value="start"
+                              />
+                              <input
+                                type="hidden"
+                                name="targetUserId"
+                                value={m.userId}
+                              />
+                              <input
+                                type="hidden"
+                                name="campId"
+                                value={campId}
+                              />
+                              <Button
+                                type="submit"
+                                size="xs"
+                                variant="light"
+                                color="grape"
+                              >
+                                Work as
+                              </Button>
+                            </Form>
                             <Button
-                              type="submit"
                               size="xs"
-                              variant="light"
-                              color="grape"
+                              variant="subtle"
+                              color="red"
+                              onClick={() =>
+                                setRemoveTarget({
+                                  memberId: m.memberId,
+                                  name: m.name,
+                                })
+                              }
                             >
-                              Work as
+                              Remove
                             </Button>
-                          </Form>
+                          </Group>
                         ) : null}
                       </Table.Td>
                     ) : null}
@@ -346,6 +409,44 @@ export default function Members({ loaderData }: Route.ComponentProps) {
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
+
+        <Modal
+          opened={removeTarget !== null}
+          onClose={() => setRemoveTarget(null)}
+          title={`Remove ${removeTarget?.name ?? "member"} from the camp?`}
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm">
+              This removes them from the camp and deletes their camp data for
+              all years — RSVPs, questionnaire answers, passes, and ticket
+              requests. Items they declared stay on the map as camp items. Their
+              account itself is not deleted, and they can be re-added or
+              re-invited later.
+            </Text>
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setRemoveTarget(null)}>
+                Cancel
+              </Button>
+              <Button
+                color="red"
+                loading={removeFetcher.state !== "idle"}
+                onClick={() => {
+                  if (removeTarget)
+                    removeFetcher.submit(
+                      {
+                        intent: "removeMember",
+                        memberId: removeTarget.memberId,
+                      },
+                      { method: "post" },
+                    );
+                }}
+              >
+                Remove
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
       </Stack>
     </Container>
   );

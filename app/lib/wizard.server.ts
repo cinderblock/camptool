@@ -17,7 +17,11 @@ export type WizardState = {
   resolved: Record<string, string>;
   /** ask_keys still awaiting action (scheduled but not resolved). */
   pending: AskKey[];
-  participation: { status: ParticipationStatus; note: string | null };
+  participation: {
+    status: ParticipationStatus;
+    arrivalDate: string | null;
+    note: string | null;
+  };
 };
 
 export async function loadWizardState(opts: {
@@ -41,7 +45,11 @@ export async function loadWizardState(opts: {
   for (const r of askRows) resolved[r.askKey] = r.status;
 
   const [part] = await db
-    .select({ status: participation.status, note: participation.note })
+    .select({
+      status: participation.status,
+      arrivalDate: participation.arrivalDate,
+      note: participation.note,
+    })
     .from(participation)
     .where(
       and(
@@ -63,6 +71,7 @@ export async function loadWizardState(opts: {
     pending,
     participation: {
       status: (part?.status as ParticipationStatus) ?? "unknown",
+      arrivalDate: part?.arrivalDate ?? null,
       note: part?.note ?? null,
     },
   };
@@ -99,6 +108,7 @@ export async function setParticipation(opts: {
   editionId: string;
   membershipId: string;
   status: ParticipationStatus;
+  arrivalDate?: string | null;
   note?: string | null;
 }): Promise<void> {
   await db
@@ -109,12 +119,16 @@ export async function setParticipation(opts: {
       editionId: opts.editionId,
       membershipId: opts.membershipId,
       status: opts.status,
+      arrivalDate: opts.arrivalDate ?? null,
       note: opts.note ?? null,
     })
     .onConflictDoUpdate({
       target: [participation.editionId, participation.membershipId],
       set: {
         status: opts.status,
+        ...(opts.arrivalDate !== undefined
+          ? { arrivalDate: opts.arrivalDate }
+          : {}),
         ...(opts.note !== undefined ? { note: opts.note } : {}),
         updatedAt: new Date(),
       },

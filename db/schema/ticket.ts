@@ -12,9 +12,12 @@
  *                   checkout. The member then self-marks the ticket `purchased`.
  *   ticket_request  a member's ask for a ticket (unbound to a specific ticket
  *                   until an officer assigns one).
- *   setup_pass_date an early-arrival entry date + the per-date quota the camp got.
- *   setup_pass      an individual pass for a date; request + grant unified via
- *                   `status` (quota counts only `granted`).
+ *   setup_pass_date an "on or after" early-arrival date + the per-date quota the
+ *                   camp got: the camp holds `quota` passes valid on or after
+ *                   `date` (an earlier-dated pass covers a later arrival).
+ *   setup_pass      an individual pass; request + grant unified via `status`
+ *                   (quota counts only `granted`). A request is unbound
+ *                   (`pass_date_id` NULL) until an officer grants it a date.
  *
  * `price_cents` is the ticket's value as set by the vendor (integer cents,
  * nullable: null = TBD, 0 = free) — the camp never collects it.
@@ -136,9 +139,11 @@ export const setupPass = sqliteTable(
     editionId: text("edition_id").references(() => campEdition.id, {
       onDelete: "cascade",
     }),
-    passDateId: text("pass_date_id")
-      .notNull()
-      .references(() => setupPassDate.id, { onDelete: "cascade" }),
+    // The granted pass's "on or after" date row; NULL while the request is
+    // unbound — the officer picks the date at grant time.
+    passDateId: text("pass_date_id").references(() => setupPassDate.id, {
+      onDelete: "cascade",
+    }),
     membershipId: text("membership_id")
       .notNull()
       .references(() => membership.id, { onDelete: "cascade" }),

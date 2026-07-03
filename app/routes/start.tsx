@@ -16,13 +16,15 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
+import { DateInput } from "@mantine/dates";
+import dayjs from "dayjs";
 import { and, asc, eq } from "drizzle-orm";
 import { useState } from "react";
 import { data, useFetcher, useNavigate } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { QuestionField } from "~/components/QuestionField";
 import { parseBannedKinds } from "~/lib/bans";
-import { weeksUntilEvent } from "~/lib/brc";
+import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
 import type { QuestionType } from "~/lib/questions";
 import { parseOptions } from "~/lib/questions";
 import {
@@ -49,6 +51,8 @@ import {
   membership,
   onboardingCompletion,
   onboardingTask,
+  setupPass,
+  setupPassDate,
   user,
 } from "../../db/schema";
 import type { Route } from "./+types/start";
@@ -214,6 +218,22 @@ export async function loader({ request }: Route.LoaderArgs) {
     inviterOptions = await loadInviterOptions(campId);
   }
 
+  // The camper's setup pass (if any) — drives the "arriving early needs a
+  // Setup Access Pass" prompt on the RSVP step. Denied rows don't count.
+  const passRows = await db
+    .select({
+      status: setupPass.status,
+      date: setupPassDate.date,
+    })
+    .from(setupPass)
+    .leftJoin(setupPassDate, eq(setupPass.passDateId, setupPassDate.id))
+    .where(
+      and(eq(setupPass.editionId, editionId), eq(setupPass.membershipId, mid)),
+    );
+  const myPass = passRows.find((p) => p.status !== "denied") ?? null;
+
+  const arrivalWindow = eventWindowFor(activeEdition.year);
+
   return {
     locked: activeEdition.locked,
     bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
@@ -239,6 +259,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     answers,
     invitedByName,
     inviterOptions,
+    myPass,
+    // Gates open on `focus`; min/max bound the arrival picker.
+    arrivalWindow,
   };
 }
 
@@ -292,12 +315,51 @@ export async function action({ request }: Route.ActionArgs) {
       return data({ error: "Bad status." }, { status: 400 });
     }
     const noteRaw = form.get("note");
+    const arrivalRaw = form.get("arrivalDate");
+    let arrivalDate: string | null | undefined;
+    if (arrivalRaw != null) {
+      arrivalDate = String(arrivalRaw) || null;
+      if (arrivalDate && !/^\d{4}-\d{2}-\d{2}$/.test(arrivalDate)) {
+        return data({ error: "Bad arrival date." }, { status: 400 });
+      }
+    }
     await setParticipation({
       campId,
       editionId,
       membershipId: mid,
       status,
+      arrivalDate,
       note: noteRaw == null ? undefined : String(noteRaw) || null,
+    });
+    return data({ ok: true });
+  }
+
+  // Auto-request a Setup Access Pass (unbound — an officer assigns the
+  // "on or after" date on /passes) when the camper is arriving pre-event.
+  if (intent === "requestSetupPass") {
+    if (activeEdition.locked) {
+      return data({ error: "This year is locked." }, { status: 403 });
+    }
+    const existing = await db
+      .select({ id: setupPass.id, status: setupPass.status })
+      .from(setupPass)
+      .where(
+        and(
+          eq(setupPass.editionId, editionId),
+          eq(setupPass.membershipId, mid),
+        ),
+      );
+    if (existing.some((p) => p.status !== "denied")) {
+      return data({ ok: true }); // already requested/granted — idempotent
+    }
+    await db.insert(setupPass).values({
+      id: crypto.randomUUID(),
+      campId,
+      editionId,
+      membershipId: mid,
+      status: "requested",
+      note: "Requested during onboarding (arriving before gates open).",
+      createdById: authUser.id,
     });
     return data({ ok: true });
   }
@@ -549,6 +611,100 @@ function RsvpButtons({ data: d }: { data: LoaderData }) {
           </Button>
         ))}
       </Group>
+      {current === "coming" || current === "maybe" ? (
+        <ArrivalAsk data={d} fetcher={fetcher} />
+      ) : null}
+    </Stack>
+  );
+}
+
+/** Arrival-date ask + the Setup Access Pass prompt: arriving before gate-open
+ * needs a pass, which the camper can auto-request right here (an officer picks
+ * the pass's "on or after" date on /passes). */
+function ArrivalAsk({
+  data: d,
+  fetcher,
+}: {
+  data: LoaderData;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const arrival = d.participation.arrivalDate;
+  const gateOpen = d.arrivalWindow.focus;
+  const gateOpenFmt = dayjs(gateOpen).format("dddd, MMM D");
+  const arrivingEarly = arrival != null && arrival < gateOpen;
+  const saveArrival = (v: unknown) =>
+    fetcher.submit(
+      {
+        intent: "rsvp",
+        status: d.participation.status,
+        arrivalDate: v ? dayjs(v as Date).format("YYYY-MM-DD") : "",
+      },
+      { method: "post" },
+    );
+  return (
+    <Stack gap="xs" mt="xs">
+      <DateInput
+        label="When do you plan to arrive?"
+        description={`Gates open ${gateOpenFmt}.`}
+        placeholder="pick a date"
+        w={220}
+        disabled={d.locked}
+        value={arrival ? dayjs(arrival).toDate() : null}
+        onChange={saveArrival as (v: Date | null) => void}
+        minDate={dayjs(d.arrivalWindow.min).toDate()}
+        maxDate={dayjs(d.arrivalWindow.max).toDate()}
+        defaultDate={dayjs(gateOpen).toDate()}
+        valueFormat="ddd, MMM D"
+        clearable
+      />
+      {arrivingEarly ? (
+        <Paper withBorder p="sm" radius="md">
+          {d.myPass?.status === "granted" ? (
+            <Stack gap={4}>
+              <Text size="sm" c="green">
+                ✓ You have a Setup Access Pass
+                {d.myPass.date
+                  ? ` — it admits you on or after ${dayjs(d.myPass.date).format("ddd, MMM D")}`
+                  : ""}
+                .
+              </Text>
+              {d.myPass.date && arrival && d.myPass.date > arrival ? (
+                <Text size="sm" c="orange">
+                  Heads up: that's after your planned arrival — talk to an
+                  officer about an earlier pass.
+                </Text>
+              ) : null}
+            </Stack>
+          ) : d.myPass ? (
+            <Text size="sm" c="dimmed">
+              ✓ Setup Access Pass requested — an officer will assign you one
+              that covers your arrival.
+            </Text>
+          ) : (
+            <Stack gap="xs">
+              <Text size="sm">
+                Arriving before gates open requires a Setup Access Pass. Want us
+                to request one for you?
+              </Text>
+              <Group>
+                <Button
+                  size="xs"
+                  disabled={d.locked}
+                  loading={fetcher.state !== "idle"}
+                  onClick={() =>
+                    fetcher.submit(
+                      { intent: "requestSetupPass" },
+                      { method: "post" },
+                    )
+                  }
+                >
+                  Yes, request a pass
+                </Button>
+              </Group>
+            </Stack>
+          )}
+        </Paper>
+      ) : null}
     </Stack>
   );
 }
