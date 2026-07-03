@@ -5074,6 +5074,64 @@ function Editor({
                 </g>
               );
             })}
+            {/* Fuel & battery safety zones. Burning Man requires separation rings
+            around fuel storage (10′ no ignition sources, 20′ liquid↔propane, 50′
+            to another fuel area) and a minimum safety zone around a ≥100 kWh
+            battery bank. Drawn under the object markers, in plot-local feet, so
+            they print + export with the map. */}
+            {objects.flatMap((o) => {
+              const ccx = originX + (o.x + o.width / 2) * ppf;
+              const ccy = originY + (o.y + o.height / 2) * ppf;
+              const ring = (
+                rFt: number,
+                color: string,
+                label: string,
+                key: string,
+              ) =>
+                rFt > 0 ? (
+                  <g key={key} pointerEvents="none">
+                    <circle
+                      cx={ccx}
+                      cy={ccy}
+                      r={rFt * ppf}
+                      fill="none"
+                      stroke={color}
+                      strokeOpacity={0.55}
+                      strokeWidth={1.5}
+                      strokeDasharray="5 4"
+                    />
+                    <text
+                      x={ccx}
+                      y={ccy - rFt * ppf + 11}
+                      textAnchor="middle"
+                      fontSize={10}
+                      fontWeight={600}
+                      fill={color}
+                      style={{ userSelect: "none" }}
+                    >
+                      {label}
+                    </text>
+                  </g>
+                ) : null;
+              if (o.kind === "fuel-storage") {
+                return [
+                  ring(10, "#e8590c", "10′ no ignition", `${o.id}-f10`),
+                  ring(20, "#e8590c", "20′ liquid↔propane", `${o.id}-f20`),
+                  ring(50, "#e8590c", "50′ to other fuel", `${o.id}-f50`),
+                ];
+              }
+              if (o.kind === "battery" && (o.config.kwh ?? 0) >= 100) {
+                return [
+                  ring(
+                    o.config.safetyFt ?? 20,
+                    "#2f9e44",
+                    `${Math.round(o.config.safetyFt ?? 20)}′ battery safety zone`,
+                    `${o.id}-bat`,
+                  ),
+                ];
+              }
+              return [];
+            })}
             {/* Canopies (shade/carport/popup/…) render last so they sit over the
             items beneath them. */}
             {[...objects]

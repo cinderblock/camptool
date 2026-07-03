@@ -461,6 +461,56 @@ const CORE_KINDS = [
     tags: ["structure"],
     personal: false,
   },
+  // Liquid-fuel or propane storage. The map auto-draws the Burning Man fuel
+  // separation rings around it: 10′ (no ignition sources / combustibles), 20′
+  // (between liquid fuel and propane), 50′ (to another fuel storage area).
+  {
+    value: "fuel-storage",
+    label: "Fuel storage",
+    color: "#e8590c",
+    w: 5,
+    h: 5,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Power",
+    tags: ["structure"],
+    personal: false,
+  },
+  // Battery / energy-storage bank. When capacity ≥ 100 kWh the map draws a
+  // minimum safety-zone ring (BM electrical-safety requirement); small personal
+  // batteries (leave capacity at 0) don't need one and draw nothing.
+  {
+    value: "battery",
+    label: "Battery bank",
+    color: "#2f9e44",
+    w: 4,
+    h: 4,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Power",
+    tags: ["structure"],
+    personal: false,
+    controls: [
+      {
+        key: "kwh",
+        label: "Capacity (kWh)",
+        min: 0,
+        max: 500,
+        step: 5,
+        default: 0,
+      },
+      {
+        key: "safetyFt",
+        label: "Safety zone (ft)",
+        min: 0,
+        max: 100,
+        step: 5,
+        default: 20,
+      },
+    ],
+  },
   // A solar/sun shower or shower stall.
   {
     value: "shower",
