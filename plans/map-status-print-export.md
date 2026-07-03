@@ -123,7 +123,16 @@ downloads, and **restores to dark** — no errors. (Did not open the downloaded 
 via automation; user to eyeball final header text + stripped camper names.)
 
 ### Post-review fixes (all deployed green)
-- Export forces LIGHT scheme + re-render before snapshot (was capturing dark).
+- Export renders a LIGHT copy **off-screen** — clone the SVG under a hidden
+  `data-mantine-color-scheme="light"` wrapper and read computed styles there, so
+  the map's scheme vars resolve light in that subtree only. **Never touches the
+  live page's theme.** (Superseded a first attempt that flipped the whole app's
+  Mantine scheme via `setColorScheme` + restore — that mutated the live page and
+  got **stuck cycling** light/dark, and persisted `mantine-color-scheme-value` to
+  localStorage. Don't flip the live page to snapshot it.) Needed broadening the
+  `MAP_SCHEME_CSS` selectors from `html[...]` to `[...]` so a wrapper can scope
+  the vars. Residual: JS-derived shadow literals (#000/0.85) stay dark-tuned but
+  read fine on white.
 - Dates are ISO `YYYY-MM-DD` (user hates MM/DD/YY — see memory).
 - Contact renders `First "Playa" Last`.
 - Object labels run along the dominant axis, folded to never be upside down.
