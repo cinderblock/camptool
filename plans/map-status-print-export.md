@@ -112,6 +112,27 @@ officers can produce a submission-ready file:
       typecheck/build/lint green. NOT yet browser-verified — the SVG→canvas
       color/quality path especially needs eyeballing.
 
+## Live verification (2026-07-02, camptool.mathcamp.us/map)
+
+BROWSER-VERIFIED as Cameron (Math Camp @ Group W, 2026): DRAFT watermark renders
+over the map; Map status presets + free text work; object labels now align to each
+object's long axis (upright). Export dialog opens with the **persisted** contact
+(playa "Quadrangle", phone) + version from the status; filename preview
+`mathcampgr_07_02.jpg` (20 chars). On Export JPEG the map **flips to light**, renders,
+downloads, and **restores to dark** — no errors. (Did not open the downloaded JPEG
+via automation; user to eyeball final header text + stripped camper names.)
+
+### Post-review fixes (all deployed green)
+- Export forces LIGHT scheme + re-render before snapshot (was capturing dark).
+- Dates are ISO `YYYY-MM-DD` (user hates MM/DD/YY — see memory).
+- Contact renders `First "Playa" Last`.
+- Object labels run along the dominant axis, folded to never be upside down.
+- BM export strips campers' personal (occupant) names (`data-personal-name`).
+
+### Known limitation
+- A locked edition hides officer tools, so you can't export a locked year (export
+  just before locking). Relax later if needed.
+
 ## Findings / gotchas
 - **SVG export loses CSS variables.** The map fills use `var(--mantine-color-*)`
   and the scheme vars; a naive serialize→`<img>` renders them wrong. Fix:
