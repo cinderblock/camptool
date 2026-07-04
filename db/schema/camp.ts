@@ -66,6 +66,9 @@ export const campEdition = sqliteTable(
     // "NOT FINAL", "FINAL v2"). NULL/"" = no overlay. Independent of `locked`
     // (locked = read-only; this is just a human label / the export's version tag).
     mapStatus: text("map_status"),
+    // Undo/redo cursor for the official map: the `seq` of the current state in
+    // `map_snapshot` (kind=auto). NULL = no history yet. See map_snapshot.
+    mapUndoCursor: integer("map_undo_cursor"),
     // Structure kinds disallowed for THIS edition (a JSON array of kind `value`s),
     // e.g. Burning Man bans pop-up canopies but a smaller event allows them. The
     // palette hides these and add-actions reject them; existing placed objects of a

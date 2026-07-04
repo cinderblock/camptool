@@ -281,6 +281,13 @@
       "when": 1783065946432,
       "tag": "0039_abnormal_war_machine",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1783125028273,
+      "tag": "0040_last_bloodaxe",
+      "breakpoints": true
     }
   ]
 }

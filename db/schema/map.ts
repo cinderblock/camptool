@@ -274,3 +274,43 @@ export const mapRoad = sqliteTable(
   },
   (t) => [index("map_road_edition").on(t.editionId)],
 );
+
+/** Undo/redo + named restore points for a camp's official map, per edition.
+ *
+ * `data` is a JSON snapshot of the FULL edition map state (placement + objects +
+ * occupants + zones + cables + roads) — small (KB) at this scale. `kind`:
+ *   auto   — an automatic history state captured after each officer edit; the
+ *            undo/redo line. `campEdition.mapUndoCursor` holds the `seq` of the
+ *            current state; undo/redo move the cursor and restore that state.
+ *            Auto states are ring-buffered (only the newest are kept).
+ *   named  — an officer-saved restore point (kept until deleted); off the
+ *            auto seq line (its `seq` is unused/0).
+ * Restore = replace all edition map rows from `data` in one transaction. Only
+ * officers write history / restore (members only *suggest* via pending-approval).
+ */
+export const mapSnapshot = sqliteTable(
+  "map_snapshot",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id")
+      .notNull()
+      .references(() => campEdition.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("auto"), // "auto" | "named"
+    label: text("label"),
+    // Monotonic position on the auto undo/redo line (per edition). 0 for named.
+    seq: integer("seq").notNull().default(0),
+    // JSON: { placement, objects, occupants, zones, cables, roads }.
+    data: text("data").notNull(),
+    createdByMembershipId: text("created_by_membership_id").references(
+      () => membership.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [index("map_snapshot_edition").on(t.editionId, t.kind, t.seq)],
+);

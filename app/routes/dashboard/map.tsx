@@ -25,7 +25,7 @@ import {
   useComputedColorScheme,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, gt, lt } from "drizzle-orm";
 import {
   memo,
   useEffect,
@@ -90,7 +90,9 @@ import {
   campEdition,
   mapCable,
   mapObject,
+  mapObjectOccupant,
   mapRoad,
+  mapSnapshot,
   mapZone,
   membership,
   placement,
@@ -713,6 +715,301 @@ async function loadObjRow(
   return r ? toObjRow(r) : null;
 }
 
+// ---- Official-map undo/redo + snapshots (server) ----------------------------
+// The full edition map state serializes to a small JSON blob; undo/redo and named
+// snapshots restore it. Only officers write history / restore. See map_snapshot
+// and plans/map-undo-snapshots.md.
+
+const MAX_AUTO_SNAPSHOTS = 60;
+
+// Timestamp columns per table, to revive from JSON (ISO string → Date) on restore.
+const SNAP_DATE_FIELDS = {
+  placement: ["createdAt", "updatedAt"],
+  objects: ["pendingAt", "createdAt", "updatedAt"],
+  occupants: ["createdAt"],
+  zones: ["createdAt", "updatedAt"],
+  cables: ["createdAt", "updatedAt"],
+  roads: ["createdAt", "updatedAt"],
+} as const;
+
+// biome-ignore lint/suspicious/noExplicitAny: generic row revival across tables
+function reviveDates(row: any, fields: readonly string[]) {
+  const out = { ...row };
+  for (const f of fields) out[f] = out[f] == null ? null : new Date(out[f]);
+  return out;
+}
+
+/** Serialize the FULL edition map state to a JSON string (Dates → ISO). */
+async function serializeMap(editionId: string): Promise<string> {
+  const [pl, objects, occupants, zones, cables, roads] = await Promise.all([
+    db.select().from(placement).where(eq(placement.editionId, editionId)),
+    db.select().from(mapObject).where(eq(mapObject.editionId, editionId)),
+    db
+      .select()
+      .from(mapObjectOccupant)
+      .where(eq(mapObjectOccupant.editionId, editionId)),
+    db.select().from(mapZone).where(eq(mapZone.editionId, editionId)),
+    db.select().from(mapCable).where(eq(mapCable.editionId, editionId)),
+    db.select().from(mapRoad).where(eq(mapRoad.editionId, editionId)),
+  ]);
+  return JSON.stringify({
+    placement: pl[0] ?? null,
+    objects,
+    occupants,
+    zones,
+    cables,
+    roads,
+  });
+}
+
+/** Replace all edition map rows from a serialized snapshot (delete + reinsert,
+ * IDs preserved so occupant FKs stay valid). */
+async function restoreMap(editionId: string, dataJson: string) {
+  const d = JSON.parse(dataJson);
+  await db
+    .delete(mapObjectOccupant)
+    .where(eq(mapObjectOccupant.editionId, editionId));
+  await db.delete(mapObject).where(eq(mapObject.editionId, editionId));
+  await db.delete(mapZone).where(eq(mapZone.editionId, editionId));
+  await db.delete(mapCable).where(eq(mapCable.editionId, editionId));
+  await db.delete(mapRoad).where(eq(mapRoad.editionId, editionId));
+  await db.delete(placement).where(eq(placement.editionId, editionId));
+  if (d.placement)
+    await db
+      .insert(placement)
+      .values(reviveDates(d.placement, SNAP_DATE_FIELDS.placement));
+  if (d.objects?.length)
+    await db
+      .insert(mapObject)
+      .values(
+        d.objects.map((o: unknown) => reviveDates(o, SNAP_DATE_FIELDS.objects)),
+      );
+  if (d.occupants?.length)
+    await db
+      .insert(mapObjectOccupant)
+      .values(
+        d.occupants.map((o: unknown) =>
+          reviveDates(o, SNAP_DATE_FIELDS.occupants),
+        ),
+      );
+  if (d.zones?.length)
+    await db
+      .insert(mapZone)
+      .values(
+        d.zones.map((o: unknown) => reviveDates(o, SNAP_DATE_FIELDS.zones)),
+      );
+  if (d.cables?.length)
+    await db
+      .insert(mapCable)
+      .values(
+        d.cables.map((o: unknown) => reviveDates(o, SNAP_DATE_FIELDS.cables)),
+      );
+  if (d.roads?.length)
+    await db
+      .insert(mapRoad)
+      .values(
+        d.roads.map((o: unknown) => reviveDates(o, SNAP_DATE_FIELDS.roads)),
+      );
+}
+
+async function insertSnap(
+  campId: string,
+  editionId: string,
+  membershipId: string,
+  kind: "auto" | "named",
+  label: string | null,
+  seq: number,
+  data: string,
+) {
+  await db.insert(mapSnapshot).values({
+    id: crypto.randomUUID(),
+    campId,
+    editionId,
+    kind,
+    label,
+    seq,
+    data,
+    createdByMembershipId: membershipId,
+  });
+}
+
+/** After an officer edit, capture the new state as an undo checkpoint. `pre` is
+ * the pre-edit state (used as the seq-0 baseline on the first edit so the first
+ * edit is undoable). No-ops if the edit changed nothing. */
+async function recordOfficialHistory(
+  campId: string,
+  editionId: string,
+  membershipId: string,
+  pre: string,
+) {
+  const post = await serializeMap(editionId);
+  if (post === pre) return; // errored / no-op edit — no checkpoint
+  const [ed] = await db
+    .select({ cursor: campEdition.mapUndoCursor })
+    .from(campEdition)
+    .where(eq(campEdition.id, editionId))
+    .limit(1);
+  const autos = await db
+    .select({ seq: mapSnapshot.seq })
+    .from(mapSnapshot)
+    .where(
+      and(eq(mapSnapshot.editionId, editionId), eq(mapSnapshot.kind, "auto")),
+    )
+    .orderBy(desc(mapSnapshot.seq));
+  let cursor = ed?.cursor ?? null;
+  if (autos.length === 0) {
+    await insertSnap(campId, editionId, membershipId, "auto", null, 0, pre);
+    cursor = 0;
+  } else if (cursor == null) {
+    cursor = autos[0]?.seq ?? 0;
+  }
+  // Discard the redo branch (anything ahead of the cursor).
+  await db
+    .delete(mapSnapshot)
+    .where(
+      and(
+        eq(mapSnapshot.editionId, editionId),
+        eq(mapSnapshot.kind, "auto"),
+        gt(mapSnapshot.seq, cursor),
+      ),
+    );
+  const newSeq = cursor + 1;
+  await insertSnap(campId, editionId, membershipId, "auto", null, newSeq, post);
+  await db
+    .update(campEdition)
+    .set({ mapUndoCursor: newSeq })
+    .where(eq(campEdition.id, editionId));
+  // Ring-buffer: drop auto checkpoints older than the newest MAX.
+  await db
+    .delete(mapSnapshot)
+    .where(
+      and(
+        eq(mapSnapshot.editionId, editionId),
+        eq(mapSnapshot.kind, "auto"),
+        lt(mapSnapshot.seq, newSeq - MAX_AUTO_SNAPSHOTS + 1),
+      ),
+    );
+}
+
+/** Undo/redo availability for the current cursor. */
+async function historyState(editionId: string) {
+  const [ed] = await db
+    .select({ cursor: campEdition.mapUndoCursor })
+    .from(campEdition)
+    .where(eq(campEdition.id, editionId))
+    .limit(1);
+  const cursor = ed?.cursor ?? null;
+  if (cursor == null) return { canUndo: false, canRedo: false };
+  const [lower] = await db
+    .select({ seq: mapSnapshot.seq })
+    .from(mapSnapshot)
+    .where(
+      and(
+        eq(mapSnapshot.editionId, editionId),
+        eq(mapSnapshot.kind, "auto"),
+        lt(mapSnapshot.seq, cursor),
+      ),
+    )
+    .limit(1);
+  const [higher] = await db
+    .select({ seq: mapSnapshot.seq })
+    .from(mapSnapshot)
+    .where(
+      and(
+        eq(mapSnapshot.editionId, editionId),
+        eq(mapSnapshot.kind, "auto"),
+        gt(mapSnapshot.seq, cursor),
+      ),
+    )
+    .limit(1);
+  return { canUndo: !!lower, canRedo: !!higher };
+}
+
+/** Named snapshots (restore points) for the snapshots panel, newest first. */
+async function listSnapshots(editionId: string) {
+  const rows = await db
+    .select({
+      id: mapSnapshot.id,
+      label: mapSnapshot.label,
+      createdAt: mapSnapshot.createdAt,
+    })
+    .from(mapSnapshot)
+    .where(
+      and(eq(mapSnapshot.editionId, editionId), eq(mapSnapshot.kind, "named")),
+    )
+    .orderBy(desc(mapSnapshot.createdAt));
+  return rows.map((r) => ({
+    id: r.id,
+    label: r.label ?? "Snapshot",
+    createdAt: r.createdAt.getTime(),
+  }));
+}
+
+/** The client-shaped map state (objects/zones/cables/roads/lot) for a bulk
+ * refresh after undo/redo/restore — mirrors the loader's mapping. */
+async function loadClientMap(editionId: string) {
+  const [objectRows, zoneRows, cableRows, roadRows, lotRows] =
+    await Promise.all([
+      db
+        .select(objSelect)
+        .from(mapObject)
+        .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
+        .leftJoin(user, eq(membership.userId, user.id))
+        .where(
+          and(eq(mapObject.editionId, editionId), eq(mapObject.placed, true)),
+        ),
+      db.select().from(mapZone).where(eq(mapZone.editionId, editionId)),
+      db.select().from(mapCable).where(eq(mapCable.editionId, editionId)),
+      db.select().from(mapRoad).where(eq(mapRoad.editionId, editionId)),
+      db.select().from(placement).where(eq(placement.editionId, editionId)),
+    ]);
+  const lot = lotRows[0];
+  return {
+    objects: objectRows.map(toObjRow) satisfies ObjRow[],
+    zones: zoneRows.map((z) => ({
+      id: z.id,
+      name: z.name,
+      kind: z.kind,
+      color: z.color,
+      points: parseZonePoints(z.points),
+      notes: z.notes,
+    })) satisfies ZoneRow[],
+    cables: cableRows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      kind: c.kind,
+      color: c.color,
+      points: parseZonePoints(c.points),
+      amps: c.amps,
+      gauge: c.gauge,
+      notes: c.notes,
+    })) satisfies CableRow[],
+    roads: roadRows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      kind: r.kind,
+      color: r.color,
+      width: r.width,
+      cutback: r.cutback,
+      points: parseZonePoints(r.points),
+      notes: r.notes,
+    })) satisfies RoadRow[],
+    lot: lot
+      ? {
+          streetLetter: lot.streetLetter,
+          year: lot.year,
+          frontsToMan: lot.frontsToMan,
+          street: lot.street,
+          address: lot.address,
+          frontageFt: lot.frontageFt,
+          depthFt: lot.depthFt,
+          innerRadiusFt: lot.innerRadiusFt,
+          notes: lot.notes,
+        }
+      : null,
+  };
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   const {
     user: account,
@@ -768,10 +1065,18 @@ export async function loader({ request }: Route.LoaderArgs) {
         )
     : [];
 
+  // Official-map undo/redo availability + saved snapshots (officer tools).
+  const [history, snapshots] = await Promise.all([
+    historyState(editionId),
+    listSnapshots(editionId),
+  ]);
+
   return {
     canEdit:
       hasAtLeast(active.membership.role, "member") && !activeEdition.locked,
     locked: activeEdition.locked,
+    history,
+    snapshots,
     // Free-text "doneness" label shown as a watermark over the map (officer-set).
     mapStatus: activeEdition.mapStatus,
     // The event this edition is for — gates Burning-Man-specific UI.
@@ -908,681 +1213,827 @@ export async function action({ request }: Route.ActionArgs) {
     "addRoad",
     "updateRoad",
     "deleteRoad",
+    // Undo/redo + snapshots act on the official map — officers only.
+    "undo",
+    "redo",
+    "saveSnapshot",
+    "restoreSnapshot",
+    "deleteSnapshot",
   ]);
   if (officerOnly.has(intent) && !canManage) {
     return data({ error: "Officers manage the map." }, { status: 403 });
   }
 
-  if (intent === "savePlacement") {
-    const values = {
-      streetLetter: str("streetLetter"),
-      year: form.get("year") ? Math.round(num("year")) : null,
-      frontsToMan: form.get("frontsToMan") === "on",
-      street: str("street"),
-      address: str("address"),
-      frontageFt: Math.max(1, num("frontageFt", 100)),
-      depthFt: Math.max(1, num("depthFt", 100)),
-      innerRadiusFt: form.get("innerRadiusFt") ? num("innerRadiusFt") : null,
-      notes: str("notes"),
-      updatedAt: new Date(),
-    };
-    const [existing] = await db
-      .select({ id: placement.id })
-      .from(placement)
-      .where(eq(placement.editionId, editionId))
-      .limit(1);
-    if (existing) {
+  // Intents that mutate the OFFICIAL map get an undo checkpoint recorded after
+  // they run (a member's own-item suggestion via updateObject does NOT — gated on
+  // canManage below). undo/redo/snapshot intents manage history themselves.
+  const OFFICIAL_MAP_INTENTS = new Set([
+    "savePlacement",
+    "addObject",
+    "addBlock",
+    "updateObject",
+    "updateObjects",
+    "unplaceObjects",
+    "linkObjects",
+    "unlinkObjects",
+    "duplicateObject",
+    "placeObject",
+    "unplaceObject",
+    "deleteObject",
+    "approveChange",
+    "rejectChange",
+    "addZone",
+    "updateZone",
+    "deleteZone",
+    "addCable",
+    "updateCable",
+    "deleteCable",
+    "addRoad",
+    "updateRoad",
+    "deleteRoad",
+  ]);
+  const officialPre =
+    canManage && OFFICIAL_MAP_INTENTS.has(intent)
+      ? await serializeMap(editionId)
+      : null;
+
+  const runIntent = async () => {
+    if (intent === "undo" || intent === "redo") {
+      const [ed] = await db
+        .select({ cursor: campEdition.mapUndoCursor })
+        .from(campEdition)
+        .where(eq(campEdition.id, editionId))
+        .limit(1);
+      const cursor = ed?.cursor ?? null;
+      if (cursor == null)
+        return data({ error: "Nothing to undo yet." }, { status: 400 });
+      const [target] = await db
+        .select({ seq: mapSnapshot.seq, data: mapSnapshot.data })
+        .from(mapSnapshot)
+        .where(
+          and(
+            eq(mapSnapshot.editionId, editionId),
+            eq(mapSnapshot.kind, "auto"),
+            intent === "undo"
+              ? lt(mapSnapshot.seq, cursor)
+              : gt(mapSnapshot.seq, cursor),
+          ),
+        )
+        .orderBy(intent === "undo" ? desc(mapSnapshot.seq) : mapSnapshot.seq)
+        .limit(1);
+      if (!target)
+        return data(
+          {
+            error: intent === "undo" ? "Nothing to undo." : "Nothing to redo.",
+          },
+          { status: 400 },
+        );
+      await restoreMap(editionId, target.data);
       await db
-        .update(placement)
-        .set(values)
-        .where(eq(placement.id, existing.id));
-    } else {
-      await db
-        .insert(placement)
-        .values({ id: crypto.randomUUID(), campId, editionId, ...values });
+        .update(campEdition)
+        .set({ mapUndoCursor: target.seq })
+        .where(eq(campEdition.id, editionId));
+      return data({
+        map: await loadClientMap(editionId),
+        history: await historyState(editionId),
+      });
     }
-    return data({ ok: true });
-  }
 
-  if (intent === "setMapStatus") {
-    // Free-text doneness label ("DRAFT"/"FINAL v2"/…). Trim; empty clears it.
-    const raw = String(form.get("mapStatus") ?? "").trim();
-    await db
-      .update(campEdition)
-      .set({ mapStatus: raw === "" ? null : raw.slice(0, 60) })
-      .where(eq(campEdition.id, editionId));
-    return data({ ok: true });
-  }
-
-  if (intent === "setPlacementContact") {
-    // Camp-scoped submission contact for the map export (persists across years).
-    const clean = (k: string) => {
-      const v = String(form.get(k) ?? "").trim();
-      return v === "" ? null : v.slice(0, 120);
-    };
-    await db
-      .update(camp)
-      .set({
-        placementContactName: clean("name"),
-        placementContactPlaya: clean("playa"),
-        placementContactEmail: clean("email"),
-        placementContactPhone: clean("phone"),
-      })
-      .where(eq(camp.id, campId));
-    return data({ ok: true });
-  }
-
-  if (intent === "addObject") {
-    const kind = String(form.get("kind") ?? "structure");
-    if (isKindBanned(activeEdition.bannedKinds, kind)) {
-      return data(
-        { error: `${kindDef(kind).label} isn't allowed this year.` },
-        { status: 403 },
+    if (intent === "saveSnapshot") {
+      const label = (str("label") ?? "Snapshot").slice(0, 80);
+      await insertSnap(
+        campId,
+        editionId,
+        myMembershipId,
+        "named",
+        label,
+        0,
+        await serializeMap(editionId),
       );
+      return data({ snapshots: await listSnapshots(editionId) });
     }
-    const def = kindDef(kind);
-    const row = {
-      id: crypto.randomUUID(),
-      campId,
-      editionId,
-      name: str("name"),
-      kind,
-      // Dropping from the legend = an officer placing a camp/shared item.
-      placed: true,
-      x: num("x", 0),
-      y: num("y", 0),
-      width: Math.max(1, num("width", def.w)),
-      height: Math.max(1, num("height", def.h)),
-      rotation: num("rotation", 0),
-      tallFt: num("tallFt", kindHeight(kind)),
-      showDoor: true,
-      mirrored: false,
-      color: str("color"),
-      notes: str("notes"),
-      createdById: user.id,
-    };
-    await db.insert(mapObject).values(row);
-    return data({
-      object: {
-        id: row.id,
-        name: row.name,
-        kind: row.kind,
-        x: row.x,
-        y: row.y,
-        width: row.width,
-        height: row.height,
-        rotation: row.rotation,
-        tallFt: row.tallFt,
-        showDoor: row.showDoor,
-        mirrored: row.mirrored,
-        config: {},
-        color: row.color,
-        notes: row.notes,
-        groupId: null,
-        ownerMembershipId: null,
-        ownerName: null,
-        pending: null,
-      } satisfies ObjRow,
-    });
-  }
 
-  if (intent === "addBlock") {
-    // Drop a premade cluster: the client sends pre-positioned items (absolute
-    // plot-local feet); we persist them all as camp/shared objects and return
-    // the rows so the client can append them.
-    let raw: unknown;
-    try {
-      raw = JSON.parse(String(form.get("items") ?? "[]"));
-    } catch {
-      raw = [];
+    if (intent === "restoreSnapshot") {
+      const id = String(form.get("id"));
+      const [snap] = await db
+        .select({ data: mapSnapshot.data })
+        .from(mapSnapshot)
+        .where(
+          and(eq(mapSnapshot.id, id), eq(mapSnapshot.editionId, editionId)),
+        )
+        .limit(1);
+      if (!snap) return data({ error: "Snapshot not found." }, { status: 404 });
+      // The restore is itself an undoable official edit.
+      const pre = await serializeMap(editionId);
+      await restoreMap(editionId, snap.data);
+      await recordOfficialHistory(campId, editionId, myMembershipId, pre);
+      return data({
+        map: await loadClientMap(editionId),
+        history: await historyState(editionId),
+        snapshots: await listSnapshots(editionId),
+      });
     }
-    if (!Array.isArray(raw) || raw.length === 0) {
-      return data({ error: "Empty block." }, { status: 400 });
-    }
-    const rows = raw
-      .slice(0, 20)
-      .map((it) => {
-        const kind = String((it as { kind?: unknown }).kind ?? "");
-        if (!isKind(kind)) return null;
-        if (isKindBanned(activeEdition.bannedKinds, kind)) return null;
-        const def = kindDef(kind);
-        const n = (v: unknown, d: number) => {
-          const x = Number(v);
-          return Number.isFinite(x) ? x : d;
-        };
-        const nm = (it as { name?: unknown }).name;
-        return {
-          id: crypto.randomUUID(),
-          campId,
-          editionId,
-          name: nm ? String(nm) : null,
-          kind,
-          placed: true,
-          x: n((it as { x?: unknown }).x, 0),
-          y: n((it as { y?: unknown }).y, 0),
-          width: Math.max(1, n((it as { width?: unknown }).width, def.w)),
-          height: Math.max(1, n((it as { height?: unknown }).height, def.h)),
-          rotation: n((it as { rotation?: unknown }).rotation, 0),
-          tallFt: kindHeight(kind),
-          showDoor: true,
-          mirrored: false,
-          color: null,
-          notes: null,
-          createdById: user.id,
-        };
-      })
-      .filter((r): r is NonNullable<typeof r> => r !== null);
-    if (rows.length === 0) {
-      return data({ error: "No valid items." }, { status: 400 });
-    }
-    await db.insert(mapObject).values(rows);
-    return data({
-      objects: rows.map(
-        (row) =>
-          ({
-            id: row.id,
-            name: row.name,
-            kind: row.kind,
-            x: row.x,
-            y: row.y,
-            width: row.width,
-            height: row.height,
-            rotation: row.rotation,
-            tallFt: row.tallFt,
-            showDoor: row.showDoor,
-            mirrored: row.mirrored,
-            config: {},
-            color: row.color,
-            notes: row.notes,
-            groupId: null,
-            ownerMembershipId: null,
-            ownerName: null,
-            pending: null,
-          }) satisfies ObjRow,
-      ),
-    });
-  }
 
-  if (intent === "updateObjects") {
-    // Batch geometry update for a multi-select group move/rotate (officer-only —
-    // gated by the officerOnly set). One request so the single fetcher doesn't
-    // cancel rapid per-object submits.
-    let raw: unknown;
-    try {
-      raw = JSON.parse(String(form.get("items") ?? "[]"));
-    } catch {
-      raw = [];
+    if (intent === "deleteSnapshot") {
+      const id = String(form.get("id"));
+      await db
+        .delete(mapSnapshot)
+        .where(
+          and(
+            eq(mapSnapshot.id, id),
+            eq(mapSnapshot.editionId, editionId),
+            eq(mapSnapshot.kind, "named"),
+          ),
+        );
+      return data({ snapshots: await listSnapshots(editionId) });
     }
-    if (!Array.isArray(raw)) {
-      return data({ error: "Bad payload." }, { status: 400 });
+
+    return await dispatchMutation();
+  };
+
+  const dispatchMutation = async () => {
+    if (intent === "savePlacement") {
+      const values = {
+        streetLetter: str("streetLetter"),
+        year: form.get("year") ? Math.round(num("year")) : null,
+        frontsToMan: form.get("frontsToMan") === "on",
+        street: str("street"),
+        address: str("address"),
+        frontageFt: Math.max(1, num("frontageFt", 100)),
+        depthFt: Math.max(1, num("depthFt", 100)),
+        innerRadiusFt: form.get("innerRadiusFt") ? num("innerRadiusFt") : null,
+        notes: str("notes"),
+        updatedAt: new Date(),
+      };
+      const [existing] = await db
+        .select({ id: placement.id })
+        .from(placement)
+        .where(eq(placement.editionId, editionId))
+        .limit(1);
+      if (existing) {
+        await db
+          .update(placement)
+          .set(values)
+          .where(eq(placement.id, existing.id));
+      } else {
+        await db
+          .insert(placement)
+          .values({ id: crypto.randomUUID(), campId, editionId, ...values });
+      }
+      return data({ ok: true });
     }
-    for (const it of raw.slice(0, 300)) {
-      const o = it as Record<string, unknown>;
-      const id = String(o.id ?? "");
-      if (!id) continue;
+
+    if (intent === "setMapStatus") {
+      // Free-text doneness label ("DRAFT"/"FINAL v2"/…). Trim; empty clears it.
+      const raw = String(form.get("mapStatus") ?? "").trim();
+      await db
+        .update(campEdition)
+        .set({ mapStatus: raw === "" ? null : raw.slice(0, 60) })
+        .where(eq(campEdition.id, editionId));
+      return data({ ok: true });
+    }
+
+    if (intent === "setPlacementContact") {
+      // Camp-scoped submission contact for the map export (persists across years).
+      const clean = (k: string) => {
+        const v = String(form.get(k) ?? "").trim();
+        return v === "" ? null : v.slice(0, 120);
+      };
+      await db
+        .update(camp)
+        .set({
+          placementContactName: clean("name"),
+          placementContactPlaya: clean("playa"),
+          placementContactEmail: clean("email"),
+          placementContactPhone: clean("phone"),
+        })
+        .where(eq(camp.id, campId));
+      return data({ ok: true });
+    }
+
+    if (intent === "addObject") {
+      const kind = String(form.get("kind") ?? "structure");
+      if (isKindBanned(activeEdition.bannedKinds, kind)) {
+        return data(
+          { error: `${kindDef(kind).label} isn't allowed this year.` },
+          { status: 403 },
+        );
+      }
+      const def = kindDef(kind);
+      const row = {
+        id: crypto.randomUUID(),
+        campId,
+        editionId,
+        name: str("name"),
+        kind,
+        // Dropping from the legend = an officer placing a camp/shared item.
+        placed: true,
+        x: num("x", 0),
+        y: num("y", 0),
+        width: Math.max(1, num("width", def.w)),
+        height: Math.max(1, num("height", def.h)),
+        rotation: num("rotation", 0),
+        tallFt: num("tallFt", kindHeight(kind)),
+        showDoor: true,
+        mirrored: false,
+        color: str("color"),
+        notes: str("notes"),
+        createdById: user.id,
+      };
+      await db.insert(mapObject).values(row);
+      return data({
+        object: {
+          id: row.id,
+          name: row.name,
+          kind: row.kind,
+          x: row.x,
+          y: row.y,
+          width: row.width,
+          height: row.height,
+          rotation: row.rotation,
+          tallFt: row.tallFt,
+          showDoor: row.showDoor,
+          mirrored: row.mirrored,
+          config: {},
+          color: row.color,
+          notes: row.notes,
+          groupId: null,
+          ownerMembershipId: null,
+          ownerName: null,
+          pending: null,
+        } satisfies ObjRow,
+      });
+    }
+
+    if (intent === "addBlock") {
+      // Drop a premade cluster: the client sends pre-positioned items (absolute
+      // plot-local feet); we persist them all as camp/shared objects and return
+      // the rows so the client can append them.
+      let raw: unknown;
+      try {
+        raw = JSON.parse(String(form.get("items") ?? "[]"));
+      } catch {
+        raw = [];
+      }
+      if (!Array.isArray(raw) || raw.length === 0) {
+        return data({ error: "Empty block." }, { status: 400 });
+      }
+      const rows = raw
+        .slice(0, 20)
+        .map((it) => {
+          const kind = String((it as { kind?: unknown }).kind ?? "");
+          if (!isKind(kind)) return null;
+          if (isKindBanned(activeEdition.bannedKinds, kind)) return null;
+          const def = kindDef(kind);
+          const n = (v: unknown, d: number) => {
+            const x = Number(v);
+            return Number.isFinite(x) ? x : d;
+          };
+          const nm = (it as { name?: unknown }).name;
+          return {
+            id: crypto.randomUUID(),
+            campId,
+            editionId,
+            name: nm ? String(nm) : null,
+            kind,
+            placed: true,
+            x: n((it as { x?: unknown }).x, 0),
+            y: n((it as { y?: unknown }).y, 0),
+            width: Math.max(1, n((it as { width?: unknown }).width, def.w)),
+            height: Math.max(1, n((it as { height?: unknown }).height, def.h)),
+            rotation: n((it as { rotation?: unknown }).rotation, 0),
+            tallFt: kindHeight(kind),
+            showDoor: true,
+            mirrored: false,
+            color: null,
+            notes: null,
+            createdById: user.id,
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null);
+      if (rows.length === 0) {
+        return data({ error: "No valid items." }, { status: 400 });
+      }
+      await db.insert(mapObject).values(rows);
+      return data({
+        objects: rows.map(
+          (row) =>
+            ({
+              id: row.id,
+              name: row.name,
+              kind: row.kind,
+              x: row.x,
+              y: row.y,
+              width: row.width,
+              height: row.height,
+              rotation: row.rotation,
+              tallFt: row.tallFt,
+              showDoor: row.showDoor,
+              mirrored: row.mirrored,
+              config: {},
+              color: row.color,
+              notes: row.notes,
+              groupId: null,
+              ownerMembershipId: null,
+              ownerName: null,
+              pending: null,
+            }) satisfies ObjRow,
+        ),
+      });
+    }
+
+    if (intent === "updateObjects") {
+      // Batch geometry update for a multi-select group move/rotate (officer-only —
+      // gated by the officerOnly set). One request so the single fetcher doesn't
+      // cancel rapid per-object submits.
+      let raw: unknown;
+      try {
+        raw = JSON.parse(String(form.get("items") ?? "[]"));
+      } catch {
+        raw = [];
+      }
+      if (!Array.isArray(raw)) {
+        return data({ error: "Bad payload." }, { status: 400 });
+      }
+      for (const it of raw.slice(0, 300)) {
+        const o = it as Record<string, unknown>;
+        const id = String(o.id ?? "");
+        if (!id) continue;
+        await db
+          .update(mapObject)
+          .set({
+            x: Number(o.x) || 0,
+            y: Number(o.y) || 0,
+            width: Math.max(1, Number(o.width) || 1),
+            height: Math.max(1, Number(o.height) || 1),
+            rotation: Number(o.rotation) || 0,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+      }
+      return data({ ok: true });
+    }
+
+    if (intent === "linkObjects" || intent === "unlinkObjects") {
+      // Link a multi-selection into one block (shared group_id, client-supplied so
+      // its optimistic update matches) or unlink (clear it). Officer-only, batched.
+      let raw: unknown;
+      try {
+        raw = JSON.parse(String(form.get("ids") ?? "[]"));
+      } catch {
+        raw = [];
+      }
+      if (!Array.isArray(raw)) {
+        return data({ error: "Bad payload." }, { status: 400 });
+      }
+      const groupId =
+        intent === "linkObjects"
+          ? String(form.get("groupId") ?? "") || null
+          : null;
+      for (const v of raw.slice(0, 300)) {
+        const id = String(v ?? "");
+        if (!id) continue;
+        await db
+          .update(mapObject)
+          .set({ groupId, updatedAt: new Date() })
+          .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+      }
+      return data({ ok: true });
+    }
+
+    if (intent === "unplaceObjects") {
+      // Batch unplace (send a multi-select group back to the tray) in one request.
+      let raw: unknown;
+      try {
+        raw = JSON.parse(String(form.get("ids") ?? "[]"));
+      } catch {
+        raw = [];
+      }
+      if (!Array.isArray(raw)) {
+        return data({ error: "Bad payload." }, { status: 400 });
+      }
+      for (const v of raw.slice(0, 300)) {
+        const id = String(v ?? "");
+        if (!id) continue;
+        await db
+          .update(mapObject)
+          .set({ placed: false, updatedAt: new Date() })
+          .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+      }
+      return data({ ok: true });
+    }
+
+    if (intent === "updateObject") {
+      const id = String(form.get("id"));
+      const [obj] = await db
+        .select({
+          ownerMembershipId: mapObject.ownerMembershipId,
+          x: mapObject.x,
+          y: mapObject.y,
+          width: mapObject.width,
+          height: mapObject.height,
+          rotation: mapObject.rotation,
+          pendingAt: mapObject.pendingAt,
+        })
+        .from(mapObject)
+        .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+        .limit(1);
+      if (!obj) return data({ error: "Object not found." }, { status: 404 });
+
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      for (const key of GEOM) {
+        if (form.get(key) != null) set[key] = num(key);
+      }
+      if (form.has("tallFt")) set.tallFt = Math.max(0, num("tallFt"));
+
+      if (canManage) {
+        // Officers edit anything directly; an officer edit accepts (clears) any
+        // pending proposal on the item.
+        if (form.has("name")) set.name = str("name");
+        if (form.has("kind")) set.kind = String(form.get("kind"));
+        if (form.has("color")) set.color = str("color");
+        if (form.has("notes")) set.notes = str("notes");
+        if (form.has("showDoor"))
+          set.showDoor = form.get("showDoor") === "true";
+        if (form.has("mirrored"))
+          set.mirrored = form.get("mirrored") === "true";
+        if (form.has("config")) {
+          // Re-serialize through parseConfig so only finite-number values persist.
+          set.config = JSON.stringify(parseConfig(str("config")));
+        }
+        set.pendingByMembershipId = null;
+        set.pendingAt = null;
+        set.pendingPrev = null;
+      } else {
+        // Members may only move/resize/rotate their OWN item; the change applies
+        // live but is flagged pending until an officer approves. Non-geometry
+        // fields are ignored for members.
+        if (obj.ownerMembershipId !== myMembershipId) {
+          return data(
+            { error: "You can only adjust your own items." },
+            {
+              status: 403,
+            },
+          );
+        }
+        if (!obj.pendingAt) {
+          set.pendingByMembershipId = myMembershipId;
+          set.pendingAt = new Date();
+          set.pendingPrev = JSON.stringify({
+            x: obj.x,
+            y: obj.y,
+            width: obj.width,
+            height: obj.height,
+            rotation: obj.rotation,
+          });
+        } else {
+          set.pendingAt = new Date();
+        }
+      }
+      await db.update(mapObject).set(set).where(eq(mapObject.id, id));
+      const object = await loadObjRow(editionId, id);
+      return data({ object });
+    }
+
+    if (intent === "approveChange") {
+      const id = String(form.get("id"));
       await db
         .update(mapObject)
         .set({
-          x: Number(o.x) || 0,
-          y: Number(o.y) || 0,
-          width: Math.max(1, Number(o.width) || 1),
-          height: Math.max(1, Number(o.height) || 1),
-          rotation: Number(o.rotation) || 0,
+          pendingByMembershipId: null,
+          pendingAt: null,
+          pendingPrev: null,
           updatedAt: new Date(),
         })
         .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+      const object = await loadObjRow(editionId, id);
+      if (!object) return data({ error: "Item not found." }, { status: 404 });
+      return data({ object });
     }
-    return data({ ok: true });
-  }
 
-  if (intent === "linkObjects" || intent === "unlinkObjects") {
-    // Link a multi-selection into one block (shared group_id, client-supplied so
-    // its optimistic update matches) or unlink (clear it). Officer-only, batched.
-    let raw: unknown;
-    try {
-      raw = JSON.parse(String(form.get("ids") ?? "[]"));
-    } catch {
-      raw = [];
-    }
-    if (!Array.isArray(raw)) {
-      return data({ error: "Bad payload." }, { status: 400 });
-    }
-    const groupId =
-      intent === "linkObjects"
-        ? String(form.get("groupId") ?? "") || null
-        : null;
-    for (const v of raw.slice(0, 300)) {
-      const id = String(v ?? "");
-      if (!id) continue;
+    if (intent === "rejectChange") {
+      const id = String(form.get("id"));
+      const [obj] = await db
+        .select({ pendingPrev: mapObject.pendingPrev })
+        .from(mapObject)
+        .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+        .limit(1);
+      if (!obj) return data({ error: "Item not found." }, { status: 404 });
+      const prev = parsePending(new Date(), obj.pendingPrev)?.prev;
       await db
         .update(mapObject)
-        .set({ groupId, updatedAt: new Date() })
+        .set({
+          ...(prev ?? {}),
+          pendingByMembershipId: null,
+          pendingAt: null,
+          pendingPrev: null,
+          updatedAt: new Date(),
+        })
         .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+      const object = await loadObjRow(editionId, id);
+      return data({ object });
     }
-    return data({ ok: true });
-  }
 
-  if (intent === "unplaceObjects") {
-    // Batch unplace (send a multi-select group back to the tray) in one request.
-    let raw: unknown;
-    try {
-      raw = JSON.parse(String(form.get("ids") ?? "[]"));
-    } catch {
-      raw = [];
-    }
-    if (!Array.isArray(raw)) {
-      return data({ error: "Bad payload." }, { status: 400 });
-    }
-    for (const v of raw.slice(0, 300)) {
-      const id = String(v ?? "");
-      if (!id) continue;
-      await db
+    if (intent === "placeObject") {
+      const id = String(form.get("id"));
+      const [row] = await db
         .update(mapObject)
-        .set({ placed: false, updatedAt: new Date() })
+        .set({ placed: true, x: num("x"), y: num("y"), updatedAt: new Date() })
+        .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+        .returning();
+      if (!row) return data({ error: "Item not found." }, { status: 404 });
+      const object = await loadObjRow(editionId, id);
+      return data({ object });
+    }
+
+    if (intent === "unplaceObject") {
+      // "Remove from map" doesn't destroy the item — it returns to the Unplaced
+      // tray (placed = false), keeping its name/size/config so it can be dropped
+      // back later. Any pending member change is cleared.
+      const id = String(form.get("id"));
+      const [row] = await db
+        .update(mapObject)
+        .set({
+          placed: false,
+          pendingByMembershipId: null,
+          pendingAt: null,
+          pendingPrev: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+        .returning();
+      if (!row) return data({ error: "Item not found." }, { status: 404 });
+      return data({ unplacedId: id });
+    }
+
+    if (intent === "duplicateObject") {
+      // Copy a placed object (keeping size/rotation/mirror/config) as a new camp
+      // item, offset slightly so it's visible; returns it like a fresh add.
+      const id = String(form.get("id"));
+      const [src] = await db
+        .select()
+        .from(mapObject)
+        .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
+        .limit(1);
+      if (!src) return data({ error: "Item not found." }, { status: 404 });
+      const {
+        id: _id,
+        createdAt: _c,
+        updatedAt: _u,
+        pendingByMembershipId: _pb,
+        pendingAt: _pa,
+        pendingPrev: _pp,
+        ...rest
+      } = src;
+      const newId = crypto.randomUUID();
+      await db.insert(mapObject).values({
+        ...rest,
+        id: newId,
+        placed: true,
+        // A duplicate is an officer-placed camp/shared item.
+        ownerMembershipId: null,
+        x: src.x + 10,
+        y: src.y + 10,
+        createdById: user.id,
+      });
+      const object = await loadObjRow(editionId, newId);
+      return data({ object });
+    }
+
+    if (intent === "deleteObject") {
+      const id = String(form.get("id"));
+      await db
+        .delete(mapObject)
         .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
+      return data({ deletedId: id });
     }
-    return data({ ok: true });
-  }
 
-  if (intent === "updateObject") {
-    const id = String(form.get("id"));
-    const [obj] = await db
-      .select({
-        ownerMembershipId: mapObject.ownerMembershipId,
-        x: mapObject.x,
-        y: mapObject.y,
-        width: mapObject.width,
-        height: mapObject.height,
-        rotation: mapObject.rotation,
-        pendingAt: mapObject.pendingAt,
-      })
-      .from(mapObject)
-      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
-      .limit(1);
-    if (!obj) return data({ error: "Object not found." }, { status: 404 });
-
-    const set: Record<string, unknown> = { updatedAt: new Date() };
-    for (const key of GEOM) {
-      if (form.get(key) != null) set[key] = num(key);
+    if (intent === "addZone") {
+      const id = crypto.randomUUID();
+      const row = {
+        id,
+        campId,
+        editionId,
+        name: str("name"),
+        kind: String(form.get("kind") ?? "custom"),
+        color: String(form.get("color") ?? "#fa5252"),
+        points: String(form.get("points") ?? "[]"),
+        notes: str("notes"),
+        createdById: user.id,
+      };
+      await db.insert(mapZone).values(row);
+      return data({
+        zone: {
+          id,
+          name: row.name,
+          kind: row.kind,
+          color: row.color,
+          points: parseZonePoints(row.points),
+          notes: row.notes,
+        } satisfies ZoneRow,
+      });
     }
-    if (form.has("tallFt")) set.tallFt = Math.max(0, num("tallFt"));
 
-    if (canManage) {
-      // Officers edit anything directly; an officer edit accepts (clears) any
-      // pending proposal on the item.
+    if (intent === "updateZone") {
+      const id = String(form.get("id"));
+      const set: Record<string, unknown> = { updatedAt: new Date() };
       if (form.has("name")) set.name = str("name");
       if (form.has("kind")) set.kind = String(form.get("kind"));
-      if (form.has("color")) set.color = str("color");
+      if (form.has("color")) set.color = String(form.get("color"));
+      if (form.has("points")) set.points = String(form.get("points"));
       if (form.has("notes")) set.notes = str("notes");
-      if (form.has("showDoor")) set.showDoor = form.get("showDoor") === "true";
-      if (form.has("mirrored")) set.mirrored = form.get("mirrored") === "true";
-      if (form.has("config")) {
-        // Re-serialize through parseConfig so only finite-number values persist.
-        set.config = JSON.stringify(parseConfig(str("config")));
-      }
-      set.pendingByMembershipId = null;
-      set.pendingAt = null;
-      set.pendingPrev = null;
-    } else {
-      // Members may only move/resize/rotate their OWN item; the change applies
-      // live but is flagged pending until an officer approves. Non-geometry
-      // fields are ignored for members.
-      if (obj.ownerMembershipId !== myMembershipId) {
-        return data(
-          { error: "You can only adjust your own items." },
-          {
-            status: 403,
-          },
-        );
-      }
-      if (!obj.pendingAt) {
-        set.pendingByMembershipId = myMembershipId;
-        set.pendingAt = new Date();
-        set.pendingPrev = JSON.stringify({
-          x: obj.x,
-          y: obj.y,
-          width: obj.width,
-          height: obj.height,
-          rotation: obj.rotation,
-        });
-      } else {
-        set.pendingAt = new Date();
-      }
+      await db
+        .update(mapZone)
+        .set(set)
+        .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)));
+      const [z] = await db
+        .select()
+        .from(mapZone)
+        .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)))
+        .limit(1);
+      if (!z) return data({ error: "Zone not found." }, { status: 404 });
+      return data({
+        zone: {
+          id: z.id,
+          name: z.name,
+          kind: z.kind,
+          color: z.color,
+          points: parseZonePoints(z.points),
+          notes: z.notes,
+        } satisfies ZoneRow,
+      });
     }
-    await db.update(mapObject).set(set).where(eq(mapObject.id, id));
-    const object = await loadObjRow(editionId, id);
-    return data({ object });
-  }
 
-  if (intent === "approveChange") {
-    const id = String(form.get("id"));
-    await db
-      .update(mapObject)
-      .set({
-        pendingByMembershipId: null,
-        pendingAt: null,
-        pendingPrev: null,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
-    const object = await loadObjRow(editionId, id);
-    if (!object) return data({ error: "Item not found." }, { status: 404 });
-    return data({ object });
-  }
+    if (intent === "deleteZone") {
+      const id = String(form.get("id"));
+      await db
+        .delete(mapZone)
+        .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)));
+      return data({ deletedZoneId: id });
+    }
 
-  if (intent === "rejectChange") {
-    const id = String(form.get("id"));
-    const [obj] = await db
-      .select({ pendingPrev: mapObject.pendingPrev })
-      .from(mapObject)
-      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
-      .limit(1);
-    if (!obj) return data({ error: "Item not found." }, { status: 404 });
-    const prev = parsePending(new Date(), obj.pendingPrev)?.prev;
-    await db
-      .update(mapObject)
-      .set({
-        ...(prev ?? {}),
-        pendingByMembershipId: null,
-        pendingAt: null,
-        pendingPrev: null,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
-    const object = await loadObjRow(editionId, id);
-    return data({ object });
-  }
-
-  if (intent === "placeObject") {
-    const id = String(form.get("id"));
-    const [row] = await db
-      .update(mapObject)
-      .set({ placed: true, x: num("x"), y: num("y"), updatedAt: new Date() })
-      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
-      .returning();
-    if (!row) return data({ error: "Item not found." }, { status: 404 });
-    const object = await loadObjRow(editionId, id);
-    return data({ object });
-  }
-
-  if (intent === "unplaceObject") {
-    // "Remove from map" doesn't destroy the item — it returns to the Unplaced
-    // tray (placed = false), keeping its name/size/config so it can be dropped
-    // back later. Any pending member change is cleared.
-    const id = String(form.get("id"));
-    const [row] = await db
-      .update(mapObject)
-      .set({
-        placed: false,
-        pendingByMembershipId: null,
-        pendingAt: null,
-        pendingPrev: null,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
-      .returning();
-    if (!row) return data({ error: "Item not found." }, { status: 404 });
-    return data({ unplacedId: id });
-  }
-
-  if (intent === "duplicateObject") {
-    // Copy a placed object (keeping size/rotation/mirror/config) as a new camp
-    // item, offset slightly so it's visible; returns it like a fresh add.
-    const id = String(form.get("id"));
-    const [src] = await db
-      .select()
-      .from(mapObject)
-      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
-      .limit(1);
-    if (!src) return data({ error: "Item not found." }, { status: 404 });
-    const {
-      id: _id,
-      createdAt: _c,
-      updatedAt: _u,
-      pendingByMembershipId: _pb,
-      pendingAt: _pa,
-      pendingPrev: _pp,
-      ...rest
-    } = src;
-    const newId = crypto.randomUUID();
-    await db.insert(mapObject).values({
-      ...rest,
-      id: newId,
-      placed: true,
-      // A duplicate is an officer-placed camp/shared item.
-      ownerMembershipId: null,
-      x: src.x + 10,
-      y: src.y + 10,
-      createdById: user.id,
-    });
-    const object = await loadObjRow(editionId, newId);
-    return data({ object });
-  }
-
-  if (intent === "deleteObject") {
-    const id = String(form.get("id"));
-    await db
-      .delete(mapObject)
-      .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
-    return data({ deletedId: id });
-  }
-
-  if (intent === "addZone") {
-    const id = crypto.randomUUID();
-    const row = {
-      id,
-      campId,
-      editionId,
-      name: str("name"),
-      kind: String(form.get("kind") ?? "custom"),
-      color: String(form.get("color") ?? "#fa5252"),
-      points: String(form.get("points") ?? "[]"),
-      notes: str("notes"),
-      createdById: user.id,
-    };
-    await db.insert(mapZone).values(row);
-    return data({
-      zone: {
+    if (intent === "addCable") {
+      const id = crypto.randomUUID();
+      const kind = String(form.get("kind") ?? "power");
+      const row = {
         id,
-        name: row.name,
-        kind: row.kind,
-        color: row.color,
-        points: parseZonePoints(row.points),
-        notes: row.notes,
-      } satisfies ZoneRow,
-    });
-  }
+        campId,
+        editionId,
+        name: str("name"),
+        kind,
+        color: String(form.get("color") ?? cableKindDef(kind).color),
+        points: String(form.get("points") ?? "[]"),
+        amps: form.get("amps") ? num("amps") : null,
+        gauge: str("gauge"),
+        notes: str("notes"),
+        createdById: user.id,
+      };
+      await db.insert(mapCable).values(row);
+      return data({
+        cable: {
+          id,
+          name: row.name,
+          kind: row.kind,
+          color: row.color,
+          points: parseZonePoints(row.points),
+          amps: row.amps,
+          gauge: row.gauge,
+          notes: row.notes,
+        } satisfies CableRow,
+      });
+    }
 
-  if (intent === "updateZone") {
-    const id = String(form.get("id"));
-    const set: Record<string, unknown> = { updatedAt: new Date() };
-    if (form.has("name")) set.name = str("name");
-    if (form.has("kind")) set.kind = String(form.get("kind"));
-    if (form.has("color")) set.color = String(form.get("color"));
-    if (form.has("points")) set.points = String(form.get("points"));
-    if (form.has("notes")) set.notes = str("notes");
-    await db
-      .update(mapZone)
-      .set(set)
-      .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)));
-    const [z] = await db
-      .select()
-      .from(mapZone)
-      .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)))
-      .limit(1);
-    if (!z) return data({ error: "Zone not found." }, { status: 404 });
-    return data({
-      zone: {
-        id: z.id,
-        name: z.name,
-        kind: z.kind,
-        color: z.color,
-        points: parseZonePoints(z.points),
-        notes: z.notes,
-      } satisfies ZoneRow,
-    });
-  }
+    if (intent === "updateCable") {
+      const id = String(form.get("id"));
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (form.has("name")) set.name = str("name");
+      if (form.has("kind")) set.kind = String(form.get("kind"));
+      if (form.has("color")) set.color = String(form.get("color"));
+      if (form.has("points")) set.points = String(form.get("points"));
+      if (form.has("amps")) set.amps = form.get("amps") ? num("amps") : null;
+      if (form.has("gauge")) set.gauge = str("gauge");
+      if (form.has("notes")) set.notes = str("notes");
+      await db
+        .update(mapCable)
+        .set(set)
+        .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)));
+      const [c] = await db
+        .select()
+        .from(mapCable)
+        .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)))
+        .limit(1);
+      if (!c) return data({ error: "Cable not found." }, { status: 404 });
+      return data({
+        cable: {
+          id: c.id,
+          name: c.name,
+          kind: c.kind,
+          color: c.color,
+          points: parseZonePoints(c.points),
+          amps: c.amps,
+          gauge: c.gauge,
+          notes: c.notes,
+        } satisfies CableRow,
+      });
+    }
 
-  if (intent === "deleteZone") {
-    const id = String(form.get("id"));
-    await db
-      .delete(mapZone)
-      .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)));
-    return data({ deletedZoneId: id });
-  }
+    if (intent === "deleteCable") {
+      const id = String(form.get("id"));
+      await db
+        .delete(mapCable)
+        .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)));
+      return data({ deletedCableId: id });
+    }
 
-  if (intent === "addCable") {
-    const id = crypto.randomUUID();
-    const kind = String(form.get("kind") ?? "power");
-    const row = {
-      id,
-      campId,
-      editionId,
-      name: str("name"),
-      kind,
-      color: String(form.get("color") ?? cableKindDef(kind).color),
-      points: String(form.get("points") ?? "[]"),
-      amps: form.get("amps") ? num("amps") : null,
-      gauge: str("gauge"),
-      notes: str("notes"),
-      createdById: user.id,
-    };
-    await db.insert(mapCable).values(row);
-    return data({
-      cable: {
+    if (intent === "addRoad") {
+      const id = crypto.randomUUID();
+      const kind = String(form.get("kind") ?? "fire-lane");
+      const def = roadKindDef(kind);
+      const row = {
         id,
-        name: row.name,
-        kind: row.kind,
-        color: row.color,
-        points: parseZonePoints(row.points),
-        amps: row.amps,
-        gauge: row.gauge,
-        notes: row.notes,
-      } satisfies CableRow,
-    });
-  }
+        campId,
+        editionId,
+        name: str("name"),
+        kind,
+        color: String(form.get("color") ?? def.color),
+        width: form.get("width")
+          ? Math.max(2, num("width", def.width))
+          : def.width,
+        cutback: form.get("cutback")
+          ? Math.max(0, num("cutback"))
+          : DEFAULT_ROAD_CUTBACK,
+        points: String(form.get("points") ?? "[]"),
+        notes: str("notes"),
+        createdById: user.id,
+      };
+      await db.insert(mapRoad).values(row);
+      return data({
+        road: {
+          id,
+          name: row.name,
+          kind: row.kind,
+          color: row.color,
+          width: row.width,
+          cutback: row.cutback,
+          points: parseZonePoints(row.points),
+          notes: row.notes,
+        } satisfies RoadRow,
+      });
+    }
 
-  if (intent === "updateCable") {
-    const id = String(form.get("id"));
-    const set: Record<string, unknown> = { updatedAt: new Date() };
-    if (form.has("name")) set.name = str("name");
-    if (form.has("kind")) set.kind = String(form.get("kind"));
-    if (form.has("color")) set.color = String(form.get("color"));
-    if (form.has("points")) set.points = String(form.get("points"));
-    if (form.has("amps")) set.amps = form.get("amps") ? num("amps") : null;
-    if (form.has("gauge")) set.gauge = str("gauge");
-    if (form.has("notes")) set.notes = str("notes");
-    await db
-      .update(mapCable)
-      .set(set)
-      .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)));
-    const [c] = await db
-      .select()
-      .from(mapCable)
-      .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)))
-      .limit(1);
-    if (!c) return data({ error: "Cable not found." }, { status: 404 });
-    return data({
-      cable: {
-        id: c.id,
-        name: c.name,
-        kind: c.kind,
-        color: c.color,
-        points: parseZonePoints(c.points),
-        amps: c.amps,
-        gauge: c.gauge,
-        notes: c.notes,
-      } satisfies CableRow,
-    });
-  }
+    if (intent === "updateRoad") {
+      const id = String(form.get("id"));
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (form.has("name")) set.name = str("name");
+      if (form.has("kind")) set.kind = String(form.get("kind"));
+      if (form.has("color")) set.color = String(form.get("color"));
+      if (form.has("width")) set.width = Math.max(2, num("width", 20));
+      if (form.has("cutback")) set.cutback = Math.max(0, num("cutback"));
+      if (form.has("points")) set.points = String(form.get("points"));
+      if (form.has("notes")) set.notes = str("notes");
+      await db
+        .update(mapRoad)
+        .set(set)
+        .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)));
+      const [r] = await db
+        .select()
+        .from(mapRoad)
+        .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)))
+        .limit(1);
+      if (!r) return data({ error: "Road not found." }, { status: 404 });
+      return data({
+        road: {
+          id: r.id,
+          name: r.name,
+          kind: r.kind,
+          color: r.color,
+          width: r.width,
+          cutback: r.cutback,
+          points: parseZonePoints(r.points),
+          notes: r.notes,
+        } satisfies RoadRow,
+      });
+    }
 
-  if (intent === "deleteCable") {
-    const id = String(form.get("id"));
-    await db
-      .delete(mapCable)
-      .where(and(eq(mapCable.id, id), eq(mapCable.editionId, editionId)));
-    return data({ deletedCableId: id });
-  }
+    if (intent === "deleteRoad") {
+      const id = String(form.get("id"));
+      await db
+        .delete(mapRoad)
+        .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)));
+      return data({ deletedRoadId: id });
+    }
 
-  if (intent === "addRoad") {
-    const id = crypto.randomUUID();
-    const kind = String(form.get("kind") ?? "fire-lane");
-    const def = roadKindDef(kind);
-    const row = {
-      id,
-      campId,
-      editionId,
-      name: str("name"),
-      kind,
-      color: String(form.get("color") ?? def.color),
-      width: form.get("width")
-        ? Math.max(2, num("width", def.width))
-        : def.width,
-      cutback: form.get("cutback")
-        ? Math.max(0, num("cutback"))
-        : DEFAULT_ROAD_CUTBACK,
-      points: String(form.get("points") ?? "[]"),
-      notes: str("notes"),
-      createdById: user.id,
-    };
-    await db.insert(mapRoad).values(row);
-    return data({
-      road: {
-        id,
-        name: row.name,
-        kind: row.kind,
-        color: row.color,
-        width: row.width,
-        cutback: row.cutback,
-        points: parseZonePoints(row.points),
-        notes: row.notes,
-      } satisfies RoadRow,
-    });
-  }
+    return data({ error: "Unknown action." }, { status: 400 });
+  };
 
-  if (intent === "updateRoad") {
-    const id = String(form.get("id"));
-    const set: Record<string, unknown> = { updatedAt: new Date() };
-    if (form.has("name")) set.name = str("name");
-    if (form.has("kind")) set.kind = String(form.get("kind"));
-    if (form.has("color")) set.color = String(form.get("color"));
-    if (form.has("width")) set.width = Math.max(2, num("width", 20));
-    if (form.has("cutback")) set.cutback = Math.max(0, num("cutback"));
-    if (form.has("points")) set.points = String(form.get("points"));
-    if (form.has("notes")) set.notes = str("notes");
-    await db
-      .update(mapRoad)
-      .set(set)
-      .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)));
-    const [r] = await db
-      .select()
-      .from(mapRoad)
-      .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)))
-      .limit(1);
-    if (!r) return data({ error: "Road not found." }, { status: 404 });
-    return data({
-      road: {
-        id: r.id,
-        name: r.name,
-        kind: r.kind,
-        color: r.color,
-        width: r.width,
-        cutback: r.cutback,
-        points: parseZonePoints(r.points),
-        notes: r.notes,
-      } satisfies RoadRow,
-    });
+  const result = await runIntent();
+  // Record an undo checkpoint AFTER a successful official-map edit (no-op if the
+  // edit changed nothing). Members' own-item suggestions don't reach here
+  // (officialPre is null unless canManage).
+  if (officialPre != null) {
+    await recordOfficialHistory(campId, editionId, myMembershipId, officialPre);
   }
-
-  if (intent === "deleteRoad") {
-    const id = String(form.get("id"));
-    await db
-      .delete(mapRoad)
-      .where(and(eq(mapRoad.id, id), eq(mapRoad.editionId, editionId)));
-    return data({ deletedRoadId: id });
-  }
-
-  return data({ error: "Unknown action." }, { status: 400 });
+  return result;
 }
 
 // ---- Geometry helpers -------------------------------------------------------
@@ -2594,6 +3045,100 @@ function BurningManExport({
   );
 }
 
+/** Officer snapshots panel: save named restore points of the official map and
+ * restore/delete them. Restoring is itself undoable (it goes on the undo stack). */
+function SnapshotsPanel({
+  snapshots,
+  fetcher,
+}: {
+  snapshots: { id: string; label: string; createdAt: number }[];
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const [label, setLabel] = useState("");
+  const save = () => {
+    fetcher.submit(
+      { intent: "saveSnapshot", label: label.trim() || "Snapshot" },
+      { method: "post" },
+    );
+    setLabel("");
+  };
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Text size="xs" fw={600} mb={6}>
+        Snapshots
+      </Text>
+      <Group gap={6} wrap="nowrap">
+        <TextInput
+          size="xs"
+          placeholder="Label (e.g. Planned v1)"
+          style={{ flex: 1 }}
+          value={label}
+          maxLength={80}
+          onChange={(e) => setLabel(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save();
+            }
+          }}
+        />
+        <Button size="compact-xs" onClick={save}>
+          Save
+        </Button>
+      </Group>
+      {snapshots.length > 0 ? (
+        <Stack gap={4} mt={8}>
+          {snapshots.map((s) => (
+            <Group key={s.id} justify="space-between" gap={4} wrap="nowrap">
+              <Text
+                size="xs"
+                title={`${s.label} · ${new Date(s.createdAt).toISOString().slice(0, 16).replace("T", " ")}`}
+                style={{
+                  flex: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {s.label}
+              </Text>
+              <Button
+                size="compact-xs"
+                variant="light"
+                onClick={() =>
+                  fetcher.submit(
+                    { intent: "restoreSnapshot", id: s.id },
+                    { method: "post" },
+                  )
+                }
+              >
+                Restore
+              </Button>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="red"
+                onClick={() =>
+                  fetcher.submit(
+                    { intent: "deleteSnapshot", id: s.id },
+                    { method: "post" },
+                  )
+                }
+              >
+                ✕
+              </Button>
+            </Group>
+          ))}
+        </Stack>
+      ) : (
+        <Text size="xs" c="dimmed" mt={6}>
+          Save a restore point you can return to anytime.
+        </Text>
+      )}
+    </Paper>
+  );
+}
+
 /** Officer control for the free-text map "doneness" label (the watermark shown
  * over the map + used as the export's version tag). Preset chips apply instantly;
  * the text field saves on Enter / the Save button. Empty clears the overlay. */
@@ -2667,8 +3212,7 @@ function MapStatusControl({
 }
 
 export default function CampMap({ loaderData }: Route.ComponentProps) {
-  const { canEdit, canManage, unplaced, lot, myMembershipId, event } =
-    loaderData;
+  const { canEdit, canManage, unplaced, myMembershipId, event } = loaderData;
   const bannedKinds = loaderData.bannedKinds;
   // Free-text "doneness" label overlaid on the map (officer-set, null = none).
   const mapStatus = loaderData.mapStatus?.trim() || null;
@@ -2676,6 +3220,19 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // naturally instead of the desktop fixed-height, two-pane / inner-scroll model.
   const isNarrow = useMediaQuery("(max-width: 768px)");
   const fetcher = useFetcher();
+  // `lot` is state (not just loaderData) so undo/redo/snapshot-restore can update
+  // it when a restore includes a different lot setup.
+  const [lot, setLot] = useState(loaderData.lot);
+  // Official-map undo/redo availability + saved snapshots (officer tools), kept in
+  // state so action results refresh them without a full reload.
+  const [history, setHistory] = useState(loaderData.history);
+  const [snapshots, setSnapshots] = useState(loaderData.snapshots);
+  const doUndo = () => {
+    if (history.canUndo) fetcher.submit({ intent: "undo" }, { method: "post" });
+  };
+  const doRedo = () => {
+    if (history.canRedo) fetcher.submit({ intent: "redo" }, { method: "post" });
+  };
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Multi-selection: all currently-selected object ids (includes the primary
@@ -2754,10 +3311,40 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           deletedCableId?: string;
           road?: RoadRow;
           deletedRoadId?: string;
+          map?: {
+            objects: ObjRow[];
+            zones: ZoneRow[];
+            cables: CableRow[];
+            roads: RoadRow[];
+            lot: typeof loaderData.lot;
+          };
+          history?: typeof loaderData.history;
+          snapshots?: typeof loaderData.snapshots;
         }
       | undefined;
     if (!d || d === lastSynced.current) return;
     lastSynced.current = d;
+    // Undo/redo/snapshot-restore return the whole map — replace all state.
+    if (d.map) {
+      setObjects(d.map.objects);
+      setZones(d.map.zones);
+      setCables(d.map.cables);
+      setRoads(d.map.roads);
+      setLot(d.map.lot);
+      setSelectedId(null);
+      setSelectedIds([]);
+      setSelectedZoneId(null);
+      setSelectedCableId(null);
+      setSelectedRoadId(null);
+    }
+    // Undo/redo availability + snapshot list refresh (may arrive alone).
+    if (d.history) setHistory(d.history);
+    if (d.snapshots) setSnapshots(d.snapshots);
+    if (d.map || d.history || d.snapshots) return;
+    // Any other result is a committed official edit → a fresh undo checkpoint
+    // exists and the redo branch is cleared. (Members don't see undo, so the
+    // optimistic flip is harmless for their own-item suggestions.)
+    if (canManage) setHistory({ canUndo: true, canRedo: false });
     // A premade block returns several new objects at once — append them all.
     if (d.objects && d.objects.length > 0) {
       const fresh = d.objects;
@@ -2839,6 +3426,34 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
     }
   }, [fetcher.data]);
 
+  // Undo/redo keyboard shortcuts (officers): Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or
+  // Ctrl+Y. Ignored while typing in a field.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: doUndo/doRedo read live history
+  useEffect(() => {
+    if (!canManage) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        doUndo();
+      } else if (k === "y" || (k === "z" && e.shiftKey)) {
+        e.preventDefault();
+        doRedo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canManage, history.canUndo, history.canRedo]);
+
   if (!lot) {
     return (
       <Stack gap="lg" maw={620}>
@@ -2896,6 +3511,28 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           </Text>
         </div>
         <Group gap="xs" align="center" wrap="nowrap">
+          {canManage ? (
+            <Button.Group>
+              <Button
+                variant="default"
+                size="xs"
+                onClick={doUndo}
+                disabled={!history.canUndo}
+                title="Undo (Ctrl+Z)"
+              >
+                Undo
+              </Button>
+              <Button
+                variant="default"
+                size="xs"
+                onClick={doRedo}
+                disabled={!history.canRedo}
+                title="Redo (Ctrl+Shift+Z)"
+              >
+                Redo
+              </Button>
+            </Button.Group>
+          ) : null}
           {isBurningMan(event) ? <BurningManDisclaimer mt={0} /> : null}
           <Button variant="default" size="xs" onClick={() => window.print()}>
             Print
@@ -2997,6 +3634,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               status={loaderData.mapStatus ?? ""}
               fetcher={fetcher}
             />
+          ) : null}
+          {canManage ? (
+            <SnapshotsPanel snapshots={snapshots} fetcher={fetcher} />
           ) : null}
           <Paper withBorder p="sm" radius="md">
             <Text size="xs" fw={600} mb={6}>
