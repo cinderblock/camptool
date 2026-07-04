@@ -12,7 +12,7 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { and, count, eq, isNotNull, sql } from "drizzle-orm";
+import { and, count, eq, isNotNull, or, sql } from "drizzle-orm";
 import { useState } from "react";
 import { Link, useNavigate, useRevalidator } from "react-router";
 import { authClient } from "~/lib/auth-client";
@@ -25,11 +25,13 @@ import { db } from "../../../db/client.server";
 import {
   account,
   announcement,
+  camp,
   contributionTier,
   financeEntry,
   mapObject,
   memberRequirement,
   membership,
+  recruitApplication,
 } from "../../../db/schema";
 import type { Route } from "./+types/index";
 
@@ -71,10 +73,26 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Only compute the camp-creation gate when the user has no camp yet (the only
   // time the create form shows).
   let canCreateCamp = true;
+  // A camp-less user may be an applicant waiting on review — surface those
+  // applications instead of the bare "no camp" screen.
+  let pendingApplications: { campName: string; slug: string | null }[] = [];
   if (!active) {
     canCreateCamp =
       (await isSuperAdmin(user.id)) ||
       (await getInstanceSettings()).allowCampCreation;
+    pendingApplications = await db
+      .select({ campName: camp.name, slug: camp.slug })
+      .from(recruitApplication)
+      .innerJoin(camp, eq(recruitApplication.campId, camp.id))
+      .where(
+        and(
+          eq(recruitApplication.status, "pending"),
+          or(
+            eq(recruitApplication.userId, user.id),
+            eq(recruitApplication.email, user.email),
+          ),
+        ),
+      );
   }
 
   // Home dashboard: latest news + the viewer's to-dos for the active year.
@@ -203,10 +221,12 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   return {
     userName: user.name,
+    userEmail: user.email,
     discordEnabled,
     hasDiscord,
     memberCount,
     canCreateCamp,
+    pendingApplications,
     overview,
     active: active
       ? { campName: active.camp.name, role: active.membership.role }
@@ -216,7 +236,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export default function DashboardIndex({ loaderData }: Route.ComponentProps) {
   if (!loaderData.active)
-    return <CreateCamp canCreateCamp={loaderData.canCreateCamp} />;
+    return (
+      <NoCampYet
+        canCreateCamp={loaderData.canCreateCamp}
+        pendingApplications={loaderData.pendingApplications}
+        userEmail={loaderData.userEmail}
+      />
+    );
   return <CampOverview loaderData={loaderData} />;
 }
 
@@ -420,11 +446,46 @@ function CampOverview({
   );
 }
 
-function CreateCamp({ canCreateCamp }: { canCreateCamp: boolean }) {
+function NoCampYet({
+  canCreateCamp,
+  pendingApplications,
+  userEmail,
+}: {
+  canCreateCamp: boolean;
+  pendingApplications: { campName: string; slug: string | null }[];
+  userEmail: string;
+}) {
   const navigate = useNavigate();
   const revalidator = useRevalidator();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // An applicant waiting on review shouldn't see camp-creation messaging — show
+  // their application status instead.
+  if (pendingApplications.length > 0) {
+    return (
+      <Container size="sm">
+        <Stack gap="md">
+          <Title order={2}>Application pending</Title>
+          {pendingApplications.map((a) => (
+            <Card withBorder padding="lg" radius="md" key={a.campName}>
+              <Text fw={600}>{a.campName}</Text>
+              <Text size="sm" c="dimmed" mt={4}>
+                Your application is in — the camp will reach out at{" "}
+                <b>{userEmail}</b>. There's nothing else you need to do right
+                now.
+              </Text>
+              {a.slug ? (
+                <Anchor component={Link} to={`/c/${a.slug}`} size="sm" mt="sm">
+                  View your application page
+                </Anchor>
+              ) : null}
+            </Card>
+          ))}
+        </Stack>
+      </Container>
+    );
+  }
 
   if (!canCreateCamp) {
     return (

@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Checkbox,
   Container,
   Group,
   Image,
@@ -12,6 +13,7 @@ import {
   Title,
 } from "@mantine/core";
 import { and, eq, or } from "drizzle-orm";
+import { useState } from "react";
 import { data, useFetcher } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { discordEnabled } from "~/lib/auth.server";
@@ -187,7 +189,7 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
             <ApplySection {...loaderData} viewer={loaderData.viewer} />
           ) : (
             <AuthInline
-              intro="Create an account to apply — it lets you set a password and check on your application later."
+              intro="Create an account to apply — so you can sign back in later and check on your application."
               discordEnabled={loaderData.discordEnabled}
             />
           )}
@@ -211,6 +213,7 @@ function ApplySection({
   const fetcher = useFetcher<FetcherData>();
   const result = fetcher.data;
   const submitting = fetcher.state !== "idle";
+  const [beenBefore, setBeenBefore] = useState(false);
 
   if (alreadyMember) {
     return (
@@ -222,8 +225,15 @@ function ApplySection({
   if (alreadyApplied || result?.ok) {
     return (
       <Alert color="green" title="Application received">
-        {result?.ok ??
-          "You've already applied — the camp will be in touch. Hang tight!"}
+        <Stack gap={6}>
+          <Text size="sm">
+            {result?.ok ?? "You've already applied — hang tight!"}
+          </Text>
+          <Text size="sm">
+            The camp will reach out at <b>{viewer.email}</b>. You can revisit
+            this page any time to check where things stand.
+          </Text>
+        </Stack>
       </Alert>
     );
   }
@@ -239,12 +249,23 @@ function ApplySection({
             {result.error}
           </Alert>
         ) : null}
-        <TextInput
-          name="playaName"
-          label="Playa name"
-          description="Optional — what folks call you on playa."
-          placeholder="Dusty"
+        {/* "Playa name" is Burning Man jargon — meaningless to first-timers, so
+            only ask once they say they've been. (Event-layer copy; revisit when
+            the event theming layer peels out.) */}
+        <Checkbox
+          label="I've been to Burning Man before"
+          description="No worries if not — first-timers are welcome."
+          checked={beenBefore}
+          onChange={(e) => setBeenBefore(e.currentTarget.checked)}
         />
+        {beenBefore ? (
+          <TextInput
+            name="playaName"
+            label="Playa name"
+            description="Optional — the nickname you go by at the event."
+            placeholder="Dusty"
+          />
+        ) : null}
         <Textarea
           name="message"
           label="Why do you want to join?"

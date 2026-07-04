@@ -102,36 +102,49 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     activeEditionLocked,
   } = loaderData;
   const editionFetcher = useFetcher();
-  const nav = [
-    { to: "/", label: "Overview", end: true },
-    { to: "/guide", label: "How it works", end: false },
-    { to: "/announcements", label: "Announcements", end: false },
-    ...(showFinishSetup
-      ? [{ to: "/start", label: "Finish setup", end: false }]
-      : []),
-    { to: "/members", label: "Members", end: false },
-    ...(activeRole && hasAtLeast(activeRole, "member")
-      ? [{ to: "/invite", label: "Invite friends", end: false }]
-      : []),
-    { to: "/editions", label: "Years", end: false },
-    { to: "/map", label: "Map", end: false },
-    { to: "/bringing", label: "Bringing", end: false },
-    { to: "/supplies", label: "Supplies", end: false },
-    { to: "/documents", label: "Documents", end: false },
-    { to: "/tickets", label: "Tickets", end: false },
-    { to: "/passes", label: "Passes", end: false },
-    ...(activeRole && hasAtLeast(activeRole, "officer")
-      ? [
-          { to: "/recruits", label: "Recruits", end: false },
-          { to: "/inventory", label: "Inventory", end: false },
-          { to: "/finances", label: "Finances", end: false },
-          ...(tracksDues ? [{ to: "/dues", label: "Dues", end: false }] : []),
-        ]
-      : []),
-    { to: "/questions", label: "Questions", end: false },
-    { to: "/onboarding", label: "Onboarding", end: false },
-    ...(superAdmin ? [{ to: "/admin", label: "Site admin", end: false }] : []),
-  ];
+  // Camp-scoped routes all bounce back to "/" for a camp-less user (e.g. an
+  // applicant awaiting review), so only show them once there's an active camp.
+  const nav = !activeCampId
+    ? [
+        { to: "/", label: "Overview", end: true },
+        ...(superAdmin
+          ? [{ to: "/admin", label: "Site admin", end: false }]
+          : []),
+      ]
+    : [
+        { to: "/", label: "Overview", end: true },
+        { to: "/guide", label: "How it works", end: false },
+        { to: "/announcements", label: "Announcements", end: false },
+        ...(showFinishSetup
+          ? [{ to: "/start", label: "Finish setup", end: false }]
+          : []),
+        { to: "/members", label: "Members", end: false },
+        ...(activeRole && hasAtLeast(activeRole, "member")
+          ? [{ to: "/invite", label: "Invite friends", end: false }]
+          : []),
+        { to: "/editions", label: "Years", end: false },
+        { to: "/map", label: "Map", end: false },
+        { to: "/bringing", label: "Bringing", end: false },
+        { to: "/supplies", label: "Supplies", end: false },
+        { to: "/documents", label: "Documents", end: false },
+        { to: "/tickets", label: "Tickets", end: false },
+        { to: "/passes", label: "Passes", end: false },
+        ...(activeRole && hasAtLeast(activeRole, "officer")
+          ? [
+              { to: "/recruits", label: "Recruits", end: false },
+              { to: "/inventory", label: "Inventory", end: false },
+              { to: "/finances", label: "Finances", end: false },
+              ...(tracksDues
+                ? [{ to: "/dues", label: "Dues", end: false }]
+                : []),
+            ]
+          : []),
+        { to: "/questions", label: "Questions", end: false },
+        { to: "/onboarding", label: "Onboarding", end: false },
+        ...(superAdmin
+          ? [{ to: "/admin", label: "Site admin", end: false }]
+          : []),
+      ];
   const [opened, { toggle }] = useDisclosure();
   const navigate = useNavigate();
   const location = useLocation();

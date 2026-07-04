@@ -66,6 +66,28 @@ would help conversion and self-selection.
 - User menu contains only the email + Sign out — no account settings; an applicant can't
   fix a typo'd name/email after submitting.
 
+## Fixes landed (2026-07-04, same session)
+
+- **#1 + #3:** camp-less dashboard now queries pending `recruit_application`s
+  (by userId or email) and shows an "Application pending" card per camp with the
+  camp name, the email the camp will use, and a link back to `/c/<slug>`
+  (`dashboard/index.tsx`, `CreateCamp` → `NoCampYet`).
+- **#2:** sidebar nav hides all camp-scoped items for camp-less users — just
+  Overview (+ Site admin for superadmins) (`dashboard/layout.tsx`).
+- **#4:** post-apply confirmation (and the returning "already applied" state) now
+  says the camp will reach out at `<email>` and that this page shows status
+  (`c.$slug.tsx`).
+- **#5:** playa name is hidden behind an "I've been to Burning Man before"
+  checkbox (per Cameron — don't surface it to first-timers at all); when shown,
+  the description explains it plainly. BM wording flagged as event-layer copy.
+- **#7 (partial):** signup intro no longer says "set a password" above a
+  password field — now "so you can sign back in later and check on your
+  application."
+
+Still open: **#6** (camp blurb on the application page — needs a camp
+description field + officer-authored content), feedback-dialog shape, no
+self-serve email/name edit for applicants.
+
 ## What worked well
 - The three-field account creation is fast; no email-verification wall before applying.
 - Two-step flow (account → short application) is low-friction; playa name optional.
