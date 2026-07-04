@@ -25,7 +25,7 @@ import {
   useComputedColorScheme,
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
-import { and, desc, eq, gt, lt } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, lt } from "drizzle-orm";
 import {
   memo,
   useEffect,
@@ -1734,6 +1734,38 @@ export async function action({ request }: Route.ActionArgs) {
       return data({ object });
     }
 
+    if (intent === "undoSuggestion") {
+      // A member discards their own pending suggestion(s), reverting the item(s)
+      // to the last approved geometry (pendingPrev). Not officer-only — but scoped
+      // to the caller's OWN pending items. Optional `id` targets a single item.
+      const id = str("id");
+      const rows = await db
+        .select({ id: mapObject.id, pendingPrev: mapObject.pendingPrev })
+        .from(mapObject)
+        .where(
+          and(
+            eq(mapObject.editionId, editionId),
+            eq(mapObject.ownerMembershipId, myMembershipId),
+            isNotNull(mapObject.pendingAt),
+            ...(id ? [eq(mapObject.id, id)] : []),
+          ),
+        );
+      for (const r of rows) {
+        const prev = parsePending(new Date(), r.pendingPrev)?.prev;
+        await db
+          .update(mapObject)
+          .set({
+            ...(prev ?? {}),
+            pendingByMembershipId: null,
+            pendingAt: null,
+            pendingPrev: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(mapObject.id, r.id));
+      }
+      return data({ map: await loadClientMap(editionId) });
+    }
+
     if (intent === "placeObject") {
       const id = String(form.get("id"));
       const [row] = await db
@@ -3233,6 +3265,11 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const doRedo = () => {
     if (history.canRedo) fetcher.submit({ intent: "redo" }, { method: "post" });
   };
+  // A member discards their own pending suggestion(s) — reverts their items to
+  // the last approved geometry. (Officers have no pending items of their own.)
+  const doUndoSuggestion = () => {
+    fetcher.submit({ intent: "undoSuggestion" }, { method: "post" });
+  };
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Multi-selection: all currently-selected object ids (includes the primary
@@ -3426,11 +3463,12 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
     }
   }, [fetcher.data]);
 
-  // Undo/redo keyboard shortcuts (officers): Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or
-  // Ctrl+Y. Ignored while typing in a field.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: doUndo/doRedo read live history
+  // Undo/redo keyboard shortcuts: Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or Ctrl+Y.
+  // Officers drive the official undo/redo; members' Ctrl+Z discards their own
+  // pending suggestion(s). Ignored while typing in a field.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: handlers read live state
   useEffect(() => {
-    if (!canManage) return;
+    if (!canEdit) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       const t = e.target as HTMLElement | null;
@@ -3444,15 +3482,22 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       const k = e.key.toLowerCase();
       if (k === "z" && !e.shiftKey) {
         e.preventDefault();
-        doUndo();
-      } else if (k === "y" || (k === "z" && e.shiftKey)) {
+        if (canManage) doUndo();
+        else doUndoSuggestion();
+      } else if (canManage && (k === "y" || (k === "z" && e.shiftKey))) {
         e.preventDefault();
         doRedo();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canManage, history.canUndo, history.canRedo]);
+  }, [canEdit, canManage, history.canUndo, history.canRedo]);
+
+  // How many of the viewer's own items have an un-approved pending suggestion
+  // (drives the member "Undo my change(s)" button).
+  const myPendingCount = objects.filter(
+    (o) => o.ownerMembershipId === myMembershipId && o.pending,
+  ).length;
 
   if (!lot) {
     return (
@@ -3532,6 +3577,16 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 Redo
               </Button>
             </Button.Group>
+          ) : null}
+          {canEdit && !canManage && myPendingCount > 0 ? (
+            <Button
+              variant="default"
+              size="xs"
+              onClick={doUndoSuggestion}
+              title="Discard your pending change(s) (Ctrl+Z)"
+            >
+              Undo my {myPendingCount === 1 ? "change" : "changes"}
+            </Button>
           ) : null}
           {isBurningMan(event) ? <BurningManDisclaimer mt={0} /> : null}
           <Button variant="default" size="xs" onClick={() => window.print()}>

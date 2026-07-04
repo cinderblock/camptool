@@ -102,8 +102,16 @@ serializes to a small JSON blob (dozens of objects → a few KB).
       Kitchen back); delete snapshot → removed. Test edit reverted + test
       snapshot cleaned up.
 
-**Phase 2 — Member suggestion undo.**
-- [ ] Member-accessible "undo my suggestion" (revert own pending → pendingPrev)
+**Phase 2 — Member suggestion undo. LANDED (code).**
+- [x] `undoSuggestion` intent (NOT officer-only) reverts the caller's OWN pending
+      item(s) to `pendingPrev` — optional `id` targets one, else all their
+      pending. Mirrors `rejectChange` but member-scoped to own items. Returns the
+      full client map. Not an official checkpoint (officers' history is separate).
+- [x] Client: `myPendingCount`; header "Undo my change(s)" button (members only,
+      shown when they have pending); Ctrl+Z for members → `doUndoSuggestion`
+      (officers' Ctrl+Z still drives official undo).
+- [ ] Verify live (needs a member account — officer flow re-checked; member UI
+      not browser-tested this session).
 
 ## Findings / gotchas
 - Another thread owns migration 0039 + `db/schema/flag.ts` + the `index.ts`
