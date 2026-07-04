@@ -7850,15 +7850,35 @@ const MapObjectShape = memo(
             />
           ) : null}
           {o.pending ? (
-            <circle
-              cx={px + w}
-              cy={py}
-              r={4}
-              fill="#f08c00"
-              stroke="#fff"
-              strokeWidth={1}
-              pointerEvents="none"
-            />
+            // Awaiting officer approval: trace the REAL footprint in dashed amber
+            // (+ a corner dot) so pending edits stand out on the map.
+            <>
+              <polygon
+                points={footprintOutline(
+                  o.kind,
+                  o.width,
+                  o.height,
+                  o.config,
+                  o.mirrored,
+                )
+                  .map(([lx, ly]) => `${cx + lx * ppf},${cy + ly * ppf}`)
+                  .join(" ")}
+                fill="none"
+                stroke="#f08c00"
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                pointerEvents="none"
+              />
+              <circle
+                cx={px + w}
+                cy={py}
+                r={4}
+                fill="#f08c00"
+                stroke="#fff"
+                strokeWidth={1}
+                pointerEvents="none"
+              />
+            </>
           ) : null}
           {overflow ? (
             // The footprint crosses the lot border — flag it tracing the REAL
