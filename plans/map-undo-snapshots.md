@@ -96,7 +96,11 @@ serializes to a small JSON blob (dozens of objects → a few KB).
       `d.map`/`d.history`/`d.snapshots`; optimistic canUndo after edits
 - [x] Toolbar Undo/Redo (Button.Group) + Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y;
       `SnapshotsPanel` (save/restore/delete) in the rail
-- [ ] Verify live (deploy + browser)
+- [x] Verified live (commit e8d0cfc, deploy green): save snapshot → appears;
+      officer edit (arrow-nudge) → Undo enabled and PERSISTS across reload
+      (server checkpoint); Undo → reverts, Redo enables, map intact (34 labels,
+      Kitchen back); delete snapshot → removed. Test edit reverted + test
+      snapshot cleaned up.
 
 **Phase 2 — Member suggestion undo.**
 - [ ] Member-accessible "undo my suggestion" (revert own pending → pendingPrev)
