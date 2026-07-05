@@ -19,7 +19,7 @@ export function JoinFlowchart({ year }: { year?: number }) {
         <Stack gap={0}>
           <FlowNode
             title="A friend invites you"
-            hint="Someone in the camp sends you their invite link."
+            hint="Someone in the camp makes you a one-time invite link."
           />
           <FlowArrow />
           <FlowNode

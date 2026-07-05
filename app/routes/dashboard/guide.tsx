@@ -127,7 +127,7 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
             <PhaseCard
               title="1 · Joining"
               items={[
-                "Apply on the public page, redeem a friend's invite link, or get added by an officer.",
+                "Redeem a friend's one-time invite link (the usual way in), apply on the public page, or get added by an officer.",
                 "Officers review applications — accept, waitlist, or pass.",
                 "Recruits become full members as they get involved.",
               ]}

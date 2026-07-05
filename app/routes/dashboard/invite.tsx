@@ -13,7 +13,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { useEffect, useRef } from "react";
 import { data, useFetcher } from "react-router";
 import { newInviteToken } from "~/lib/invite.server";
@@ -50,7 +50,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     revoked: Boolean(r.revokedAt),
   }));
 
-  return { invites };
+  return {
+    invites,
+    isOfficer: hasAtLeast(active.membership.role, "officer"),
+  };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -63,14 +66,25 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = String(form.get("intent"));
 
   if (intent === "create") {
+    // Reusable (multi-use) links are an officer tool and must not spread
+    // further; everyone else gets strictly one-time links (server-enforced,
+    // not just hidden in the UI).
+    const reusable =
+      form.get("reusable") === "1" &&
+      hasAtLeast(active.membership.role, "officer");
     await db.insert(campInvite).values({
       id: crypto.randomUUID(),
       campId: active.camp.id,
       inviterMembershipId: active.membership.id,
       token: newInviteToken(),
       role: "recruit",
+      maxUses: reusable ? null : 1,
     });
-    return data({ ok: "New invite link created." });
+    return data({
+      ok: reusable
+        ? "Reusable invite link created."
+        : "One-time invite link created.",
+    });
   }
 
   if (intent === "revoke") {
@@ -79,7 +93,12 @@ export async function action({ request }: Route.ActionArgs) {
     await db
       .update(campInvite)
       .set({ revokedAt: new Date() })
-      .where(eq(campInvite.id, inviteId));
+      .where(
+        and(
+          eq(campInvite.id, inviteId),
+          eq(campInvite.inviterMembershipId, active.membership.id),
+        ),
+      );
     return data({ ok: "Invite link revoked." });
   }
 
@@ -105,7 +124,7 @@ function inviteStatus(i: {
 }
 
 export default function InviteFriends({ loaderData }: Route.ComponentProps) {
-  const { invites } = loaderData;
+  const { invites, isOfficer } = loaderData;
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
   const busy = fetcher.state !== "idle";
@@ -115,16 +134,22 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
       <Stack gap="lg">
         <Title order={2}>Invite friends</Title>
         <Text c="dimmed" size="sm">
-          Share a link to invite friends to the camp. Whoever joins through your
-          link is recorded as invited by you, and joins as a recruit — promote
-          them later from Members.
+          One-time signup links are how friends join the camp: create a link,
+          send it to one friend, and it stops working once they use it. Whoever
+          joins through your link is recorded as invited by you, and joins as a
+          recruit — promote them later from Members.
         </Text>
 
         <Card withBorder padding="md" radius="md">
           <Group justify="space-between">
-            <Text fw={600} size="sm">
-              Create a new invite link
-            </Text>
+            <div>
+              <Text fw={600} size="sm">
+                Create a one-time signup link
+              </Text>
+              <Text c="dimmed" size="xs">
+                Good for exactly one signup — make a fresh link for each friend.
+              </Text>
+            </div>
             <fetcher.Form method="post">
               <input type="hidden" name="intent" value="create" />
               <Button type="submit" size="xs" loading={busy}>
@@ -133,6 +158,30 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
             </fetcher.Form>
           </Group>
         </Card>
+
+        {isOfficer ? (
+          <Card withBorder padding="md" radius="md">
+            <Group justify="space-between">
+              <div>
+                <Text fw={600} size="sm">
+                  Create a reusable link (officers only)
+                </Text>
+                <Text c="dimmed" size="xs">
+                  Admits anyone who has it until you revoke it. Keep it within
+                  the officer team — for bringing in friends, use one-time links
+                  instead.
+                </Text>
+              </div>
+              <fetcher.Form method="post">
+                <input type="hidden" name="intent" value="create" />
+                <input type="hidden" name="reusable" value="1" />
+                <Button type="submit" size="xs" variant="light" loading={busy}>
+                  Create reusable link
+                </Button>
+              </fetcher.Form>
+            </Group>
+          </Card>
+        ) : null}
 
         {invites.length === 0 ? (
           <Text c="dimmed">No invite links yet. Create one above.</Text>
@@ -160,7 +209,7 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
                       </Table.Td>
                       <Table.Td>
                         {i.useCount}
-                        {i.maxUses != null ? ` / ${i.maxUses}` : ""}
+                        {i.maxUses != null ? ` / ${i.maxUses}` : " · reusable"}
                       </Table.Td>
                       <Table.Td>
                         <Badge color={status.color} variant="light">

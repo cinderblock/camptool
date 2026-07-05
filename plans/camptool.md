@@ -1327,6 +1327,17 @@ New model, built in three shippable stages:
       `/c/:slug`). typecheck + build + biome green. Validated over HTTP: create →
       loader renders link; signup → redeem → membership(recruit) with invitedBy set
       + useCount++; bad token 404; expired/revoked/used-up states handled.
+- [x] One-time links are the primary door (2026-07-05, user-locked). Member-
+      created invite links are now **single-use** (`maxUses=1`, enforced in the
+      action — not just hidden UI); **reusable (multi-use) links are officer-only**
+      and the UI tells officers to keep them within the officer team. Copy on
+      /invite, the guide's joining list, and the JoinFlowchart now frame the
+      one-time link as *the* way friends join. Also fixed a latent bug: the
+      revoke action's where-clause only matched the invite id (any member could
+      revoke any camp's link by id) — now also requires
+      `inviter_membership_id = caller`. NOTE: pre-existing member-created
+      links from before this change are unlimited-use rows; revoke by hand if
+      any are still circulating.
 - [ ] Stage 3 — invite tree view + founder-rooted backfill (edge column already exists).
 
 ## Instance admin: super admin + signup/camp lockdowns (landed, browser-tested 2026-06-11)
