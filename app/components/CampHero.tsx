@@ -20,7 +20,9 @@ export function CampHero({
 }) {
   return (
     <Stack gap="xs" align="center">
-      {logo ? <Image src={logo} alt={name} w={96} h={96} radius="md" /> : null}
+      {logo ? (
+        <Image src={logo} alt={`${name} logo`} w={96} h={96} radius="md" />
+      ) : null}
       <Title order={1} ta="center">
         {name}
       </Title>

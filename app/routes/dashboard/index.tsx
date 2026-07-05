@@ -374,7 +374,9 @@ function CampOverview({
       <Stack gap="lg">
         <Group justify="space-between" align="flex-end">
           <div>
-            <Title order={2}>{active.campName}</Title>
+            <Title order={1} size="h2">
+              {active.campName}
+            </Title>
             <Text c="dimmed">Welcome back, {loaderData.userName}.</Text>
           </div>
           <Badge color={ROLE_COLOR[role]} size="lg" variant="light">
@@ -526,7 +528,9 @@ function NoCampYet({
     return (
       <Container size="sm">
         <Stack gap="md">
-          <Title order={2}>Application pending</Title>
+          <Title order={1} size="h2">
+            Application pending
+          </Title>
           {pendingApplications.map((a) => (
             <Card withBorder padding="lg" radius="md" key={a.campName}>
               <Text fw={600}>{a.campName}</Text>
@@ -552,7 +556,9 @@ function NoCampYet({
     return (
       <Container size="sm">
         <Stack gap="md">
-          <Title order={2}>No camp yet</Title>
+          <Title order={1} size="h2">
+            No camp yet
+          </Title>
           <Text c="dimmed">
             New camp creation is currently turned off on this deployment. Ask a
             site administrator to create your camp or to re-enable camp
@@ -590,12 +596,12 @@ function ContactFix({
         application, and your email is how you sign in.
       </Text>
       {fetcher.data?.error ? (
-        <Text size="sm" c="red" mb="xs">
+        <Text size="sm" c="red" mb="xs" role="alert">
           {fetcher.data.error}
         </Text>
       ) : null}
       {fetcher.data?.ok && !dirty ? (
-        <Text size="sm" c="green" mb="xs">
+        <Text component="output" display="block" size="sm" c="green" mb="xs">
           {fetcher.data.ok}
         </Text>
       ) : null}
@@ -672,7 +678,9 @@ function CreateCampForm() {
     <Container size="sm">
       <Stack gap="md">
         <div>
-          <Title order={2}>Create your camp</Title>
+          <Title order={1} size="h2">
+            Create your camp
+          </Title>
           <Text c="dimmed">
             You're not part of a camp yet. Create one to get started — you'll be
             its first admin.

@@ -104,8 +104,8 @@ export default function Login({ loaderData }: Route.ComponentProps) {
   }
 
   return (
-    <Container size={460} py="xl">
-      <Title order={2} ta="center">
+    <Container component="main" id="main-content" size={460} py="xl">
+      <Title order={1} size="h2" ta="center">
         CampTool
       </Title>
       <Text c="dimmed" size="sm" ta="center" mt={4}>

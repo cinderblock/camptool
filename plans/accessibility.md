@@ -114,8 +114,31 @@ landmark.
 
 - [x] 2026-07-05 Review completed (3 code-review agents + live axe). Findings
       above. No fixes applied yet.
-- [ ] Phase A infrastructure
-- [ ] Phase B loud gaps
+- [x] 2026-07-05 Phase A landed: `app/components/Announcer.tsx` (visually-
+      hidden polite+assertive live regions + `announce()` helper + SkipLink),
+      mounted in root; focus moves to `#main-content` on client navigation
+      (skipped on first load); main landmarks: AppShell.Main, /start, /login,
+      /c/ (NOT /i/ — peer session mid-flight there); h1s via
+      `Title order={1} size="h2"` on dashboard/guide/start/login + guide
+      section levels fixed. Mantine facts verified live: Alert already has
+      role="alert"; notifications announce themselves — the announcer is for
+      everything else.
+- [x] 2026-07-05 Phase B landed: aria-pressed on RSVP + question button
+      groups; EventCalendar day buttons get full spoken labels ("Sunday,
+      August 30, gates open, arrival") + aria-pressed + tap announcements
+      ("Arrival … — now pick your last day" / "Stay set: …"); wizard step
+      changes announced ("Step 2 of 6: Questionnaire"); "Answer saved."
+      announced on question saves; RSVP choice + stay-picker reveal announced;
+      PlayaNameField reveal announced; JoinFlowchart visual aria-hidden with a
+      VisuallyHidden ol narrative; required asterisk paired with sr-only
+      "(required)"; ✕ remove ActionIcons labeled (start occupants/items,
+      bringing); Burger/camp-Select/user-menu labeled; impersonation banner
+      role=status; ContactFix results role=alert / <output>; magic-link
+      double-fire guard; CampHero alt "{name} logo". Biome's a11y lint rules
+      confirmed ACTIVE (they caught 3 things during this pass).
+      Deferred from this pass: /i/ main landmark (peer-owned file right now),
+      map.tsx anything (Phase D), EventCalendar arrow-key roving tabindex
+      (Phase C), contrast theme work (Phase E).
 - [ ] Phase C EventCalendar grid
 - [ ] Phase D map parity view
 - [ ] Phase E theme & prefs

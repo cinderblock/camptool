@@ -4,7 +4,7 @@ import {
   mantineHtmlProps,
 } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import {
   Links,
   Meta,
@@ -18,6 +18,7 @@ import {
 import "@mantine/core/styles.css";
 import "@mantine/notifications/styles.css";
 
+import { Announcer, SkipLink } from "~/components/Announcer";
 import { installTelemetry, pushCrumb } from "~/lib/telemetry.client";
 import type { Route } from "./+types/root";
 
@@ -55,8 +56,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         <MantineProvider defaultColorScheme="auto">
+          <SkipLink />
           <Notifications position="top-right" />
           {children}
+          <Announcer />
         </MantineProvider>
         <ScrollRestoration />
         <Scripts />
@@ -71,8 +74,22 @@ export default function App() {
   useEffect(() => {
     installTelemetry();
   }, []);
+  const firstRender = useRef(true);
   useEffect(() => {
     pushCrumb("nav", location.pathname + location.search);
+    // On client-side navigation, move focus to the page's main landmark so
+    // keyboard and screen-reader users start at the new content instead of
+    // wherever focus happened to be. Skipped on initial load (the browser's
+    // default focus behavior is right there).
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    const main = document.getElementById("main-content");
+    if (main) {
+      main.tabIndex = -1;
+      main.focus({ preventScroll: true });
+    }
   }, [location.pathname, location.search]);
   return <Outlet />;
 }

@@ -445,6 +445,7 @@ function ItemRow({
                 variant="subtle"
                 color="red"
                 mb={4}
+                aria-label={`Remove ${item.name ?? def.label}`}
                 onClick={() =>
                   fetcher.submit(
                     { intent: "removeItem", id: item.id },
@@ -452,7 +453,7 @@ function ItemRow({
                   )
                 }
               >
-                ✕
+                <span aria-hidden="true">✕</span>
               </ActionIcon>
             </Tooltip>
           )}

@@ -21,6 +21,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { useState } from "react";
 import { data, useFetcher, useNavigate } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
+import { announce } from "~/components/Announcer";
 import { EventCalendar } from "~/components/EventCalendar";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
@@ -452,23 +453,36 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
       { method: "post" },
     );
   }
+  // Step transitions are only visible (the vertical stepper collapses/expands)
+  // — say where we landed so screen-reader users can follow along.
+  function goTo(index: number) {
+    setActive(index);
+    const step = steps[index];
+    announce(
+      step
+        ? `Step ${index + 1} of ${steps.length}: ${step.label}`
+        : "All steps complete — you're all set. Your answers are saved.",
+    );
+  }
   function next(status: "done" | "skipped" = "done") {
     if (steps[active]) mark(steps[active].key, status);
-    setActive((a) => Math.min(last, a + 1));
+    goTo(Math.min(last, active + 1));
   }
   function finish() {
     if (steps[active]) mark(steps[active].key, "done");
     // Advance past the last step so the Stepper shows its Completed panel —
     // an explicit "you're saved, safe to leave" confirmation — rather than
     // silently bouncing to the dashboard.
-    setActive(last + 1);
+    goTo(last + 1);
   }
 
   return (
-    <Container size="sm" py="xl">
+    <Container component="main" id="main-content" size="sm" py="xl">
       <Group justify="space-between" align="flex-end" mb="lg">
         <div>
-          <Title order={2}>Welcome — let's get you set up</Title>
+          <Title order={1} size="h2">
+            Welcome — let's get you set up
+          </Title>
           <Text c="dimmed" size="sm">
             We only ask for what's relevant right now
             {weeksToEvent > 0 ? ` (~${weeksToEvent} weeks to the event)` : ""}.
@@ -496,7 +510,7 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
 
       <Stepper
         active={active}
-        onStepClick={setActive}
+        onStepClick={goTo}
         size="sm"
         orientation="vertical"
       >
@@ -527,7 +541,7 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
       <Group justify="space-between" mt="xl">
         <Button
           variant="default"
-          onClick={() => setActive((a) => Math.max(0, a - 1))}
+          onClick={() => goTo(Math.max(0, active - 1))}
           disabled={active === 0}
         >
           Back
@@ -601,8 +615,15 @@ function RsvpButtons({ data: d }: { data: LoaderData }) {
     { value: "maybe", label: "Maybe", color: "yellow" },
     { value: "not_coming", label: "Not this year", color: "gray" },
   ];
-  const setStatus = (status: ParticipationStatus) =>
+  const setStatus = (status: ParticipationStatus, label: string) => {
     fetcher.submit({ intent: "rsvp", status }, { method: "post" });
+    // The reveal of the stay picker (and the save itself) is otherwise silent.
+    announce(
+      status === "coming" || status === "maybe"
+        ? `${label} saved — pick your stay dates below.`
+        : `${label} saved.`,
+    );
+  };
   return (
     <Stack gap="xs" maw={460}>
       <Text size="sm" fw={600}>
@@ -617,8 +638,9 @@ function RsvpButtons({ data: d }: { data: LoaderData }) {
             key={c.value}
             variant={current === c.value ? "filled" : "default"}
             color={c.color}
+            aria-pressed={current === c.value}
             disabled={d.locked}
-            onClick={() => setStatus(c.value)}
+            onClick={() => setStatus(c.value, c.label)}
           >
             {c.label}
           </Button>
@@ -948,9 +970,10 @@ function BringingStep({ data: d }: { data: LoaderData }) {
                           variant="subtle"
                           color="red"
                           mb={4}
+                          aria-label={`Remove ${item.name ?? kindDef(item.kind).label}`}
                           onClick={() => remove(item.id)}
                         >
-                          ✕
+                          <span aria-hidden="true">✕</span>
                         </ActionIcon>
                       </Tooltip>
                     )}
@@ -1015,6 +1038,7 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
                             size="xs"
                             variant="transparent"
                             color="gray"
+                            aria-label={`Remove ${o.name ?? "member"} from ${item.name ?? kindDef(item.kind).label}`}
                             onClick={() =>
                               fetcher.submit(
                                 {
@@ -1026,7 +1050,7 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
                               )
                             }
                           >
-                            ✕
+                            <span aria-hidden="true">✕</span>
                           </ActionIcon>
                         )
                       }

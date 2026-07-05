@@ -70,6 +70,8 @@ export function AuthInline({
   }
 
   async function handleMagicLink() {
+    // The link-styled button has no loading spinner — guard against double-fires.
+    if (busy) return;
     if (form.validateField("email").hasError) return;
     setBusy(true);
     const { error } = await signIn.magicLink({ email: form.values.email });

@@ -52,7 +52,9 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
     <Container size="md">
       <Stack gap="xl">
         <div>
-          <Title order={2}>How {campName} works</Title>
+          <Title order={1} size="h2">
+            How {campName} works
+          </Title>
           <Text c="dimmed" size="sm">
             From joining to the playa and back again next year
             {weeksToEvent > 0 ? ` — about ${weeksToEvent} weeks out` : ""}.
@@ -113,14 +115,14 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
         </Card>
 
         <div>
-          <Title order={4} mb="sm">
+          <Title order={2} size="h4" mb="sm">
             Joining {campName} — the big picture
           </Title>
           <JoinFlowchart year={year} />
         </div>
 
         <div>
-          <Title order={4} mb="sm">
+          <Title order={2} size="h4" mb="sm">
             The details
           </Title>
           <Stack gap="md">

@@ -1,4 +1,5 @@
 import { Box, Group, Text, UnstyledButton } from "@mantine/core";
+import { announce } from "~/components/Announcer";
 import { eventDayLabels, eventStartFor, eventWindowFor } from "~/lib/brc";
 import type { EventRange } from "~/lib/questions";
 
@@ -66,32 +67,49 @@ export function EventCalendar({
 
   // Tapping in range mode: first tap (or a tap with both already set) starts a new
   // arrival; a tap before the arrival restarts; tapping the arrival again clears it.
+  // Every outcome is announced — the visual state change is color-only.
   const tapRange = (ymd: string) => {
     if (!onRangeChange) return;
-    if (!arrival || (arrival && departure)) {
+    if (!arrival || (arrival && departure) || ymd < arrival) {
       onRangeChange({ arrival: ymd, departure: null });
-    } else if (ymd < arrival) {
-      onRangeChange({ arrival: ymd, departure: null });
+      announce(`Arrival ${spokenDate(ymd)} — now pick your last day.`);
     } else if (ymd === arrival) {
       onRangeChange({ arrival: null, departure: null });
+      announce("Stay cleared.");
     } else {
       onRangeChange({ arrival, departure: ymd });
+      announce(`Stay set: ${spokenDate(arrival)} to ${spokenDate(ymd)}.`);
     }
+  };
+
+  const tapSingle = (ymd: string, wasSelected: boolean) => {
+    onChange?.(wasSelected ? null : ymd);
+    announce(wasSelected ? "Date cleared." : `${spokenDate(ymd)} selected.`);
   };
 
   return (
     <Box maw={320}>
       <Box
+        // biome-ignore lint/a11y/useSemanticElements: a <fieldset> can't reliably be a CSS grid container (browsers special-case its layout), so the grid keeps role="group" instead.
+        role="group"
+        aria-label={
+          mode === "range"
+            ? "Stay calendar — pick your arrival day, then your last day"
+            : "Event calendar — pick a day"
+        }
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(7, 1fr)",
           gap: 2,
         }}
       >
+        {/* Terse column letters are decorative — every day button carries its
+            full weekday name for screen readers. */}
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
           <Text
             // biome-ignore lint/suspicious/noArrayIndexKey: fixed weekday header
             key={i}
+            aria-hidden="true"
             ta="center"
             size="xs"
             c="dimmed"
@@ -136,14 +154,35 @@ export function EventCalendar({
               ? "var(--mantine-color-blue-7)"
               : undefined;
 
+          // Full spoken name: date + named event day + selection state (the
+          // visual equivalents are color-only).
+          const stateWords = isArrival
+            ? "arrival"
+            : isDeparture
+              ? "departure"
+              : between
+                ? "in your stay"
+                : singleSelected
+                  ? "selected"
+                  : "";
+          const dayLabel = [
+            spokenDate(ymd),
+            callout ? (CALLOUT_SPOKEN[callout] ?? callout) : "",
+            stateWords,
+          ]
+            .filter(Boolean)
+            .join(", ");
+
           return (
             <UnstyledButton
               key={ymd}
               disabled={!enabled}
+              aria-label={dayLabel}
+              aria-pressed={selected || between}
               onClick={() =>
                 mode === "range"
                   ? tapRange(ymd)
-                  : onChange?.(singleSelected ? null : ymd)
+                  : tapSingle(ymd, singleSelected)
               }
               title={callout}
               style={{
@@ -247,3 +286,20 @@ function formatYmd(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+
+/** "Sunday, August 30" — the screen-reader name for a day button. */
+function spokenDate(ymd: string): string {
+  return parseYmd(ymd).toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+/** Expand the grid's terse callouts for speech. */
+const CALLOUT_SPOKEN: Record<string, string> = {
+  Gates: "gates open",
+  Burn: "Man burn",
+  Temple: "Temple burn",
+  Exodus: "exodus",
+};

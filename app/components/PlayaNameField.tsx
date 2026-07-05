@@ -1,5 +1,6 @@
 import { Checkbox, TextInput, type TextInputProps } from "@mantine/core";
 import { useState } from "react";
+import { announce } from "~/components/Announcer";
 
 /**
  * "Playa name" is Burning Man jargon — meaningless to first-timers, so the
@@ -19,7 +20,12 @@ export function PlayaNameField({
         label="I've been to Burning Man before"
         description="No worries if not — first-timers are welcome."
         checked={beenBefore}
-        onChange={(e) => setBeenBefore(e.currentTarget.checked)}
+        onChange={(e) => {
+          const checked = e.currentTarget.checked;
+          setBeenBefore(checked);
+          // The field appears/disappears silently otherwise.
+          if (checked) announce("Playa name field added below.");
+        }}
       />
       {beenBefore ? (
         <TextInput

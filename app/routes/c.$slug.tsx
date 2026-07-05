@@ -135,7 +135,7 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
   const { campName, logo, description } = loaderData;
 
   return (
-    <Container size="sm" py="xl">
+    <Container component="main" id="main-content" size="sm" py="xl">
       <Stack gap="lg">
         <CampHero
           name={campName}

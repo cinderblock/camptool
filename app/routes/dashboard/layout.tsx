@@ -178,6 +178,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               onClick={toggle}
               hiddenFrom="sm"
               size="sm"
+              aria-label={opened ? "Close navigation" : "Open navigation"}
             />
             <Title order={4}>CampTool</Title>
           </Group>
@@ -185,6 +186,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             {camps.length > 1 ? (
               <Select
                 size="xs"
+                aria-label="Camp"
                 value={activeCampId}
                 onChange={switchCamp}
                 data={camps.map((c) => ({ value: c.id, label: c.name }))}
@@ -220,7 +222,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             <FeedbackButton />
             <Menu position="bottom-end" withinPortal>
               <Menu.Target>
-                <UnstyledButton>
+                <UnstyledButton aria-label={`Account menu — ${user.name}`}>
                   <Text size="sm" fw={500}>
                     {user.name}
                   </Text>
@@ -248,7 +250,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ))}
       </AppShell.Navbar>
 
-      <AppShell.Main>
+      <AppShell.Main id="main-content">
         {impersonatedBy ? (
           <Group
             justify="space-between"
@@ -256,6 +258,8 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             mb="md"
             px="md"
             py="xs"
+            // biome-ignore lint/a11y/useSemanticElements: an <output> element is for form results; this is a session-status banner, and role="status" makes SRs announce it when impersonation starts.
+            role="status"
             style={{
               background: "var(--mantine-color-grape-light)",
               borderRadius: "var(--mantine-radius-sm)",

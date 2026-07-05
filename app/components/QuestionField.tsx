@@ -10,9 +10,11 @@ import {
   Text,
   TextInput,
   Textarea,
+  VisuallyHidden,
 } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { useFetcher } from "react-router";
+import { announce } from "~/components/Announcer";
 import { EventCalendar } from "~/components/EventCalendar";
 import {
   type QuestionType,
@@ -83,20 +85,27 @@ export function QuestionField({
   inviterOptions?: string[];
 }) {
   const fetcher = useFetcher();
-  const save = (v: string) =>
+  const save = (v: string) => {
     fetcher.submit(
       { intent: "answer", questionId: q.id, value: v },
       action ? { method: "post", action } : { method: "post" },
     );
+    // "Answers save as you go" — say so, since nothing visible confirms it.
+    announce("Answer saved.");
+  };
 
   const description = bare ? undefined : q.helpText;
   const label = bare ? undefined : (
     <span>
       {q.prompt}
       {q.required ? (
-        <Text component="span" c="red" inherit>
-          {" *"}
-        </Text>
+        // The red asterisk is color/symbol-only — pair it with spoken text.
+        <>
+          <Text component="span" c="red" inherit aria-hidden="true">
+            {" *"}
+          </Text>
+          <VisuallyHidden> (required)</VisuallyHidden>
+        </>
       ) : null}
     </span>
   );
@@ -136,6 +145,7 @@ export function QuestionField({
                   key={o}
                   size="xs"
                   variant={current === o ? "filled" : "default"}
+                  aria-pressed={current === o}
                   disabled={locked}
                   onClick={() => save(current === o ? "" : o)}
                 >
@@ -174,6 +184,7 @@ export function QuestionField({
                   key={o}
                   size="xs"
                   variant={selected.includes(o) ? "filled" : "default"}
+                  aria-pressed={selected.includes(o)}
                   disabled={locked}
                   onClick={() => toggle(o)}
                 >
@@ -212,6 +223,7 @@ export function QuestionField({
             <Button
               size="xs"
               variant={yn === "yes" ? "filled" : "default"}
+              aria-pressed={yn === "yes"}
               disabled={locked}
               onClick={() => pick("yes")}
             >
@@ -220,6 +232,7 @@ export function QuestionField({
             <Button
               size="xs"
               variant={yn === "no" ? "filled" : "default"}
+              aria-pressed={yn === "no"}
               disabled={locked}
               onClick={() => pick("no")}
             >
