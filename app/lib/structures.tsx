@@ -247,6 +247,39 @@ const CORE_KINDS = [
     tags: ["domicile"],
     personal: true,
   },
+  // SHIFTPOD (2/III): the insulated festival pod. Real footprint is 6-sided —
+  // a hexagon filling a 12×12 ft bounding box (vendor: "12'x12' hexagonal",
+  // ~106-144 sq ft) — with a ~6'6" peak (III: 6'11").
+  {
+    value: "shiftpod",
+    label: "Shift Pod",
+    color: "#9775fa",
+    w: 12,
+    h: 12,
+    shape: "hexagon",
+    vehicle: false,
+    rigid: true,
+    fixedTall: true,
+    group: "Domiciles",
+    tags: ["domicile"],
+    personal: true,
+  },
+  // SHIFTPOD Mini: the compact pod is 4-sided, per vendor 72"×72"×56" set up —
+  // a 6×6 ft square footprint with a ~4.7 ft peak.
+  {
+    value: "shiftpod-mini",
+    label: "Shift Pod Mini",
+    color: "#a78bfa",
+    w: 6,
+    h: 6,
+    shape: "rect",
+    vehicle: false,
+    rigid: true,
+    fixedTall: true,
+    group: "Domiciles",
+    tags: ["domicile"],
+    personal: true,
+  },
   {
     value: "rv",
     label: "RV / trailer",
@@ -680,6 +713,9 @@ const KIND_HEIGHTS: Record<string, number> = {
   // this is the peak. Per-corner heights for shade live in map.tsx cornerHeights.
   hyparhut: 6,
   dome: 12,
+  // SHIFTPOD peaks ~6'6" (2) to 6'11" (III); the Mini sets up 56" tall.
+  shiftpod: 6.5,
+  "shiftpod-mini": 4.7,
   rv: 10,
   car: 5,
   truck: 11,

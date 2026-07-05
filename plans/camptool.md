@@ -214,7 +214,10 @@ not yet independently verified end-to-end by this thread). What exists:
 *MVP increment shipped:* `placement` (one BRC lot per camp) + `map_object`
 (structures in plot-local feet) schema; `/dashboard/map` SVG editor — drag-drop
 legend palette, drag to move, corner-handle resize, top-dot rotate, keyboard
-shortcuts (R rotate, arrows nudge, Del, Esc), side panel for name/kind/size/
+shortcuts (R rotate, arrows nudge, Del, Esc). Palette later gained **Shift Pod**
+(real vendor footprint: 6-sided hexagon in a 12×12 ft box, ~6'6" peak) and
+**Shift Pod Mini** (4-sided, 6×6 ft square, 56" peak) — generic domiciles, not
+camp/event-specific (2026-07-05). Side panel for name/kind/size/
 rotation/notes + delete, lot-setup form (street, address, frontage, depth,
 optional inner-radius → wedge taper). Skewed 10ft grid (50ft emphasis). Side-rail
 layout with size-capped map. Orientation compass (true north + daylight wedge +
