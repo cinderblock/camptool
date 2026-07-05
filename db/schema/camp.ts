@@ -120,6 +120,13 @@ export const membership = sqliteTable("membership", {
     (): AnySQLiteColumn => membership.id,
     { onDelete: "set null" },
   ),
+  // The exact invite link this membership redeemed (null = public application,
+  // officer-added, or joined before tracking). Complements the inviter edge:
+  // an open link records no personal inviter, but still records the door.
+  // Plain id, no FK — camp_invite lives in recruit.ts which imports this file
+  // (a real reference would be a module cycle), and invites are only ever
+  // revoked, never deleted, so a dangling id can't occur.
+  viaInviteId: text("via_invite_id"),
   // Onboarding-wizard progress (app-managed, not a better-auth field): the
   // furthest step entered (0 = never started) and when it was finished.
   wizardStep: integer("wizard_step").notNull().default(0),

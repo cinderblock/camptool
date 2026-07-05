@@ -14,7 +14,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { newInviteToken } from "~/lib/invite.server";
@@ -54,6 +54,28 @@ export async function loader({ request }: Route.LoaderArgs) {
     )
     .orderBy(desc(campInvite.createdAt));
 
+  // Who actually joined through each link (membership.via_invite_id, recorded
+  // at redemption — links redeemed before tracking landed show nobody).
+  const ids = rows.map((r) => r.inv.id);
+  const redeemerRows = ids.length
+    ? await db
+        .select({
+          viaInviteId: membership.viaInviteId,
+          userName: user.name,
+          playaName: membership.playaName,
+        })
+        .from(membership)
+        .innerJoin(user, eq(membership.userId, user.id))
+        .where(inArray(membership.viaInviteId, ids))
+    : [];
+  const joinedBy = new Map<string, string[]>();
+  for (const r of redeemerRows) {
+    if (!r.viaInviteId) continue;
+    const list = joinedBy.get(r.viaInviteId) ?? [];
+    list.push(r.playaName || r.userName);
+    joinedBy.set(r.viaInviteId, list);
+  }
+
   const invites = rows.map(({ inv: r, inviterUserName, inviterPlayaName }) => ({
     id: r.id,
     url: `${baseUrl}/i/${r.token}`,
@@ -62,8 +84,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     note: r.note,
     createdBy: inviterPlayaName || inviterUserName,
     mine: r.inviterMembershipId === active.membership.id,
+    joined: joinedBy.get(r.id) ?? [],
     useCount: r.useCount,
     maxUses: r.maxUses,
+    createdAt: r.createdAt.getTime(),
+    lastUsedAt: r.lastUsedAt ? r.lastUsedAt.getTime() : null,
     expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
     revoked: Boolean(r.revokedAt),
   }));
@@ -93,6 +118,15 @@ export async function action({ request }: Route.ActionArgs) {
       String(form.get("note") ?? "")
         .trim()
         .slice(0, 200) || null;
+    // Optional expiry from a date-only input: the link dies at the END of the
+    // chosen day (UTC — hour-level slop is immaterial for a signup link).
+    const expiresRaw = String(form.get("expires") ?? "").trim();
+    const expiresAt = /^\d{4}-\d{2}-\d{2}$/.test(expiresRaw)
+      ? new Date(`${expiresRaw}T23:59:59.999Z`)
+      : null;
+    if (expiresAt && expiresAt.getTime() <= Date.now()) {
+      return data({ error: "Expiry must be in the future." }, { status: 400 });
+    }
     await db.insert(campInvite).values({
       id: crypto.randomUUID(),
       campId: active.camp.id,
@@ -102,6 +136,7 @@ export async function action({ request }: Route.ActionArgs) {
       kind: open ? "open" : "personal",
       note,
       maxUses: open ? null : 1,
+      expiresAt,
     });
     return data({
       ok: open
@@ -132,6 +167,11 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 type FetcherData = { ok?: string; error?: string };
+
+/** Table date format: ISO (YYYY-MM-DD). */
+function isoDate(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10);
+}
 
 function inviteStatus(i: {
   revoked: boolean;
@@ -181,13 +221,21 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
           </Text>
           <fetcher.Form method="post" key={`one-${resetKey}`}>
             <input type="hidden" name="intent" value="create" />
-            <Group gap="xs" mt="xs" wrap="nowrap">
+            <Group gap="xs" mt="xs" align="flex-end" wrap="wrap">
               <TextInput
+                label="For"
                 name="note"
                 size="xs"
-                style={{ flex: 1 }}
+                style={{ flex: 1, minWidth: 200 }}
                 maxLength={200}
                 placeholder={'Who’s it for? — e.g. "Alex from work"'}
+              />
+              <TextInput
+                label="Expires (optional)"
+                type="date"
+                name="expires"
+                size="xs"
+                w={150}
               />
               <Button type="submit" size="xs" loading={busy}>
                 Create link
@@ -209,13 +257,21 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
             <fetcher.Form method="post" key={`multi-${resetKey}`}>
               <input type="hidden" name="intent" value="create" />
               <input type="hidden" name="reusable" value="1" />
-              <Group gap="xs" mt="xs" wrap="nowrap">
+              <Group gap="xs" mt="xs" align="flex-end" wrap="wrap">
                 <TextInput
+                  label="For"
                   name="note"
                   size="xs"
-                  style={{ flex: 1 }}
+                  style={{ flex: 1, minWidth: 200 }}
                   maxLength={200}
                   placeholder={'What’s it for? — e.g. "2026 build crew"'}
+                />
+                <TextInput
+                  label="Expires (optional)"
+                  type="date"
+                  name="expires"
+                  size="xs"
+                  w={150}
                 />
                 <Button type="submit" size="xs" variant="light" loading={busy}>
                   Create reusable link
@@ -228,7 +284,7 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
         {invites.length === 0 ? (
           <Text c="dimmed">No invite links yet. Create one above.</Text>
         ) : (
-          <Table.ScrollContainer minWidth={isOfficer ? 860 : 760}>
+          <Table.ScrollContainer minWidth={isOfficer ? 1180 : 1080}>
             <Table verticalSpacing="sm">
               <Table.Thead>
                 <Table.Tr>
@@ -236,6 +292,10 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
                   <Table.Th>For</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Uses</Table.Th>
+                  <Table.Th>Joined</Table.Th>
+                  <Table.Th>Created</Table.Th>
+                  <Table.Th>Last used</Table.Th>
+                  <Table.Th>Expires</Table.Th>
                   <Table.Th>Status</Table.Th>
                   {isOfficer ? <Table.Th>Created by</Table.Th> : null}
                   <Table.Th>Actions</Table.Th>
@@ -276,6 +336,41 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
                       <Table.Td>
                         {i.useCount}
                         {i.maxUses != null ? ` / ${i.maxUses}` : ""}
+                      </Table.Td>
+                      <Table.Td maw={180}>
+                        {i.joined.length ? (
+                          <Tooltip
+                            label={i.joined.join(", ")}
+                            openDelay={300}
+                            withArrow
+                          >
+                            <Text size="sm" truncate>
+                              {i.joined.slice(0, 2).join(", ")}
+                              {i.joined.length > 2
+                                ? ` +${i.joined.length - 2}`
+                                : ""}
+                            </Text>
+                          </Tooltip>
+                        ) : (
+                          <Text size="sm" c="dimmed">
+                            —
+                          </Text>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" c="dimmed">
+                          {isoDate(i.createdAt)}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" c="dimmed">
+                          {i.lastUsedAt ? isoDate(i.lastUsedAt) : "—"}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm" c="dimmed">
+                          {i.expiresAt ? isoDate(i.expiresAt) : "—"}
+                        </Text>
                       </Table.Td>
                       <Table.Td>
                         <Badge color={status.color} variant="light">

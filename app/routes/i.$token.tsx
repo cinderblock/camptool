@@ -126,11 +126,14 @@ export async function action({ request, params }: Route.ActionArgs) {
     status: "active",
     invitedByMembershipId:
       invite.kind === "personal" ? invite.inviterMembershipId : null,
+    // Both kinds record the door they came through — an open link carries no
+    // personal inviter, but the link itself is still traceable.
+    viaInviteId: invite.id,
   });
 
   await db
     .update(campInvite)
-    .set({ useCount: sql`${campInvite.useCount} + 1` })
+    .set({ useCount: sql`${campInvite.useCount} + 1`, lastUsedAt: new Date() })
     .where(eq(campInvite.id, invite.id));
 
   throw redirect("/");

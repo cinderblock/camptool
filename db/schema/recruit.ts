@@ -69,6 +69,9 @@ export const campInvite = sqliteTable("camp_invite", {
   // null = unlimited uses; otherwise redemption stops once useCount hits it.
   maxUses: integer("max_uses"),
   useCount: integer("use_count").notNull().default(0),
+  // When the link was most recently redeemed. Kept on the link itself (not
+  // derived from redeemer memberships) so the record survives member removal.
+  lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
   revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
   createdAt: integer("created_at", { mode: "timestamp_ms" })

@@ -1373,6 +1373,17 @@ New model, built in three shippable stages:
       held member-flags work exports `flag.ts` from `db/schema/index.ts`
       (uncommitted) — `db:generate` was run with that export temporarily toggled
       off so 0044 wouldn't swallow `member_flag`; do the same until flags lands.
+- [x] Invite usage columns (2026-07-05, user-picked all four). Migration **0045**
+      (same flag-export toggle): `membership.via_invite_id` (plain id, NO FK —
+      recruit.ts↔camp.ts would cycle; invites are never deleted so no dangling
+      risk) records the exact link redeemed (BOTH kinds — an open link has no
+      personal inviter but the door is now traceable), and
+      `camp_invite.last_used_at` (on the link so it survives member removal).
+      Redemption sets both. /invite table gains Joined (redeemer names, +N
+      overflow tooltip), Created / Last used / Expires (ISO dates), and the
+      create forms take an optional date-only expiry (dies at END of chosen day
+      UTC; past dates rejected). Pre-tracking redemptions show nobody in Joined
+      — no backfill (a member's multiple links make attribution ambiguous).
 - [ ] Stage 3 — invite tree view + founder-rooted backfill (edge column already exists).
 
 ## Instance admin: super admin + signup/camp lockdowns (landed, browser-tested 2026-06-11)
