@@ -22,6 +22,7 @@ import { useState } from "react";
 import { data, useFetcher, useNavigate } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { EventCalendar } from "~/components/EventCalendar";
+import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
 import { parseBannedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
@@ -475,7 +476,7 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
           </Text>
         </div>
         <Button variant="subtle" size="xs" onClick={() => navigate("/")}>
-          Skip / do it manually
+          Skip for now
         </Button>
       </Group>
 
@@ -837,10 +838,7 @@ function ProfileStep({
           )
         }
       />
-      <TextInput
-        label="Playa name (optional)"
-        description="What folks call you out on the playa."
-        placeholder="e.g. Sparkle"
+      <PlayaNameField
         defaultValue={d.playaName ?? ""}
         onBlur={(e) =>
           fetcher.submit(

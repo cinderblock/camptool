@@ -4,15 +4,14 @@ import {
   Button,
   Container,
   Group,
-  Image,
   Paper,
   Stack,
   Text,
-  Title,
 } from "@mantine/core";
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Form, data, redirect } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
+import { CampHero } from "~/components/CampHero";
 import { discordEnabled } from "~/lib/auth.server";
 import {
   getInstanceSettings,
@@ -23,6 +22,7 @@ import {
   type InviteState,
   inviteState,
 } from "~/lib/invite";
+import { isMemberOf } from "~/lib/recruits.server";
 import { getSession } from "~/lib/session.server";
 import { db } from "../../db/client.server";
 import { camp, campInvite, membership, user } from "../../db/schema";
@@ -46,6 +46,7 @@ async function findInvite(token: string) {
       revokedAt: campInvite.revokedAt,
       campName: camp.name,
       logo: camp.logo,
+      description: camp.description,
       inviterName: user.name,
     })
     .from(campInvite)
@@ -64,24 +65,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const state = inviteState(invite);
   const session = await getSession(request);
 
-  let alreadyMember = false;
-  if (session) {
-    const [m] = await db
-      .select({ id: membership.id })
-      .from(membership)
-      .where(
-        and(
-          eq(membership.userId, session.user.id),
-          eq(membership.organizationId, invite.campId),
-        ),
-      )
-      .limit(1);
-    alreadyMember = Boolean(m);
-  }
+  const alreadyMember = session
+    ? await isMemberOf(session.user.id, invite.campId)
+    : false;
 
   const payload = {
     campName: invite.campName,
     logo: invite.logo,
+    description: invite.description,
     inviterName: invite.inviterName,
     state,
     viewer: session ? { name: session.user.name } : null,
@@ -117,17 +108,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     return data({ error: INVITE_STATE_MESSAGE[state] }, { status: 400 });
   }
 
-  const [existing] = await db
-    .select({ id: membership.id })
-    .from(membership)
-    .where(
-      and(
-        eq(membership.userId, session.user.id),
-        eq(membership.organizationId, invite.campId),
-      ),
-    )
-    .limit(1);
-  if (existing) throw redirect("/");
+  if (await isMemberOf(session.user.id, invite.campId)) throw redirect("/");
 
   // Join directly. We bypass auth.api.addMember because that checks the
   // *caller's* camp permission, and the invitee has none yet — the valid token
@@ -151,23 +132,29 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function RedeemInvite({ loaderData }: Route.ComponentProps) {
-  const { campName, logo, inviterName, state, viewer, alreadyMember } =
-    loaderData;
+  const {
+    campName,
+    logo,
+    description,
+    inviterName,
+    state,
+    viewer,
+    alreadyMember,
+  } = loaderData;
 
   return (
     <Container size="sm" py="xl">
       <Stack gap="lg">
-        <Stack gap="xs" align="center">
-          {logo ? (
-            <Image src={logo} alt={campName} w={96} h={96} radius="md" />
-          ) : null}
-          <Title order={1} ta="center">
-            {campName}
-          </Title>
-          <Text c="dimmed" ta="center">
-            <b>{inviterName}</b> invited you to join {campName}.
-          </Text>
-        </Stack>
+        <CampHero
+          name={campName}
+          logo={logo}
+          description={description}
+          tagline={
+            <>
+              <b>{inviterName}</b> invited you to join {campName}.
+            </>
+          }
+        />
 
         <Paper withBorder radius="md" p="lg">
           <InviteBody
@@ -216,7 +203,7 @@ function InviteBody({
   if (!viewer) {
     return (
       <AuthInline
-        intro={`Create an account to accept your invite to ${campName} — it lets you set a password and sign back in later.`}
+        intro={`Create an account to accept your invite to ${campName} — so you can sign back in later.`}
         discordEnabled={discordEnabled}
       />
     );

@@ -129,17 +129,32 @@ Findings:
   `departure_date`; `StayAsk` replaces `ArrivalAsk` in `start.tsx`.
   **Cameron admin task:** delete the now-redundant "Which day can you stay until
   (strike)?" question in /questions.
-- Invite page (`/i/:token`) doesn't show the camp blurb (only `/c/` does) and
-  still has the old "set a password" copy — small follow-ups.
-- Wizard "Your info" step surfaces playa name to everyone — the been-to-BM
-  gating from `/c/` doesn't apply here (per-camp question dedupe is admin data;
-  the profile-step field is code).
+- ~~Invite page (`/i/:token`) doesn't show the camp blurb and still has the old
+  "set a password" copy~~ — FIXED in the DRY pass below.
+- ~~Wizard "Your info" step surfaces playa name to everyone~~ — FIXED (shared
+  `PlayaNameField`).
 - "How did you first hear / who invited you?" is a plain textarea even though
   the invite records the inviter — the camp question isn't typed `invited_by`
   (admin config, pairs with the B4 dropdown work).
 - Autosize textareas + conditional reveals ("I'm coming" → stay picker) shift
   the layout while filling — mildly disorienting, no data loss.
-- "Skip / do it manually" link wording is unclear to a newbie.
+- ~~"Skip / do it manually" link wording is unclear to a newbie~~ — FIXED
+  ("Skip for now").
+
+## DRY / placement pass (2026-07-05, per Cameron)
+
+- **`app/components/PlayaNameField.tsx`** — the been-to-BM checkbox + revealed
+  playa-name input, shared by the `/c/` apply form and the wizard's profile
+  step (pre-checked when a playa name already exists).
+- **`app/components/CampHero.tsx`** — logo/name/blurb/tagline header shared by
+  `/c/:slug` and `/i/:token`; the invite page now shows the camp blurb too.
+- **`app/lib/recruits.server.ts`** — `isMemberOf(userId, campId)` and
+  `pendingApplicationWhere(viewer, campId?)`; replaced four hand-rolled
+  membership checks (`c.$slug` ×2, `i.$token` ×2, `recruits.tsx` accept) and
+  three pending-application conditions (`c.$slug` ×2, dashboard ×2).
+  NOT touched: the same membership check in `members.tsx` — another thread has
+  uncommitted work there.
+- Invite-page copy now matches `/c/` ("so you can sign back in later").
 - Good: inviter name on the invite page, explicit Join consent, tent size
   prompt, EventCalendar with Gates/Burn/Temple/Exodus callouts, "answers save
   as you go", clean "You're all set!" finish.

@@ -1,29 +1,27 @@
 import {
   Alert,
   Button,
-  Checkbox,
   Container,
   Group,
-  Image,
   Paper,
   Stack,
   Text,
-  TextInput,
   Textarea,
-  Title,
 } from "@mantine/core";
-import { and, eq, or } from "drizzle-orm";
-import { useState } from "react";
+import { eq } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
+import { CampHero } from "~/components/CampHero";
+import { PlayaNameField } from "~/components/PlayaNameField";
 import { discordEnabled } from "~/lib/auth.server";
 import {
   getInstanceSettings,
   setSignupUnlockCookie,
 } from "~/lib/instance.server";
+import { isMemberOf, pendingApplicationWhere } from "~/lib/recruits.server";
 import { getSession } from "~/lib/session.server";
 import { db } from "../../db/client.server";
-import { camp, membership, recruitApplication } from "../../db/schema";
+import { camp, recruitApplication } from "../../db/schema";
 import type { Route } from "./+types/c.$slug";
 
 export function meta({ data: d }: Route.MetaArgs) {
@@ -67,30 +65,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     });
   }
 
-  const [member] = await db
-    .select({ id: membership.id })
-    .from(membership)
-    .where(
-      and(
-        eq(membership.userId, session.user.id),
-        eq(membership.organizationId, found.id),
-      ),
-    )
-    .limit(1);
-
   const [pending] = await db
     .select({ id: recruitApplication.id })
     .from(recruitApplication)
-    .where(
-      and(
-        eq(recruitApplication.campId, found.id),
-        eq(recruitApplication.status, "pending"),
-        or(
-          eq(recruitApplication.userId, session.user.id),
-          eq(recruitApplication.email, session.user.email),
-        ),
-      ),
-    )
+    .where(pendingApplicationWhere(session.user, found.id))
     .limit(1);
 
   return {
@@ -99,7 +77,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     description: found.description,
     slug: params.slug,
     viewer: { name: session.user.name, email: session.user.email },
-    alreadyMember: Boolean(member),
+    alreadyMember: await isMemberOf(session.user.id, found.id),
     alreadyApplied: Boolean(pending),
     discordEnabled,
   };
@@ -118,33 +96,14 @@ export async function action({ request, params }: Route.ActionArgs) {
     .limit(1);
   if (!found) throw data("Camp not found", { status: 404 });
 
-  const [member] = await db
-    .select({ id: membership.id })
-    .from(membership)
-    .where(
-      and(
-        eq(membership.userId, session.user.id),
-        eq(membership.organizationId, found.id),
-      ),
-    )
-    .limit(1);
-  if (member) {
+  if (await isMemberOf(session.user.id, found.id)) {
     return data({ error: "You're already a member of this camp." });
   }
 
   const [pending] = await db
     .select({ id: recruitApplication.id })
     .from(recruitApplication)
-    .where(
-      and(
-        eq(recruitApplication.campId, found.id),
-        eq(recruitApplication.status, "pending"),
-        or(
-          eq(recruitApplication.userId, session.user.id),
-          eq(recruitApplication.email, session.user.email),
-        ),
-      ),
-    )
+    .where(pendingApplicationWhere(session.user, found.id))
     .limit(1);
   if (pending) {
     return data({
@@ -178,21 +137,12 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
   return (
     <Container size="sm" py="xl">
       <Stack gap="lg">
-        <Stack gap="xs" align="center">
-          {logo ? (
-            <Image src={logo} alt={campName} w={96} h={96} radius="md" />
-          ) : null}
-          <Title order={1} ta="center">
-            {campName}
-          </Title>
-          {description ? (
-            <Text style={{ whiteSpace: "pre-line" }}>{description}</Text>
-          ) : null}
-          <Text c="dimmed" ta="center">
-            Interested in joining? Tell us a bit about yourself and the camp
-            will reach out.
-          </Text>
-        </Stack>
+        <CampHero
+          name={campName}
+          logo={logo}
+          description={description}
+          tagline="Interested in joining? Tell us a bit about yourself and the camp will reach out."
+        />
 
         <Paper withBorder radius="md" p="lg">
           {loaderData.viewer ? (
@@ -223,7 +173,6 @@ function ApplySection({
   const fetcher = useFetcher<FetcherData>();
   const result = fetcher.data;
   const submitting = fetcher.state !== "idle";
-  const [beenBefore, setBeenBefore] = useState(false);
 
   if (alreadyMember) {
     return (
@@ -259,23 +208,7 @@ function ApplySection({
             {result.error}
           </Alert>
         ) : null}
-        {/* "Playa name" is Burning Man jargon — meaningless to first-timers, so
-            only ask once they say they've been. (Event-layer copy; revisit when
-            the event theming layer peels out.) */}
-        <Checkbox
-          label="I've been to Burning Man before"
-          description="No worries if not — first-timers are welcome."
-          checked={beenBefore}
-          onChange={(e) => setBeenBefore(e.currentTarget.checked)}
-        />
-        {beenBefore ? (
-          <TextInput
-            name="playaName"
-            label="Playa name"
-            description="Optional — the nickname you go by at the event."
-            placeholder="Dusty"
-          />
-        ) : null}
+        <PlayaNameField name="playaName" />
         <Textarea
           name="message"
           label="Why do you want to join?"

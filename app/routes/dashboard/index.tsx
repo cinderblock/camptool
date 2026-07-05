@@ -12,7 +12,7 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { and, count, eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, count, eq, isNotNull, sql } from "drizzle-orm";
 import { useState } from "react";
 import {
   Link,
@@ -25,6 +25,7 @@ import { authClient } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
 import { type Role, hasAtLeast } from "~/lib/permissions";
+import { pendingApplicationWhere } from "~/lib/recruits.server";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { loadWizardState } from "~/lib/wizard.server";
 import { db } from "../../../db/client.server";
@@ -91,15 +92,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       .select({ campName: camp.name, slug: camp.slug })
       .from(recruitApplication)
       .innerJoin(camp, eq(recruitApplication.campId, camp.id))
-      .where(
-        and(
-          eq(recruitApplication.status, "pending"),
-          or(
-            eq(recruitApplication.userId, user.id),
-            eq(recruitApplication.email, user.email),
-          ),
-        ),
-      );
+      .where(pendingApplicationWhere(user));
   }
 
   // Home dashboard: latest news + the viewer's to-dos for the active year.
@@ -298,15 +291,7 @@ export async function action({ request }: Route.ActionArgs) {
   await db
     .update(recruitApplication)
     .set({ name, email })
-    .where(
-      and(
-        eq(recruitApplication.status, "pending"),
-        or(
-          eq(recruitApplication.userId, user.id),
-          eq(recruitApplication.email, oldEmail),
-        ),
-      ),
-    );
+    .where(pendingApplicationWhere({ id: user.id, email: oldEmail }));
 
   return data({ ok: "Saved — the camp will use your updated details." });
 }

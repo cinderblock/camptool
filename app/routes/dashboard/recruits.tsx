@@ -19,9 +19,10 @@ import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { isMemberOf } from "~/lib/recruits.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { camp, membership, recruitApplication, user } from "../../../db/schema";
+import { camp, recruitApplication, user } from "../../../db/schema";
 import type { Route } from "./+types/recruits";
 
 export function meta(_: Route.MetaArgs) {
@@ -132,17 +133,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     let outcome: string;
     if (u) {
-      const [already] = await db
-        .select({ id: membership.id })
-        .from(membership)
-        .where(
-          and(
-            eq(membership.userId, u.id),
-            eq(membership.organizationId, campId),
-          ),
-        )
-        .limit(1);
-      if (already) {
+      if (await isMemberOf(u.id, campId)) {
         outcome = `${app.name} is already a member.`;
       } else {
         try {
