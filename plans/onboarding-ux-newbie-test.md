@@ -155,6 +155,17 @@ Findings:
   NOT touched: the same membership check in `members.tsx` — another thread has
   uncommitted work there.
 - Invite-page copy now matches `/c/` ("so you can sign back in later").
+
+## Joining flowchart (2026-07-05, per Cameron)
+
+**Decision: lives on `/guide` ("How it works")** as the visual centerpiece —
+that page already narrates joining→playa→next-year. Built as a standalone
+`app/components/JoinFlowchart.tsx` (pure Mantine/CSS, no chart dep, themes
+with the app) so it can later drop onto a public page. Shape: two entry doors
+(friend's invite · found us online) → merge → Onboarding → Get ready for
+{year} → Go to Burning Man → You're in the camp, with a dashed "next year ↺"
+rail looping back to Get ready. Old phase cards kept below as "The details".
+"Go to Burning Man" is event-layer copy (flagged in the component).
 - Good: inviter name on the invite page, explicit Join consent, tent size
   prompt, EventCalendar with Gates/Burn/Temple/Exodus callouts, "answers save
   as you go", clean "You're all set!" finish.
