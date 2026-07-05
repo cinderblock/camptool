@@ -5,9 +5,11 @@
 public application link `/c/math-camp-group-w-m0d3`. Persona: "Claude Fable," a
 first-time burner who found the camp randomly online.
 
-**Test account left in place** (visible in Recruits/applications queue — delete when done):
-- Name: Claude Fable · Email: `claude-fable@example.com` · Password: `playa-dust-Fable-2026!`
-- Applied with playa name blank and a "never been to Burning Man" message.
+**Test accounts left in place** (delete when done; both use password `playa-dust-Fable-2026!`):
+- Claude Fable · `claude-fable@example.com` — has a pending application in the
+  Recruits queue (playa name blank, "never been to Burning Man" message).
+- Claude Fable Two · `claude-fable-2@example.com` — account only, NO application
+  (created post-fix to verify the apply form's checkbox reveal live).
 
 ## Findings, ordered by severity
 
@@ -83,6 +85,10 @@ would help conversion and self-selection.
 - **#7 (partial):** signup intro no longer says "set a password" above a
   password field — now "so you can sign back in later and check on your
   application."
+
+All of the above **verified live** on camptool.mathcamp.us (commit `4619635`,
+deploy green): pending-application dashboard + trimmed nav as Claude Fable;
+apply-form checkbox reveal + new signup copy as Claude Fable Two.
 
 Still open: **#6** (camp blurb on the application page — needs a camp
 description field + officer-authored content), feedback-dialog shape, no
