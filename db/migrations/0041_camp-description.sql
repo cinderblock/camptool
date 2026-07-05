@@ -1,0 +1,1 @@
+ALTER TABLE `camp` ADD `description` text;

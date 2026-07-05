@@ -14,6 +14,7 @@ import { getBreadcrumbs } from "~/lib/telemetry.client";
 
 const KINDS = [
   { value: "bug", label: "Bug" },
+  { value: "question", label: "Question" },
   { value: "issue", label: "Issue" },
   { value: "improvement", label: "Improvement" },
   { value: "suggestion", label: "Suggestion" },
@@ -145,8 +146,12 @@ export function FeedbackButton() {
             </>
           ) : (
             <Textarea
-              label="Message"
-              placeholder="Tell us what's on your mind…"
+              label={kind === "question" ? "Your question" : "Message"}
+              placeholder={
+                kind === "question"
+                  ? "What would you like to know?"
+                  : "Tell us what's on your mind…"
+              }
               autosize
               minRows={4}
               value={body}

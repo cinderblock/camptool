@@ -24,6 +24,9 @@ export const camp = sqliteTable("camp", {
   slug: text("slug").unique(),
   logo: text("logo"),
   metadata: text("metadata"),
+  // Officer-authored blurb shown on the public application page (/c/:slug) —
+  // what/where/when/vibe for strangers arriving cold. Plain text, newlines kept.
+  description: text("description"),
   // Whether this camp tracks member dues / contribution tiers. Off by default —
   // camps with no dues never see the Dues feature (hidden from nav + route).
   tracksDues: integer("tracks_dues", { mode: "boolean" })

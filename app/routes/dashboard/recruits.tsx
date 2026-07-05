@@ -9,18 +9,19 @@ import {
   Stack,
   Table,
   Text,
+  Textarea,
   Title,
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, desc, eq } from "drizzle-orm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { membership, recruitApplication, user } from "../../../db/schema";
+import { camp, membership, recruitApplication, user } from "../../../db/schema";
 import type { Route } from "./+types/recruits";
 
 export function meta(_: Route.MetaArgs) {
@@ -57,6 +58,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   const baseUrl = process.env.PUBLIC_BASE_URL ?? "http://localhost:3000";
   const applyUrl = active.camp.slug ? `${baseUrl}/c/${active.camp.slug}` : null;
 
+  const [campRow] = await db
+    .select({ description: camp.description })
+    .from(camp)
+    .where(eq(camp.id, campId))
+    .limit(1);
+
   const applications = apps
     .map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))
     .sort(
@@ -65,7 +72,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         b.createdAt.localeCompare(a.createdAt),
     );
 
-  return { applications, applyUrl };
+  return { applications, applyUrl, description: campRow?.description ?? null };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -77,6 +84,16 @@ export async function action({ request }: Route.ActionArgs) {
 
   const form = await request.formData();
   const intent = String(form.get("intent"));
+
+  if (intent === "saveDescription") {
+    const description =
+      String(form.get("description") ?? "")
+        .trim()
+        .slice(0, 2000) || null;
+    await db.update(camp).set({ description }).where(eq(camp.id, campId));
+    return data({ ok: "Public page blurb saved." });
+  }
+
   const applicationId = String(form.get("applicationId"));
 
   const [app] = await db
@@ -163,10 +180,11 @@ export async function action({ request }: Route.ActionArgs) {
 type FetcherData = { ok?: string; error?: string };
 
 export default function Recruits({ loaderData }: Route.ComponentProps) {
-  const { applications, applyUrl } = loaderData;
+  const { applications, applyUrl, description } = loaderData;
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
   const busy = fetcher.state !== "idle";
+  const [blurb, setBlurb] = useState(description ?? "");
 
   function act(intent: string, applicationId: string) {
     fetcher.submit({ intent, applicationId }, { method: "post" });
@@ -208,6 +226,32 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
                 )}
               </CopyButton>
             </Group>
+            <Textarea
+              mt="md"
+              label="Public page blurb"
+              description="Shown on the application page — assume the reader found you cold. What's the camp, which event, when, what's expected?"
+              placeholder="We're a theme camp of math nerds who build interactive puzzle art at Burning Man…"
+              autosize
+              minRows={2}
+              value={blurb}
+              onChange={(e) => setBlurb(e.currentTarget.value)}
+            />
+            {blurb !== (description ?? "") ? (
+              <Group justify="flex-end" mt="xs">
+                <Button
+                  size="xs"
+                  loading={busy}
+                  onClick={() =>
+                    fetcher.submit(
+                      { intent: "saveDescription", description: blurb },
+                      { method: "post" },
+                    )
+                  }
+                >
+                  Save blurb
+                </Button>
+              </Group>
+            ) : null}
           </Card>
         ) : null}
 

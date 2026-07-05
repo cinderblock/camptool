@@ -90,9 +90,26 @@ All of the above **verified live** on camptool.mathcamp.us (commit `4619635`,
 deploy green): pending-application dashboard + trimmed nav as Claude Fable;
 apply-form checkbox reveal + new signup copy as Claude Fable Two.
 
-Still open: **#6** (camp blurb on the application page — needs a camp
-description field + officer-authored content), feedback-dialog shape, no
-self-serve email/name edit for applicants.
+Second pass (same day, per Cameron's "do it") — the remaining three:
+
+- **#6 camp blurb:** new `camp.description` column (migration **0041**, additive
+  ALTER, generated with the other thread's in-flight `flag.ts` export transiently
+  disabled so the migration contains ONLY this column). Shown on `/c/:slug`
+  above the apply card (plain text, newlines kept). Officers edit it on
+  `/recruits` in the Public application link card ("Public page blurb" textarea,
+  `saveDescription` intent). CONTENT IS STILL EMPTY — Cameron: write the blurb
+  in /recruits.
+- **Feedback question:** added a `question` kind (client + server); non-bug
+  kinds already had a freeform body, so a question now gets "Your question"
+  instead of the bug template.
+- **Contact self-serve:** pending-application dashboard gains a "Your contact
+  details" card (name + email, `updateContact` action). Action is applicant-only
+  (403 with a camp), validates + checks email uniqueness, resets emailVerified
+  on change, and syncs the user's PENDING recruit_application rows so officers
+  see the fix.
+
+Still open: none from the original walkthrough. (Nit not pursued: feedback
+dialog stacking over the user menu.)
 
 ## What worked well
 - The three-field account creation is fast; no email-verification wall before applying.

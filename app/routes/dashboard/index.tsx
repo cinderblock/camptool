@@ -14,7 +14,13 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, count, eq, isNotNull, or, sql } from "drizzle-orm";
 import { useState } from "react";
-import { Link, useNavigate, useRevalidator } from "react-router";
+import {
+  Link,
+  data,
+  useFetcher,
+  useNavigate,
+  useRevalidator,
+} from "react-router";
 import { authClient } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
@@ -32,6 +38,7 @@ import {
   memberRequirement,
   membership,
   recruitApplication,
+  user as userTable,
 } from "../../../db/schema";
 import type { Route } from "./+types/index";
 
@@ -234,12 +241,83 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
+export async function action({ request }: Route.ActionArgs) {
+  const { user, active } = await resolveActiveCamp(request);
+  const form = await request.formData();
+  if (String(form.get("intent")) !== "updateContact") {
+    return data({ error: "Unknown action." }, { status: 400 });
+  }
+  // Self-serve typo fix for camp-less applicants only — members edit their
+  // profile through the wizard/members flows, and their email is load-bearing
+  // for more than an application row.
+  if (active) {
+    return data(
+      { error: "Edit your profile from Finish setup." },
+      {
+        status: 403,
+      },
+    );
+  }
+
+  const name = String(form.get("name") ?? "").trim();
+  const email = String(form.get("email") ?? "").trim();
+  if (!name || name.length > 200) {
+    return data({ error: "Please enter your name." }, { status: 400 });
+  }
+  if (!/^\S+@\S+$/.test(email) || email.length > 254) {
+    return data({ error: "That email doesn't look right." }, { status: 400 });
+  }
+
+  const oldEmail = user.email;
+  if (email !== oldEmail) {
+    const [taken] = await db
+      .select({ id: userTable.id })
+      .from(userTable)
+      .where(eq(userTable.email, email))
+      .limit(1);
+    if (taken && taken.id !== user.id) {
+      return data(
+        { error: "That email is already in use by another account." },
+        { status: 400 },
+      );
+    }
+  }
+
+  await db
+    .update(userTable)
+    .set({
+      name,
+      email,
+      // A changed address was never verified; reset so nothing trusts it.
+      ...(email !== oldEmail ? { emailVerified: false } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(userTable.id, user.id));
+
+  // Keep what the reviewing officers see in sync with the fix.
+  await db
+    .update(recruitApplication)
+    .set({ name, email })
+    .where(
+      and(
+        eq(recruitApplication.status, "pending"),
+        or(
+          eq(recruitApplication.userId, user.id),
+          eq(recruitApplication.email, oldEmail),
+        ),
+      ),
+    );
+
+  return data({ ok: "Saved — the camp will use your updated details." });
+}
+
 export default function DashboardIndex({ loaderData }: Route.ComponentProps) {
   if (!loaderData.active)
     return (
       <NoCampYet
         canCreateCamp={loaderData.canCreateCamp}
         pendingApplications={loaderData.pendingApplications}
+        userName={loaderData.userName}
         userEmail={loaderData.userEmail}
       />
     );
@@ -449,17 +527,14 @@ function CampOverview({
 function NoCampYet({
   canCreateCamp,
   pendingApplications,
+  userName,
   userEmail,
 }: {
   canCreateCamp: boolean;
   pendingApplications: { campName: string; slug: string | null }[];
+  userName: string;
   userEmail: string;
 }) {
-  const navigate = useNavigate();
-  const revalidator = useRevalidator();
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-
   // An applicant waiting on review shouldn't see camp-creation messaging — show
   // their application status instead.
   if (pendingApplications.length > 0) {
@@ -482,6 +557,7 @@ function NoCampYet({
               ) : null}
             </Card>
           ))}
+          <ContactFix userName={userName} userEmail={userEmail} />
         </Stack>
       </Container>
     );
@@ -501,6 +577,80 @@ function NoCampYet({
       </Container>
     );
   }
+
+  return <CreateCampForm />;
+}
+
+/** Inline typo fix for the name/email an applicant signed up with — the only
+ * contact info the camp has for them. Shown only on the pending-application
+ * dashboard; the action rejects users who already have a camp. */
+function ContactFix({
+  userName,
+  userEmail,
+}: {
+  userName: string;
+  userEmail: string;
+}) {
+  const fetcher = useFetcher<{ ok?: string; error?: string }>();
+  const [name, setName] = useState(userName);
+  const [email, setEmail] = useState(userEmail);
+  const dirty = name !== userName || email !== userEmail;
+  const busy = fetcher.state !== "idle";
+
+  return (
+    <Card withBorder padding="lg" radius="md">
+      <Text fw={600}>Your contact details</Text>
+      <Text size="sm" c="dimmed" mt={4} mb="sm">
+        Typo in your name or email? Fix it here — the camp sees these on your
+        application, and your email is how you sign in.
+      </Text>
+      {fetcher.data?.error ? (
+        <Text size="sm" c="red" mb="xs">
+          {fetcher.data.error}
+        </Text>
+      ) : null}
+      {fetcher.data?.ok && !dirty ? (
+        <Text size="sm" c="green" mb="xs">
+          {fetcher.data.ok}
+        </Text>
+      ) : null}
+      <Stack gap="xs">
+        <TextInput
+          label="Name"
+          value={name}
+          onChange={(e) => setName(e.currentTarget.value)}
+        />
+        <TextInput
+          label="Email"
+          value={email}
+          onChange={(e) => setEmail(e.currentTarget.value)}
+        />
+        {dirty ? (
+          <Group justify="flex-end">
+            <Button
+              size="xs"
+              loading={busy}
+              onClick={() =>
+                fetcher.submit(
+                  { intent: "updateContact", name, email },
+                  { method: "post" },
+                )
+              }
+            >
+              Save
+            </Button>
+          </Group>
+        ) : null}
+      </Stack>
+    </Card>
+  );
+}
+
+function CreateCampForm() {
+  const navigate = useNavigate();
+  const revalidator = useRevalidator();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
 
   function slugify(value: string) {
     return value

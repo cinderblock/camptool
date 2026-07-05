@@ -6,6 +6,7 @@ import type { Route } from "./+types/api.feedback";
 
 const KINDS = new Set([
   "bug",
+  "question",
   "issue",
   "improvement",
   "suggestion",

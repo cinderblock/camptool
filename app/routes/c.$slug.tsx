@@ -33,7 +33,12 @@ export function meta({ data: d }: Route.MetaArgs) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const [found] = await db
-    .select({ id: camp.id, name: camp.name, logo: camp.logo })
+    .select({
+      id: camp.id,
+      name: camp.name,
+      logo: camp.logo,
+      description: camp.description,
+    })
     .from(camp)
     .where(eq(camp.slug, params.slug))
     .limit(1);
@@ -44,6 +49,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     const payload = {
       campName: found.name,
       logo: found.logo,
+      description: found.description,
       slug: params.slug,
       viewer: null,
       alreadyMember: false,
@@ -90,6 +96,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return {
     campName: found.name,
     logo: found.logo,
+    description: found.description,
     slug: params.slug,
     viewer: { name: session.user.name, email: session.user.email },
     alreadyMember: Boolean(member),
@@ -166,7 +173,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 type FetcherData = { ok?: string; error?: string };
 
 export default function PublicCamp({ loaderData }: Route.ComponentProps) {
-  const { campName, logo } = loaderData;
+  const { campName, logo, description } = loaderData;
 
   return (
     <Container size="sm" py="xl">
@@ -178,6 +185,9 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
           <Title order={1} ta="center">
             {campName}
           </Title>
+          {description ? (
+            <Text style={{ whiteSpace: "pre-line" }}>{description}</Text>
+          ) : null}
           <Text c="dimmed" ta="center">
             Interested in joining? Tell us a bit about yourself and the camp
             will reach out.
