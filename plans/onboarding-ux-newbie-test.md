@@ -166,6 +166,15 @@ door, reusable, joining records NO personal inviter and the /i/ page says
 "You're invited to join X" instead of naming the creator. /invite list shows
 a Type badge.
 
+Backfill nuance: ALL five pre-existing links — including the `79s86…` one used
+for the Fable III walkthrough — were created under the pre-one-time code
+(`max_uses` NULL, unlimited), so the backfill correctly classed every one of
+them as **open**; no personal links exist yet. Live-verified: open links now
+show the nameless "You're invited to join…" tagline. The personal path (named
+inviter + invited-by edge) only runs for one-time links minted under the new
+code. Cameron: revoke the stale unlimited links (79s86 included) and mint
+fresh one-time links per friend.
+
 ## Joining flowchart (2026-07-05, per Cameron)
 
 **Decision: lives on `/guide` ("How it works")** as the visual centerpiece —
