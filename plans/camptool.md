@@ -1361,6 +1361,18 @@ New model, built in three shippable stages:
       `inviter_membership_id = caller`. NOTE: pre-existing member-created
       links from before this change are unlimited-use rows; revoke by hand if
       any are still circulating.
+- [x] Invite-link notes + creator metadata (2026-07-05, user ask). `camp_invite.note`
+      (migration **0044**, nullable text ≤200 chars) — a "who/what is this for"
+      label set at creation on both create forms (inputs auto-clear via form
+      remount after success so a stale note can't attach to the next link), shown
+      as a "For" column. Who generated a link was already stored
+      (`inviter_membership_id` on BOTH kinds); now surfaced: **officers see ALL
+      of the camp's links** with a "Created by" column (playa name, else real
+      name; "You" for own), members still see only their own. Officers can also
+      revoke any camp link (was owner-only). NOTE for migration authors: the
+      held member-flags work exports `flag.ts` from `db/schema/index.ts`
+      (uncommitted) — `db:generate` was run with that export temporarily toggled
+      off so 0044 wouldn't swallow `member_flag`; do the same until flags lands.
 - [ ] Stage 3 — invite tree view + founder-rooted backfill (edge column already exists).
 
 ## Instance admin: super admin + signup/camp lockdowns (landed, browser-tested 2026-06-11)

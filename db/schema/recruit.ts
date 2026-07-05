@@ -63,6 +63,9 @@ export const campInvite = sqliteTable("camp_invite", {
   // Role granted on redemption. Kept to "recruit" for safety: a leaked link
   // must never self-grant elevated access — promote via member management.
   role: text("role").notNull().default("recruit"),
+  // Free-text label for who/what the link is for ("For Alex", "2026 art crew
+  // channel"). Internal bookkeeping — never shown to the redeemer.
+  note: text("note"),
   // null = unlimited uses; otherwise redemption stops once useCount hits it.
   maxUses: integer("max_uses"),
   useCount: integer("use_count").notNull().default(0),

@@ -9,18 +9,19 @@ import {
   Stack,
   Table,
   Text,
+  TextInput,
   Title,
   Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, desc, eq } from "drizzle-orm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { newInviteToken } from "~/lib/invite.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { campInvite } from "../../../db/schema";
+import { campInvite, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/invite";
 
 export function meta(_: Route.MetaArgs) {
@@ -34,27 +35,40 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const baseUrl = process.env.PUBLIC_BASE_URL ?? "http://localhost:3000";
+  // Officers oversee the camp's whole link inventory (with who created each);
+  // everyone else manages just their own links.
+  const isOfficer = hasAtLeast(active.membership.role, "officer");
   const rows = await db
-    .select()
+    .select({
+      inv: campInvite,
+      inviterUserName: user.name,
+      inviterPlayaName: membership.playaName,
+    })
     .from(campInvite)
-    .where(eq(campInvite.inviterMembershipId, active.membership.id))
+    .innerJoin(membership, eq(campInvite.inviterMembershipId, membership.id))
+    .innerJoin(user, eq(membership.userId, user.id))
+    .where(
+      isOfficer
+        ? eq(campInvite.campId, active.camp.id)
+        : eq(campInvite.inviterMembershipId, active.membership.id),
+    )
     .orderBy(desc(campInvite.createdAt));
 
-  const invites = rows.map((r) => ({
+  const invites = rows.map(({ inv: r, inviterUserName, inviterPlayaName }) => ({
     id: r.id,
     url: `${baseUrl}/i/${r.token}`,
     role: r.role,
     kind: r.kind,
+    note: r.note,
+    createdBy: inviterPlayaName || inviterUserName,
+    mine: r.inviterMembershipId === active.membership.id,
     useCount: r.useCount,
     maxUses: r.maxUses,
     expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
     revoked: Boolean(r.revokedAt),
   }));
 
-  return {
-    invites,
-    isOfficer: hasAtLeast(active.membership.role, "officer"),
-  };
+  return { invites, isOfficer };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -74,6 +88,11 @@ export async function action({ request }: Route.ActionArgs) {
     const open =
       form.get("reusable") === "1" &&
       hasAtLeast(active.membership.role, "officer");
+    // Who/what the link is for — internal bookkeeping shown in the table.
+    const note =
+      String(form.get("note") ?? "")
+        .trim()
+        .slice(0, 200) || null;
     await db.insert(campInvite).values({
       id: crypto.randomUUID(),
       campId: active.camp.id,
@@ -81,6 +100,7 @@ export async function action({ request }: Route.ActionArgs) {
       token: newInviteToken(),
       role: "recruit",
       kind: open ? "open" : "personal",
+      note,
       maxUses: open ? null : 1,
     });
     return data({
@@ -92,14 +112,17 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "revoke") {
     const inviteId = String(form.get("inviteId"));
-    // Owner-only: the where-clause scopes the revoke to the caller's own link.
+    // Own links only — except officers, who can revoke any of the camp's links.
     await db
       .update(campInvite)
       .set({ revokedAt: new Date() })
       .where(
         and(
           eq(campInvite.id, inviteId),
-          eq(campInvite.inviterMembershipId, active.membership.id),
+          eq(campInvite.campId, active.camp.id),
+          hasAtLeast(active.membership.role, "officer")
+            ? undefined
+            : eq(campInvite.inviterMembershipId, active.membership.id),
         ),
       );
     return data({ ok: "Invite link revoked." });
@@ -131,6 +154,12 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
   const busy = fetcher.state !== "idle";
+  // Remount the create forms after a successful action so the uncontrolled
+  // note inputs clear — a stale note must not silently attach to the next link.
+  const [resetKey, setResetKey] = useState(0);
+  useEffect(() => {
+    if (fetcher.state === "idle" && fetcher.data?.ok) setResetKey((k) => k + 1);
+  }, [fetcher.state, fetcher.data]);
 
   return (
     <Container>
@@ -144,59 +173,71 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
         </Text>
 
         <Card withBorder padding="md" radius="md">
-          <Group justify="space-between">
-            <div>
-              <Text fw={600} size="sm">
-                Create a one-time signup link
-              </Text>
-              <Text c="dimmed" size="xs">
-                Good for exactly one signup — make a fresh link for each friend.
-              </Text>
-            </div>
-            <fetcher.Form method="post">
-              <input type="hidden" name="intent" value="create" />
+          <Text fw={600} size="sm">
+            Create a one-time signup link
+          </Text>
+          <Text c="dimmed" size="xs">
+            Good for exactly one signup — make a fresh link for each friend.
+          </Text>
+          <fetcher.Form method="post" key={`one-${resetKey}`}>
+            <input type="hidden" name="intent" value="create" />
+            <Group gap="xs" mt="xs" wrap="nowrap">
+              <TextInput
+                name="note"
+                size="xs"
+                style={{ flex: 1 }}
+                maxLength={200}
+                placeholder={'Who’s it for? — e.g. "Alex from work"'}
+              />
               <Button type="submit" size="xs" loading={busy}>
                 Create link
               </Button>
-            </fetcher.Form>
-          </Group>
+            </Group>
+          </fetcher.Form>
         </Card>
 
         {isOfficer ? (
           <Card withBorder padding="md" radius="md">
-            <Group justify="space-between">
-              <div>
-                <Text fw={600} size="sm">
-                  Create a reusable link (officers only)
-                </Text>
-                <Text c="dimmed" size="xs">
-                  Admits anyone who has it until you revoke it. Keep it within
-                  the officer team — for bringing in friends, use one-time links
-                  instead.
-                </Text>
-              </div>
-              <fetcher.Form method="post">
-                <input type="hidden" name="intent" value="create" />
-                <input type="hidden" name="reusable" value="1" />
+            <Text fw={600} size="sm">
+              Create a reusable link (officers only)
+            </Text>
+            <Text c="dimmed" size="xs">
+              Admits anyone who has it until you revoke it. Keep it within the
+              officer team — for bringing in friends, use one-time links
+              instead.
+            </Text>
+            <fetcher.Form method="post" key={`multi-${resetKey}`}>
+              <input type="hidden" name="intent" value="create" />
+              <input type="hidden" name="reusable" value="1" />
+              <Group gap="xs" mt="xs" wrap="nowrap">
+                <TextInput
+                  name="note"
+                  size="xs"
+                  style={{ flex: 1 }}
+                  maxLength={200}
+                  placeholder={'What’s it for? — e.g. "2026 build crew"'}
+                />
                 <Button type="submit" size="xs" variant="light" loading={busy}>
                   Create reusable link
                 </Button>
-              </fetcher.Form>
-            </Group>
+              </Group>
+            </fetcher.Form>
           </Card>
         ) : null}
 
         {invites.length === 0 ? (
           <Text c="dimmed">No invite links yet. Create one above.</Text>
         ) : (
-          <Table.ScrollContainer minWidth={640}>
+          <Table.ScrollContainer minWidth={isOfficer ? 860 : 760}>
             <Table verticalSpacing="sm">
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Link</Table.Th>
+                  <Table.Th>For</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Uses</Table.Th>
                   <Table.Th>Status</Table.Th>
+                  {isOfficer ? <Table.Th>Created by</Table.Th> : null}
                   <Table.Th>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -206,10 +247,23 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
                   const active = status.label === "active";
                   return (
                     <Table.Tr key={i.id}>
-                      <Table.Td maw={320}>
+                      <Table.Td maw={280}>
                         <Anchor href={i.url} target="_blank" size="sm">
                           {i.url}
                         </Anchor>
+                      </Table.Td>
+                      <Table.Td maw={180}>
+                        {i.note ? (
+                          <Tooltip label={i.note} openDelay={300} withArrow>
+                            <Text size="sm" truncate>
+                              {i.note}
+                            </Text>
+                          </Tooltip>
+                        ) : (
+                          <Text size="sm" c="dimmed">
+                            —
+                          </Text>
+                        )}
                       </Table.Td>
                       <Table.Td>
                         <Badge
@@ -228,6 +282,13 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
                           {status.label}
                         </Badge>
                       </Table.Td>
+                      {isOfficer ? (
+                        <Table.Td>
+                          <Text size="sm" c={i.mine ? undefined : "dimmed"}>
+                            {i.mine ? "You" : i.createdBy}
+                          </Text>
+                        </Table.Td>
+                      ) : null}
                       <Table.Td>
                         <Group gap="xs" wrap="nowrap">
                           <CopyButton value={i.url}>

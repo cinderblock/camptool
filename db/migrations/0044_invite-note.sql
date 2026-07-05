@@ -1,0 +1,1 @@
+ALTER TABLE `camp_invite` ADD `note` text;
