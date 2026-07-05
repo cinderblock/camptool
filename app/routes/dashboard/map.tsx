@@ -4218,6 +4218,9 @@ function Editor({
   const drag = useRef<DragState | null>(null);
   const liveObj = useRef<ObjRow | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Rotation is a second-click affordance: the rotate handle only appears once you
+  // press an item that was ALREADY the sole selection. This holds that item's id.
+  const [rotateArmedId, setRotateArmedId] = useState<string | null>(null);
   // Editing a selected cable's vertices: which point is being dragged, and a
   // live working copy committed on pointer-up.
   const cableDrag = useRef<{ cableId: string; index: number } | null>(null);
@@ -4285,6 +4288,7 @@ function Editor({
   const selectOnly = (id: string | null) => {
     setSelectedId(id);
     setSelectedIds(id ? [id] : []);
+    setRotateArmedId(null);
   };
 
   // Officers edit anything; a member may move/resize/rotate only their own
@@ -4964,8 +4968,18 @@ function Editor({
     setSelectedCableId(null);
     setSelectedRoadId(null);
 
+    // A body press on an item that was ALREADY the sole selection arms rotation
+    // (reveals the rotate handle); a first press (fresh/different selection)
+    // disarms it. Grabbing the resize/rotate handles keeps the current arm state.
+    const wasSole =
+      selectedId === o.id &&
+      selectedIds.length === 1 &&
+      selectedIds[0] === o.id;
+    if (mode === "move") setRotateArmedId(wasSole ? o.id : null);
+
     // Shift-click toggles this object (or its whole linked block) in the selection.
     if (mode === "move" && e.shiftKey) {
+      setRotateArmedId(null);
       const grp = expandGroups([o.id]);
       setSelectedIds((prev) =>
         prev.includes(o.id)
@@ -6235,6 +6249,7 @@ function Editor({
                   }
                   editable={editable(o)}
                   resizable={resizable(o)}
+                  rotateArmed={rotateArmedId === o.id}
                   dim={highlight !== "none" && !matches(o)}
                   showDoors={showDoors}
                   overflow={objectOverflowsLot(
@@ -7411,6 +7426,7 @@ const MapObjectShape = memo(
     soleSelected,
     editable,
     resizable,
+    rotateArmed,
     dim,
     showDoors,
     overflow,
@@ -7431,6 +7447,9 @@ const MapObjectShape = memo(
     /** Whether the corner drag-resize handle is offered (owner-only; see the
      * `resizable` helper). Move/rotate follow `editable` instead. */
     resizable: boolean;
+    /** Rotation armed by a second click on the already-selected item — only then
+     * is the rotate handle shown. */
+    rotateArmed: boolean;
     dim: boolean;
     showDoors: boolean;
     /** The object's footprint crosses the lot border (center is still inside). */
@@ -7902,24 +7921,30 @@ const MapObjectShape = memo(
           ) : null}
           {soleSelected && editable ? (
             <>
-              <line
-                x1={cx}
-                y1={py}
-                x2={cx}
-                y2={py - 22}
-                stroke="#1c1c1c"
-                strokeWidth={1}
-              />
-              <circle
-                cx={cx}
-                cy={py - 22}
-                r={6}
-                fill="#fff"
-                stroke="#1c1c1c"
-                strokeWidth={1.5}
-                style={{ cursor: "grab" }}
-                onPointerDown={onRotateDown}
-              />
+              {/* Rotate handle: only after a second click on the selected item
+              (rotateArmed). */}
+              {rotateArmed ? (
+                <>
+                  <line
+                    x1={cx}
+                    y1={py}
+                    x2={cx}
+                    y2={py - 22}
+                    stroke="#1c1c1c"
+                    strokeWidth={1}
+                  />
+                  <circle
+                    cx={cx}
+                    cy={py - 22}
+                    r={6}
+                    fill="#fff"
+                    stroke="#1c1c1c"
+                    strokeWidth={1.5}
+                    style={{ cursor: "grab" }}
+                    onPointerDown={onRotateDown}
+                  />
+                </>
+              ) : null}
               {resizable &&
               !(def.vehicle || def.rigid || def.shape === "dome") ? (
                 // Domes stay round: no corner-drag (which would skew w≠h); the
@@ -7987,6 +8012,7 @@ const MapObjectShape = memo(
     prev.soleSelected === next.soleSelected &&
     prev.editable === next.editable &&
     prev.resizable === next.resizable &&
+    prev.rotateArmed === next.rotateArmed &&
     prev.dim === next.dim &&
     prev.overflow === next.overflow &&
     prev.showDoors === next.showDoors &&
