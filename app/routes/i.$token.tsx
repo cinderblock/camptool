@@ -40,6 +40,7 @@ async function findInvite(token: string) {
       campId: campInvite.campId,
       inviterMembershipId: campInvite.inviterMembershipId,
       role: campInvite.role,
+      kind: campInvite.kind,
       maxUses: campInvite.maxUses,
       useCount: campInvite.useCount,
       expiresAt: campInvite.expiresAt,
@@ -73,7 +74,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     campName: invite.campName,
     logo: invite.logo,
     description: invite.description,
-    inviterName: invite.inviterName,
+    // Only a personal link is "so-and-so invited you"; an open link is the
+    // camp's door, not a person's.
+    inviterName: invite.kind === "personal" ? invite.inviterName : null,
     state,
     viewer: session ? { name: session.user.name } : null,
     alreadyMember,
@@ -113,14 +116,16 @@ export async function action({ request, params }: Route.ActionArgs) {
   // Join directly. We bypass auth.api.addMember because that checks the
   // *caller's* camp permission, and the invitee has none yet — the valid token
   // is the authorization. Inserting here also lets us record the invite edge
-  // atomically.
+  // atomically. Only a personal link records its inviter on the new membership;
+  // an open link is the camp's door, so the invite tree gets no edge.
   await db.insert(membership).values({
     id: crypto.randomUUID(),
     organizationId: invite.campId,
     userId: session.user.id,
     role: invite.role,
     status: "active",
-    invitedByMembershipId: invite.inviterMembershipId,
+    invitedByMembershipId:
+      invite.kind === "personal" ? invite.inviterMembershipId : null,
   });
 
   await db
@@ -150,9 +155,13 @@ export default function RedeemInvite({ loaderData }: Route.ComponentProps) {
           logo={logo}
           description={description}
           tagline={
-            <>
-              <b>{inviterName}</b> invited you to join {campName}.
-            </>
+            inviterName ? (
+              <>
+                <b>{inviterName}</b> invited you to join {campName}.
+              </>
+            ) : (
+              <>You're invited to join {campName}.</>
+            )
           }
         />
 

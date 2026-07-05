@@ -156,6 +156,16 @@ Findings:
   uncommitted work there.
 - Invite-page copy now matches `/c/` ("so you can sign back in later").
 
+## Invite kind locked (2026-07-05, per Cameron)
+
+`camp_invite.kind` ('personal' | 'open', migration **0043** with backfill:
+existing `max_uses IS NULL` rows → 'open'). The kind is set at creation and
+never mutated: **personal** = tied to its inviter, maxUses forced to 1,
+redeemer's membership records `invited_by`; **open** (officer-only) = camp
+door, reusable, joining records NO personal inviter and the /i/ page says
+"You're invited to join X" instead of naming the creator. /invite list shows
+a Type badge.
+
 ## Joining flowchart (2026-07-05, per Cameron)
 
 **Decision: lives on `/guide` ("How it works")** as the visual centerpiece —

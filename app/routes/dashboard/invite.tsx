@@ -44,6 +44,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     id: r.id,
     url: `${baseUrl}/i/${r.token}`,
     role: r.role,
+    kind: r.kind,
     useCount: r.useCount,
     maxUses: r.maxUses,
     expiresAt: r.expiresAt ? r.expiresAt.getTime() : null,
@@ -66,10 +67,11 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = String(form.get("intent"));
 
   if (intent === "create") {
-    // Reusable (multi-use) links are an officer tool and must not spread
-    // further; everyone else gets strictly one-time links (server-enforced,
-    // not just hidden in the UI).
-    const reusable =
+    // The kind is locked at creation and drives everything else. 'open'
+    // (reusable) links are an officer tool and must not spread further;
+    // everyone else gets 'personal' links — tied to them as the inviter and
+    // therefore strictly one-time (server-enforced, not just hidden in the UI).
+    const open =
       form.get("reusable") === "1" &&
       hasAtLeast(active.membership.role, "officer");
     await db.insert(campInvite).values({
@@ -78,10 +80,11 @@ export async function action({ request }: Route.ActionArgs) {
       inviterMembershipId: active.membership.id,
       token: newInviteToken(),
       role: "recruit",
-      maxUses: reusable ? null : 1,
+      kind: open ? "open" : "personal",
+      maxUses: open ? null : 1,
     });
     return data({
-      ok: reusable
+      ok: open
         ? "Reusable invite link created."
         : "One-time invite link created.",
     });
@@ -191,6 +194,7 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Link</Table.Th>
+                  <Table.Th>Type</Table.Th>
                   <Table.Th>Uses</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Actions</Table.Th>
@@ -208,8 +212,16 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
                         </Anchor>
                       </Table.Td>
                       <Table.Td>
+                        <Badge
+                          variant="light"
+                          color={i.kind === "open" ? "orange" : "blue"}
+                        >
+                          {i.kind === "open" ? "reusable" : "one-time"}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
                         {i.useCount}
-                        {i.maxUses != null ? ` / ${i.maxUses}` : " · reusable"}
+                        {i.maxUses != null ? ` / ${i.maxUses}` : ""}
                       </Table.Td>
                       <Table.Td>
                         <Badge color={status.color} variant="light">

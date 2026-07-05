@@ -54,6 +54,12 @@ export const campInvite = sqliteTable("camp_invite", {
     .notNull()
     .references(() => membership.id, { onDelete: "cascade" }),
   token: text("token").notNull().unique(),
+  // The invite's locked type. 'personal' is a one-person door tied to its
+  // inviter: maxUses is forced to 1 at creation and the redeemer is recorded
+  // as invited by them. 'open' (officer-only) is a camp door: reusable, and
+  // joining through it records no personal inviter. The kind never changes
+  // after creation.
+  kind: text("kind").notNull().default("personal"),
   // Role granted on redemption. Kept to "recruit" for safety: a leaked link
   // must never self-grant elevated access — promote via member management.
   role: text("role").notNull().default("recruit"),
