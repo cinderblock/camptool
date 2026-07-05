@@ -11,6 +11,7 @@ import type {
   FootprintCtx,
   Kind,
   KindTag,
+  ShadowVertex,
   ShapeKind,
   StructureConfig,
 } from "@camptool/theme-contract";
@@ -175,6 +176,178 @@ function toyHaulerFootprint(
   return pts;
 }
 
+/** Stretch-hexayurt outline (object-local CENTERED feet): the regular 8ft-panel
+ * hexagon split in half with a `stretch`-ft rectangle inserted along the ridge
+ * (+x), the way real stretch builds add 4×8 wall panels in the middle. At
+ * stretch 0 this is exactly the regular hexayurt hexagon. */
+function stretchHexOutline(
+  w: number,
+  h: number,
+  config: StructureConfig,
+): Array<{ x: number; y: number }> {
+  const s = Math.max(0, Math.min(16, config.stretch ?? 8)) / 2;
+  const flat = w / 2 - w / 4; // half the flat (top/bottom) edge
+  return [
+    { x: w / 2 + s, y: 0 },
+    { x: flat + s, y: h / 2 },
+    { x: -flat - s, y: h / 2 },
+    { x: -w / 2 - s, y: 0 },
+    { x: -flat - s, y: -h / 2 },
+    { x: flat + s, y: -h / 2 },
+  ];
+}
+
+/** Stretch hexayurt drawn top-down: the stretched hexagon plus the roof ridge
+ * (along the stretch) and hip lines from each wall corner to the ridge ends. */
+function StretchHexayurtFootprint({
+  w,
+  h,
+  color,
+  selected,
+  config,
+}: FootprintCtx): ReactNode {
+  const cx = w / 2;
+  const cy = h / 2;
+  const s = Math.max(0, Math.min(16, config.stretch ?? 8)) / 2;
+  const pts = stretchHexOutline(w, h, config).map((p) => ({
+    x: p.x + cx,
+    y: p.y + cy,
+  }));
+  const ridgeL = { x: cx - s, y: cy };
+  const ridgeR = { x: cx + s, y: cy };
+  // Each outline vertex hips to its own end of the ridge (left half → left end).
+  const hips = pts.map((p) => ({ p, r: p.x < cx ? ridgeL : ridgeR }));
+  return (
+    <g>
+      <polygon
+        points={pts.map((p) => `${p.x},${p.y}`).join(" ")}
+        fill={color}
+        fillOpacity={0.78}
+        stroke={selected ? "#1c1c1c" : color}
+        strokeWidth={selected ? 0.5 : 0.25}
+      />
+      <g stroke="#1c1c1c" strokeOpacity={0.35} strokeWidth={0.2}>
+        <line x1={ridgeL.x} y1={ridgeL.y} x2={ridgeR.x} y2={ridgeR.y} />
+        {hips.map(({ p, r }) => (
+          <line key={`${p.x},${p.y}`} x1={p.x} y1={p.y} x2={r.x} y2={r.y} />
+        ))}
+      </g>
+    </g>
+  );
+}
+
+/** Legend/tray icon for the stretch hexayurt: the elongated hexagon + ridge. */
+function stretchHexIcon(size: number): ReactNode {
+  // Default proportions: 16ft hexagon + 8ft stretch → 24ft × 13.86ft.
+  const w = size - 2;
+  const h = w * (13.86 / 24);
+  const y0 = (size - h) / 2;
+  const xs = [0, w / 6, (5 * w) / 6, w].map((x) => x + 1);
+  const pts = [
+    `${xs[3]},${y0 + h / 2}`,
+    `${xs[2]},${y0 + h}`,
+    `${xs[1]},${y0 + h}`,
+    `${xs[0]},${y0 + h / 2}`,
+    `${xs[1]},${y0}`,
+    `${xs[2]},${y0}`,
+  ].join(" ");
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      style={{ display: "block", flex: "0 0 auto" }}
+      aria-hidden="true"
+    >
+      <polygon points={pts} fill="#087f5b" />
+      <line
+        x1={xs[1]}
+        y1={y0 + h / 2}
+        x2={xs[2]}
+        y2={y0 + h / 2}
+        stroke="#1c1c1c"
+        strokeOpacity={0.4}
+      />
+    </svg>
+  );
+}
+
+/** Pop-up camper footprint: the trailer box plus, when popped up
+ * (config `popped`), the fold-out bunks cantilevered ~3.5ft past BOTH ends —
+ * slightly narrower than the box. Centered outline, like the RV's, so the
+ * deployed bunks take real space for spacing / shade / overlap. */
+function popupCamperFootprint(
+  w: number,
+  h: number,
+  config: StructureConfig,
+): Array<{ x: number; y: number }> {
+  const out = (config.popped ?? 1) > 0 ? 3.5 : 0;
+  const bw = (w * 0.85) / 2;
+  const pts: Array<{ x: number; y: number }> = [{ x: -w / 2, y: -h / 2 }];
+  if (out > 0)
+    pts.push(
+      { x: -bw, y: -h / 2 },
+      { x: -bw, y: -h / 2 - out },
+      { x: bw, y: -h / 2 - out },
+      { x: bw, y: -h / 2 },
+    );
+  pts.push({ x: w / 2, y: -h / 2 }, { x: w / 2, y: h / 2 });
+  if (out > 0)
+    pts.push(
+      { x: bw, y: h / 2 },
+      { x: bw, y: h / 2 + out },
+      { x: -bw, y: h / 2 + out },
+      { x: -bw, y: h / 2 },
+    );
+  pts.push({ x: -w / 2, y: h / 2 });
+  return pts;
+}
+
+/** Vehicle shadow silhouette: the body box, plus — when the `rooftopTent`
+ * toggle is on — the opened tent box (~4.5×7ft, ~3.5ft above the roof) as a
+ * separate part, so the vehicle casts a real stepped shadow. `z` is a fraction
+ * of the object's tallFt, so the tent's added height is calibrated against the
+ * kind's default height (`baseTallFt`). */
+function rooftopTentShadow(baseTallFt: number) {
+  return (
+    w: number,
+    h: number,
+    config: StructureConfig,
+  ): Array<readonly ShadowVertex[]> => {
+    const box = (
+      hw: number,
+      hh: number,
+      z0: number,
+      z1: number,
+    ): readonly ShadowVertex[] =>
+      [0, 1].flatMap((zi) =>
+        [
+          { x: -hw, y: -hh },
+          { x: hw, y: -hh },
+          { x: hw, y: hh },
+          { x: -hw, y: hh },
+        ].map((p) => ({ ...p, z: zi === 0 ? z0 : z1 })),
+      );
+    const parts = [box(w / 2, h / 2, 0, 1)];
+    if ((config.rooftopTent ?? 0) > 0) {
+      parts.push(
+        box(Math.min(w, 4.5) / 2, Math.min(h, 7) / 2, 1, 1 + 3.5 / baseTallFt),
+      );
+    }
+    return parts;
+  };
+}
+
+/** The rooftop-tent toggle shared by the plain vehicles (car / truck / van). */
+const ROOFTOP_TENT_CONTROL = {
+  key: "rooftopTent",
+  label: "Rooftop tent",
+  min: 0,
+  max: 1,
+  default: 0,
+  toggle: true,
+} as const;
+
 /** The built-in palette shipped with the open-source app. A self-hoster's
  * camp-theme package contributes additional structures (see `KINDS` below) —
  * bespoke per-camp kinds never bloat this shared list. */
@@ -280,6 +453,81 @@ const CORE_KINDS = [
     tags: ["domicile"],
     personal: true,
   },
+  // Canvas bell tent (Sibley/Fernweh style): round, sold by diameter — 13ft
+  // (4m) and 16.4ft (5m) are the common sizes; ~10ft center pole on a 5m.
+  {
+    value: "bell-tent",
+    label: "Bell tent",
+    color: "#38d9a9",
+    w: 16,
+    h: 16,
+    shape: "dome",
+    vehicle: false,
+    rigid: false,
+    group: "Domiciles",
+    tags: ["domicile"],
+    personal: true,
+  },
+  // The 8ft-panel hexayurt elongated with extra 4×8 wall panels in the middle —
+  // a common playa build. The stretch slider inserts feet between the hexagon
+  // halves (4ft per pair of panels); 0 = the regular hexayurt footprint.
+  {
+    value: "stretch-hexayurt",
+    label: "Stretch hexayurt",
+    color: "#087f5b",
+    w: 16,
+    h: 13.86,
+    shape: "custom",
+    vehicle: false,
+    rigid: true,
+    fixedTall: true,
+    group: "Domiciles",
+    tags: ["domicile"],
+    personal: true,
+    footprint: stretchHexOutline,
+    renderFootprint: StretchHexayurtFootprint,
+    renderIcon: stretchHexIcon,
+    controls: [
+      {
+        key: "stretch",
+        label: "Stretch (ft)",
+        min: 0,
+        max: 16,
+        step: 4,
+        default: 8,
+      },
+    ],
+  },
+  // Canvas cabin tent (Kodiak/Springbar flex-bow): 10×14 is the classic size
+  // (10×10 and 12×12 also common — it resizes); ~6'6" ridge.
+  {
+    value: "cabin-tent",
+    label: "Canvas cabin tent",
+    color: "#2b8a3e",
+    w: 10,
+    h: 14,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Domiciles",
+    tags: ["domicile"],
+    personal: true,
+  },
+  // Tipi: conical lodge on a pole crown — round footprint, commonly 12-18ft
+  // diameter, and taller than wide (~12ft peak on a 15ft lodge).
+  {
+    value: "tipi",
+    label: "Tipi",
+    color: "#b08968",
+    w: 15,
+    h: 15,
+    shape: "dome",
+    vehicle: false,
+    rigid: false,
+    group: "Domiciles",
+    tags: ["domicile"],
+    personal: true,
+  },
   {
     value: "rv",
     label: "RV / trailer",
@@ -340,6 +588,77 @@ const CORE_KINDS = [
       },
     ],
   },
+  // Box truck sleeper (U-Haul-style conversion): 8ft-wide box, ~22ft overall
+  // with the common 15ft box; longer trucks stretch it (length-only resize).
+  {
+    value: "box-truck",
+    label: "Box truck",
+    color: "#1971c2",
+    w: 8,
+    h: 22,
+    shape: "rect",
+    vehicle: true,
+    rigid: false,
+    group: "Domiciles",
+    tags: ["domicile", "vehicle"],
+    personal: true,
+  },
+  // School bus / skoolie: 8ft body width, 20-40ft long (35ft is the classic
+  // full-size), ~10'6" tall.
+  {
+    value: "skoolie",
+    label: "School bus / skoolie",
+    color: "#fab005",
+    w: 8,
+    h: 35,
+    shape: "rect",
+    vehicle: true,
+    rigid: false,
+    group: "Domiciles",
+    tags: ["domicile", "vehicle"],
+    personal: true,
+  },
+  // Teardrop trailer: ~5ft wide, ~10ft overall including the tongue, ~5ft tall.
+  {
+    value: "teardrop",
+    label: "Teardrop trailer",
+    color: "#74c0fc",
+    w: 5,
+    h: 10,
+    shape: "rect",
+    vehicle: true,
+    rigid: true,
+    group: "Domiciles",
+    tags: ["domicile", "vehicle"],
+    personal: true,
+  },
+  // Pop-up / tent camper: ~7ft-wide trailer (10ft box typical; 8-16ft exist, so
+  // length resizes). Popping up folds bunks out ~3.5ft past BOTH ends — the
+  // deployed footprint is real space, like the RV pop-outs.
+  {
+    value: "popup-camper",
+    label: "Pop-up camper",
+    color: "#5c7cfa",
+    w: 7,
+    h: 12,
+    shape: "rect",
+    vehicle: true,
+    rigid: false,
+    group: "Domiciles",
+    tags: ["domicile", "vehicle"],
+    personal: true,
+    footprint: popupCamperFootprint,
+    controls: [
+      {
+        key: "popped",
+        label: "Popped up (beds out)",
+        min: 0,
+        max: 1,
+        default: 1,
+        toggle: true,
+      },
+    ],
+  },
   {
     value: "car",
     label: "Car",
@@ -352,6 +671,8 @@ const CORE_KINDS = [
     group: "Vehicles",
     tags: ["vehicle"],
     personal: true,
+    controls: [ROOFTOP_TENT_CONTROL],
+    shadowVolume: rooftopTentShadow(5),
   },
   {
     value: "truck",
@@ -365,6 +686,8 @@ const CORE_KINDS = [
     group: "Vehicles",
     tags: ["vehicle"],
     personal: true,
+    controls: [ROOFTOP_TENT_CONTROL],
+    shadowVolume: rooftopTentShadow(11),
   },
   {
     value: "van",
@@ -378,6 +701,8 @@ const CORE_KINDS = [
     group: "Vehicles",
     tags: ["vehicle"],
     personal: true,
+    controls: [ROOFTOP_TENT_CONTROL],
+    shadowVolume: rooftopTentShadow(8),
   },
   {
     value: "shade",
@@ -716,6 +1041,16 @@ const KIND_HEIGHTS: Record<string, number> = {
   // SHIFTPOD peaks ~6'6" (2) to 6'11" (III); the Mini sets up 56" tall.
   shiftpod: 6.5,
   "shiftpod-mini": 4.7,
+  // NOTE: round (dome-shaped) kinds' shadows derive from the radius, not
+  // tallFt — these heights still seed the object and the corner-height path.
+  "bell-tent": 10,
+  "stretch-hexayurt": 6, // same 6ft ridge as the regular hexayurt
+  "cabin-tent": 6.5,
+  tipi: 12,
+  "box-truck": 11,
+  skoolie: 10.5,
+  teardrop: 5,
+  "popup-camper": 8.5, // popped-up roof height; closed it tows at ~4.5ft
   rv: 10,
   car: 5,
   truck: 11,

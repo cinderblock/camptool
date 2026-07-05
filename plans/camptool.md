@@ -217,7 +217,17 @@ legend palette, drag to move, corner-handle resize, top-dot rotate, keyboard
 shortcuts (R rotate, arrows nudge, Del, Esc). Palette later gained **Shift Pod**
 (real vendor footprint: 6-sided hexagon in a 12×12 ft box, ~6'6" peak) and
 **Shift Pod Mini** (4-sided, 6×6 ft square, 56" peak) — generic domiciles, not
-camp/event-specific (2026-07-05). Side panel for name/kind/size/
+camp/event-specific (2026-07-05). Then 8 more real-spec domiciles + a vehicle
+toggle (2026-07-05, user-picked): **bell tent** (round, 16ft/5m default),
+**stretch hexayurt** (custom footprint = hexagon halves + a stretch slider, 4ft
+per panel pair; shape "custom" with core-kind renderFootprint — first core kind
+to use the camp-theme rendering hooks), **canvas cabin tent** (10×14 Kodiak
+class), **tipi** (round 15ft), **box truck** (8×22, length-resizable),
+**skoolie** (8×35), **teardrop** (5×10), **pop-up camper** (7ft wide, "popped"
+toggle folds ~3.5ft bunks out past both ends — real footprint like RV
+pop-outs), and a **rooftop tent** toggle on car/truck/van (roof marker +
+`shadowVolume` so the stepped shadow is real; z>1 works — it's just a
+multiplier over tallFt). Side panel for name/kind/size/
 rotation/notes + delete, lot-setup form (street, address, frontage, depth,
 optional inner-radius → wedge taper). Skewed 10ft grid (50ft emphasis). Side-rail
 layout with size-capped map. Orientation compass (true north + daylight wedge +

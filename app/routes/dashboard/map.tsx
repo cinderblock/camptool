@@ -393,7 +393,8 @@ function KindGlyph({
     );
   }
 
-  if (kind === "truck") {
+  if (kind === "truck" || kind === "box-truck") {
+    // Cab + cargo box — reads right for a pickup and a box-truck conversion.
     return (
       <g pointerEvents="none">
         {wheels([0.18, 0.82])}
@@ -458,11 +459,44 @@ function KindGlyph({
     );
   }
 
-  // Towed trailers (no cab): tandem axles + a hitch tongue at the front (-y).
-  if (kind === "airstream" || kind === "toy-hauler") {
+  if (kind === "skoolie") {
+    // Bus: windshield up front + rows of side window panes.
     return (
       <g pointerEvents="none">
-        {wheels([0.6, 0.74])}
+        {wheels([0.14, 0.78])}
+        <polygon
+          points={`${X(0.24)},${Y(0.03)} ${X(0.76)},${Y(0.03)} ${X(0.86)},${Y(0.1)} ${X(0.14)},${Y(0.1)}`}
+          {...pane}
+        />
+        {[0.18, 0.32, 0.46, 0.6, 0.74].flatMap((f) =>
+          [X(0.05), X(0.83)].map((wx) => (
+            <rect
+              key={`${f}-${wx}`}
+              x={wx}
+              y={Y(f)}
+              width={w * 0.12}
+              height={h * 0.06}
+              rx={1}
+              {...pane}
+              fillOpacity={0.5}
+            />
+          )),
+        )}
+      </g>
+    );
+  }
+
+  // Towed trailers (no cab): axles + a hitch tongue at the front (-y).
+  if (
+    kind === "airstream" ||
+    kind === "toy-hauler" ||
+    kind === "teardrop" ||
+    kind === "popup-camper"
+  ) {
+    const tandem = kind === "airstream" || kind === "toy-hauler";
+    return (
+      <g pointerEvents="none">
+        {wheels(tandem ? [0.6, 0.74] : [0.62])}
         <polygon
           points={`${X(0.42)},${py} ${X(0.58)},${py} ${X(0.5)},${py - h * 0.05}`}
           {...line}
@@ -481,10 +515,10 @@ function KindGlyph({
               {...line}
             />
           ))
-        ) : (
+        ) : kind === "toy-hauler" ? (
           // Toy hauler: garage line near the rear.
           <line x1={X(0.1)} y1={Y(0.5)} x2={X(0.9)} y2={Y(0.5)} {...line} />
-        )}
+        ) : null}
       </g>
     );
   }
@@ -7572,6 +7606,32 @@ const MapObjectShape = memo(
                     );
                   })()
                 : null}
+              {/* Pop-up camper fold-out bunks off both ends when popped up
+              (drawn under the body, like the RV pop-outs). */}
+              {o.kind === "popup-camper" && (o.config.popped ?? 1) > 0
+                ? (() => {
+                    const out = 3.5 * ppf;
+                    const bw = w * 0.85;
+                    const bx = px + (w - bw) / 2;
+                    return (
+                      <g style={bodyStyle} onPointerDown={onBodyDown}>
+                        {[py - out, py + h].map((by) => (
+                          <rect
+                            key={by}
+                            x={bx}
+                            y={by}
+                            width={bw}
+                            height={out}
+                            fill={fill}
+                            fillOpacity={0.55}
+                            stroke={selected ? "#1c1c1c" : fill}
+                            strokeWidth={selected ? 1.5 : 0.75}
+                          />
+                        ))}
+                      </g>
+                    );
+                  })()
+                : null}
               <rect
                 x={px}
                 y={py}
@@ -7868,6 +7928,39 @@ const MapObjectShape = memo(
               pointerEvents="none"
             />
           ) : null}
+          {/* Rooftop tent (opened) on a vehicle's roof — only kinds carrying
+          the rooftopTent control ever set this config key. */}
+          {(o.config.rooftopTent ?? 0) > 0
+            ? (() => {
+                const tw = Math.min(4.5 * ppf, w * 0.7);
+                const tl = Math.min(7 * ppf, h * 0.55);
+                return (
+                  <g pointerEvents="none">
+                    <rect
+                      x={cx - tw / 2}
+                      y={cy - tl / 2}
+                      width={tw}
+                      height={tl}
+                      rx={2}
+                      fill="#495057"
+                      fillOpacity={0.55}
+                      stroke="#1c1c1c"
+                      strokeOpacity={0.5}
+                      strokeWidth={0.8}
+                    />
+                    <line
+                      x1={cx}
+                      y1={cy - tl / 2}
+                      x2={cx}
+                      y2={cy + tl / 2}
+                      stroke="#f1f3f5"
+                      strokeOpacity={0.8}
+                      strokeWidth={0.8}
+                    />
+                  </g>
+                );
+              })()
+            : null}
           {o.pending ? (
             // Awaiting officer approval: trace the REAL footprint in dashed amber
             // (+ a corner dot) so pending edits stand out on the map.
