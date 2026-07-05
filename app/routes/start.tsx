@@ -669,8 +669,8 @@ function StayAsk({
           When will you be there?
         </Text>
         <Text size="xs" c="dimmed">
-          Tap the day you'll arrive, then the day you'll head home — like
-          booking a stay. Gates open {gateOpenFmt}.
+          Tap the day you'll arrive, then the day you'll head home. Gates open{" "}
+          {gateOpenFmt}.
         </Text>
       </div>
       <EventCalendar
