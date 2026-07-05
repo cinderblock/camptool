@@ -120,20 +120,40 @@ export function dayArc(year: number): {
  * closest to `azimuthDeg`. The sun sweeps the full circle once per day (daylight
  * across the south, then swinging back through the north below the horizon at
  * night), so scanning the whole day lets a drag reach any time — including night —
- * making the dial draggable all the way around. */
+ * making the dial draggable all the way around.
+ *
+ * Returns a FRACTIONAL minute: a coarse scan brackets the target, then a ternary
+ * search refines to sub-second precision. Snapping to whole scan samples (the
+ * old 2-min grid) made a smooth dial drag step the azimuth ~0.5-1° at a time,
+ * which read as visible shadow jumps. */
 export function minuteForAzimuth(year: number, azimuthDeg: number): number {
+  // Circular distance between the sun's azimuth at minute m and the target.
+  const diff = (m: number) => {
+    const d = Math.abs(sunAt(year, m).azimuth - azimuthDeg);
+    return d > 180 ? 360 - d : d;
+  };
+  const STEP = 6;
   let best = 0;
   let bestDiff = Number.POSITIVE_INFINITY;
-  for (let m = 0; m <= 1440; m += 2) {
-    const az = sunAt(year, m).azimuth;
-    let d = Math.abs(az - azimuthDeg);
-    if (d > 180) d = 360 - d;
+  for (let m = 0; m <= 1440; m += STEP) {
+    const d = diff(m);
     if (d < bestDiff) {
       bestDiff = d;
       best = m;
     }
   }
-  return best;
+  // Azimuth is monotonic in time at BRC's latitude (lat > solar declination, so
+  // no retrograde swing), which makes `diff` V-shaped around the best sample —
+  // ternary-search the bracket down to sub-second precision.
+  let lo = Math.max(0, best - STEP);
+  let hi = Math.min(1440, best + STEP);
+  for (let i = 0; i < 30 && hi - lo > 1 / 120; i++) {
+    const m1 = lo + (hi - lo) / 3;
+    const m2 = hi - (hi - lo) / 3;
+    if (diff(m1) <= diff(m2)) hi = m2;
+    else lo = m1;
+  }
+  return (lo + hi) / 2;
 }
 
 /** Format a local minute-of-day as a 12-hour clock, e.g. 915 → "3:15 PM". */

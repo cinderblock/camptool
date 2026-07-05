@@ -679,6 +679,16 @@ placement page.)
 
 ## Findings / gotchas
 
+- **Sun-dial drag made shadows jump in visible steps (fixed 2026-07-05).** Not
+  pixel granularity: `minuteForAzimuth` (sun.ts) snapped a drag to the nearest
+  2-minute scan sample, quantizing azimuth ~0.5-1° per step near midday. Now a
+  coarse 6-min bracket + ternary search returns a FRACTIONAL minute — measured
+  max azimuth error 0.46° → 0.0009°, and ~3× cheaper per pointermove (0.31ms →
+  0.11ms). "Animate sun" likewise now sweeps 1.65 min @ 30Hz instead of 6 min @
+  8Hz (same 50 sim-min/s speed). The shadow pipeline itself is cheap — convex
+  hulls per object, union-by-group-opacity, no polygon clipping — per-move cost
+  is dominated by React re-rendering the big SVG, fine at current object counts.
+
 - **Second tenancy axis: `camp_edition` (per camp, per year).** Introduced with
   the map editor (`db/schema/camp.ts`). A camp has one edition per `(camp_id,
   year)`; editions are independently editable, **lockable** (read-only once a year

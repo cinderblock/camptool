@@ -3354,12 +3354,15 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // back to midnight after a full 24h.
   useEffect(() => {
     if (!animateShade || sunDragging) return;
+    // Same sweep speed as before (50 sim-minutes per real second), but at 30Hz
+    // in fractional-minute steps so the shadows glide instead of jumping 6
+    // minutes at a time.
     const id = setInterval(() => {
       setTimeMin((t) => {
-        const n = t + 6;
+        const n = t + 1.65;
         return n >= 1440 ? 0 : n;
       });
-    }, 120);
+    }, 33);
     return () => clearInterval(id);
   }, [animateShade, sunDragging]);
 
