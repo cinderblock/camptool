@@ -16,12 +16,12 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
-import { DateInput } from "@mantine/dates";
 import dayjs from "dayjs";
 import { and, asc, eq } from "drizzle-orm";
 import { useState } from "react";
 import { data, useFetcher, useNavigate } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
+import { EventCalendar } from "~/components/EventCalendar";
 import { QuestionField } from "~/components/QuestionField";
 import { parseBannedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
@@ -315,13 +315,24 @@ export async function action({ request }: Route.ActionArgs) {
       return data({ error: "Bad status." }, { status: 400 });
     }
     const noteRaw = form.get("note");
-    const arrivalRaw = form.get("arrivalDate");
-    let arrivalDate: string | null | undefined;
-    if (arrivalRaw != null) {
-      arrivalDate = String(arrivalRaw) || null;
-      if (arrivalDate && !/^\d{4}-\d{2}-\d{2}$/.test(arrivalDate)) {
-        return data({ error: "Bad arrival date." }, { status: 400 });
+    // Absent field = leave unchanged; empty string = clear; else YYYY-MM-DD.
+    const readDay = (key: string): string | null | undefined => {
+      const raw = form.get(key);
+      if (raw == null) return undefined;
+      return String(raw) || null;
+    };
+    const arrivalDate = readDay("arrivalDate");
+    const departureDate = readDay("departureDate");
+    for (const day of [arrivalDate, departureDate]) {
+      if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+        return data({ error: "Bad date." }, { status: 400 });
       }
+    }
+    if (arrivalDate && departureDate && departureDate < arrivalDate) {
+      return data(
+        { error: "Departure can't be before arrival." },
+        { status: 400 },
+      );
     }
     await setParticipation({
       campId,
@@ -329,6 +340,7 @@ export async function action({ request }: Route.ActionArgs) {
       membershipId: mid,
       status,
       arrivalDate,
+      departureDate,
       note: noteRaw == null ? undefined : String(noteRaw) || null,
     });
     return data({ ok: true });
@@ -612,16 +624,17 @@ function RsvpButtons({ data: d }: { data: LoaderData }) {
         ))}
       </Group>
       {current === "coming" || current === "maybe" ? (
-        <ArrivalAsk data={d} fetcher={fetcher} />
+        <StayAsk data={d} fetcher={fetcher} />
       ) : null}
     </Stack>
   );
 }
 
-/** Arrival-date ask + the Setup Access Pass prompt: arriving before gate-open
- * needs a pass, which the camper can auto-request right here (an officer picks
- * the pass's "on or after" date on /passes). */
-function ArrivalAsk({
+/** Booking-style stay ask (tap arrival day, tap last day) + the Setup Access
+ * Pass prompt: arriving before gate-open needs a pass, which the camper can
+ * auto-request right here (an officer picks the pass's "on or after" date on
+ * /passes). */
+function StayAsk({
   data: d,
   fetcher,
 }: {
@@ -629,34 +642,51 @@ function ArrivalAsk({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const arrival = d.participation.arrivalDate;
+  const departure = d.participation.departureDate;
   const gateOpen = d.arrivalWindow.focus;
   const gateOpenFmt = dayjs(gateOpen).format("dddd, MMM D");
   const arrivingEarly = arrival != null && arrival < gateOpen;
-  const saveArrival = (v: unknown) =>
+  const fmt = (day: string) => dayjs(day).format("ddd, MMM D");
+  const nights =
+    arrival && departure ? dayjs(departure).diff(dayjs(arrival), "day") : null;
+  const saveStay = (range: {
+    arrival: string | null;
+    departure: string | null;
+  }) =>
     fetcher.submit(
       {
         intent: "rsvp",
         status: d.participation.status,
-        arrivalDate: v ? dayjs(v as Date).format("YYYY-MM-DD") : "",
+        arrivalDate: range.arrival ?? "",
+        departureDate: range.departure ?? "",
       },
       { method: "post" },
     );
   return (
     <Stack gap="xs" mt="xs">
-      <DateInput
-        label="When do you plan to arrive?"
-        description={`Gates open ${gateOpenFmt}.`}
-        placeholder="pick a date"
-        w={220}
+      <div>
+        <Text size="sm" fw={600}>
+          When will you be there?
+        </Text>
+        <Text size="xs" c="dimmed">
+          Tap the day you'll arrive, then the day you'll head home — like
+          booking a stay. Gates open {gateOpenFmt}.
+        </Text>
+      </div>
+      <EventCalendar
+        year={d.year}
+        mode="range"
+        range={{ arrival, departure }}
+        onRangeChange={saveStay}
         disabled={d.locked}
-        value={arrival ? dayjs(arrival).toDate() : null}
-        onChange={saveArrival as (v: Date | null) => void}
-        minDate={dayjs(d.arrivalWindow.min).toDate()}
-        maxDate={dayjs(d.arrivalWindow.max).toDate()}
-        defaultDate={dayjs(gateOpen).toDate()}
-        valueFormat="ddd, MMM D"
-        clearable
       />
+      <Text size="sm" c={arrival && departure ? undefined : "dimmed"}>
+        {arrival && departure
+          ? `${fmt(arrival)} → ${fmt(departure)} · ${nights} ${nights === 1 ? "night" : "nights"}`
+          : arrival
+            ? `Arriving ${fmt(arrival)} — now tap your last day.`
+            : "No stay picked yet."}
+      </Text>
       {arrivingEarly ? (
         <Paper withBorder p="sm" radius="md">
           {d.myPass?.status === "granted" ? (

@@ -1,0 +1,1 @@
+ALTER TABLE `participation` ADD `departure_date` text;

@@ -20,6 +20,7 @@ export type WizardState = {
   participation: {
     status: ParticipationStatus;
     arrivalDate: string | null;
+    departureDate: string | null;
     note: string | null;
   };
 };
@@ -48,6 +49,7 @@ export async function loadWizardState(opts: {
     .select({
       status: participation.status,
       arrivalDate: participation.arrivalDate,
+      departureDate: participation.departureDate,
       note: participation.note,
     })
     .from(participation)
@@ -72,6 +74,7 @@ export async function loadWizardState(opts: {
     participation: {
       status: (part?.status as ParticipationStatus) ?? "unknown",
       arrivalDate: part?.arrivalDate ?? null,
+      departureDate: part?.departureDate ?? null,
       note: part?.note ?? null,
     },
   };
@@ -109,6 +112,7 @@ export async function setParticipation(opts: {
   membershipId: string;
   status: ParticipationStatus;
   arrivalDate?: string | null;
+  departureDate?: string | null;
   note?: string | null;
 }): Promise<void> {
   await db
@@ -120,6 +124,7 @@ export async function setParticipation(opts: {
       membershipId: opts.membershipId,
       status: opts.status,
       arrivalDate: opts.arrivalDate ?? null,
+      departureDate: opts.departureDate ?? null,
       note: opts.note ?? null,
     })
     .onConflictDoUpdate({
@@ -128,6 +133,9 @@ export async function setParticipation(opts: {
         status: opts.status,
         ...(opts.arrivalDate !== undefined
           ? { arrivalDate: opts.arrivalDate }
+          : {}),
+        ...(opts.departureDate !== undefined
+          ? { departureDate: opts.departureDate }
           : {}),
         ...(opts.note !== undefined ? { note: opts.note } : {}),
         updatedAt: new Date(),

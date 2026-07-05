@@ -111,6 +111,39 @@ Second pass (same day, per Cameron's "do it") — the remaining three:
 Still open: none from the original walkthrough. (Nit not pursued: feedback
 dialog stacking over the user menu.)
 
+## Invited-flow walkthrough (2026-07-04, per Cameron)
+
+Generated a fresh invite link from Cameron's session (`/invite`), redeemed it in
+incognito as **Claude Fable III** (`claude-fable-3@example.com`, same password) —
+full path: invite page → account create → explicit "Join" button → straight into
+the `/start` wizard → completed all 6 steps ("You're all set!"). Fable III is now
+a **recruit member** of the live camp (remove from Members when done). Cameron's
+invite link `79s86I0vVGWM5AYsJ_zMpdPvGHNfRwFB` has 1 use — revoke at will.
+
+Findings:
+- **Arrival picker was the broken DateInput** Blake reported (giant chevrons,
+  cramped grid) — the participation ask never got EventCalendar (the D4 debt).
+- **FIXED same session (migration 0042):** arrival + the separate "stay until
+  (strike)" question are now ONE booking-style range on `EventCalendar` (tap
+  arrival, tap last day, green stay band, nights count). `participation` gained
+  `departure_date`; `StayAsk` replaces `ArrivalAsk` in `start.tsx`.
+  **Cameron admin task:** delete the now-redundant "Which day can you stay until
+  (strike)?" question in /questions.
+- Invite page (`/i/:token`) doesn't show the camp blurb (only `/c/` does) and
+  still has the old "set a password" copy — small follow-ups.
+- Wizard "Your info" step surfaces playa name to everyone — the been-to-BM
+  gating from `/c/` doesn't apply here (per-camp question dedupe is admin data;
+  the profile-step field is code).
+- "How did you first hear / who invited you?" is a plain textarea even though
+  the invite records the inviter — the camp question isn't typed `invited_by`
+  (admin config, pairs with the B4 dropdown work).
+- Autosize textareas + conditional reveals ("I'm coming" → stay picker) shift
+  the layout while filling — mildly disorienting, no data loss.
+- "Skip / do it manually" link wording is unclear to a newbie.
+- Good: inviter name on the invite page, explicit Join consent, tent size
+  prompt, EventCalendar with Gates/Burn/Temple/Exodus callouts, "answers save
+  as you go", clean "You're all set!" finish.
+
 ## What worked well
 - The three-field account creation is fast; no email-verification wall before applying.
 - Two-step flow (account → short application) is low-friction; playa name optional.
