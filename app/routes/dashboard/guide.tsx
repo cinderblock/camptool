@@ -11,6 +11,7 @@ import {
   Title,
 } from "@mantine/core";
 import { Link } from "react-router";
+import { JoinFlowchart } from "~/components/JoinFlowchart";
 import { weeksUntilEvent } from "~/lib/brc";
 import { requireActiveEdition } from "~/lib/session.server";
 import { loadWizardState } from "~/lib/wizard.server";
@@ -113,7 +114,14 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
 
         <div>
           <Title order={4} mb="sm">
-            The big picture
+            Joining {campName} — the big picture
+          </Title>
+          <JoinFlowchart year={year} />
+        </div>
+
+        <div>
+          <Title order={4} mb="sm">
+            The details
           </Title>
           <Stack gap="md">
             <PhaseCard
