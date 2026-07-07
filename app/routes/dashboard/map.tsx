@@ -562,10 +562,11 @@ type ObjRow = {
   // The camper who brought this (NULL = shared/communal camp item).
   ownerMembershipId: string | null;
   ownerName: string | null;
-  // Set when the owner has an unapproved move/resize/rotate (the live geometry
-  // is the proposed state; `prev` is what Reject restores). Only the owner can
-  // propose, so the proposer is always the owner.
-  pending: { prev: PendingPrev } | null;
+  // Set when there's an unapproved move/resize/rotate suggestion (the live
+  // geometry is the proposed state; `prev` is what Reject restores). `by` is the
+  // membership that proposed it — ANY camper may suggest an edit to ANY item, so
+  // the proposer isn't necessarily the owner.
+  pending: { prev: PendingPrev; by: string | null } | null;
 };
 
 type ZonePt = { x: number; y: number };
@@ -631,7 +632,8 @@ function parseZonePoints(json: string): ZonePt[] {
 function parsePending(
   pendingAt: Date | null,
   prevJson: string | null,
-): { prev: PendingPrev } | null {
+  pendingBy: string | null = null,
+): { prev: PendingPrev; by: string | null } | null {
   if (!pendingAt || !prevJson) return null;
   try {
     const p = JSON.parse(prevJson);
@@ -643,6 +645,7 @@ function parsePending(
         height: Number(p.height) || 0,
         rotation: Number(p.rotation) || 0,
       },
+      by: pendingBy,
     };
   } catch {
     return null;
@@ -670,6 +673,7 @@ const objSelect = {
   ownerName: user.name,
   pendingAt: mapObject.pendingAt,
   pendingPrev: mapObject.pendingPrev,
+  pendingBy: mapObject.pendingByMembershipId,
 } as const;
 
 type ObjSelectRow = {
@@ -692,6 +696,7 @@ type ObjSelectRow = {
   ownerName: string | null;
   pendingAt: Date | null;
   pendingPrev: string | null;
+  pendingBy: string | null;
 };
 
 /** Parse the stored config JSON into a clean Record<string, number> (bad → {}). */
@@ -730,7 +735,7 @@ function toObjRow(r: ObjSelectRow): ObjRow {
     groupId: r.groupId,
     ownerMembershipId: r.ownerMembershipId,
     ownerName: r.ownerName,
-    pending: parsePending(r.pendingAt, r.pendingPrev),
+    pending: parsePending(r.pendingAt, r.pendingPrev, r.pendingBy),
   };
 }
 
@@ -1699,17 +1704,10 @@ export async function action({ request }: Route.ActionArgs) {
         set.pendingAt = null;
         set.pendingPrev = null;
       } else {
-        // Members may only move/resize/rotate their OWN item; the change applies
-        // live but is flagged pending until an officer approves. Non-geometry
-        // fields are ignored for members.
-        if (obj.ownerMembershipId !== myMembershipId) {
-          return data(
-            { error: "You can only adjust your own items." },
-            {
-              status: 403,
-            },
-          );
-        }
+        // Any camper may suggest a move/resize/rotate to ANY item; the change
+        // applies live but is flagged pending until an officer approves.
+        // Non-geometry fields are ignored for members. The first suggestion since
+        // the last approval records who proposed it + the geometry to revert to.
         if (!obj.pendingAt) {
           set.pendingByMembershipId = myMembershipId;
           set.pendingAt = new Date();
@@ -1769,9 +1767,9 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     if (intent === "undoSuggestion") {
-      // A member discards their own pending suggestion(s), reverting the item(s)
-      // to the last approved geometry (pendingPrev). Not officer-only — but scoped
-      // to the caller's OWN pending items. Optional `id` targets a single item.
+      // A member discards suggestion(s) THEY proposed, reverting the item(s) to
+      // the last approved geometry (pendingPrev). Scoped to changes the caller
+      // made (pendingByMembershipId), on any item. Optional `id` targets one.
       const id = str("id");
       const rows = await db
         .select({ id: mapObject.id, pendingPrev: mapObject.pendingPrev })
@@ -1779,7 +1777,7 @@ export async function action({ request }: Route.ActionArgs) {
         .where(
           and(
             eq(mapObject.editionId, editionId),
-            eq(mapObject.ownerMembershipId, myMembershipId),
+            eq(mapObject.pendingByMembershipId, myMembershipId),
             isNotNull(mapObject.pendingAt),
             ...(id ? [eq(mapObject.id, id)] : []),
           ),
@@ -3530,10 +3528,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [canEdit, canManage, history.canUndo, history.canRedo]);
 
-  // How many of the viewer's own items have an un-approved pending suggestion
-  // (drives the member "Undo my change(s)" button).
+  // How many un-approved suggestions the viewer has proposed (on any item) —
+  // drives the member "Undo my change(s)" button.
   const myPendingCount = objects.filter(
-    (o) => o.ownerMembershipId === myMembershipId && o.pending,
+    (o) => o.pending?.by === myMembershipId,
   ).length;
 
   if (!lot) {
@@ -4328,17 +4326,16 @@ function Editor({
     setRotateArmedId(null);
   };
 
-  // Officers edit anything; a member may move/resize/rotate only their own
-  // items (those edits become pending approval, handled server-side).
-  const editable = (o: ObjRow) =>
-    canManage || (canEdit && o.ownerMembershipId === myMembershipId);
+  // Officers change the official map directly; any camper (member+) may
+  // move/rotate ANY item as a *suggestion* (applied live, flagged pending until
+  // an officer approves — handled server-side).
+  const editable = (o: ObjRow) => canManage || canEdit;
 
-  // Drag-resizing is narrower than editing. A person knows their own tent's
-  // size, so you shouldn't casually drag someone else's to a wrong dimension —
-  // even officers, who arrange the camp, shouldn't resize others' domiciles by
-  // eye. The corner handle is therefore limited to your own items and
-  // unowned/shared objects; an officer can still correct a size via the numeric
-  // width/height inputs in the properties panel.
+  // Drag-resizing is narrower than moving. A person knows their own tent's size,
+  // so you shouldn't casually drag someone else's to a wrong dimension — even
+  // officers shouldn't resize others' domiciles by eye. The corner handle is
+  // therefore limited to your own items and unowned/shared objects; an officer
+  // can still correct any size via the numeric width/height inputs in the panel.
   const resizable = (o: ObjRow) =>
     editable(o) &&
     (o.ownerMembershipId === null || o.ownerMembershipId === myMembershipId);
@@ -8168,13 +8165,11 @@ function SidePanel({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const selected = objects.find((o) => o.id === selectedId) ?? null;
-  // Officers edit anything (incl. name/kind/notes + delete). An owner-member may
-  // adjust their own item's geometry (those edits become pending). Anyone else
-  // sees read-only details.
+  // Officers edit anything (incl. name/kind/notes + delete). Any camper (member+)
+  // may adjust ANY item's geometry as a suggestion (those edits become pending);
+  // recruits/viewers see read-only details. Name/kind/notes stay officer-only.
   const isOfficer = canManage;
-  const isOwnerMember =
-    !canManage && canEdit && selected?.ownerMembershipId === myMembershipId;
-  const canGeom = isOfficer || isOwnerMember;
+  const canGeom = canManage || canEdit;
   const canMeta = isOfficer;
 
   function patch(id: string, fields: Partial<ObjRow>) {
@@ -8252,8 +8247,7 @@ function SidePanel({
               isOfficer ? (
                 <Paper bg="orange.0" p="xs" radius="sm">
                   <Text size="xs" fw={600} mb={2}>
-                    Pending change{" "}
-                    {selected.ownerName ? `by ${selected.ownerName}` : ""}
+                    Suggested change
                   </Text>
                   {describeChange(selected, selected.pending.prev).map((l) => (
                     <Text key={l} size="xs" c="dimmed">
@@ -8289,7 +8283,9 @@ function SidePanel({
                 </Paper>
               ) : (
                 <Text size="xs" c="orange.7">
-                  Your change is pending officer approval.
+                  {selected.pending.by === myMembershipId
+                    ? "Your suggested change is pending officer approval."
+                    : "A suggested change is pending officer approval."}
                 </Text>
               )
             ) : null}
