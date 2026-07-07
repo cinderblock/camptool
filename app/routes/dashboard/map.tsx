@@ -1614,6 +1614,30 @@ export async function action({ request }: Route.ActionArgs) {
           })
           .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
       }
+      // Zones in the same group (their polygon points, translated/rotated).
+      let rawZones: unknown;
+      try {
+        rawZones = JSON.parse(String(form.get("zones") ?? "[]"));
+      } catch {
+        rawZones = [];
+      }
+      if (Array.isArray(rawZones)) {
+        for (const it of rawZones.slice(0, 300)) {
+          const z = it as Record<string, unknown>;
+          const id = String(z.id ?? "");
+          if (!id) continue;
+          const pts = (Array.isArray(z.points) ? z.points : [])
+            .map((p) => ({
+              x: Number((p as ZonePt)?.x),
+              y: Number((p as ZonePt)?.y),
+            }))
+            .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+          await db
+            .update(mapZone)
+            .set({ points: JSON.stringify(pts), updatedAt: new Date() })
+            .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)));
+        }
+      }
       return data({ ok: true });
     }
 
@@ -3315,6 +3339,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [zones, setZones] = useState<ZoneRow[]>(loaderData.zones);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  // Zones in the multi-selection (parallel to `selectedIds` for objects) — a
+  // group move/rotate acts on objects + zones together.
+  const [selectedZoneIds, setSelectedZoneIds] = useState<string[]>([]);
   const [cables, setCables] = useState<CableRow[]>(loaderData.cables);
   const [selectedCableId, setSelectedCableId] = useState<string | null>(null);
   const [roads, setRoads] = useState<RoadRow[]>(loaderData.roads);
@@ -3412,6 +3439,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       setSelectedId(null);
       setSelectedIds([]);
       setSelectedZoneId(null);
+      setSelectedZoneIds([]);
       setSelectedCableId(null);
       setSelectedRoadId(null);
     }
@@ -3688,6 +3716,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setZones={setZones}
             selectedZoneId={selectedZoneId}
             setSelectedZoneId={setSelectedZoneId}
+            selectedZoneIds={selectedZoneIds}
+            setSelectedZoneIds={setSelectedZoneIds}
             cables={cables}
             setCables={setCables}
             selectedCableId={selectedCableId}
@@ -3834,10 +3864,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               fetcher={fetcher}
             />
           ) : null}
-          {selectedIds.length > 1 ? (
+          {selectedIds.length + selectedZoneIds.length > 1 ? (
             <Paper withBorder p="sm" radius="md" bg="blue.0">
               <Text size="sm" fw={600}>
-                {selectedIds.length} items selected
+                {selectedIds.length + selectedZoneIds.length} items selected
               </Text>
               <Text size="xs" c="dimmed">
                 Drag any one to move them together; use the round handle above
@@ -4119,6 +4149,8 @@ function Editor({
   setZones,
   selectedZoneId,
   setSelectedZoneId,
+  selectedZoneIds,
+  setSelectedZoneIds,
   cables,
   setCables,
   selectedCableId,
@@ -4156,6 +4188,8 @@ function Editor({
   setZones: React.Dispatch<React.SetStateAction<ZoneRow[]>>;
   selectedZoneId: string | null;
   setSelectedZoneId: (id: string | null) => void;
+  selectedZoneIds: string[];
+  setSelectedZoneIds: React.Dispatch<React.SetStateAction<string[]>>;
   cables: CableRow[];
   setCables: React.Dispatch<React.SetStateAction<CableRow[]>>;
   selectedCableId: string | null;
@@ -4309,6 +4343,8 @@ function Editor({
     cx: number;
     cy: number;
     items: { id: string; x: number; y: number; rotation: number }[];
+    // Zones in the group carry their original points (translated/rotated as one).
+    zoneItems: { id: string; points: ZonePt[] }[];
   } | null>(null);
   // Latest geometry of the group being dragged (committed on pointer-up).
   const liveGroup = useRef<
@@ -4322,6 +4358,9 @@ function Editor({
       }[]
     | null
   >(null);
+  const liveGroupZones = useRef<{ id: string; points: ZonePt[] }[] | null>(
+    null,
+  );
   // Marquee (rubber-band) selection: drag on empty canvas to box-select. The ref
   // holds the live rect (read on pointer-up, avoiding a stale-state closure); the
   // `marqueeRect` state is just for rendering the box.
@@ -4344,6 +4383,7 @@ function Editor({
   const selectOnly = (id: string | null) => {
     setSelectedId(id);
     setSelectedIds(id ? [id] : []);
+    setSelectedZoneIds([]);
     setRotateArmedId(null);
   };
 
@@ -4943,8 +4983,8 @@ function Editor({
     );
   }
 
-  // Persist a whole multi-select group in one request (so the single fetcher
-  // doesn't cancel rapid per-object submits).
+  // Persist a whole multi-select group (objects + zones) in one request (so the
+  // single fetcher doesn't cancel rapid per-item submits).
   function commitGroup(
     items: {
       id: string;
@@ -4954,6 +4994,7 @@ function Editor({
       height: number;
       rotation: number;
     }[],
+    zoneItems: { id: string; points: ZonePt[] }[] = [],
   ) {
     fetcher.submit(
       {
@@ -4966,6 +5007,12 @@ function Editor({
             width: round(o.width),
             height: round(o.height),
             rotation: Math.round(o.rotation),
+          })),
+        ),
+        zones: JSON.stringify(
+          zoneItems.map((z) => ({
+            id: z.id,
+            points: z.points.map((p) => ({ x: round(p.x), y: round(p.y) })),
           })),
         ),
       },
@@ -4984,6 +5031,29 @@ function Editor({
     const n = Math.max(1, items.length);
     return { x: sx / n, y: sy / n };
   }
+  // Centroid of a zone polygon (mean of its points).
+  function zoneCentroid(z: ZoneRow): ZonePt {
+    const n = Math.max(1, z.points.length);
+    const sx = z.points.reduce((s, p) => s + p.x, 0);
+    const sy = z.points.reduce((s, p) => s + p.y, 0);
+    return { x: sx / n, y: sy / n };
+  }
+  // Combined centroid over selected objects + zones (each thing weighted once).
+  function mixedCentroid(objs: ObjRow[], zns: ZoneRow[]): ZonePt {
+    let sx = 0;
+    let sy = 0;
+    for (const o of objs) {
+      sx += o.x + o.width / 2;
+      sy += o.y + o.height / 2;
+    }
+    for (const z of zns) {
+      const c = zoneCentroid(z);
+      sx += c.x;
+      sy += c.y;
+    }
+    const n = Math.max(1, objs.length + zns.length);
+    return { x: sx / n, y: sy / n };
+  }
 
   // Begin a group rotate (about the selection centroid) from the group handle.
   function startGroupRotate(e: React.PointerEvent) {
@@ -4991,8 +5061,9 @@ function Editor({
     e.preventDefault();
     if (!canManage) return;
     const items = objects.filter((x) => selectedIds.includes(x.id));
-    if (items.length < 2) return;
-    const c = groupCentroid(items);
+    const zns = zones.filter((z) => selectedZoneIds.includes(z.id));
+    if (items.length + zns.length < 2) return;
+    const c = mixedCentroid(items, zns);
     const p = svgPoint(e);
     groupDrag.current = {
       mode: "rotate",
@@ -5006,6 +5077,7 @@ function Editor({
         y: x.y,
         rotation: x.rotation,
       })),
+      zoneItems: zns.map((z) => ({ id: z.id, points: z.points })),
     };
     setDragging(true);
   }
@@ -5059,23 +5131,35 @@ function Editor({
       return;
     }
 
-    // The working selection: keep the current multi-selection if this object is in
-    // it; otherwise select this object — expanded to its whole linked block.
+    // The working selection: keep the current multi-selection (objects + zones)
+    // if this object is in it; otherwise select this object — expanded to its
+    // whole linked block — and drop any zone multi-selection.
     let workIds: string[];
-    if (selectedIds.length > 1 && selectedIds.includes(o.id)) {
+    let workZoneIds: string[];
+    if (
+      selectedIds.length + selectedZoneIds.length > 1 &&
+      selectedIds.includes(o.id)
+    ) {
       workIds = selectedIds;
+      workZoneIds = selectedZoneIds;
     } else {
       workIds = expandGroups([o.id]);
+      workZoneIds = [];
       setSelectedIds(workIds);
+      setSelectedZoneIds([]);
     }
     setSelectedId(o.id);
     if (!editable(o)) return;
     e.preventDefault();
     const p = svgPoint(e);
 
-    // A multi-object working set (an explicit selection or a linked block) moves
-    // together (officers only).
-    if (workIds.length > 1 && mode === "move" && canManage) {
+    // A multi-item working set (objects + zones) moves together (officers only).
+    const groupZones = zones.filter((z) => workZoneIds.includes(z.id));
+    if (
+      workIds.length + groupZones.length > 1 &&
+      mode === "move" &&
+      canManage
+    ) {
       const items = objects.filter((x) => workIds.includes(x.id));
       groupDrag.current = {
         mode: "move",
@@ -5089,6 +5173,7 @@ function Editor({
           y: x.y,
           rotation: x.rotation,
         })),
+        zoneItems: groupZones.map((z) => ({ id: z.id, points: z.points })),
       };
       setDragging(true);
       return;
@@ -5172,11 +5257,21 @@ function Editor({
         })
         .map((o) => o.id),
     );
+    // Zones whose centroid falls inside the box join the selection too.
+    const boxedZones = zones
+      .filter((z) => {
+        const c = zoneCentroid(z);
+        return c.x >= xLo && c.x <= xHi && c.y >= yLo && c.y <= yHi;
+      })
+      .map((z) => z.id);
     setSelectedIds((prev) => {
       const ids = m.additive ? Array.from(new Set([...prev, ...boxed])) : boxed;
       setSelectedId(ids[ids.length - 1] ?? null);
       return ids;
     });
+    setSelectedZoneIds((prev) =>
+      m.additive ? Array.from(new Set([...prev, ...boxedZones])) : boxedZones,
+    );
   }
 
   // ---- Zones & cables -----------------------------------------------------
@@ -5350,12 +5445,48 @@ function Editor({
     );
   }
   // Grab the zone body to move the whole polygon (first press also selects it).
+  // Shift toggles it in the multi-selection; if it's part of a multi-selection,
+  // the whole group (objects + zones) moves together.
   function startZoneMove(e: React.PointerEvent, zone: ZoneRow) {
     e.stopPropagation();
-    selectZone(zone.id);
+    if (e.shiftKey && canManage) {
+      e.preventDefault();
+      setRotateArmedId(null);
+      setSelectedZoneIds((prev) =>
+        prev.includes(zone.id)
+          ? prev.filter((id) => id !== zone.id)
+          : [...prev, zone.id],
+      );
+      setSelectedZoneId(zone.id);
+      return;
+    }
+    const inMulti =
+      selectedIds.length + selectedZoneIds.length > 1 &&
+      selectedZoneIds.includes(zone.id);
+    if (!inMulti) selectZone(zone.id);
     if (!canManage) return;
     e.preventDefault();
     const p = svgPoint(e);
+    if (inMulti) {
+      const items = objects.filter((x) => selectedIds.includes(x.id));
+      const zns = zones.filter((z) => selectedZoneIds.includes(z.id));
+      groupDrag.current = {
+        mode: "move",
+        startFx: fx(p.x),
+        startFy: fy(p.y),
+        cx: 0,
+        cy: 0,
+        items: items.map((x) => ({
+          id: x.id,
+          x: x.x,
+          y: x.y,
+          rotation: x.rotation,
+        })),
+        zoneItems: zns.map((z) => ({ id: z.id, points: z.points })),
+      };
+      setDragging(true);
+      return;
+    }
     zoneDrag.current = {
       zoneId: zone.id,
       index: "move",
@@ -5470,46 +5601,40 @@ function Editor({
       const p = svgPoint(e);
       const curx = fx(p.x);
       const cury = fy(p.y);
+      const isMove = g.mode === "move";
+      const dx = curx - g.startFx;
+      const dy = cury - g.startFy;
+      const a0 = Math.atan2(g.startFy - g.cy, g.startFx - g.cx);
+      const a1 = Math.atan2(cury - g.cy, curx - g.cx);
+      const rad = a1 - a0;
+      const deg = (rad * 180) / Math.PI;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      // Move = translate; rotate = pivot about the group centroid. Applied to
+      // object centers AND zone points alike.
+      const xform = (px: number, py: number): ZonePt => {
+        if (isMove) return { x: px + dx, y: py + dy };
+        const ox = px - g.cx;
+        const oy = py - g.cy;
+        return {
+          x: g.cx + ox * cos - oy * sin,
+          y: g.cy + ox * sin + oy * cos,
+        };
+      };
       const byId = new Map(objects.map((o) => [o.id, o]));
       const next: NonNullable<typeof liveGroup.current> = [];
-      if (g.mode === "move") {
-        const dx = curx - g.startFx;
-        const dy = cury - g.startFy;
-        for (const it of g.items) {
-          const o = byId.get(it.id);
-          if (!o) continue;
-          next.push({
-            id: it.id,
-            x: it.x + dx,
-            y: it.y + dy,
-            width: o.width,
-            height: o.height,
-            rotation: it.rotation,
-          });
-        }
-      } else {
-        const a0 = Math.atan2(g.startFy - g.cy, g.startFx - g.cx);
-        const a1 = Math.atan2(cury - g.cy, curx - g.cx);
-        const rad = a1 - a0;
-        const deg = (rad * 180) / Math.PI;
-        const cos = Math.cos(rad);
-        const sin = Math.sin(rad);
-        for (const it of g.items) {
-          const o = byId.get(it.id);
-          if (!o) continue;
-          const ox = it.x + o.width / 2 - g.cx;
-          const oy = it.y + o.height / 2 - g.cy;
-          const ncx = g.cx + ox * cos - oy * sin;
-          const ncy = g.cy + ox * sin + oy * cos;
-          next.push({
-            id: it.id,
-            x: ncx - o.width / 2,
-            y: ncy - o.height / 2,
-            width: o.width,
-            height: o.height,
-            rotation: it.rotation + deg,
-          });
-        }
+      for (const it of g.items) {
+        const o = byId.get(it.id);
+        if (!o) continue;
+        const c = xform(it.x + o.width / 2, it.y + o.height / 2);
+        next.push({
+          id: it.id,
+          x: c.x - o.width / 2,
+          y: c.y - o.height / 2,
+          width: o.width,
+          height: o.height,
+          rotation: isMove ? it.rotation : it.rotation + deg,
+        });
       }
       liveGroup.current = next;
       const m = new Map(next.map((n) => [n.id, n]));
@@ -5519,6 +5644,20 @@ function Editor({
           return n ? { ...o, x: n.x, y: n.y, rotation: n.rotation } : o;
         }),
       );
+      if (g.zoneItems.length > 0) {
+        const zNext = g.zoneItems.map((zi) => ({
+          id: zi.id,
+          points: zi.points.map((pt) => xform(pt.x, pt.y)),
+        }));
+        liveGroupZones.current = zNext;
+        const zm = new Map(zNext.map((z) => [z.id, z]));
+        setZones((prev) =>
+          prev.map((z) => {
+            const n = zm.get(z.id);
+            return n ? { ...z, points: n.points } : z;
+          }),
+        );
+      }
       return;
     }
     const d = drag.current;
@@ -5541,10 +5680,16 @@ function Editor({
     const g = groupDrag.current;
     if (g) {
       const items = liveGroup.current;
+      const zoneItems = liveGroupZones.current;
       groupDrag.current = null;
       liveGroup.current = null;
+      liveGroupZones.current = null;
       setDragging(false);
-      if (items && items.length > 0) commitGroup(items);
+      // liveGroup*/liveGroupZones are only set once the gesture actually moves, so
+      // a plain click on a group member commits nothing.
+      if ((items && items.length > 0) || (zoneItems && zoneItems.length > 0)) {
+        commitGroup(items ?? [], zoneItems ?? []);
+      }
       return;
     }
     const d = drag.current;
@@ -6342,7 +6487,14 @@ function Editor({
                 z.points.reduce((s, p) => s + p.x, 0) / z.points.length;
               const cyFt =
                 z.points.reduce((s, p) => s + p.y, 0) / z.points.length;
-              const sel = z.id === selectedZoneId;
+              const inMulti = selectedZoneIds.includes(z.id);
+              const sel = z.id === selectedZoneId || inMulti;
+              // Vertex/insert handles only when this zone is the SOLE selection
+              // (a multi-selection shows the group box instead).
+              const soleZone =
+                z.id === selectedZoneId &&
+                selectedIds.length === 0 &&
+                selectedZoneIds.length === 0;
               return (
                 <g key={z.id}>
                   <polygon
@@ -6372,7 +6524,7 @@ function Editor({
                   {/* Edit handles on the selected zone (officers): midpoint "+"
                   inserts a vertex, vertex handles drag to reshape, double-click
                   removes. Segments wrap around the polygon close. */}
-                  {sel && canManage && drawMode === null ? (
+                  {soleZone && canManage && drawMode === null ? (
                     <>
                       {z.points.map((p, i) => {
                         const q = z.points[(i + 1) % z.points.length];
@@ -6821,10 +6973,13 @@ function Editor({
             {/* Multi-select group box + a single rotate handle (rotates the whole
             selection about its centroid). Per-object handles are hidden while >1
             is selected (see soleSelected). */}
-            {selectedIds.length > 1
+            {selectedIds.length + selectedZoneIds.length > 1
               ? (() => {
                   const sel = objects.filter((o) => selectedIds.includes(o.id));
-                  if (sel.length < 2) return null;
+                  const selZns = zones.filter((z) =>
+                    selectedZoneIds.includes(z.id),
+                  );
+                  if (sel.length + selZns.length < 2) return null;
                   let xLo = Number.POSITIVE_INFINITY;
                   let xHi = Number.NEGATIVE_INFINITY;
                   let yLo = Number.POSITIVE_INFINITY;
@@ -6835,6 +6990,14 @@ function Editor({
                       o.x + o.width / 2,
                       o.y + o.height / 2,
                     )) {
+                      if (p.x < xLo) xLo = p.x;
+                      if (p.x > xHi) xHi = p.x;
+                      if (p.y < yLo) yLo = p.y;
+                      if (p.y > yHi) yHi = p.y;
+                    }
+                  }
+                  for (const z of selZns) {
+                    for (const p of z.points) {
                       if (p.x < xLo) xLo = p.x;
                       if (p.x > xHi) xHi = p.x;
                       if (p.y < yLo) yLo = p.y;
