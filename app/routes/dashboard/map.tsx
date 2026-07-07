@@ -1795,23 +1795,14 @@ export async function action({ request }: Route.ActionArgs) {
         set.pendingAt = null;
         set.pendingPrev = null;
       } else {
-        // Any camper may suggest a move/resize/rotate to ANY item; the change
-        // applies live but is flagged pending until an officer approves.
-        // Non-geometry fields are ignored for members. The first suggestion since
-        // the last approval records who proposed it + the geometry to revert to.
-        if (!obj.pendingAt) {
-          set.pendingByMembershipId = myMembershipId;
-          set.pendingAt = new Date();
-          set.pendingPrev = JSON.stringify({
-            x: obj.x,
-            y: obj.y,
-            width: obj.width,
-            height: obj.height,
-            rotation: obj.rotation,
-          });
-        } else {
-          set.pendingAt = new Date();
-        }
+        // Members don't edit the official geometry — they propose a personal
+        // suggestion via `suggestEdit` (see the ghost model). Guard defensively.
+        return data(
+          {
+            error: "Members suggest edits; they don't change the official map.",
+          },
+          { status: 403 },
+        );
       }
       await db.update(mapObject).set(set).where(eq(mapObject.id, id));
       const object = await loadObjRow(editionId, id);
@@ -3515,16 +3506,17 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // state so action results refresh them without a full reload.
   const [history, setHistory] = useState(loaderData.history);
   const [snapshots, setSnapshots] = useState(loaderData.snapshots);
+  // Per-camper edit suggestions (ghosts). Everyone sees them; officers resolve.
+  const [suggestions, setSuggestions] = useState(loaderData.suggestions);
   const doUndo = () => {
     if (history.canUndo) fetcher.submit({ intent: "undo" }, { method: "post" });
   };
   const doRedo = () => {
     if (history.canRedo) fetcher.submit({ intent: "redo" }, { method: "post" });
   };
-  // A member discards their own pending suggestion(s) — reverts their items to
-  // the last approved geometry. (Officers have no pending items of their own.)
+  // A member discards ALL of their own suggestions (ghosts).
   const doUndoSuggestion = () => {
-    fetcher.submit({ intent: "undoSuggestion" }, { method: "post" });
+    fetcher.submit({ intent: "deleteMySuggestion" }, { method: "post" });
   };
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -3619,10 +3611,13 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           };
           history?: typeof loaderData.history;
           snapshots?: typeof loaderData.snapshots;
+          suggestions?: typeof loaderData.suggestions;
         }
       | undefined;
     if (!d || d === lastSynced.current) return;
     lastSynced.current = d;
+    // Suggestion list refresh (may accompany an object update or arrive alone).
+    if (d.suggestions) setSuggestions(d.suggestions);
     // Undo/redo/snapshot-restore return the whole map — replace all state.
     if (d.map) {
       setObjects(d.map.objects);
@@ -3756,10 +3751,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [canEdit, canManage, history.canUndo, history.canRedo]);
 
-  // How many un-approved suggestions the viewer has proposed (on any item) —
-  // drives the member "Undo my change(s)" button.
-  const myPendingCount = objects.filter(
-    (o) => o.pending?.by === myMembershipId,
+  // How many suggestions the viewer has proposed — drives the member "Undo my
+  // suggestion(s)" button.
+  const myPendingCount = suggestions.filter(
+    (s) => s.membershipId === myMembershipId,
   ).length;
 
   if (!lot) {
@@ -3846,9 +3841,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               variant="default"
               size="xs"
               onClick={doUndoSuggestion}
-              title="Discard your pending change(s) (Ctrl+Z)"
+              title="Discard your suggestion(s) (Ctrl+Z)"
             >
-              Undo my {myPendingCount === 1 ? "change" : "changes"}
+              Undo my {myPendingCount === 1 ? "suggestion" : "suggestions"}
             </Button>
           ) : null}
           {isBurningMan(event) ? <BurningManDisclaimer mt={0} /> : null}
@@ -3912,6 +3907,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             setSelectedZoneId={setSelectedZoneId}
             selectedZoneIds={selectedZoneIds}
             setSelectedZoneIds={setSelectedZoneIds}
+            suggestions={suggestions}
             cables={cables}
             setCables={setCables}
             selectedCableId={selectedCableId}
@@ -4020,7 +4016,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             }}
           />
           {canManage ? (
-            <PendingPanel
+            <SuggestionsPanel
+              suggestions={suggestions}
               objects={objects}
               setSelectedId={setSelectedId}
               fetcher={fetcher}
@@ -4151,6 +4148,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             canManage={canManage}
             myMembershipId={myMembershipId}
             bannedKinds={bannedKinds}
+            suggestions={suggestions}
             lotOpen={lotOpen}
             fetcher={fetcher}
           />
@@ -4364,6 +4362,7 @@ function Editor({
   setSelectedZoneId,
   selectedZoneIds,
   setSelectedZoneIds,
+  suggestions,
   cables,
   setCables,
   selectedCableId,
@@ -4403,6 +4402,7 @@ function Editor({
   setSelectedZoneId: (id: string | null) => void;
   selectedZoneIds: string[];
   setSelectedZoneIds: React.Dispatch<React.SetStateAction<string[]>>;
+  suggestions: Suggestion[];
   cables: CableRow[];
   setCables: React.Dispatch<React.SetStateAction<CableRow[]>>;
   selectedCableId: string | null;
@@ -5976,8 +5976,33 @@ function Editor({
         round(o.width) !== round(s.width) ||
         round(o.height) !== round(s.height) ||
         Math.round(o.rotation) !== Math.round(s.rotation);
-      if (changed) commit(o);
+      if (changed) {
+        if (canManage) {
+          commit(o); // officer → official geometry
+        } else {
+          // Member → a personal SUGGESTION (ghost). The official item reverts to
+          // where it was; their ghost stays at the proposed spot.
+          suggestEdit(o);
+          setObjects((prev) => prev.map((x) => (x.id === s.id ? s : x)));
+        }
+      }
     }
+  }
+
+  // Upsert the viewer's own suggested geometry for an object (a ghost edit).
+  function suggestEdit(o: ObjRow) {
+    fetcher.submit(
+      {
+        intent: "suggestEdit",
+        objectId: o.id,
+        x: round(o.x),
+        y: round(o.y),
+        width: round(o.width),
+        height: round(o.height),
+        rotation: Math.round(o.rotation),
+      },
+      { method: "post" },
+    );
   }
 
   function addObjectAt(kind: string, fxFeet: number, fyFeet: number) {
@@ -6933,6 +6958,52 @@ function Editor({
                   onRotateDown={(e) => startDrag(e, o, "rotate")}
                 />
               ))}
+            {/* Suggested-edit "ghosts": each camper's proposed geometry for an
+            object, drawn as a translucent footprint at the proposed spot + the
+            suggester's first name. The official item stays where it is. */}
+            {suggestions.map((sg) => {
+              const o = objects.find((x) => x.id === sg.objectId);
+              if (!o) return null;
+              const cx = sg.x + sg.width / 2;
+              const cy = sg.y + sg.height / 2;
+              const pts = footprintOutline(
+                o.kind,
+                sg.width,
+                sg.height,
+                o.config,
+                o.mirrored,
+              )
+                .map(([lx, ly]) => {
+                  const v = rotateVec(lx, ly, sg.rotation);
+                  return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
+                })
+                .join(" ");
+              const who = sg.memberName?.split(" ")[0] ?? "?";
+              return (
+                <g key={sg.id} pointerEvents="none">
+                  <polygon
+                    points={pts}
+                    fill="#4263eb"
+                    fillOpacity={0.12}
+                    stroke="#4263eb"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                  />
+                  <text
+                    x={originX + cx * ppf}
+                    y={originY + cy * ppf}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={11}
+                    fontWeight={600}
+                    fill="#3b5bdb"
+                    style={{ userSelect: "none" }}
+                  >
+                    ✎ {who}
+                  </text>
+                </g>
+              );
+            })}
             {/* Flag any placed object whose kind is disallowed this year (banned
             after it was placed): a small amber "!" badge so an officer can resolve
             it, rather than silently deleting the object. */}
@@ -8794,6 +8865,7 @@ function SidePanel({
   canManage,
   myMembershipId,
   bannedKinds,
+  suggestions,
   lotOpen,
   fetcher,
 }: {
@@ -8806,16 +8878,17 @@ function SidePanel({
   myMembershipId: string;
   // Structure kinds disallowed this edition (filtered out of the Kind picker).
   bannedKinds: string[];
+  suggestions: Suggestion[];
   // Lot config visibility — toggled by the map toolbar gear (lifted to CampMap).
   lotOpen: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const selected = objects.find((o) => o.id === selectedId) ?? null;
-  // Officers edit anything (incl. name/kind/notes + delete). Any camper (member+)
-  // may adjust ANY item's geometry as a suggestion (those edits become pending);
-  // recruits/viewers see read-only details. Name/kind/notes stay officer-only.
+  // Officers edit the official geometry + name/kind/notes + delete. Members
+  // propose changes by DRAGGING the item (creates a personal suggestion), so the
+  // panel's numeric fields are read-only for them; recruits/viewers too.
   const isOfficer = canManage;
-  const canGeom = canManage || canEdit;
+  const canGeom = isOfficer;
   const canMeta = isOfficer;
 
   function patch(id: string, fields: Partial<ObjRow>) {
@@ -8889,52 +8962,115 @@ function SidePanel({
               ) : null}
             </Group>
 
-            {selected.pending ? (
-              isOfficer ? (
-                <Paper bg="orange.0" p="xs" radius="sm">
-                  <Text size="xs" fw={600} mb={2}>
-                    Suggested change
+            {(() => {
+              const objSugs = suggestions.filter(
+                (s) => s.objectId === selected.id,
+              );
+              if (objSugs.length === 0) {
+                return canEdit && !isOfficer ? (
+                  <Text size="xs" c="dimmed">
+                    Drag this item to suggest a change (officers approve).
                   </Text>
-                  {describeChange(selected, selected.pending.prev).map((l) => (
-                    <Text key={l} size="xs" c="dimmed">
-                      {l}
+                ) : null;
+              }
+              if (!isOfficer) {
+                const mine = objSugs.some(
+                  (s) => s.membershipId === myMembershipId,
+                );
+                return (
+                  <Text size="xs" c="blue.7">
+                    {objSugs.length} suggested edit
+                    {objSugs.length > 1 ? "s" : ""} on this item
+                    {mine ? " (including yours)" : ""}.
+                  </Text>
+                );
+              }
+              return (
+                <Paper bg="blue.0" p="xs" radius="sm">
+                  <Group justify="space-between" mb={4}>
+                    <Text size="xs" fw={600}>
+                      Suggested edits ({objSugs.length})
                     </Text>
-                  ))}
-                  <Group gap="xs" mt={6}>
-                    <Button
-                      size="compact-xs"
-                      color="green"
-                      onClick={() =>
-                        fetcher.submit(
-                          { intent: "approveChange", id: selected.id },
-                          { method: "post" },
-                        )
-                      }
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      size="compact-xs"
-                      variant="default"
-                      onClick={() =>
-                        fetcher.submit(
-                          { intent: "rejectChange", id: selected.id },
-                          { method: "post" },
-                        )
-                      }
-                    >
-                      Reject
-                    </Button>
+                    {objSugs.length > 1 ? (
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        color="red"
+                        onClick={() =>
+                          fetcher.submit(
+                            {
+                              intent: "clearSuggestions",
+                              objectId: selected.id,
+                            },
+                            { method: "post" },
+                          )
+                        }
+                      >
+                        Clear all
+                      </Button>
+                    ) : null}
                   </Group>
+                  <Stack gap={6}>
+                    {objSugs.map((s) => (
+                      <div key={s.id}>
+                        <Text size="xs" fw={500}>
+                          {s.memberName ?? "A camper"}
+                        </Text>
+                        {describeSuggestion(selected, s).map((l) => (
+                          <Text key={l} size="xs" c="dimmed">
+                            {l}
+                          </Text>
+                        ))}
+                        <Group gap={4} mt={2}>
+                          <Button
+                            size="compact-xs"
+                            color="green"
+                            onClick={() =>
+                              fetcher.submit(
+                                { intent: "approveSuggestion", id: s.id },
+                                { method: "post" },
+                              )
+                            }
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="compact-xs"
+                            color="green"
+                            variant="light"
+                            title="Apply this and clear the other suggestions"
+                            onClick={() =>
+                              fetcher.submit(
+                                {
+                                  intent: "approveSuggestion",
+                                  id: s.id,
+                                  clearOthers: "true",
+                                },
+                                { method: "post" },
+                              )
+                            }
+                          >
+                            Approve + clear rest
+                          </Button>
+                          <Button
+                            size="compact-xs"
+                            variant="default"
+                            onClick={() =>
+                              fetcher.submit(
+                                { intent: "rejectSuggestion", id: s.id },
+                                { method: "post" },
+                              )
+                            }
+                          >
+                            Reject
+                          </Button>
+                        </Group>
+                      </div>
+                    ))}
+                  </Stack>
                 </Paper>
-              ) : (
-                <Text size="xs" c="orange.7">
-                  {selected.pending.by === myMembershipId
-                    ? "Your suggested change is pending officer approval."
-                    : "A suggested change is pending officer approval."}
-                </Text>
-              )
-            ) : null}
+              );
+            })()}
 
             {kindDef(selected.kind).fixedName ? null : (
               <TextInput
@@ -9254,84 +9390,164 @@ function SidePanel({
 
 /** Officer queue of items with an unapproved member change — click to select,
  * or approve/reject inline. */
-function PendingPanel({
+/** One camper's suggestion described relative to the object's official geometry. */
+function describeSuggestion(o: ObjRow, s: Suggestion): string[] {
+  const suggested = {
+    ...o,
+    x: s.x,
+    y: s.y,
+    width: s.width,
+    height: s.height,
+    rotation: s.rotation,
+  };
+  const official = {
+    x: o.x,
+    y: o.y,
+    width: o.width,
+    height: o.height,
+    rotation: o.rotation,
+  };
+  return describeChange(suggested, official);
+}
+
+/** Officer review of per-camper suggested edits (ghosts), grouped by item. Each
+ * suggestion: Approve (keep others) / ✓✕ (approve + clear others) / Reject; plus
+ * a per-item "Clear all". */
+function SuggestionsPanel({
+  suggestions,
   objects,
   setSelectedId,
   fetcher,
 }: {
+  suggestions: Suggestion[];
   objects: ObjRow[];
   setSelectedId: (id: string | null) => void;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
-  const pending = objects.filter((o) => o.pending);
-  if (pending.length === 0) return null;
+  if (suggestions.length === 0) return null;
+  const byObject = new Map<string, Suggestion[]>();
+  for (const s of suggestions) {
+    const arr = byObject.get(s.objectId) ?? [];
+    arr.push(s);
+    byObject.set(s.objectId, arr);
+  }
+  const submit = (payload: Record<string, string>) =>
+    fetcher.submit(payload, { method: "post" });
   return (
-    <Paper withBorder p="sm" radius="md" bg="orange.0">
+    <Paper withBorder p="sm" radius="md" bg="blue.0">
       <Text size="xs" fw={600} mb={6}>
-        Pending approvals ({pending.length})
+        Suggested edits ({suggestions.length})
       </Text>
-      <Stack gap={6}>
-        {pending.map((o) => (
-          <div key={o.id}>
-            <Group gap={6} wrap="nowrap" justify="space-between">
-              <button
-                type="button"
-                onClick={() => setSelectedId(o.id)}
-                style={{
-                  flex: 1,
-                  textAlign: "left",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: 0,
-                }}
-              >
-                <Text size="xs" fw={500}>
-                  {kindDef(o.kind).label}
-                  {o.ownerName ? (
-                    <Text span c="dimmed">
-                      {" "}
-                      · {o.ownerName}
-                    </Text>
-                  ) : null}
-                </Text>
-              </button>
-              <Group gap={4} wrap="nowrap">
-                <Button
-                  size="compact-xs"
-                  color="green"
-                  onClick={() =>
-                    fetcher.submit(
-                      { intent: "approveChange", id: o.id },
-                      { method: "post" },
-                    )
-                  }
+      <Stack gap={10}>
+        {[...byObject.entries()].map(([objectId, sgs]) => {
+          const o = objects.find((x) => x.id === objectId);
+          if (!o) return null;
+          return (
+            <div key={objectId}>
+              <Group gap={6} justify="space-between" wrap="nowrap">
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(objectId)}
+                  style={{
+                    flex: 1,
+                    textAlign: "left",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
                 >
-                  ✓
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  onClick={() =>
-                    fetcher.submit(
-                      { intent: "rejectChange", id: o.id },
-                      { method: "post" },
-                    )
-                  }
-                >
-                  ✕
-                </Button>
-              </Group>
-            </Group>
-            {o.pending
-              ? describeChange(o, o.pending.prev).map((l) => (
-                  <Text key={l} size="xs" c="dimmed" ml={2}>
-                    {l}
+                  <Text size="xs" fw={600}>
+                    {o.name ?? kindDef(o.kind).label}
+                    {o.ownerName ? (
+                      <Text span c="dimmed">
+                        {" "}
+                        · {o.ownerName}
+                      </Text>
+                    ) : null}
                   </Text>
-                ))
-              : null}
-          </div>
-        ))}
+                </button>
+                {sgs.length > 1 ? (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="red"
+                    onClick={() =>
+                      submit({ intent: "clearSuggestions", objectId })
+                    }
+                  >
+                    Clear all
+                  </Button>
+                ) : null}
+              </Group>
+              <Stack gap={3} mt={3}>
+                {sgs.map((s) => {
+                  const lines = describeSuggestion(o, s);
+                  return (
+                    <Group
+                      key={s.id}
+                      gap={4}
+                      justify="space-between"
+                      wrap="nowrap"
+                    >
+                      <Text
+                        size="xs"
+                        c="dimmed"
+                        title={lines.join(" · ")}
+                        style={{
+                          flex: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {s.memberName?.split(" ")[0] ?? "?"}:{" "}
+                        {lines.join(", ") || "no change"}
+                      </Text>
+                      <Group gap={2} wrap="nowrap">
+                        <Button
+                          size="compact-xs"
+                          color="green"
+                          title="Approve (keep the others)"
+                          onClick={() =>
+                            submit({ intent: "approveSuggestion", id: s.id })
+                          }
+                        >
+                          ✓
+                        </Button>
+                        <Button
+                          size="compact-xs"
+                          color="green"
+                          variant="light"
+                          title="Approve & clear the others"
+                          onClick={() =>
+                            submit({
+                              intent: "approveSuggestion",
+                              id: s.id,
+                              clearOthers: "true",
+                            })
+                          }
+                        >
+                          ✓✕
+                        </Button>
+                        <Button
+                          size="compact-xs"
+                          variant="default"
+                          title="Reject this suggestion"
+                          onClick={() =>
+                            submit({ intent: "rejectSuggestion", id: s.id })
+                          }
+                        >
+                          ✕
+                        </Button>
+                      </Group>
+                    </Group>
+                  );
+                })}
+              </Stack>
+            </div>
+          );
+        })}
       </Stack>
     </Paper>
   );

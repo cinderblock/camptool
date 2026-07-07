@@ -71,4 +71,19 @@ How should multiple suggestions appear on the map?
 - P4 verify live (multi-camper).
 
 ## Progress log
-- (start) plan written; awaiting the display fork decision.
+- P1+P2 (5af6d16): `map_edit_suggestion` (migration 0048) + server CRUD + loader.
+- P3 (client): suggestions state + reconcile (`d.suggestions`); member drag →
+  `suggestEdit` (item reverts to official on drop, ghost stays); ghost layer
+  (footprint at proposed geometry + suggester name); `SuggestionsPanel` (rail,
+  grouped by item: Approve / ✓✕ approve+clear / Reject + per-item Clear all);
+  SidePanel per-item review incl. "Approve + clear rest" + "Clear all"; member
+  "Undo my suggestion(s)" → `deleteMySuggestion`; retired the old pending path
+  (updateObject member branch → 403; panel geometry officer-only).
+
+## Known follow-ups / gotchas
+- Undo/redo/snapshot-restore delete+reinsert map_object, which CASCADE-deletes
+  suggestions (FK). So an official undo wipes outstanding suggestions. Acceptable
+  for now (they'd be stale vs the new official geometry); revisit if annoying.
+- The old `map_object.pending*` columns + `approveChange`/`rejectChange`/
+  `undoSuggestion` intents are now dead — leave for now, drop later.
+- Member suggestions are drag-only (panel numeric fields officer-only).
