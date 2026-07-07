@@ -1541,6 +1541,27 @@ files). typecheck + build green; **not yet exercised in a browser** (next step).
    confirm zones still work and recruits stay read-only. Task plan:
    `C:\Users\camer\.claude\plans\curious-splashing-teapot.md`.
 
+## Recruit application: previous-camp questions (landed 2026-07-07)
+
+BM veterans applying to the camp now get asked where they camped before. On the
+public apply form (`/c/:slug`), checking "I've been to Burning Man before"
+reveals — alongside the playa-name field — two optional fields: **Previous
+camp** (short text) and **How was it — and why a new camp?** (textarea for what
+they liked/didn't and what they're looking for). Everyone on the apply form is
+by definition not-yet-a-member, so "been before + not camped with us" reduces to
+just the checkbox there. Implementation: `PlayaNameField` grew a
+`withPreviousCamp` prop (the wizard's profile-step usage doesn't pass it, so
+returning members are untouched); `recruit_application` gained `previous_camp` +
+`previous_camp_notes` (**migration 0051**); the officer review queue
+(`/recruits`) shows the info as a dimmed "Previously: …" line under the
+applicant's message. Gotcha: a parallel thread had an uncommitted `flag` schema
+exported from `db/schema/index.ts` — its export was temporarily removed while
+running `db:generate` so migration 0051 contains only the two ALTERs, then
+restored (the flag table stays pending for that thread's own generate).
+Possible follow-up: invite-link recruits never see `/c/:slug`, so they aren't
+asked — could add the same fields for role=recruit in the wizard, but that needs
+a storage home (membership columns) and wasn't part of the ask.
+
 ## Deployment — firefly + auto-deploy (landed)
 
 Goal: build + auto-deploy to the **firefly** host (`firefly.isozilla.com`),

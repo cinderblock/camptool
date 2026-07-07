@@ -280,6 +280,16 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
                         <Text size="sm" c={a.message ? undefined : "dimmed"}>
                           {a.message ?? "—"}
                         </Text>
+                        {a.previousCamp || a.previousCampNotes ? (
+                          <Text size="xs" c="dimmed" mt={4}>
+                            {a.previousCamp
+                              ? `Previously: ${a.previousCamp}`
+                              : "Previous camp"}
+                            {a.previousCampNotes
+                              ? ` — ${a.previousCampNotes}`
+                              : ""}
+                          </Text>
+                        ) : null}
                       </Table.Td>
                       <Table.Td>
                         <Badge

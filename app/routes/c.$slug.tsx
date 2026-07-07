@@ -112,8 +112,13 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   const form = await request.formData();
-  const playaName = String(form.get("playaName") ?? "").trim() || null;
-  const message = String(form.get("message") ?? "").trim() || null;
+  const field = (name: string) => String(form.get(name) ?? "").trim() || null;
+  const playaName = field("playaName");
+  // Only present when the applicant checked "I've been before" (the fields
+  // are revealed with the playa-name one).
+  const previousCamp = field("previousCamp");
+  const previousCampNotes = field("previousCampNotes");
+  const message = field("message");
 
   await db.insert(recruitApplication).values({
     id: crypto.randomUUID(),
@@ -121,6 +126,8 @@ export async function action({ request, params }: Route.ActionArgs) {
     name: session.user.name,
     email: session.user.email,
     playaName,
+    previousCamp,
+    previousCampNotes,
     message,
     status: "pending",
     userId: session.user.id,
@@ -208,7 +215,7 @@ function ApplySection({
             {result.error}
           </Alert>
         ) : null}
-        <PlayaNameField name="playaName" />
+        <PlayaNameField name="playaName" withPreviousCamp />
         <Textarea
           name="message"
           label="Why do you want to join?"

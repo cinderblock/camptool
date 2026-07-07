@@ -27,6 +27,11 @@ export const recruitApplication = sqliteTable("recruit_application", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   playaName: text("playa_name"),
+  // Event veterans applying from another camp: where they camped before and
+  // what they liked (or didn't) / why they're looking for a new camp. Only
+  // asked when the applicant says they've been to the event before.
+  previousCamp: text("previous_camp"),
+  previousCampNotes: text("previous_camp_notes"),
   message: text("message"),
   status: text("status").notNull().default("pending"),
   // Set if the applicant's email matches an existing account.
