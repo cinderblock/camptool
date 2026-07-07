@@ -29,9 +29,10 @@ import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { parseBannedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
 import type { QuestionType } from "~/lib/questions";
-import { parseOptions } from "~/lib/questions";
+import { isAnswered, parseOptions, surfacedInWizard } from "~/lib/questions";
 import {
   filterByAudience,
+  importApplicationAnswers,
   loadAnswers,
   loadCampQuestions,
   loadInviterName,
@@ -225,7 +226,17 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   if (keys.has("questionnaire") || keys.has("extras")) {
-    const rows = filterByAudience(await loadCampQuestions(campId), role);
+    // A just-accepted applicant's apply-form answers become their answers here
+    // (one-time; no-op for everyone else).
+    await importApplicationAnswers({
+      campId,
+      editionId,
+      membershipId: mid,
+      userId: authUser.id,
+    });
+    const rows = filterByAudience(await loadCampQuestions(campId), role).filter(
+      (q) => surfacedInWizard(q.surface),
+    );
     const mapped: (WizardQuestion & { placement: string })[] = rows.map(
       (q) => ({
         id: q.id,
@@ -329,6 +340,36 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "resolveAsk") {
     const askKey = String(form.get("askKey")) as AskKey;
     const status = form.get("status") === "skipped" ? "skipped" : "done";
+    // The questionnaire steps can't be resolved (done OR skipped) while a
+    // required in-scope question is unanswered — the guarantee that important
+    // questions get answered. Locked years are exempt: answers are read-only.
+    if (
+      (askKey === "questionnaire" || askKey === "extras") &&
+      !activeEdition.locked
+    ) {
+      const placement = askKey === "extras" ? "after" : "before";
+      const required = filterByAudience(
+        await loadCampQuestions(campId),
+        active.membership.role,
+      ).filter(
+        (q) =>
+          q.required &&
+          surfacedInWizard(q.surface) &&
+          (q.wizardPlacement === "after" ? "after" : "before") === placement,
+      );
+      if (required.length > 0) {
+        const answers = await loadAnswers({ editionId, membershipId: mid });
+        const missing = required.filter(
+          (q) => !isAnswered(q.type, answers[q.id]),
+        );
+        if (missing.length > 0) {
+          return data(
+            { error: "Please answer the required questions (marked *) first." },
+            { status: 400 },
+          );
+        }
+      }
+    }
     await resolveAsk({ campId, editionId, membershipId: mid, askKey, status });
     return data({ ok: true });
   }
@@ -508,6 +549,21 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
   const [active, setActive] = useState(firstPending < 0 ? 0 : firstPending);
   const last = steps.length - 1;
 
+  // A questionnaire step holds its Next/Skip until every required question on
+  // it is answered (answers save as you go, so this clears live). The action
+  // enforces the same rule server-side. Locked years exempt — read-only.
+  const stepQuestions = (key: string | undefined) =>
+    key === "questionnaire"
+      ? loaderData.questionsBefore
+      : key === "extras"
+        ? loaderData.questionsAfter
+        : [];
+  const blocked =
+    !locked &&
+    stepQuestions(steps[active]?.key).some(
+      (q) => q.required && !isAnswered(q.type, loaderData.answers[q.id]),
+    );
+
   function mark(key: string, status: "done" | "skipped") {
     fetcher.submit(
       { intent: "resolveAsk", askKey: key, status },
@@ -599,7 +655,12 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
         </Stepper.Completed>
       </Stepper>
 
-      <Group justify="space-between" mt="xl">
+      {blocked ? (
+        <Text size="sm" c="red" mt="md">
+          Answer the required questions (marked *) above to continue.
+        </Text>
+      ) : null}
+      <Group justify="space-between" mt={blocked ? "xs" : "xl"}>
         <Button
           variant="default"
           onClick={() => goTo(Math.max(0, active - 1))}
@@ -617,14 +678,17 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
               <Button
                 variant="subtle"
                 color="gray"
+                disabled={blocked}
                 onClick={() => next("skipped")}
               >
                 Skip this
               </Button>
               {active < last ? (
-                <Button onClick={() => next("done")}>Next</Button>
+                <Button disabled={blocked} onClick={() => next("done")}>
+                  Next
+                </Button>
               ) : (
-                <Button color="green" onClick={finish}>
+                <Button color="green" disabled={blocked} onClick={finish}>
                   Finish
                 </Button>
               )}

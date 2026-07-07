@@ -49,6 +49,18 @@ export type QuestionType =
  * "a few more questions" step that follows the gear selection. */
 export type QuestionPlacement = "before" | "after";
 
+/** How long an answer lives. `per_edition` = answered fresh each year (the
+ * default: rideshare, arrival, consent). `once` = a lifetime fact (previous
+ * camps, "how did you find us"): its answer is stored edition-less
+ * (question_answer.edition_id NULL) and pre-fills every later year. */
+export type QuestionScope = "per_edition" | "once";
+
+/** Where the question is asked: the onboarding wizard, the public application
+ * form (pre-membership), or both. Application answers are held as JSON on
+ * recruit_application until the applicant has a membership, then imported
+ * into question_answer (see importApplicationAnswers). */
+export type QuestionSurface = "wizard" | "application" | "both";
+
 export const campQuestion = sqliteTable(
   "camp_question",
   {
@@ -72,6 +84,10 @@ export const campQuestion = sqliteTable(
     // shows on (see QuestionPlacement). "what are you bringing"-type questions go
     // after; everything else stays in the early questionnaire.
     wizardPlacement: text("wizard_placement").notNull().default("before"),
+    // per_edition | once — see QuestionScope.
+    scope: text("scope").notNull().default("per_edition"),
+    // wizard | application | both — see QuestionSurface.
+    surface: text("surface").notNull().default("wizard"),
     required: integer("required", { mode: "boolean" }).notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     // Soft-retire: a question with archivedAt set is hidden from new answers but
@@ -94,6 +110,8 @@ export const questionAnswer = sqliteTable(
     campId: text("camp_id")
       .notNull()
       .references(() => camp.id, { onDelete: "cascade" }),
+    // NULL = the lifetime answer to a `once`-scoped question (not tied to any
+    // year); otherwise the year the answer belongs to.
     editionId: text("edition_id").references(() => campEdition.id, {
       onDelete: "cascade",
     }),
@@ -119,5 +137,11 @@ export const questionAnswer = sqliteTable(
       t.membershipId,
       t.questionId,
     ),
+    // NULLs are distinct in unique indexes, so once-scoped (edition-less)
+    // answers need their own partial uniqueness (upserts target it via
+    // targetWhere, like attendee_member).
+    uniqueIndex("question_answer_once_unique")
+      .on(t.membershipId, t.questionId)
+      .where(sql`edition_id IS NULL`),
   ],
 );

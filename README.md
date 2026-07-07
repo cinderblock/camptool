@@ -112,6 +112,9 @@ server into a container. Both are documented in
 
 ## Design notes
 
+- **How joining works** (apply page vs. invite links, the onboarding wizard,
+  and the question axes — audience/scope/surface/placement) is documented in
+  [`docs/camp-lifecycle.md`](docs/camp-lifecycle.md).
 - **Four layers (the app is not Burning-Man-specific):** (1) the **core app**
   framework — users, groups, the onboarding framework, post-event followups, the
   camp/edition/membership skeleton (this repo, event- and camp-agnostic); (2)

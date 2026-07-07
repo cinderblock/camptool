@@ -69,6 +69,7 @@ export function QuestionField({
   year,
   invitedByName,
   inviterOptions,
+  onSave,
 }: {
   question: QuestionFieldData;
   value: string | undefined;
@@ -83,9 +84,17 @@ export function QuestionField({
   invitedByName?: string | null;
   /** Active member names for the `invited_by` dropdown (so it isn't open-ended). */
   inviterOptions?: string[];
+  /** Collect the value locally instead of persisting via fetcher — for plain
+   * forms that submit everything at once (the public application form). */
+  onSave?: (value: string) => void;
 }) {
   const fetcher = useFetcher();
   const save = (v: string) => {
+    if (onSave) {
+      // Local form mode: nothing is persisted yet, so no "saved" announcement.
+      onSave(v);
+      return;
+    }
     fetcher.submit(
       { intent: "answer", questionId: q.id, value: v },
       action ? { method: "post", action } : { method: "post" },

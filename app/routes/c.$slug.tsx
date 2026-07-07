@@ -9,15 +9,19 @@ import {
   Textarea,
 } from "@mantine/core";
 import { eq } from "drizzle-orm";
+import { useState } from "react";
 import { data, useFetcher } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { CampHero } from "~/components/CampHero";
 import { PlayaNameField } from "~/components/PlayaNameField";
+import { QuestionField } from "~/components/QuestionField";
 import { discordEnabled } from "~/lib/auth.server";
 import {
   getInstanceSettings,
   setSignupUnlockCookie,
 } from "~/lib/instance.server";
+import { type QuestionType, isAnswered, parseOptions } from "~/lib/questions";
+import { loadApplicationQuestions } from "~/lib/questions.server";
 import { isMemberOf, pendingApplicationWhere } from "~/lib/recruits.server";
 import { getSession } from "~/lib/session.server";
 import { db } from "../../db/client.server";
@@ -42,6 +46,17 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     .limit(1);
   if (!found) throw data("Camp not found", { status: 404 });
 
+  // The camp's application-surfaced questions, rendered as part of the form.
+  const questions = (await loadApplicationQuestions(found.id)).map((q) => ({
+    id: q.id,
+    prompt: q.prompt,
+    helpText: q.helpText,
+    type: q.type as QuestionType,
+    options: parseOptions(q.options),
+    required: q.required,
+    exclusiveOption: q.exclusiveOption,
+  }));
+
   const session = await getSession(request);
   if (!session) {
     const payload = {
@@ -53,6 +68,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       alreadyMember: false,
       alreadyApplied: false,
       discordEnabled,
+      questions,
     };
     // The public apply page is a sanctioned signup entry point. Only when the
     // instance is in invite-only mode do we drop the signup-unlock cookie that
@@ -80,6 +96,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     alreadyMember: await isMemberOf(session.user.id, found.id),
     alreadyApplied: Boolean(pending),
     discordEnabled,
+    questions,
   };
 }
 
@@ -112,13 +129,37 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   const form = await request.formData();
-  const field = (name: string) => String(form.get(name) ?? "").trim() || null;
-  const playaName = field("playaName");
-  // Only present when the applicant checked "I've been before" (the fields
-  // are revealed with the playa-name one).
-  const previousCamp = field("previousCamp");
-  const previousCampNotes = field("previousCampNotes");
-  const message = field("message");
+  const playaName = String(form.get("playaName") ?? "").trim() || null;
+  const message = String(form.get("message") ?? "").trim() || null;
+
+  // Application-surfaced questionnaire answers, JSON {questionId: value}.
+  // Only known question ids are kept; required ones must actually be answered.
+  // Held on the application (no membership exists yet) and imported into
+  // question_answer once they have one.
+  const appQuestions = await loadApplicationQuestions(found.id);
+  let raw: Record<string, unknown> = {};
+  try {
+    const v = JSON.parse(String(form.get("answers") ?? "{}"));
+    if (v && typeof v === "object" && !Array.isArray(v)) raw = v;
+  } catch {
+    // Malformed answers JSON is treated as empty — required checks below catch it.
+  }
+  const answers: Record<string, string> = {};
+  for (const q of appQuestions) {
+    const v = raw[q.id];
+    if (typeof v === "string" && v !== "") answers[q.id] = v;
+  }
+  const missing = appQuestions.filter(
+    (q) => q.required && !isAnswered(q.type, answers[q.id]),
+  );
+  if (missing.length > 0) {
+    return data(
+      {
+        error: `Please answer: ${missing.map((q) => `“${q.prompt}”`).join(", ")}`,
+      },
+      { status: 400 },
+    );
+  }
 
   await db.insert(recruitApplication).values({
     id: crypto.randomUUID(),
@@ -126,8 +167,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     name: session.user.name,
     email: session.user.email,
     playaName,
-    previousCamp,
-    previousCampNotes,
+    answers: Object.keys(answers).length > 0 ? JSON.stringify(answers) : null,
     message,
     status: "pending",
     userId: session.user.id,
@@ -171,15 +211,20 @@ function ApplySection({
   viewer,
   alreadyMember,
   alreadyApplied,
+  questions,
 }: {
   campName: string;
   viewer: { name: string; email: string };
   alreadyMember: boolean;
   alreadyApplied: boolean;
+  questions: Route.ComponentProps["loaderData"]["questions"];
 }) {
   const fetcher = useFetcher<FetcherData>();
   const result = fetcher.data;
   const submitting = fetcher.state !== "idle";
+  // Question answers collected locally (QuestionField's onSave mode) and
+  // submitted with the rest of the form as one JSON field.
+  const [answers, setAnswers] = useState<Record<string, string>>({});
 
   if (alreadyMember) {
     return (
@@ -215,7 +260,17 @@ function ApplySection({
             {result.error}
           </Alert>
         ) : null}
-        <PlayaNameField name="playaName" withPreviousCamp />
+        <PlayaNameField name="playaName" />
+        {questions.map((q) => (
+          <QuestionField
+            key={q.id}
+            question={q}
+            value={answers[q.id]}
+            locked={false}
+            onSave={(v) => setAnswers((a) => ({ ...a, [q.id]: v }))}
+          />
+        ))}
+        <input type="hidden" name="answers" value={JSON.stringify(answers)} />
         <Textarea
           name="message"
           label="Why do you want to join?"

@@ -19,10 +19,16 @@ import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { parseMultiValue } from "~/lib/questions";
 import { isMemberOf } from "~/lib/recruits.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { camp, recruitApplication, user } from "../../../db/schema";
+import {
+  camp,
+  campQuestion,
+  recruitApplication,
+  user,
+} from "../../../db/schema";
 import type { Route } from "./+types/recruits";
 
 export function meta(_: Route.MetaArgs) {
@@ -65,8 +71,52 @@ export async function loader({ request }: Route.LoaderArgs) {
     .where(eq(camp.id, campId))
     .limit(1);
 
+  // All camp questions (archived included) so old applications' answers still
+  // resolve to their prompt.
+  const questionRows = await db
+    .select({
+      id: campQuestion.id,
+      prompt: campQuestion.prompt,
+      type: campQuestion.type,
+    })
+    .from(campQuestion)
+    .where(eq(campQuestion.campId, campId));
+  const qById = new Map(questionRows.map((q) => [q.id, q]));
+
+  const displayValue = (type: string, value: string): string => {
+    if (type === "boolean" || type === "consent")
+      return value === "true" ? "Yes" : "No";
+    if (type === "multi_select") return parseMultiValue(value).join(", ");
+    return value;
+  };
+  const answerList = (
+    raw: string | null,
+  ): { prompt: string; display: string }[] => {
+    if (!raw) return [];
+    try {
+      const v = JSON.parse(raw);
+      if (!v || typeof v !== "object") return [];
+      const out: { prompt: string; display: string }[] = [];
+      for (const [qid, value] of Object.entries(v)) {
+        if (typeof value !== "string" || !value) continue;
+        const q = qById.get(qid);
+        out.push({
+          prompt: q?.prompt ?? "(deleted question)",
+          display: q ? displayValue(q.type, value) : value,
+        });
+      }
+      return out;
+    } catch {
+      return [];
+    }
+  };
+
   const applications = apps
-    .map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))
+    .map((a) => ({
+      ...a,
+      createdAt: a.createdAt.toISOString(),
+      answerList: answerList(a.answers),
+    }))
     .sort(
       (a, b) =>
         (STATUS_RANK[a.status] ?? 9) - (STATUS_RANK[b.status] ?? 9) ||
@@ -280,7 +330,13 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
                         <Text size="sm" c={a.message ? undefined : "dimmed"}>
                           {a.message ?? "—"}
                         </Text>
+                        {a.answerList.map((ans) => (
+                          <Text size="xs" c="dimmed" mt={4} key={ans.prompt}>
+                            {ans.prompt} — {ans.display}
+                          </Text>
+                        ))}
                         {a.previousCamp || a.previousCampNotes ? (
+                          // Legacy pre-question-bank fields on old applications.
                           <Text size="xs" c="dimmed" mt={4}>
                             {a.previousCamp
                               ? `Previously: ${a.previousCamp}`

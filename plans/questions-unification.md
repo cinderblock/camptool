@@ -110,22 +110,91 @@ Officer review view: the recruits queue keeps showing application answers; a
 member/recruit detail view should show their question-bank answers in one place
 (check what `/questions` admin + members detail already show before building).
 
+## Decisions (locked)
+
+- **User (2026-07-07): go with the structural fix.** Also asked to document
+  the joining flows → extended `docs/camp-lifecycle.md` (it already had the
+  join flowchart) with "The question axes" + the two-doors section; linked
+  from README's Design notes.
+- **Answers import silently** (open question 2): a cold applicant's
+  application answers become their question answers lazily on first
+  wizard/`/questions` load (`importApplicationAnswers` — works for both accept
+  paths, incl. better-auth invitation where no membership exists at accept
+  time). The wizard shows `once` questions pre-filled, which doubles as
+  confirmation — no separate re-confirm step.
+- **`once` questions stay visible in the wizard, pre-filled** — NOT hidden
+  once answered (the assessment originally said hide-while-unanswered; that
+  would make a question vanish mid-session right after you blur the field).
+  Not-re-asked = pre-filled + never blocks, not invisible.
+
+## Implementation notes (landed 2026-07-07)
+
+- Schema (**migration 0056_whole_spyke**): `camp_question.scope`
+  ('per_edition' default | 'once') + `.surface` ('wizard' default |
+  'application' | 'both'); `recruit_application.answers` (JSON
+  {questionId: value}) + `.answersImportedAt`; partial unique index
+  `question_answer_once_unique (membership_id, question_id) WHERE edition_id
+  IS NULL`. Upsert uses `targetWhere` (same pattern as `attendee_member`).
+  Migration also SEEDS the two previous-camp questions (short_text +
+  long_text, audience recruit, scope once, surface both) for every existing
+  camp; new camps' officers author their own (documented).
+- The 2026-07-07 hardcoded apply-form fields (`previous_camp`,
+  `previous_camp_notes`) are now LEGACY: columns kept + still displayed on
+  `/recruits` for old applications, no longer written. `PlayaNameField`
+  reverted to playa-name-only.
+- Apply form renders application-surfaced questions via `QuestionField`'s new
+  `onSave` prop (local-state mode, one hidden JSON field); server validates
+  required + unknown ids. Wizard filters `surface !== 'application'`;
+  `/questions` member view likewise (officers still manage all).
+- Required enforcement: wizard questionnaire/extras steps disable Next/Skip
+  until required in-scope questions pass `isAnswered` (type-aware: consent
+  must be "true", multi_select non-empty, event_range half-filled ok);
+  `resolveAsk` re-checks server-side (400). Locked years exempt.
+- **Migration verified** by script on a fresh DB through the full 0000→0056
+  chain: columns/index created, seeds land per camp after existing questions,
+  partial index rejects duplicate lifetime answers while allowing an
+  edition row alongside. (Script was a one-off; not kept.)
+
+## Gotchas
+
+- Shared-tree migration races: while building this, a peer session generated
+  and pushed migrations 0054/0055 (roster/tickets) and left a dangling
+  journal entry 0057 with no SQL file. My commit stages a journal ending at
+  0056 (crafted via `git hash-object`/`update-index`, working tree untouched)
+  so the dangling entry never reaches production, where the app migrates on
+  boot and a missing file = crash. If you see 0057 reappear with a real file,
+  that's the peer finishing — fine.
+- Drizzle-kit generate reads `db/schema/index.ts`; the untracked `flag`
+  schema was unexported at generate time (peer had already withdrawn it), so
+  0056 contains only this feature's changes.
+
 ## Open questions for the user
 
-1. Go with the structural direction above, or just do the zero-code data fix
-   for now and defer? (Recommendation: do the data fix immediately either way;
-   build scope/surface/required-enforcement as the next wizard slice.)
-2. When a cold applicant is accepted, should application answers silently
-   become their question answers (recommended), or should the wizard re-show
-   them pre-filled for confirmation?
+1. ~~Direction~~ — structural fix chosen, landed.
+2. ~~Silent import vs re-confirm~~ — silent import + pre-filled wizard.
 3. Is "previous BM experience" a `once` question forever, or should returning
    members ever be re-asked (e.g. if they joined pre-CampTool)? (`once` +
-   unanswered-until-answered handles the pre-CampTool case automatically.)
+   unanswered-until-answered handles the pre-CampTool case automatically —
+   current behavior; revisit only if it bothers anyone.)
+4. Future: should the "Finish setup" pending badge also re-surface when an
+   officer adds a NEW required question after someone already resolved the
+   questionnaire ask? (Today a resolved ask stays resolved; the new question
+   is answerable on /questions but nothing nags.) Small follow-up if wanted.
 
 ## Progress log
 
 - [x] 2026-07-07 — inventory + assessment written (this doc). No code changes.
-- [ ] Decide direction (user).
-- [ ] If structural: schema slice (scope + surface + answers JSON on
-      recruit_application), required enforcement, seed/migrate previous-camp
-      questions, backfill existing application answers.
+- [x] 2026-07-07 — user chose the structural fix (+ document joining flows).
+- [x] 2026-07-07 — schema + migration 0056 (scope/surface/answers/partial
+      index + seeded previous-camp questions), verified on a fresh DB.
+- [x] 2026-07-07 — apply form → dynamic application questions; answers held
+      on the application and imported on membership; hardcoded previous-camp
+      fields retired (legacy display kept).
+- [x] 2026-07-07 — wizard + /questions surface filtering; required-question
+      enforcement (client + server); officer admin gets Scope/Surface selects.
+- [x] 2026-07-07 — docs: camp-lifecycle.md question-axes + two-doors
+      sections; README link. typecheck green (only pre-existing peer-thread
+      error in members.tsx, not this work); biome green on changed files.
+- [ ] Browser-test the golden path (apply with answers → review shows them →
+      accept → wizard shows imported answers; invited recruit gets asked the
+      seeded questions; required question blocks Next).

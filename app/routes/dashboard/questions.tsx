@@ -42,15 +42,21 @@ import { hasAtLeast } from "~/lib/permissions";
 import {
   QUESTION_AUDIENCES,
   QUESTION_PLACEMENTS,
+  QUESTION_SCOPES,
+  QUESTION_SURFACES,
   QUESTION_TYPES,
   type QuestionAudience,
   type QuestionPlacement,
+  type QuestionScope,
+  type QuestionSurface,
   type QuestionType,
   isSelectType,
   parseOptions,
+  surfacedInWizard,
 } from "~/lib/questions";
 import {
   filterByAudience,
+  importApplicationAnswers,
   loadAnswers,
   loadCampQuestions,
   loadInviterName,
@@ -68,10 +74,18 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { user, active, activeEdition } = await requireActiveEdition(request);
   const campId = active.camp.id;
   const role = active.membership.role;
   const canManage = hasAtLeast(role, "officer");
+
+  // A just-accepted applicant's apply-form answers become their answers here.
+  await importApplicationAnswers({
+    campId,
+    editionId: activeEdition.id,
+    membershipId: active.membership.id,
+    userId: user.id,
+  });
 
   const rows = await loadCampQuestions(campId);
   const answers = await loadAnswers({
@@ -89,6 +103,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     options: parseOptions(q.options),
     audience: q.audience as QuestionAudience,
     placement: q.wizardPlacement as QuestionPlacement,
+    scope: q.scope as QuestionScope,
+    surface: q.surface as QuestionSurface,
     required: q.required,
     exclusiveOption: q.exclusiveOption,
   }));
@@ -123,7 +139,7 @@ export async function action({ request }: Route.ActionArgs) {
     const questionId = String(form.get("questionId"));
     // Confirm the question belongs to this camp before storing an answer.
     const [q] = await db
-      .select({ id: campQuestion.id })
+      .select({ id: campQuestion.id, scope: campQuestion.scope })
       .from(campQuestion)
       .where(
         and(eq(campQuestion.id, questionId), eq(campQuestion.campId, campId)),
@@ -138,6 +154,7 @@ export async function action({ request }: Route.ActionArgs) {
       editionId: activeEdition.id,
       membershipId,
       questionId,
+      scope: q.scope,
       value,
     });
     return data({ ok: true });
@@ -225,6 +242,12 @@ export async function action({ request }: Route.ActionArgs) {
       case "placement":
         set.wizardPlacement = val === "after" ? "after" : "before";
         break;
+      case "scope":
+        set.scope = val === "once" ? "once" : "per_edition";
+        break;
+      case "surface":
+        set.surface = val === "application" || val === "both" ? val : "wizard";
+        break;
       case "required":
         set.required = val === "true";
         break;
@@ -298,9 +321,12 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
     invitedByName,
     inviterOptions,
   } = loaderData;
-  // Members only see the questions relevant to them; officers manage all of them.
+  // Members only see the questions relevant to them (application-only ones are
+  // the apply form's, not theirs); officers manage all of them.
   const mine = questions.filter(
-    (q) => q.audience === "all" || q.audience === audience,
+    (q) =>
+      (q.audience === "all" || q.audience === audience) &&
+      surfacedInWizard(q.surface),
   );
 
   return (
@@ -725,6 +751,26 @@ const SortableQuestion = memo(function SortableQuestion({
               allowDeselect={false}
               comboboxProps={{ withinPortal: true }}
               w={170}
+            />
+            <Select
+              size="xs"
+              aria-label="How often it's asked"
+              data={QUESTION_SCOPES}
+              value={q.scope}
+              onChange={(v) => v && v !== q.scope && save("scope", v)}
+              allowDeselect={false}
+              comboboxProps={{ withinPortal: true }}
+              w={120}
+            />
+            <Select
+              size="xs"
+              aria-label="Where it's asked"
+              data={QUESTION_SURFACES}
+              value={q.surface}
+              onChange={(v) => v && v !== q.surface && save("surface", v)}
+              allowDeselect={false}
+              comboboxProps={{ withinPortal: true }}
+              w={180}
             />
             <Checkbox
               size="xs"

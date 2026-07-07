@@ -1562,6 +1562,20 @@ Possible follow-up: invite-link recruits never see `/c/:slug`, so they aren't
 asked — could add the same fields for role=recruit in the wizard, but that needs
 a storage home (membership columns) and wasn't part of the ask.
 
+## Questions unification: scope + surface + required enforcement (landed 2026-07-07)
+
+The question bank is now the single question system — see
+`plans/questions-unification.md` (decisions, implementation notes, gotchas) and
+`docs/camp-lifecycle.md` ("The question axes") for the model. In short:
+questions carry audience + **scope** (per-year vs once-ever, once-answers
+stored edition-less) + **surface** (wizard / apply form / both) + placement;
+the apply form renders application-surfaced questions and their answers import
+into `question_answer` when the applicant gets a membership; required questions
+block the wizard's Next/Skip (server-enforced too). Migration **0056** adds the
+columns + partial unique index and seeds the two previous-camp questions
+(audience recruit, once, both) per camp — this supersedes the 2026-07-07
+hardcoded apply-form fields, which are legacy display-only now.
+
 ## Deployment — firefly + auto-deploy (landed)
 
 Goal: build + auto-deploy to the **firefly** host (`firefly.isozilla.com`),

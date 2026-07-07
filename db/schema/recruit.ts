@@ -27,11 +27,16 @@ export const recruitApplication = sqliteTable("recruit_application", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   playaName: text("playa_name"),
-  // Event veterans applying from another camp: where they camped before and
-  // what they liked (or didn't) / why they're looking for a new camp. Only
-  // asked when the applicant says they've been to the event before.
+  // LEGACY (pre question-bank): superseded by seeded application-surfaced
+  // camp questions (migration 0052). Kept so old applications still display;
+  // no longer written.
   previousCamp: text("previous_camp"),
   previousCampNotes: text("previous_camp_notes"),
+  // Application-surfaced questionnaire answers, JSON {questionId: value} —
+  // held here because the applicant has no membership yet. Imported into
+  // question_answer (and stamped answersImportedAt) once they do.
+  answers: text("answers"),
+  answersImportedAt: integer("answers_imported_at", { mode: "timestamp_ms" }),
   message: text("message"),
   status: text("status").notNull().default("pending"),
   // Set if the applicant's email matches an existing account.
