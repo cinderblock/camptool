@@ -5,6 +5,7 @@ export * from "./camp";
 export * from "./discord";
 export * from "./document";
 export * from "./finance";
+export * from "./flag";
 export * from "./instance";
 export * from "./inventory";
 export * from "./map";

@@ -10,6 +10,7 @@ import {
   Table,
   Text,
   TextInput,
+  Textarea,
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -27,7 +28,7 @@ import {
 } from "~/lib/permissions";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { membership, user } from "../../../db/schema";
+import { memberFlag, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/members";
 
 export function meta(_: Route.MetaArgs) {
@@ -74,7 +75,36 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
 
   const canManage = hasAtLeast(actorRole, "officer");
+  // Recruits can't flag; members and up can quietly raise a concern.
+  const canFlag = hasAtLeast(actorRole, "member");
   const assignableRoles = ROLES.filter((r) => rankOf(r) <= rankOf(actorRole));
+
+  // Open flags. Names resolve via the roster already loaded above; a null
+  // reporter means they've since left the camp.
+  const myMid = active.membership.id;
+  const nameOf = new Map(rows.map((r) => [r.memberId, r.name]));
+  const flagRows = await db
+    .select()
+    .from(memberFlag)
+    .where(and(eq(memberFlag.campId, campId), eq(memberFlag.status, "open")));
+  const toView = (f: (typeof flagRows)[number]) => ({
+    id: f.id,
+    subjectMembershipId: f.subjectMembershipId,
+    subjectName: nameOf.get(f.subjectMembershipId) ?? "Former member",
+    reporterName: f.reporterMembershipId
+      ? (nameOf.get(f.reporterMembershipId) ?? "Former member")
+      : "Former member",
+    body: f.body,
+    createdAt: f.createdAt.toISOString().slice(0, 10),
+  });
+  // Officers see every open flag EXCEPT ones about themselves — a flagged
+  // officer must not see (or resolve) the concern raised about them.
+  const officerFlags = canManage
+    ? flagRows.filter((f) => f.subjectMembershipId !== myMid).map(toView)
+    : [];
+  const myFlags = canFlag
+    ? flagRows.filter((f) => f.reporterMembershipId === myMid).map(toView)
+    : [];
 
   return {
     campId,
@@ -82,8 +112,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     actorUserId: actor.id,
     actorRole,
     canManage,
+    canFlag,
     assignableRoles,
     members,
+    officerFlags,
+    myFlags,
   };
 }
 
@@ -91,7 +124,58 @@ export async function action({ request }: Route.ActionArgs) {
   const { user: actor, active } = await requireActiveCamp(request);
   const campId = active.camp.id;
   const actorRole = active.membership.role;
+  const myMid = active.membership.id;
 
+  const form = await request.formData();
+  const intent = form.get("intent");
+
+  // --- Flagging (member+; everything below the officer wall) ---------------
+  if (intent === "flagMember") {
+    if (!hasAtLeast(actorRole, "member")) {
+      return data({ error: "Members only." }, { status: 403 });
+    }
+    const memberId = String(form.get("memberId"));
+    const body = String(form.get("body") ?? "")
+      .trim()
+      .slice(0, 2000);
+    if (!body) {
+      return data({ error: "Describe the issue." }, { status: 400 });
+    }
+    const [subject] = await db
+      .select({ id: membership.id, userId: membership.userId })
+      .from(membership)
+      .where(
+        and(eq(membership.id, memberId), eq(membership.organizationId, campId)),
+      );
+    if (!subject) return data({ error: "Member not found." }, { status: 404 });
+    if (subject.id === myMid) {
+      return data({ error: "You can't flag yourself." }, { status: 400 });
+    }
+    await db.insert(memberFlag).values({
+      id: crypto.randomUUID(),
+      campId,
+      subjectMembershipId: subject.id,
+      reporterMembershipId: myMid,
+      body,
+    });
+    return data({ ok: "Flag sent — officers will handle it privately." });
+  }
+
+  if (intent === "withdrawFlag") {
+    await db
+      .delete(memberFlag)
+      .where(
+        and(
+          eq(memberFlag.id, String(form.get("id"))),
+          eq(memberFlag.campId, campId),
+          eq(memberFlag.reporterMembershipId, myMid),
+          eq(memberFlag.status, "open"),
+        ),
+      );
+    return data({ ok: "Flag withdrawn." });
+  }
+
+  // --- Officer-only ---------------------------------------------------------
   if (!hasAtLeast(actorRole, "officer")) {
     return data(
       { error: "You don't have permission to manage members." },
@@ -101,8 +185,28 @@ export async function action({ request }: Route.ActionArgs) {
     );
   }
 
-  const form = await request.formData();
-  const intent = form.get("intent");
+  if (intent === "resolveFlag") {
+    const id = String(form.get("id"));
+    const [flag] = await db
+      .select()
+      .from(memberFlag)
+      .where(and(eq(memberFlag.id, id), eq(memberFlag.campId, campId)));
+    if (!flag) return data({ error: "Flag not found." }, { status: 404 });
+    // A flagged officer never sees the flag about them; they can't resolve
+    // it either.
+    if (flag.subjectMembershipId === myMid) {
+      return data({ error: "Flag not found." }, { status: 404 });
+    }
+    await db
+      .update(memberFlag)
+      .set({
+        status: "resolved",
+        resolvedByMembershipId: myMid,
+        resolvedAt: new Date(),
+      })
+      .where(eq(memberFlag.id, id));
+    return data({ ok: "Flag resolved." });
+  }
 
   if (intent === "updateRole") {
     const memberId = String(form.get("memberId"));
@@ -220,19 +324,28 @@ export default function Members({ loaderData }: Route.ComponentProps) {
   const {
     members,
     canManage,
+    canFlag,
     assignableRoles,
     actorUserId,
     actorRole,
     campId,
+    officerFlags,
+    myFlags,
   } = loaderData;
   const roleFetcher = useFetcher<FetcherData>();
   const addFetcher = useFetcher<FetcherData>();
   const removeFetcher = useFetcher<FetcherData>();
+  const flagFetcher = useFetcher<FetcherData>();
   const addFormRef = useRef<HTMLFormElement>(null);
   const [removeTarget, setRemoveTarget] = useState<{
     memberId: string;
     name: string;
   } | null>(null);
+  const [flagTarget, setFlagTarget] = useState<{
+    memberId: string;
+    name: string;
+  } | null>(null);
+  const [flagBody, setFlagBody] = useState("");
 
   useFetcherNotifications(roleFetcher.data, roleFetcher.state);
   useFetcherNotifications(addFetcher.data, addFetcher.state, () =>
@@ -241,8 +354,13 @@ export default function Members({ loaderData }: Route.ComponentProps) {
   useFetcherNotifications(removeFetcher.data, removeFetcher.state, () =>
     setRemoveTarget(null),
   );
+  useFetcherNotifications(flagFetcher.data, flagFetcher.state, () => {
+    setFlagTarget(null);
+    setFlagBody("");
+  });
 
   const roleOptions = assignableRoles.map((r) => ({ value: r, label: r }));
+  const showActions = canManage || canFlag;
 
   return (
     <Container size="lg">
@@ -270,6 +388,81 @@ export default function Members({ loaderData }: Route.ComponentProps) {
           </Card>
         ) : null}
 
+        {canManage && officerFlags.length > 0 ? (
+          <Card withBorder padding="md" radius="md">
+            <Text fw={600} mb="xs">
+              Flagged concerns · {officerFlags.length}
+            </Text>
+            <Text size="sm" c="dimmed" mb="sm">
+              Raised privately by campers — visible to officers only. Handle
+              them discreetly.
+            </Text>
+            <Stack gap="sm">
+              {officerFlags.map((f) => (
+                <Group
+                  key={f.id}
+                  justify="space-between"
+                  wrap="nowrap"
+                  align="flex-start"
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <Text size="sm" fw={500}>
+                      {f.subjectName}
+                      <Text span size="xs" c="dimmed">
+                        {" "}
+                        — flagged by {f.reporterName} · {f.createdAt}
+                      </Text>
+                    </Text>
+                    <Text size="sm">“{f.body}”</Text>
+                  </div>
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    onClick={() =>
+                      flagFetcher.submit(
+                        { intent: "resolveFlag", id: f.id },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    Resolve
+                  </Button>
+                </Group>
+              ))}
+            </Stack>
+          </Card>
+        ) : null}
+
+        {myFlags.length > 0 ? (
+          <Card withBorder padding="md" radius="md">
+            <Text fw={600} mb="xs">
+              Your open flags
+            </Text>
+            <Stack gap="xs">
+              {myFlags.map((f) => (
+                <Group key={f.id} justify="space-between" wrap="nowrap">
+                  <Text size="sm">
+                    {f.subjectName}: “{f.body}”
+                  </Text>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="gray"
+                    onClick={() =>
+                      flagFetcher.submit(
+                        { intent: "withdrawFlag", id: f.id },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    Withdraw
+                  </Button>
+                </Group>
+              ))}
+            </Stack>
+          </Card>
+        ) : null}
+
         <Table.ScrollContainer minWidth={720}>
           <Table verticalSpacing="sm" highlightOnHover>
             <Table.Thead>
@@ -280,7 +473,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 <Table.Th>Discord</Table.Th>
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Role</Table.Th>
-                {canManage ? <Table.Th>Actions</Table.Th> : null}
+                {showActions ? <Table.Th>Actions</Table.Th> : null}
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -357,50 +550,67 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                         </Badge>
                       )}
                     </Table.Td>
-                    {canManage ? (
+                    {showActions ? (
                       <Table.Td>
-                        {editable ? (
-                          <Group gap="xs" wrap="nowrap">
-                            <Form method="post" action="/impersonate">
-                              <input
-                                type="hidden"
-                                name="intent"
-                                value="start"
-                              />
-                              <input
-                                type="hidden"
-                                name="targetUserId"
-                                value={m.userId}
-                              />
-                              <input
-                                type="hidden"
-                                name="campId"
-                                value={campId}
-                              />
+                        <Group gap="xs" wrap="nowrap">
+                          {editable ? (
+                            <>
+                              <Form method="post" action="/impersonate">
+                                <input
+                                  type="hidden"
+                                  name="intent"
+                                  value="start"
+                                />
+                                <input
+                                  type="hidden"
+                                  name="targetUserId"
+                                  value={m.userId}
+                                />
+                                <input
+                                  type="hidden"
+                                  name="campId"
+                                  value={campId}
+                                />
+                                <Button
+                                  type="submit"
+                                  size="xs"
+                                  variant="light"
+                                  color="grape"
+                                >
+                                  Work as
+                                </Button>
+                              </Form>
                               <Button
-                                type="submit"
                                 size="xs"
-                                variant="light"
-                                color="grape"
+                                variant="subtle"
+                                color="red"
+                                onClick={() =>
+                                  setRemoveTarget({
+                                    memberId: m.memberId,
+                                    name: m.name,
+                                  })
+                                }
                               >
-                                Work as
+                                Remove
                               </Button>
-                            </Form>
+                            </>
+                          ) : null}
+                          {canFlag && !isSelf ? (
                             <Button
                               size="xs"
                               variant="subtle"
-                              color="red"
+                              color="gray"
                               onClick={() =>
-                                setRemoveTarget({
+                                setFlagTarget({
                                   memberId: m.memberId,
                                   name: m.name,
                                 })
                               }
                             >
-                              Remove
+                              Flag
                             </Button>
-                          </Group>
-                        ) : null}
+                          ) : null}
+                        </Group>
                       </Table.Td>
                     ) : null}
                   </Table.Tr>
@@ -443,6 +653,51 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 }}
               >
                 Remove
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
+        <Modal
+          opened={flagTarget !== null}
+          onClose={() => setFlagTarget(null)}
+          title={`Flag an issue with ${flagTarget?.name ?? "a member"}`}
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">
+              This goes privately to the camp's officers — {flagTarget?.name}{" "}
+              won't see it. Use it for anything you'd rather not raise directly.
+            </Text>
+            <Textarea
+              placeholder="What's going on?"
+              autosize
+              minRows={3}
+              value={flagBody}
+              onChange={(e) => setFlagBody(e.currentTarget.value)}
+              maxLength={2000}
+            />
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setFlagTarget(null)}>
+                Cancel
+              </Button>
+              <Button
+                color="orange"
+                disabled={!flagBody.trim()}
+                loading={flagFetcher.state !== "idle"}
+                onClick={() => {
+                  if (flagTarget)
+                    flagFetcher.submit(
+                      {
+                        intent: "flagMember",
+                        memberId: flagTarget.memberId,
+                        body: flagBody,
+                      },
+                      { method: "post" },
+                    );
+                }}
+              >
+                Send to officers
               </Button>
             </Group>
           </Stack>

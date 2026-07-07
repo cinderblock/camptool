@@ -981,6 +981,14 @@ placement page.)
       fields map to existing features (Bringing inventory, RSVP, passes, tickets);
       only the free-form remainder is the new bank. Camp's actual questions get
       entered as DATA via admin, not committed. See section below.
+- [~] Private member flags (2026-07-03; code green, 17/17 E2E on a scratch
+      server; **COMMIT/PUSH HELD behind the map-undo thread's uncommitted
+      migration 0040** — see `plans/arrival-sap-and-removal.md` follow-up
+      section). `member_flag` (`db/schema/flag.ts`, camp-scoped): member+ can
+      privately flag an issue with any camper (not self) from `/members`;
+      officers get a "Flagged concerns" queue (never shown a flag about
+      themselves, can't resolve one either); reporters can withdraw. Removal
+      was ALREADY officer-gated (the user's concern #1 needed no change).
 - [x] Member removal + arrival date + "on or after" SAPs (2026-07-03; code
       green, E2E-tested over HTTP against a scratch server, NOT browser-tested;
       task plan `plans/arrival-sap-and-removal.md`). (1) **Remove member**:

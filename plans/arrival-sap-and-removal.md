@@ -85,3 +85,40 @@ Three user asks (2026-07-03):
 - NOT browser-tested (modal, DateInputs, selects render/interaction). Worth a
   click-through on the live deploy: /start arrival + SAP prompt, /passes
   officer grant picker, /members Remove modal.
+
+## Follow-up (user, 2026-07-03): private member flags
+
+User feedback after the first deploy: "members shouldn't be able to remove
+recruits — but they should be able to flag issues with members for officers to
+privately deal with."
+
+- **Part 1 needed no change**: removal was already officer+-only (the whole
+  members action gates on officer, and the UI only shows Remove to officers).
+  The rank comparison only decides WHICH people an officer/admin can remove.
+  E2E had asserted this ("non-officer removal rejected → 403").
+- **Part 2 — `member_flag` (new `db/schema/flag.ts`)**: CAMP-scoped (not
+  per-year; interpersonal issues aren't edition data). Columns: subject
+  (cascade), reporter (set null if they leave), body, status open→resolved,
+  resolvedBy/At. Visibility rules:
+  - Flagging = member+ (recruits can't), any subject except self, body ≤2000ch.
+  - Officers+ see all open flags EXCEPT ones about themselves (a flagged
+    officer must not see or resolve the concern about them — `resolveFlag`
+    404s on self-subject too).
+  - The reporter sees their own open flags ("Your open flags" card) and can
+    withdraw (delete) them.
+  - `/members` UI: "Flag" button on every non-self row (member+) → modal
+    ("goes privately to officers — {name} won't see it") → "Flagged concerns"
+    officer queue card with Resolve.
+- E2E (scratch server :3100, hand-created table): 17/17 passed — creation
+  gates, all four visibility assertions (via page-HTML checks per viewer),
+  resolve/withdraw rules, cascade on member removal, and re-confirmed member
+  can't remove.
+
+**COMMIT/PUSH HELD**: the map-undo thread's migration **0040_last_bloodaxe** is
+uncommitted in the shared tree (thread active — its files changing minutes
+ago). Generating my migration now would put an 0041 entry in the shared
+journal (breaking THEIR commit), and committing my source on master would ride
+along with their next push table-less (breaking the deploy). A background
+watcher waits for 0040 to be committed; then: `bun run db:generate` (→ 0041),
+verify on a DB copy, commit flag.ts + index.ts + members.tsx + 0041 + journal,
+push, watch CI.

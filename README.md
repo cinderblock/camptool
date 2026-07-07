@@ -27,7 +27,8 @@ events (see the four-layer architecture in the plan).
 
 Phase 3 — camp map editor (in progress). On top of the Phase 1 foundation
 (multi-camp data model; auth via email/password, magic link, passkeys, optional
-Discord; member directory with role management) and Phase 2 recruiting (public
+Discord; member directory with role management, officer-gated removal, and
+private member-to-officer issue flags) and Phase 2 recruiting (public
 `/c/:slug` application page, officer review queue, per-member onboarding
 checklists), the dashboard now has a **Map** tab: a visual, database-backed
 editor for laying out camp. The map/addressing is a pluggable **per-event
