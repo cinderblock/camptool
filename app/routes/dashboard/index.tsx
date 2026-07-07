@@ -21,6 +21,7 @@ import {
   useNavigate,
   useRevalidator,
 } from "react-router";
+import { type Headcount, headcountFor } from "~/lib/attendee.server";
 import { authClient } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
@@ -104,6 +105,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     bringingCount: number;
     pendingApprovals: number;
     dues: { expected: number; paid: number; owed: number } | null;
+    headcount: Headcount;
   } | null = null;
   if (active && activeEdition) {
     const editionId = activeEdition.id;
@@ -216,6 +218,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       bringingCount,
       pendingApprovals,
       dues,
+      headcount: await headcountFor(editionId),
     };
   }
 
@@ -463,6 +466,25 @@ function CampOverview({
               {memberCount === 1 ? "member" : "members"}
             </Text>
           </Card>
+
+          {overview ? (
+            <Card withBorder padding="lg" radius="md">
+              <Group justify="space-between" mb={2}>
+                <Text size="xl" fw={700}>
+                  {overview.headcount.total}
+                </Text>
+                <Anchor component={Link} to="/roster" size="xs">
+                  Roster
+                </Anchor>
+              </Group>
+              <Text size="sm" c="dimmed">
+                coming to {overview.year}
+                {overview.headcount.guests > 0
+                  ? ` · ${overview.headcount.membersComing} member${overview.headcount.membersComing === 1 ? "" : "s"} + ${overview.headcount.guests} guest${overview.headcount.guests === 1 ? "" : "s"}`
+                  : ""}
+              </Text>
+            </Card>
+          ) : null}
 
           <Card withBorder padding="lg" radius="md">
             <Text fw={600}>Passkey</Text>

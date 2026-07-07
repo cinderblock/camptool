@@ -3,9 +3,9 @@
  * what they've already resolved, and the upserts the wizard's actions call. Pairs
  * with the pure catalog/scheduler in wizard.ts.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "../../db/client.server";
-import { participation, wizardAsk } from "../../db/schema";
+import { attendee, wizardAsk } from "../../db/schema";
 import { weeksUntilEvent } from "./brc";
 import { type AskDef, type AskKey, scheduleAsks } from "./wizard";
 
@@ -47,16 +47,16 @@ export async function loadWizardState(opts: {
 
   const [part] = await db
     .select({
-      status: participation.status,
-      arrivalDate: participation.arrivalDate,
-      departureDate: participation.departureDate,
-      note: participation.note,
+      status: attendee.status,
+      arrivalDate: attendee.arrivalDate,
+      departureDate: attendee.departureDate,
+      note: attendee.note,
     })
-    .from(participation)
+    .from(attendee)
     .where(
       and(
-        eq(participation.editionId, editionId),
-        eq(participation.membershipId, membershipId),
+        eq(attendee.editionId, editionId),
+        eq(attendee.membershipId, membershipId),
       ),
     )
     .limit(1);
@@ -116,7 +116,7 @@ export async function setParticipation(opts: {
   note?: string | null;
 }): Promise<void> {
   await db
-    .insert(participation)
+    .insert(attendee)
     .values({
       id: crypto.randomUUID(),
       campId: opts.campId,
@@ -128,7 +128,9 @@ export async function setParticipation(opts: {
       note: opts.note ?? null,
     })
     .onConflictDoUpdate({
-      target: [participation.editionId, participation.membershipId],
+      // Partial unique index (attendee_member) — must repeat its WHERE clause.
+      target: [attendee.editionId, attendee.membershipId],
+      targetWhere: isNotNull(attendee.membershipId),
       set: {
         status: opts.status,
         ...(opts.arrivalDate !== undefined

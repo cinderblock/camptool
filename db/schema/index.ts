@@ -1,4 +1,5 @@
 export * from "./announcement";
+export * from "./attendee";
 export * from "./auth";
 export * from "./camp";
 export * from "./discord";

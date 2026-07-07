@@ -119,6 +119,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           ? [{ to: "/start", label: "Finish setup", end: false }]
           : []),
         { to: "/members", label: "Members", end: false },
+        { to: "/roster", label: "Who's coming", end: false },
         ...(activeRole && hasAtLeast(activeRole, "member")
           ? [{ to: "/invite", label: "Invite friends", end: false }]
           : []),

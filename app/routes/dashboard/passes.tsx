@@ -27,8 +27,8 @@ import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import {
+  attendee,
   membership,
-  participation,
   setupPass,
   setupPassDate,
   user,
@@ -98,17 +98,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     : [];
 
   // Planned arrivals (from onboarding) — shown next to requests so officers
-  // can pick a pass date that covers each requester's arrival.
+  // can pick a pass date that covers each requester's arrival. Read from each
+  // member's own attendee row (membership_id set; guests excluded).
   const arrivalRows = await db
     .select({
-      membershipId: participation.membershipId,
-      arrivalDate: participation.arrivalDate,
+      membershipId: attendee.membershipId,
+      arrivalDate: attendee.arrivalDate,
     })
-    .from(participation)
-    .where(eq(participation.editionId, editionId));
+    .from(attendee)
+    .where(eq(attendee.editionId, editionId));
   const arrivals: Record<string, string> = {};
   for (const r of arrivalRows) {
-    if (r.arrivalDate) arrivals[r.membershipId] = r.arrivalDate;
+    if (r.membershipId && r.arrivalDate)
+      arrivals[r.membershipId] = r.arrivalDate;
   }
 
   return {
