@@ -5396,7 +5396,19 @@ function Editor({
     liveObj.current = null;
     setDragging(false);
     setSnapHint(null);
-    if (d && o) commit(o);
+    // Only persist an ACTUAL change — a plain click (down+up, no move) must not
+    // commit, or it would create a no-op edit (and, for a member, a spurious
+    // pending suggestion just from selecting an item).
+    if (d && o) {
+      const s = d.start;
+      const changed =
+        round(o.x) !== round(s.x) ||
+        round(o.y) !== round(s.y) ||
+        round(o.width) !== round(s.width) ||
+        round(o.height) !== round(s.height) ||
+        Math.round(o.rotation) !== Math.round(s.rotation);
+      if (changed) commit(o);
+    }
   }
 
   function addObjectAt(kind: string, fxFeet: number, fyFeet: number) {
