@@ -266,3 +266,43 @@ export async function updateGuest(
 export async function removeGuest(guestId: string): Promise<void> {
   await db.delete(attendee).where(eq(attendee.id, guestId));
 }
+
+/**
+ * Return the attendee id for a member in an edition, creating an `unknown`-status
+ * row if they don't have one yet. Used when a member is added as a map occupant
+ * before they've RSVP'd — occupancy references an attendee, not a membership.
+ */
+export async function ensureMemberAttendee(
+  campId: string,
+  editionId: string,
+  membershipId: string,
+): Promise<string> {
+  const [existing] = await db
+    .select({ id: attendee.id })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        eq(attendee.membershipId, membershipId),
+      ),
+    )
+    .limit(1);
+  if (existing) return existing.id;
+  const id = crypto.randomUUID();
+  await db
+    .insert(attendee)
+    .values({ id, campId, editionId, membershipId, status: "unknown" })
+    .onConflictDoNothing();
+  // Re-select in case a concurrent insert won the partial-unique race.
+  const [row] = await db
+    .select({ id: attendee.id })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        eq(attendee.membershipId, membershipId),
+      ),
+    )
+    .limit(1);
+  return row?.id ?? id;
+}

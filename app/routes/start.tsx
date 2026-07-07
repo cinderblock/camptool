@@ -25,6 +25,7 @@ import { announce } from "~/components/Announcer";
 import { EventCalendar } from "~/components/EventCalendar";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
+import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { parseBannedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
 import type { QuestionType } from "~/lib/questions";
@@ -48,6 +49,7 @@ import {
 } from "~/lib/wizard.server";
 import { db } from "../../db/client.server";
 import {
+  attendee,
   mapObject,
   mapObjectOccupant,
   membership,
@@ -111,10 +113,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   }[] = [];
   let occupants: {
     objectId: string;
-    membershipId: string;
+    attendeeId: string;
+    membershipId: string | null;
     name: string | null;
   }[] = [];
   let roster: { membershipId: string; name: string | null }[] = [];
+  // The viewer's own guests (attendee rows), addable as occupants of their tent.
+  let myGuests: { attendeeId: string; name: string | null }[] = [];
   let tasks: { id: string; title: string; done: boolean }[] = [];
   type WizardQuestion = {
     id: string;
@@ -151,15 +156,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   if (keys.has("sharing")) {
-    occupants = await db
+    const occRows = await db
       .select({
         objectId: mapObjectOccupant.objectId,
-        membershipId: mapObjectOccupant.membershipId,
-        name: user.name,
+        attendeeId: attendee.id,
+        membershipId: attendee.membershipId,
+        guestName: attendee.name,
+        memberName: user.name,
       })
       .from(mapObjectOccupant)
       .innerJoin(mapObject, eq(mapObjectOccupant.objectId, mapObject.id))
-      .leftJoin(membership, eq(mapObjectOccupant.membershipId, membership.id))
+      .innerJoin(attendee, eq(mapObjectOccupant.attendeeId, attendee.id))
+      .leftJoin(membership, eq(attendee.membershipId, membership.id))
       .leftJoin(user, eq(membership.userId, user.id))
       .where(
         and(
@@ -167,6 +175,12 @@ export async function loader({ request }: Route.LoaderArgs) {
           eq(mapObjectOccupant.editionId, editionId),
         ),
       );
+    occupants = occRows.map((o) => ({
+      objectId: o.objectId,
+      attendeeId: o.attendeeId,
+      membershipId: o.membershipId,
+      name: o.guestName ?? o.memberName,
+    }));
 
     const rosterRows = await db
       .select({ membershipId: membership.id, name: user.name })
@@ -179,6 +193,17 @@ export async function loader({ request }: Route.LoaderArgs) {
         ),
       );
     roster = rosterRows.filter((r) => r.membershipId !== mid);
+
+    // The viewer's own guests — addable as occupants alongside members.
+    myGuests = await db
+      .select({ attendeeId: attendee.id, name: attendee.name })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          eq(attendee.hostMembershipId, mid),
+        ),
+      );
   }
 
   if (keys.has("checklist")) {
@@ -255,6 +280,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     items,
     occupants,
     roster,
+    myGuests,
     tasks,
     questionsBefore,
     questionsAfter,
@@ -384,7 +410,6 @@ export async function action({ request }: Route.ActionArgs) {
       return data({ error: "This year is locked." }, { status: 403 });
     }
     const objectId = String(form.get("objectId"));
-    const membershipId = String(form.get("membershipId"));
     // Confirm the structure is the caller's own item in this edition.
     const [own] = await db
       .select({ id: mapObject.id })
@@ -400,13 +425,49 @@ export async function action({ request }: Route.ActionArgs) {
     if (!own) return data({ error: "Not your item." }, { status: 403 });
 
     if (intent === "addOccupant") {
+      // The picker sends `m:<membershipId>` (a member) or `a:<attendeeId>` (a
+      // guest). Resolve either to the attendee the occupant references.
+      const ref = String(form.get("occupantRef"));
+      let attendeeId: string | null = null;
+      if (ref.startsWith("m:")) {
+        const targetMid = ref.slice(2);
+        const [tm] = await db
+          .select({ id: membership.id })
+          .from(membership)
+          .where(
+            and(
+              eq(membership.id, targetMid),
+              eq(membership.organizationId, campId),
+            ),
+          )
+          .limit(1);
+        if (!tm) return data({ error: "Unknown member." }, { status: 400 });
+        attendeeId = await ensureMemberAttendee(campId, editionId, targetMid);
+      } else if (ref.startsWith("a:")) {
+        const aid = ref.slice(2);
+        const [g] = await db
+          .select({ id: attendee.id })
+          .from(attendee)
+          .where(
+            and(
+              eq(attendee.id, aid),
+              eq(attendee.campId, campId),
+              eq(attendee.editionId, editionId),
+            ),
+          )
+          .limit(1);
+        if (!g) return data({ error: "Unknown guest." }, { status: 400 });
+        attendeeId = aid;
+      }
+      if (!attendeeId) return data({ error: "Pick someone." }, { status: 400 });
+
       const [existing] = await db
         .select({ id: mapObjectOccupant.id })
         .from(mapObjectOccupant)
         .where(
           and(
             eq(mapObjectOccupant.objectId, objectId),
-            eq(mapObjectOccupant.membershipId, membershipId),
+            eq(mapObjectOccupant.attendeeId, attendeeId),
           ),
         )
         .limit(1);
@@ -416,7 +477,7 @@ export async function action({ request }: Route.ActionArgs) {
           campId,
           editionId,
           objectId,
-          membershipId,
+          attendeeId,
         });
       }
       return data({ ok: true });
@@ -426,7 +487,7 @@ export async function action({ request }: Route.ActionArgs) {
       .where(
         and(
           eq(mapObjectOccupant.objectId, objectId),
-          eq(mapObjectOccupant.membershipId, membershipId),
+          eq(mapObjectOccupant.attendeeId, String(form.get("attendeeId"))),
         ),
       );
     return data({ ok: true });
@@ -994,15 +1055,23 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
   const holders = d.items.filter(
     (i) => hasTag(i.kind, "domicile") || hasTag(i.kind, "vehicle"),
   );
-  const rosterOptions = d.roster.map((r) => ({
-    value: r.membershipId,
+  // Pick from other camp members (m:) or the viewer's own guests (a:).
+  const memberOptions = d.roster.map((r) => ({
+    value: `m:${r.membershipId}`,
     label: r.name ?? "Member",
+    mid: r.membershipId,
+  }));
+  const guestOptions = d.myGuests.map((g) => ({
+    value: `a:${g.attendeeId}`,
+    label: `${g.name ?? "Guest"} (guest)`,
+    aid: g.attendeeId,
   }));
 
   return (
     <Stack gap="md" mt="md">
       <Text size="sm" c="dimmed">
-        Sharing a tent, RV, or vehicle? Add the other campers staying in it.
+        Sharing a tent, RV, or vehicle? Add the other people staying in it —
+        campers or your own guests.
       </Text>
       {holders.length === 0 ? (
         <Text c="dimmed" size="sm">
@@ -1012,8 +1081,20 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
         holders.map((item) => {
           const def = kindDef(item.kind);
           const occ = d.occupants.filter((o) => o.objectId === item.id);
-          const occIds = new Set(occ.map((o) => o.membershipId));
-          const avail = rosterOptions.filter((r) => !occIds.has(r.value));
+          const occMids = new Set(
+            occ.map((o) => o.membershipId).filter(Boolean),
+          );
+          const occAids = new Set(occ.map((o) => o.attendeeId));
+          const availMembers = memberOptions.filter((m) => !occMids.has(m.mid));
+          const availGuests = guestOptions.filter((g) => !occAids.has(g.aid));
+          const grouped = [
+            ...(availMembers.length > 0
+              ? [{ group: "Campers", items: availMembers }]
+              : []),
+            ...(availGuests.length > 0
+              ? [{ group: "Your guests", items: availGuests }]
+              : []),
+          ];
           return (
             <Paper key={item.id} withBorder p="sm" radius="md">
               <Group gap="sm" mb={6}>
@@ -1030,21 +1111,22 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
                 ) : (
                   occ.map((o) => (
                     <Badge
-                      key={o.membershipId}
+                      key={o.attendeeId}
                       variant="light"
+                      color={o.membershipId ? undefined : "grape"}
                       rightSection={
                         d.locked ? null : (
                           <ActionIcon
                             size="xs"
                             variant="transparent"
                             color="gray"
-                            aria-label={`Remove ${o.name ?? "member"} from ${item.name ?? kindDef(item.kind).label}`}
+                            aria-label={`Remove ${o.name ?? "person"} from ${item.name ?? kindDef(item.kind).label}`}
                             onClick={() =>
                               fetcher.submit(
                                 {
                                   intent: "removeOccupant",
                                   objectId: item.id,
-                                  membershipId: o.membershipId,
+                                  attendeeId: o.attendeeId,
                                 },
                                 { method: "post" },
                               )
@@ -1055,17 +1137,17 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
                         )
                       }
                     >
-                      {o.name ?? "Member"}
+                      {o.name ?? "Person"}
                     </Badge>
                   ))
                 )}
               </Group>
-              {!d.locked && avail.length > 0 ? (
+              {!d.locked && grouped.length > 0 ? (
                 <Select
                   size="xs"
-                  placeholder="Add a camper…"
+                  placeholder="Add someone…"
                   searchable
-                  data={avail}
+                  data={grouped}
                   value={null}
                   onChange={(v) =>
                     v &&
@@ -1073,7 +1155,7 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
                       {
                         intent: "addOccupant",
                         objectId: item.id,
-                        membershipId: v,
+                        occupantRef: v,
                       },
                       { method: "post" },
                     )

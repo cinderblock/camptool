@@ -23,6 +23,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { attendee } from "./attendee";
 import { user } from "./auth";
 import { camp, campEdition, membership } from "./camp";
 
@@ -137,8 +138,10 @@ export const mapObject = sqliteTable(
   (t) => [index("map_object_camp").on(t.campId)],
 );
 
-/** Occupants of a structure/vehicle — lets a camper add a second+ person to
- * their tent / car / RV. The owner is also an occupant. */
+/** Occupants of a structure/vehicle — each an `attendee` (a member OR a
+ * non-member guest) sharing a tent / car / RV. Lets a camper add a second+
+ * person, including someone with no account of their own. The owner is also an
+ * occupant. */
 export const mapObjectOccupant = sqliteTable(
   "map_object_occupant",
   {
@@ -152,16 +155,18 @@ export const mapObjectOccupant = sqliteTable(
     objectId: text("object_id")
       .notNull()
       .references(() => mapObject.id, { onDelete: "cascade" }),
-    membershipId: text("membership_id")
-      .notNull()
-      .references(() => membership.id, { onDelete: "cascade" }),
+    // The body inside — a member's or a guest's attendee row.
+    attendeeId: text("attendee_id").references(() => attendee.id, {
+      onDelete: "cascade",
+    }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
       .default(now),
   },
   (t) => [
-    uniqueIndex("map_object_occupant_unique").on(t.objectId, t.membershipId),
+    uniqueIndex("map_object_occupant_unique").on(t.objectId, t.attendeeId),
     index("map_object_occupant_object").on(t.objectId),
+    index("map_object_occupant_attendee").on(t.attendeeId),
   ],
 );
 

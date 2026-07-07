@@ -112,8 +112,14 @@ files — shared tree); push + watch CI.
 
 ## Progress log
 
-- [x] **Phase 1 — attendee entity + headcount + roster (CODE COMPLETE, green;
-      not yet browser-tested).** 2026-07-07.
+- [x] **Phase 1 — attendee entity + headcount + roster. DEPLOYED + BROWSER-TESTED
+      (commit 22924f2, Deploy to firefly green).** 2026-07-07.
+  - Live E2E on camptool.mathcamp.us: `/roster` rendered with **real prod data**
+    backfilled correctly (17 members' RSVP statuses + arrival dates folded from
+    participation → attendee; 1 maybe). Added a guest to Cameron's party → toast,
+    headcount 17→18 heads / guests 0→1, roster row showed "+1 (Roster Test Guest)";
+    removed it → back to 17/0. Confirms migration backfill on production data +
+    the full guest write/tally path. No console issues observed.
   - `db/schema/attendee.ts` — new `attendee` table (member row = membershipId set;
     guest row = hostMembershipId set; name/email; status/arrival/departure/note;
     partial unique index on (edition, membershipId)).
@@ -144,7 +150,19 @@ files — shared tree); push + watch CI.
 - [ ] Phase 1 follow-up: a wizard `/start` "who else is in your party?" step
       (deferred — the roster's Your-party card is the durable home; onboarding
       pointer is a nicety).
-- [ ] Phase 2 — unify occupants (`map_object_occupant` → attendeeId).
+- [x] **Phase 2 — unify occupants (CODE COMPLETE, green; not yet browser-tested).**
+      2026-07-07. `map_object_occupant.membership_id` → `attendee_id` (a member OR
+      guest). **Migration 0052** (add nullable `attendee_id` + backfill: create an
+      `unknown` attendee row for any occupant-member lacking one, then point each
+      occupant at it) + **0053** (drop `membership_id`, rebuild, unique index now
+      `(object_id, attendee_id)`). Two prompt-free generates (add col / drop col),
+      flag hidden during both. Verified: full chain 0000→0053 + isolated backfill
+      (a member occupying two objects got ONE created attendee, both occupants
+      linked; a member with an existing attendee reused it). `start.tsx` sharing
+      step now offers **members + the viewer's own guests** (grouped Select,
+      `m:`/`a:` prefixed refs → resolved to an attendeeId via
+      `ensureMemberAttendee`); occupant badges show guests in grape. `map.tsx`
+      snapshot code is column-agnostic (untouched). typecheck + build + biome green.
 - [ ] Phase 3 — tickets + SAPs per attendee.
 - [ ] Phase 4 — promote attendee → recruit/member.
 
