@@ -278,6 +278,48 @@ export const mapRoad = sqliteTable(
   (t) => [index("map_road_edition").on(t.editionId)],
 );
 
+/** A camper's proposed geometry for a placed object — a *suggested* edit awaiting
+ * officer approval. Unlike the retired `map_object.pending*` fields (one per item),
+ * this is one row per (object, camper), so many campers can each have their own
+ * separate suggestion on the same item. The object's own row keeps the OFFICIAL
+ * geometry; suggestions render as translucent "ghosts". An officer approve copies
+ * a suggestion's geometry onto the object and deletes that suggestion (others
+ * remain); reject / member-undo just deletes it. */
+export const mapEditSuggestion = sqliteTable(
+  "map_edit_suggestion",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id")
+      .notNull()
+      .references(() => campEdition.id, { onDelete: "cascade" }),
+    objectId: text("object_id")
+      .notNull()
+      .references(() => mapObject.id, { onDelete: "cascade" }),
+    membershipId: text("membership_id")
+      .notNull()
+      .references(() => membership.id, { onDelete: "cascade" }),
+    // Proposed plot-local-feet geometry (the whole move/resize/rotate).
+    x: real("x").notNull().default(0),
+    y: real("y").notNull().default(0),
+    width: real("width").notNull().default(10),
+    height: real("height").notNull().default(10),
+    rotation: real("rotation").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [
+    uniqueIndex("map_edit_suggestion_unique").on(t.objectId, t.membershipId),
+    index("map_edit_suggestion_edition").on(t.editionId),
+  ],
+);
+
 /** Undo/redo + named restore points for a camp's official map, per edition.
  *
  * `data` is a JSON snapshot of the FULL edition map state (placement + objects +

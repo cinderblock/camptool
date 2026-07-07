@@ -89,6 +89,7 @@ import {
   camp,
   campEdition,
   mapCable,
+  mapEditSuggestion,
   mapObject,
   mapObjectOccupant,
   mapRoad,
@@ -569,6 +570,20 @@ type ObjRow = {
   pending: { prev: PendingPrev; by: string | null } | null;
 };
 
+// A camper's proposed geometry for an object (a "ghost" edit awaiting approval).
+// Many campers can each have one per object.
+type Suggestion = {
+  id: string;
+  objectId: string;
+  membershipId: string;
+  memberName: string | null;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+};
+
 type ZonePt = { x: number; y: number };
 type ZoneRow = {
   id: string;
@@ -754,6 +769,28 @@ async function loadObjRow(
     .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
     .limit(1);
   return r ? toObjRow(r) : null;
+}
+
+/** All per-camper edit suggestions for the edition, with the suggester's name.
+ * Everyone sees all ghosts; officers act on them. */
+async function loadSuggestions(editionId: string): Promise<Suggestion[]> {
+  const rows = await db
+    .select({
+      id: mapEditSuggestion.id,
+      objectId: mapEditSuggestion.objectId,
+      membershipId: mapEditSuggestion.membershipId,
+      memberName: user.name,
+      x: mapEditSuggestion.x,
+      y: mapEditSuggestion.y,
+      width: mapEditSuggestion.width,
+      height: mapEditSuggestion.height,
+      rotation: mapEditSuggestion.rotation,
+    })
+    .from(mapEditSuggestion)
+    .leftJoin(membership, eq(mapEditSuggestion.membershipId, membership.id))
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(eq(mapEditSuggestion.editionId, editionId));
+  return rows satisfies Suggestion[];
 }
 
 // ---- Official-map undo/redo + snapshots (server) ----------------------------
@@ -1107,10 +1144,12 @@ export async function loader({ request }: Route.LoaderArgs) {
         )
     : [];
 
-  // Official-map undo/redo availability + saved snapshots (officer tools).
-  const [history, snapshots] = await Promise.all([
+  // Official-map undo/redo availability + saved snapshots (officer tools) +
+  // per-camper edit suggestions (ghosts everyone sees).
+  const [history, snapshots, suggestions] = await Promise.all([
     historyState(editionId),
     listSnapshots(editionId),
+    loadSuggestions(editionId),
   ]);
 
   return {
@@ -1119,6 +1158,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     locked: activeEdition.locked,
     history,
     snapshots,
+    suggestions,
     // Free-text "doneness" label shown as a watermark over the map (officer-set).
     mapStatus: activeEdition.mapStatus,
     // The event this edition is for — gates Burning-Man-specific UI.
@@ -1262,6 +1302,10 @@ export async function action({ request }: Route.ActionArgs) {
     "saveSnapshot",
     "restoreSnapshot",
     "deleteSnapshot",
+    // Resolving suggestions is officer-only (proposing them is not).
+    "approveSuggestion",
+    "rejectSuggestion",
+    "clearSuggestions",
   ]);
   if (officerOnly.has(intent) && !canManage) {
     return data({ error: "Officers manage the map." }, { status: 403 });
@@ -1294,6 +1338,8 @@ export async function action({ request }: Route.ActionArgs) {
     "addRoad",
     "updateRoad",
     "deleteRoad",
+    // Approving a suggestion writes the object's official geometry.
+    "approveSuggestion",
   ]);
   const officialPre =
     canManage && OFFICIAL_MAP_INTENTS.has(intent)
@@ -1841,6 +1887,137 @@ export async function action({ request }: Route.ActionArgs) {
           .where(eq(mapObject.id, r.id));
       }
       return data({ map: await loadClientMap(editionId) });
+    }
+
+    if (intent === "suggestEdit") {
+      // A camper proposes a geometry for an object — one row per (object, camper),
+      // upserted. Doesn't touch the official geometry.
+      const objectId = String(form.get("objectId"));
+      const [obj] = await db
+        .select({ id: mapObject.id })
+        .from(mapObject)
+        .where(
+          and(eq(mapObject.id, objectId), eq(mapObject.editionId, editionId)),
+        )
+        .limit(1);
+      if (!obj) return data({ error: "Item not found." }, { status: 404 });
+      const geom = {
+        x: num("x"),
+        y: num("y"),
+        width: Math.max(1, num("width")),
+        height: Math.max(1, num("height")),
+        rotation: num("rotation"),
+      };
+      const [existing] = await db
+        .select({ id: mapEditSuggestion.id })
+        .from(mapEditSuggestion)
+        .where(
+          and(
+            eq(mapEditSuggestion.objectId, objectId),
+            eq(mapEditSuggestion.membershipId, myMembershipId),
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        await db
+          .update(mapEditSuggestion)
+          .set({ ...geom, updatedAt: new Date() })
+          .where(eq(mapEditSuggestion.id, existing.id));
+      } else {
+        await db.insert(mapEditSuggestion).values({
+          id: crypto.randomUUID(),
+          campId,
+          editionId,
+          objectId,
+          membershipId: myMembershipId,
+          ...geom,
+        });
+      }
+      return data({ suggestions: await loadSuggestions(editionId) });
+    }
+
+    if (intent === "deleteMySuggestion") {
+      const objectId = String(form.get("objectId"));
+      await db
+        .delete(mapEditSuggestion)
+        .where(
+          and(
+            eq(mapEditSuggestion.editionId, editionId),
+            eq(mapEditSuggestion.membershipId, myMembershipId),
+            ...(objectId ? [eq(mapEditSuggestion.objectId, objectId)] : []),
+          ),
+        );
+      return data({ suggestions: await loadSuggestions(editionId) });
+    }
+
+    if (intent === "approveSuggestion") {
+      // Officer applies a camper's suggestion to the object's OFFICIAL geometry.
+      // Deletes that suggestion; `clearOthers` also removes the item's others.
+      const id = String(form.get("id"));
+      const clearOthers = form.get("clearOthers") === "true";
+      const [s] = await db
+        .select()
+        .from(mapEditSuggestion)
+        .where(
+          and(
+            eq(mapEditSuggestion.id, id),
+            eq(mapEditSuggestion.editionId, editionId),
+          ),
+        )
+        .limit(1);
+      if (!s) return data({ error: "Suggestion not found." }, { status: 404 });
+      await db
+        .update(mapObject)
+        .set({
+          x: s.x,
+          y: s.y,
+          width: s.width,
+          height: s.height,
+          rotation: s.rotation,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(mapObject.id, s.objectId), eq(mapObject.editionId, editionId)),
+        );
+      await db
+        .delete(mapEditSuggestion)
+        .where(
+          clearOthers
+            ? and(
+                eq(mapEditSuggestion.objectId, s.objectId),
+                eq(mapEditSuggestion.editionId, editionId),
+              )
+            : eq(mapEditSuggestion.id, id),
+        );
+      const object = await loadObjRow(editionId, s.objectId);
+      return data({ object, suggestions: await loadSuggestions(editionId) });
+    }
+
+    if (intent === "rejectSuggestion") {
+      const id = String(form.get("id"));
+      await db
+        .delete(mapEditSuggestion)
+        .where(
+          and(
+            eq(mapEditSuggestion.id, id),
+            eq(mapEditSuggestion.editionId, editionId),
+          ),
+        );
+      return data({ suggestions: await loadSuggestions(editionId) });
+    }
+
+    if (intent === "clearSuggestions") {
+      // Officer removes all outstanding suggestions on an object.
+      const objectId = String(form.get("objectId"));
+      await db
+        .delete(mapEditSuggestion)
+        .where(
+          and(
+            eq(mapEditSuggestion.objectId, objectId),
+            eq(mapEditSuggestion.editionId, editionId),
+          ),
+        );
+      return data({ suggestions: await loadSuggestions(editionId) });
     }
 
     if (intent === "placeObject") {

@@ -337,6 +337,13 @@
       "when": 1783401529076,
       "tag": "0047_first_scarlet_spider",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1783405509281,
+      "tag": "0048_thankful_the_watchers",
+      "breakpoints": true
     }
   ]
 }
