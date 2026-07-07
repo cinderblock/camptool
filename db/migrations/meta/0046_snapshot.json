@@ -78,9 +78,7 @@
       "indexes": {
         "announcement_edition": {
           "name": "announcement_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         }
       },
@@ -88,39 +86,27 @@
         "announcement_camp_id_camp_id_fk": {
           "name": "announcement_camp_id_camp_id_fk",
           "tableFrom": "announcement",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "announcement_edition_id_camp_edition_id_fk": {
           "name": "announcement_edition_id_camp_edition_id_fk",
           "tableFrom": "announcement",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "announcement_created_by_id_user_id_fk": {
           "name": "announcement_created_by_id_user_id_fk",
           "tableFrom": "announcement",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -231,13 +217,9 @@
         "account_user_id_user_id_fk": {
           "name": "account_user_id_user_id_fk",
           "tableFrom": "account",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -333,13 +315,9 @@
         "passkey_user_id_user_id_fk": {
           "name": "passkey_user_id_user_id_fk",
           "tableFrom": "passkey",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -420,9 +398,7 @@
       "indexes": {
         "session_token_unique": {
           "name": "session_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         }
       },
@@ -430,13 +406,9 @@
         "session_user_id_user_id_fk": {
           "name": "session_user_id_user_id_fk",
           "tableFrom": "session",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -504,9 +476,7 @@
       "indexes": {
         "user_email_unique": {
           "name": "user_email_unique",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": true
         }
       },
@@ -662,9 +632,7 @@
       "indexes": {
         "camp_slug_unique": {
           "name": "camp_slug_unique",
-          "columns": [
-            "slug"
-          ],
+          "columns": ["slug"],
           "isUnique": true
         }
       },
@@ -781,10 +749,7 @@
       "indexes": {
         "camp_edition_camp_year": {
           "name": "camp_edition_camp_year",
-          "columns": [
-            "camp_id",
-            "year"
-          ],
+          "columns": ["camp_id", "year"],
           "isUnique": true
         }
       },
@@ -792,26 +757,18 @@
         "camp_edition_camp_id_camp_id_fk": {
           "name": "camp_edition_camp_id_camp_id_fk",
           "tableFrom": "camp_edition",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "camp_edition_forked_from_id_camp_edition_id_fk": {
           "name": "camp_edition_forked_from_id_camp_edition_id_fk",
           "tableFrom": "camp_edition",
-          "columnsFrom": [
-            "forked_from_id"
-          ],
+          "columnsFrom": ["forked_from_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -887,26 +844,18 @@
         "invitation_camp_id_camp_id_fk": {
           "name": "invitation_camp_id_camp_id_fk",
           "tableFrom": "invitation",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "invitation_inviter_id_user_id_fk": {
           "name": "invitation_inviter_id_user_id_fk",
           "tableFrom": "invitation",
-          "columnsFrom": [
-            "inviter_id"
-          ],
+          "columnsFrom": ["inviter_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -1013,39 +962,27 @@
         "membership_camp_id_camp_id_fk": {
           "name": "membership_camp_id_camp_id_fk",
           "tableFrom": "membership",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "membership_user_id_user_id_fk": {
           "name": "membership_user_id_user_id_fk",
           "tableFrom": "membership",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "membership_invited_by_membership_id_membership_id_fk": {
           "name": "membership_invited_by_membership_id_membership_id_fk",
           "tableFrom": "membership",
-          "columnsFrom": [
-            "invited_by_membership_id"
-          ],
+          "columnsFrom": ["invited_by_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -1127,10 +1064,7 @@
       "indexes": {
         "discord_link_camp_user": {
           "name": "discord_link_camp_user",
-          "columns": [
-            "camp_id",
-            "user_id"
-          ],
+          "columns": ["camp_id", "user_id"],
           "isUnique": true
         }
       },
@@ -1138,26 +1072,18 @@
         "discord_link_camp_id_camp_id_fk": {
           "name": "discord_link_camp_id_camp_id_fk",
           "tableFrom": "discord_link",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "discord_link_user_id_user_id_fk": {
           "name": "discord_link_user_id_user_id_fk",
           "tableFrom": "discord_link",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -1246,9 +1172,7 @@
       "indexes": {
         "camp_document_camp": {
           "name": "camp_document_camp",
-          "columns": [
-            "camp_id"
-          ],
+          "columns": ["camp_id"],
           "isUnique": false
         }
       },
@@ -1256,26 +1180,18 @@
         "camp_document_camp_id_camp_id_fk": {
           "name": "camp_document_camp_id_camp_id_fk",
           "tableFrom": "camp_document",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "camp_document_created_by_id_user_id_fk": {
           "name": "camp_document_created_by_id_user_id_fk",
           "tableFrom": "camp_document",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -1357,9 +1273,7 @@
       "indexes": {
         "contribution_tier_edition": {
           "name": "contribution_tier_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         }
       },
@@ -1367,26 +1281,18 @@
         "contribution_tier_camp_id_camp_id_fk": {
           "name": "contribution_tier_camp_id_camp_id_fk",
           "tableFrom": "contribution_tier",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "contribution_tier_edition_id_camp_edition_id_fk": {
           "name": "contribution_tier_edition_id_camp_edition_id_fk",
           "tableFrom": "contribution_tier",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -1495,9 +1401,7 @@
       "indexes": {
         "finance_entry_edition": {
           "name": "finance_entry_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         }
       },
@@ -1505,52 +1409,36 @@
         "finance_entry_camp_id_camp_id_fk": {
           "name": "finance_entry_camp_id_camp_id_fk",
           "tableFrom": "finance_entry",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "finance_entry_edition_id_camp_edition_id_fk": {
           "name": "finance_entry_edition_id_camp_edition_id_fk",
           "tableFrom": "finance_entry",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "finance_entry_member_id_membership_id_fk": {
           "name": "finance_entry_member_id_membership_id_fk",
           "tableFrom": "finance_entry",
-          "columnsFrom": [
-            "member_id"
-          ],
+          "columnsFrom": ["member_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "finance_entry_created_by_id_user_id_fk": {
           "name": "finance_entry_created_by_id_user_id_fk",
           "tableFrom": "finance_entry",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -1632,10 +1520,7 @@
       "indexes": {
         "member_requirement_unique": {
           "name": "member_requirement_unique",
-          "columns": [
-            "edition_id",
-            "membership_id"
-          ],
+          "columns": ["edition_id", "membership_id"],
           "isUnique": true
         }
       },
@@ -1643,52 +1528,36 @@
         "member_requirement_camp_id_camp_id_fk": {
           "name": "member_requirement_camp_id_camp_id_fk",
           "tableFrom": "member_requirement",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "member_requirement_edition_id_camp_edition_id_fk": {
           "name": "member_requirement_edition_id_camp_edition_id_fk",
           "tableFrom": "member_requirement",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "member_requirement_membership_id_membership_id_fk": {
           "name": "member_requirement_membership_id_membership_id_fk",
           "tableFrom": "member_requirement",
-          "columnsFrom": [
-            "membership_id"
-          ],
+          "columnsFrom": ["membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "member_requirement_tier_id_contribution_tier_id_fk": {
           "name": "member_requirement_tier_id_contribution_tier_id_fk",
           "tableFrom": "member_requirement",
-          "columnsFrom": [
-            "tier_id"
-          ],
+          "columnsFrom": ["tier_id"],
           "tableTo": "contribution_tier",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -1762,13 +1631,9 @@
         "super_admin_user_id_user_id_fk": {
           "name": "super_admin_user_id_user_id_fk",
           "tableFrom": "super_admin",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -1821,9 +1686,7 @@
       "indexes": {
         "inventory_category_camp": {
           "name": "inventory_category_camp",
-          "columns": [
-            "camp_id"
-          ],
+          "columns": ["camp_id"],
           "isUnique": false
         }
       },
@@ -1831,13 +1694,9 @@
         "inventory_category_camp_id_camp_id_fk": {
           "name": "inventory_category_camp_id_camp_id_fk",
           "tableFrom": "inventory_category",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -1934,16 +1793,12 @@
       "indexes": {
         "inventory_item_edition": {
           "name": "inventory_item_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         },
         "inventory_item_category": {
           "name": "inventory_item_category",
-          "columns": [
-            "category_id"
-          ],
+          "columns": ["category_id"],
           "isUnique": false
         }
       },
@@ -1951,52 +1806,36 @@
         "inventory_item_camp_id_camp_id_fk": {
           "name": "inventory_item_camp_id_camp_id_fk",
           "tableFrom": "inventory_item",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "inventory_item_edition_id_camp_edition_id_fk": {
           "name": "inventory_item_edition_id_camp_edition_id_fk",
           "tableFrom": "inventory_item",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "inventory_item_category_id_inventory_category_id_fk": {
           "name": "inventory_item_category_id_inventory_category_id_fk",
           "tableFrom": "inventory_item",
-          "columnsFrom": [
-            "category_id"
-          ],
+          "columnsFrom": ["category_id"],
           "tableTo": "inventory_category",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "inventory_item_owner_membership_id_membership_id_fk": {
           "name": "inventory_item_owner_membership_id_membership_id_fk",
           "tableFrom": "inventory_item",
-          "columnsFrom": [
-            "owner_membership_id"
-          ],
+          "columnsFrom": ["owner_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -2108,9 +1947,7 @@
       "indexes": {
         "map_cable_edition": {
           "name": "map_cable_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         }
       },
@@ -2118,39 +1955,27 @@
         "map_cable_camp_id_camp_id_fk": {
           "name": "map_cable_camp_id_camp_id_fk",
           "tableFrom": "map_cable",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_cable_edition_id_camp_edition_id_fk": {
           "name": "map_cable_edition_id_camp_edition_id_fk",
           "tableFrom": "map_cable",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_cable_created_by_id_user_id_fk": {
           "name": "map_cable_created_by_id_user_id_fk",
           "tableFrom": "map_cable",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -2353,9 +2178,7 @@
       "indexes": {
         "map_object_camp": {
           "name": "map_object_camp",
-          "columns": [
-            "camp_id"
-          ],
+          "columns": ["camp_id"],
           "isUnique": false
         }
       },
@@ -2363,65 +2186,45 @@
         "map_object_camp_id_camp_id_fk": {
           "name": "map_object_camp_id_camp_id_fk",
           "tableFrom": "map_object",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_object_edition_id_camp_edition_id_fk": {
           "name": "map_object_edition_id_camp_edition_id_fk",
           "tableFrom": "map_object",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_object_owner_membership_id_membership_id_fk": {
           "name": "map_object_owner_membership_id_membership_id_fk",
           "tableFrom": "map_object",
-          "columnsFrom": [
-            "owner_membership_id"
-          ],
+          "columnsFrom": ["owner_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "map_object_pending_by_membership_id_membership_id_fk": {
           "name": "map_object_pending_by_membership_id_membership_id_fk",
           "tableFrom": "map_object",
-          "columnsFrom": [
-            "pending_by_membership_id"
-          ],
+          "columnsFrom": ["pending_by_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "map_object_created_by_id_user_id_fk": {
           "name": "map_object_created_by_id_user_id_fk",
           "tableFrom": "map_object",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -2480,17 +2283,12 @@
       "indexes": {
         "map_object_occupant_unique": {
           "name": "map_object_occupant_unique",
-          "columns": [
-            "object_id",
-            "membership_id"
-          ],
+          "columns": ["object_id", "membership_id"],
           "isUnique": true
         },
         "map_object_occupant_object": {
           "name": "map_object_occupant_object",
-          "columns": [
-            "object_id"
-          ],
+          "columns": ["object_id"],
           "isUnique": false
         }
       },
@@ -2498,52 +2296,36 @@
         "map_object_occupant_camp_id_camp_id_fk": {
           "name": "map_object_occupant_camp_id_camp_id_fk",
           "tableFrom": "map_object_occupant",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_object_occupant_edition_id_camp_edition_id_fk": {
           "name": "map_object_occupant_edition_id_camp_edition_id_fk",
           "tableFrom": "map_object_occupant",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_object_occupant_object_id_map_object_id_fk": {
           "name": "map_object_occupant_object_id_map_object_id_fk",
           "tableFrom": "map_object_occupant",
-          "columnsFrom": [
-            "object_id"
-          ],
+          "columnsFrom": ["object_id"],
           "tableTo": "map_object",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_object_occupant_membership_id_membership_id_fk": {
           "name": "map_object_occupant_membership_id_membership_id_fk",
           "tableFrom": "map_object_occupant",
-          "columnsFrom": [
-            "membership_id"
-          ],
+          "columnsFrom": ["membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -2657,9 +2439,7 @@
       "indexes": {
         "map_road_edition": {
           "name": "map_road_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         }
       },
@@ -2667,39 +2447,27 @@
         "map_road_camp_id_camp_id_fk": {
           "name": "map_road_camp_id_camp_id_fk",
           "tableFrom": "map_road",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_road_edition_id_camp_edition_id_fk": {
           "name": "map_road_edition_id_camp_edition_id_fk",
           "tableFrom": "map_road",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_road_created_by_id_user_id_fk": {
           "name": "map_road_created_by_id_user_id_fk",
           "tableFrom": "map_road",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -2781,11 +2549,7 @@
       "indexes": {
         "map_snapshot_edition": {
           "name": "map_snapshot_edition",
-          "columns": [
-            "edition_id",
-            "kind",
-            "seq"
-          ],
+          "columns": ["edition_id", "kind", "seq"],
           "isUnique": false
         }
       },
@@ -2793,39 +2557,27 @@
         "map_snapshot_camp_id_camp_id_fk": {
           "name": "map_snapshot_camp_id_camp_id_fk",
           "tableFrom": "map_snapshot",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_snapshot_edition_id_camp_edition_id_fk": {
           "name": "map_snapshot_edition_id_camp_edition_id_fk",
           "tableFrom": "map_snapshot",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_snapshot_created_by_membership_id_membership_id_fk": {
           "name": "map_snapshot_created_by_membership_id_membership_id_fk",
           "tableFrom": "map_snapshot",
-          "columnsFrom": [
-            "created_by_membership_id"
-          ],
+          "columnsFrom": ["created_by_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -2923,9 +2675,7 @@
       "indexes": {
         "map_zone_edition": {
           "name": "map_zone_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         }
       },
@@ -2933,39 +2683,27 @@
         "map_zone_camp_id_camp_id_fk": {
           "name": "map_zone_camp_id_camp_id_fk",
           "tableFrom": "map_zone",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_zone_edition_id_camp_edition_id_fk": {
           "name": "map_zone_edition_id_camp_edition_id_fk",
           "tableFrom": "map_zone",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "map_zone_created_by_id_user_id_fk": {
           "name": "map_zone_created_by_id_user_id_fk",
           "tableFrom": "map_zone",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -3084,9 +2822,7 @@
       "indexes": {
         "placement_edition": {
           "name": "placement_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": true
         }
       },
@@ -3094,26 +2830,18 @@
         "placement_camp_id_camp_id_fk": {
           "name": "placement_camp_id_camp_id_fk",
           "tableFrom": "placement",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "placement_edition_id_camp_edition_id_fk": {
           "name": "placement_edition_id_camp_edition_id_fk",
           "tableFrom": "placement",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -3234,9 +2962,7 @@
       "indexes": {
         "camp_question_camp": {
           "name": "camp_question_camp",
-          "columns": [
-            "camp_id"
-          ],
+          "columns": ["camp_id"],
           "isUnique": false
         }
       },
@@ -3244,13 +2970,9 @@
         "camp_question_camp_id_camp_id_fk": {
           "name": "camp_question_camp_id_camp_id_fk",
           "tableFrom": "camp_question",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -3324,19 +3046,12 @@
       "indexes": {
         "question_answer_member": {
           "name": "question_answer_member",
-          "columns": [
-            "edition_id",
-            "membership_id"
-          ],
+          "columns": ["edition_id", "membership_id"],
           "isUnique": false
         },
         "question_answer_unique": {
           "name": "question_answer_unique",
-          "columns": [
-            "edition_id",
-            "membership_id",
-            "question_id"
-          ],
+          "columns": ["edition_id", "membership_id", "question_id"],
           "isUnique": true
         }
       },
@@ -3344,52 +3059,36 @@
         "question_answer_camp_id_camp_id_fk": {
           "name": "question_answer_camp_id_camp_id_fk",
           "tableFrom": "question_answer",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "question_answer_edition_id_camp_edition_id_fk": {
           "name": "question_answer_edition_id_camp_edition_id_fk",
           "tableFrom": "question_answer",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "question_answer_question_id_camp_question_id_fk": {
           "name": "question_answer_question_id_camp_question_id_fk",
           "tableFrom": "question_answer",
-          "columnsFrom": [
-            "question_id"
-          ],
+          "columnsFrom": ["question_id"],
           "tableTo": "camp_question",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "question_answer_membership_id_membership_id_fk": {
           "name": "question_answer_membership_id_membership_id_fk",
           "tableFrom": "question_answer",
-          "columnsFrom": [
-            "membership_id"
-          ],
+          "columnsFrom": ["membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -3500,9 +3199,7 @@
       "indexes": {
         "camp_invite_token_unique": {
           "name": "camp_invite_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         }
       },
@@ -3510,26 +3207,18 @@
         "camp_invite_camp_id_camp_id_fk": {
           "name": "camp_invite_camp_id_camp_id_fk",
           "tableFrom": "camp_invite",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "camp_invite_inviter_membership_id_membership_id_fk": {
           "name": "camp_invite_inviter_membership_id_membership_id_fk",
           "tableFrom": "camp_invite",
-          "columnsFrom": [
-            "inviter_membership_id"
-          ],
+          "columnsFrom": ["inviter_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -3581,10 +3270,7 @@
       "indexes": {
         "onboarding_completion_member_task": {
           "name": "onboarding_completion_member_task",
-          "columns": [
-            "membership_id",
-            "task_id"
-          ],
+          "columns": ["membership_id", "task_id"],
           "isUnique": true
         }
       },
@@ -3592,39 +3278,27 @@
         "onboarding_completion_camp_id_camp_id_fk": {
           "name": "onboarding_completion_camp_id_camp_id_fk",
           "tableFrom": "onboarding_completion",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "onboarding_completion_membership_id_membership_id_fk": {
           "name": "onboarding_completion_membership_id_membership_id_fk",
           "tableFrom": "onboarding_completion",
-          "columnsFrom": [
-            "membership_id"
-          ],
+          "columnsFrom": ["membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "onboarding_completion_task_id_onboarding_task_id_fk": {
           "name": "onboarding_completion_task_id_onboarding_task_id_fk",
           "tableFrom": "onboarding_completion",
-          "columnsFrom": [
-            "task_id"
-          ],
+          "columnsFrom": ["task_id"],
           "tableTo": "onboarding_task",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -3686,13 +3360,9 @@
         "onboarding_task_camp_id_camp_id_fk": {
           "name": "onboarding_task_camp_id_camp_id_fk",
           "tableFrom": "onboarding_task",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -3796,39 +3466,27 @@
         "recruit_application_camp_id_camp_id_fk": {
           "name": "recruit_application_camp_id_camp_id_fk",
           "tableFrom": "recruit_application",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "recruit_application_user_id_user_id_fk": {
           "name": "recruit_application_user_id_user_id_fk",
           "tableFrom": "recruit_application",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "recruit_application_reviewed_by_id_user_id_fk": {
           "name": "recruit_application_reviewed_by_id_user_id_fk",
           "tableFrom": "recruit_application",
-          "columnsFrom": [
-            "reviewed_by_id"
-          ],
+          "columnsFrom": ["reviewed_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -3917,10 +3575,7 @@
       "indexes": {
         "participation_member": {
           "name": "participation_member",
-          "columns": [
-            "edition_id",
-            "membership_id"
-          ],
+          "columns": ["edition_id", "membership_id"],
           "isUnique": true
         }
       },
@@ -3928,39 +3583,27 @@
         "participation_camp_id_camp_id_fk": {
           "name": "participation_camp_id_camp_id_fk",
           "tableFrom": "participation",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "participation_edition_id_camp_edition_id_fk": {
           "name": "participation_edition_id_camp_edition_id_fk",
           "tableFrom": "participation",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "participation_membership_id_membership_id_fk": {
           "name": "participation_membership_id_membership_id_fk",
           "tableFrom": "participation",
-          "columnsFrom": [
-            "membership_id"
-          ],
+          "columnsFrom": ["membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -4035,19 +3678,12 @@
       "indexes": {
         "wizard_ask_member": {
           "name": "wizard_ask_member",
-          "columns": [
-            "edition_id",
-            "membership_id"
-          ],
+          "columns": ["edition_id", "membership_id"],
           "isUnique": false
         },
         "wizard_ask_unique": {
           "name": "wizard_ask_unique",
-          "columns": [
-            "edition_id",
-            "membership_id",
-            "ask_key"
-          ],
+          "columns": ["edition_id", "membership_id", "ask_key"],
           "isUnique": true
         }
       },
@@ -4055,39 +3691,27 @@
         "wizard_ask_camp_id_camp_id_fk": {
           "name": "wizard_ask_camp_id_camp_id_fk",
           "tableFrom": "wizard_ask",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "wizard_ask_edition_id_camp_edition_id_fk": {
           "name": "wizard_ask_edition_id_camp_edition_id_fk",
           "tableFrom": "wizard_ask",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "wizard_ask_membership_id_membership_id_fk": {
           "name": "wizard_ask_membership_id_membership_id_fk",
           "tableFrom": "wizard_ask",
-          "columnsFrom": [
-            "membership_id"
-          ],
+          "columnsFrom": ["membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -4195,9 +3819,7 @@
       "indexes": {
         "client_error_created": {
           "name": "client_error_created",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         }
       },
@@ -4205,26 +3827,18 @@
         "client_error_user_id_user_id_fk": {
           "name": "client_error_user_id_user_id_fk",
           "tableFrom": "client_error",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "client_error_camp_id_camp_id_fk": {
           "name": "client_error_camp_id_camp_id_fk",
           "tableFrom": "client_error",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -4334,9 +3948,7 @@
       "indexes": {
         "feedback_created": {
           "name": "feedback_created",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         }
       },
@@ -4344,26 +3956,18 @@
         "feedback_user_id_user_id_fk": {
           "name": "feedback_user_id_user_id_fk",
           "tableFrom": "feedback",
-          "columnsFrom": [
-            "user_id"
-          ],
+          "columnsFrom": ["user_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "feedback_camp_id_camp_id_fk": {
           "name": "feedback_camp_id_camp_id_fk",
           "tableFrom": "feedback",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -4458,17 +4062,12 @@
       "indexes": {
         "setup_pass_edition": {
           "name": "setup_pass_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         },
         "setup_pass_member_date": {
           "name": "setup_pass_member_date",
-          "columns": [
-            "pass_date_id",
-            "membership_id"
-          ],
+          "columns": ["pass_date_id", "membership_id"],
           "isUnique": true
         }
       },
@@ -4476,78 +4075,54 @@
         "setup_pass_camp_id_camp_id_fk": {
           "name": "setup_pass_camp_id_camp_id_fk",
           "tableFrom": "setup_pass",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "setup_pass_edition_id_camp_edition_id_fk": {
           "name": "setup_pass_edition_id_camp_edition_id_fk",
           "tableFrom": "setup_pass",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "setup_pass_pass_date_id_setup_pass_date_id_fk": {
           "name": "setup_pass_pass_date_id_setup_pass_date_id_fk",
           "tableFrom": "setup_pass",
-          "columnsFrom": [
-            "pass_date_id"
-          ],
+          "columnsFrom": ["pass_date_id"],
           "tableTo": "setup_pass_date",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "setup_pass_membership_id_membership_id_fk": {
           "name": "setup_pass_membership_id_membership_id_fk",
           "tableFrom": "setup_pass",
-          "columnsFrom": [
-            "membership_id"
-          ],
+          "columnsFrom": ["membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "setup_pass_resolved_by_membership_id_membership_id_fk": {
           "name": "setup_pass_resolved_by_membership_id_membership_id_fk",
           "tableFrom": "setup_pass",
-          "columnsFrom": [
-            "resolved_by_membership_id"
-          ],
+          "columnsFrom": ["resolved_by_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "setup_pass_created_by_id_user_id_fk": {
           "name": "setup_pass_created_by_id_user_id_fk",
           "tableFrom": "setup_pass",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -4622,10 +4197,7 @@
       "indexes": {
         "setup_pass_date_unique": {
           "name": "setup_pass_date_unique",
-          "columns": [
-            "edition_id",
-            "date"
-          ],
+          "columns": ["edition_id", "date"],
           "isUnique": true
         }
       },
@@ -4633,26 +4205,18 @@
         "setup_pass_date_camp_id_camp_id_fk": {
           "name": "setup_pass_date_camp_id_camp_id_fk",
           "tableFrom": "setup_pass_date",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "setup_pass_date_edition_id_camp_edition_id_fk": {
           "name": "setup_pass_date_edition_id_camp_edition_id_fk",
           "tableFrom": "setup_pass_date",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -4748,9 +4312,7 @@
       "indexes": {
         "ticket_edition": {
           "name": "ticket_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         }
       },
@@ -4758,52 +4320,36 @@
         "ticket_camp_id_camp_id_fk": {
           "name": "ticket_camp_id_camp_id_fk",
           "tableFrom": "ticket",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "ticket_edition_id_camp_edition_id_fk": {
           "name": "ticket_edition_id_camp_edition_id_fk",
           "tableFrom": "ticket",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "ticket_assigned_membership_id_membership_id_fk": {
           "name": "ticket_assigned_membership_id_membership_id_fk",
           "tableFrom": "ticket",
-          "columnsFrom": [
-            "assigned_membership_id"
-          ],
+          "columnsFrom": ["assigned_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "ticket_created_by_id_user_id_fk": {
           "name": "ticket_created_by_id_user_id_fk",
           "tableFrom": "ticket",
-          "columnsFrom": [
-            "created_by_id"
-          ],
+          "columnsFrom": ["created_by_id"],
           "tableTo": "user",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }
@@ -4891,9 +4437,7 @@
       "indexes": {
         "ticket_request_edition": {
           "name": "ticket_request_edition",
-          "columns": [
-            "edition_id"
-          ],
+          "columns": ["edition_id"],
           "isUnique": false
         }
       },
@@ -4901,65 +4445,45 @@
         "ticket_request_camp_id_camp_id_fk": {
           "name": "ticket_request_camp_id_camp_id_fk",
           "tableFrom": "ticket_request",
-          "columnsFrom": [
-            "camp_id"
-          ],
+          "columnsFrom": ["camp_id"],
           "tableTo": "camp",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "ticket_request_edition_id_camp_edition_id_fk": {
           "name": "ticket_request_edition_id_camp_edition_id_fk",
           "tableFrom": "ticket_request",
-          "columnsFrom": [
-            "edition_id"
-          ],
+          "columnsFrom": ["edition_id"],
           "tableTo": "camp_edition",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "ticket_request_membership_id_membership_id_fk": {
           "name": "ticket_request_membership_id_membership_id_fk",
           "tableFrom": "ticket_request",
-          "columnsFrom": [
-            "membership_id"
-          ],
+          "columnsFrom": ["membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         },
         "ticket_request_resolved_ticket_id_ticket_id_fk": {
           "name": "ticket_request_resolved_ticket_id_ticket_id_fk",
           "tableFrom": "ticket_request",
-          "columnsFrom": [
-            "resolved_ticket_id"
-          ],
+          "columnsFrom": ["resolved_ticket_id"],
           "tableTo": "ticket",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         },
         "ticket_request_resolved_by_membership_id_membership_id_fk": {
           "name": "ticket_request_resolved_by_membership_id_membership_id_fk",
           "tableFrom": "ticket_request",
-          "columnsFrom": [
-            "resolved_by_membership_id"
-          ],
+          "columnsFrom": ["resolved_by_membership_id"],
           "tableTo": "membership",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "set null"
         }

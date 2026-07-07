@@ -3,10 +3,10 @@
 // (it provides `renderToReadableStream`). Since the production server runs
 // under Bun (see `server.ts`), render to a web ReadableStream instead.
 
-import type { EntryContext } from "react-router";
-import { ServerRouter } from "react-router";
 import { isbot } from "isbot";
 import { renderToReadableStream } from "react-dom/server";
+import type { EntryContext } from "react-router";
+import { ServerRouter } from "react-router";
 
 export default async function handleRequest(
   request: Request,
@@ -15,12 +15,13 @@ export default async function handleRequest(
   routerContext: EntryContext,
 ) {
   let shellRendered = false;
+  let statusCode = responseStatusCode;
 
   const body = await renderToReadableStream(
     <ServerRouter context={routerContext} url={request.url} />,
     {
       onError(error: unknown) {
-        responseStatusCode = 500;
+        statusCode = 500;
         // Errors thrown after the shell rendered are logged but not surfaced,
         // since the response has already started streaming.
         if (shellRendered) {
@@ -40,6 +41,6 @@ export default async function handleRequest(
   responseHeaders.set("Content-Type", "text/html");
   return new Response(body, {
     headers: responseHeaders,
-    status: responseStatusCode,
+    status: statusCode,
   });
 }
