@@ -178,6 +178,11 @@ files — shared tree); push + watch CI.
     (host acts for guests); officer assign Select is grouped Campers/Guests;
     assign resolves the ref via `ensureMemberAttendee`; request auto-resolve only
     for member refs. typecheck (my files) + build + biome green.
+    **DEPLOYED (commit 78e14c1, Deploy to firefly green) + browser-tested live:**
+    the ticket backfill preserved Cameron's real assigned+PURCHASED ticket through
+    the migration (shown via the new party "Your tickets" with his name label); the
+    officer table resolved the assignee name; the assign Select opened grouped with
+    a **Campers** section (Guests group would appear when guests exist). Didn't mutate.
   - [ ] **3a-passes — DEFERRED (migration collision).** Another thread generated
     migration **0056** concurrently (built on my uncommitted 0055), so my
     setup_pass migration landed as 0057 on top of theirs — entangled. Reverted the

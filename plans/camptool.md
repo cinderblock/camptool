@@ -571,6 +571,16 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   schedules, packing lists), grouped by category; everyone reads at `/documents`,
   officers add/remove. Links only (URL normalized/validated) — file upload would
   need storage infra (follow-up). **Phase 4 (Operations) complete.**
+- [~] **Schedule — gatherings/shifts/sign-ups + training/permissions (DESIGN
+  LANDED, build pending).** Officer-scheduled work parties / camp meetings / prep
+  sessions with **nested shifts/roles**, member sign-ups, capacity + all-hands /
+  all-available staffing, daily-through-event recurrence, **attendance +
+  substitution** tracking (record who actually covered a shift), and
+  **required-training sign-offs** gating signups (validity = lifetime /
+  per_edition / annual). Notifications = in-app first (Discord/email reminders
+  ride Phase 5). Named `gathering` internally to avoid colliding with the
+  event-layer `event`. Edition-scoped (training defs camp-scoped). Full design +
+  schema + phases: **`plans/events-scheduling.md`**.
 
 **Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
 the active year — finish setup (members), declare what you're bringing, dues owed
