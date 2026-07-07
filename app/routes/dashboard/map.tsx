@@ -3679,6 +3679,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             selectedIds={selectedIds}
             setSelectedIds={setSelectedIds}
             zones={zones}
+            setZones={setZones}
             selectedZoneId={selectedZoneId}
             setSelectedZoneId={setSelectedZoneId}
             cables={cables}
@@ -4109,6 +4110,7 @@ function Editor({
   selectedIds,
   setSelectedIds,
   zones,
+  setZones,
   selectedZoneId,
   setSelectedZoneId,
   cables,
@@ -4145,6 +4147,7 @@ function Editor({
   selectedIds: string[];
   setSelectedIds: React.Dispatch<React.SetStateAction<string[]>>;
   zones: ZoneRow[];
+  setZones: React.Dispatch<React.SetStateAction<ZoneRow[]>>;
   selectedZoneId: string | null;
   setSelectedZoneId: (id: string | null) => void;
   cables: CableRow[];
@@ -4261,6 +4264,18 @@ function Editor({
   const cableDrag = useRef<{ cableId: string; index: number } | null>(null);
   const liveCable = useRef<CableRow | null>(null);
   const [cableDragging, setCableDragging] = useState(false);
+  // Editing a selected zone: either dragging one vertex (`index` = number) or
+  // moving the whole polygon (`index` = "move", using the grab pointer + the
+  // zone's points at grab time). A live working copy is committed on pointer-up.
+  const zoneDrag = useRef<{
+    zoneId: string;
+    index: number | "move";
+    startFx: number;
+    startFy: number;
+    startPoints: ZonePt[];
+  } | null>(null);
+  const liveZone = useRef<ZoneRow | null>(null);
+  const [zoneDragging, setZoneDragging] = useState(false);
   // Drawing collects plot-local feet vertices for a zone (closed polygon) or a
   // power line (open polyline). `drawMode` is which, or null when not drawing.
   const [drawMode, setDrawMode] = useState<"zone" | "cable" | "road" | null>(
@@ -4393,6 +4408,20 @@ function Editor({
       window.removeEventListener("pointercancel", up);
     };
   }, [cableDragging]);
+
+  useEffect(() => {
+    if (!zoneDragging) return;
+    const move = (e: PointerEvent) => onZoneMove(e);
+    const up = () => endZoneDrag();
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [zoneDragging]);
 
   // Keyboard shortcuts for the selected object: R rotates (Shift = the other
   // way), arrows nudge (Shift = 10ft), Delete removes, Escape deselects.
@@ -5306,6 +5335,128 @@ function Editor({
     commitCable(next);
   }
 
+  // ---- Zone geometry editing (officers): move the whole polygon or drag/insert/
+  // delete individual vertices — snapped to the grid, like drawing a zone. ----
+  function commitZone(z: ZoneRow) {
+    fetcher.submit(
+      { intent: "updateZone", id: z.id, points: JSON.stringify(z.points) },
+      { method: "post" },
+    );
+  }
+  // Grab the zone body to move the whole polygon (first press also selects it).
+  function startZoneMove(e: React.PointerEvent, zone: ZoneRow) {
+    e.stopPropagation();
+    selectZone(zone.id);
+    if (!canManage) return;
+    e.preventDefault();
+    const p = svgPoint(e);
+    zoneDrag.current = {
+      zoneId: zone.id,
+      index: "move",
+      startFx: fx(p.x),
+      startFy: fy(p.y),
+      startPoints: zone.points,
+    };
+    liveZone.current = zone;
+    setZoneDragging(true);
+  }
+  function startZoneVertexDrag(
+    e: React.PointerEvent,
+    zone: ZoneRow,
+    index: number,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!canManage) return;
+    selectZone(zone.id);
+    zoneDrag.current = {
+      zoneId: zone.id,
+      index,
+      startFx: 0,
+      startFy: 0,
+      startPoints: zone.points,
+    };
+    liveZone.current = zone;
+    setZoneDragging(true);
+  }
+  // Insert a new vertex at a segment midpoint (segments wrap around the close),
+  // then immediately drag it.
+  function startZoneInsertDrag(
+    e: React.PointerEvent,
+    zone: ZoneRow,
+    segIndex: number,
+  ) {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!canManage) return;
+    const a = zone.points[segIndex];
+    const b = zone.points[(segIndex + 1) % zone.points.length];
+    if (!a || !b) return;
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const points = [
+      ...zone.points.slice(0, segIndex + 1),
+      mid,
+      ...zone.points.slice(segIndex + 1),
+    ];
+    const next = { ...zone, points };
+    selectZone(zone.id);
+    zoneDrag.current = {
+      zoneId: zone.id,
+      index: segIndex + 1,
+      startFx: 0,
+      startFy: 0,
+      startPoints: zone.points,
+    };
+    liveZone.current = next;
+    setZones((prev) => prev.map((z) => (z.id === zone.id ? next : z)));
+    setZoneDragging(true);
+  }
+  function onZoneMove(e: { clientX: number; clientY: number }) {
+    const d = zoneDrag.current;
+    const z = liveZone.current;
+    if (!d || !z) return;
+    const p = svgPoint(e);
+    let points: ZonePt[];
+    if (d.index === "move") {
+      const dx = fx(p.x) - d.startFx;
+      const dy = fy(p.y) - d.startFy;
+      points = d.startPoints.map((pt) => ({
+        x: snapGrid(clampPadX(pt.x + dx)),
+        y: snapGrid(clampPadY(pt.y + dy)),
+      }));
+    } else {
+      const pt = placeCablePoint(fx(p.x), fy(p.y));
+      points = z.points.map((q, i) => (i === d.index ? pt : q));
+    }
+    const next = { ...z, points };
+    liveZone.current = next;
+    setZones((prev) => prev.map((x) => (x.id === d.zoneId ? next : x)));
+  }
+  function endZoneDrag() {
+    const d = zoneDrag.current;
+    const z = liveZone.current;
+    zoneDrag.current = null;
+    liveZone.current = null;
+    setZoneDragging(false);
+    if (!d || !z) return;
+    // Only persist an actual change (a plain click must not write a no-op).
+    const changed =
+      d.startPoints.length !== z.points.length ||
+      z.points.some((p, i) => {
+        const s = d.startPoints[i];
+        return !s || round(p.x) !== round(s.x) || round(p.y) !== round(s.y);
+      });
+    if (changed) commitZone(z);
+  }
+  // Remove a vertex (a polygon keeps at least 3).
+  function deleteZoneVertex(zone: ZoneRow, index: number) {
+    if (!canManage || zone.points.length <= 3) return;
+    const points = zone.points.filter((_, i) => i !== index);
+    const next = { ...zone, points };
+    setZones((prev) => prev.map((z) => (z.id === zone.id ? next : z)));
+    commitZone(next);
+  }
+
   function onMove(e: { clientX: number; clientY: number }) {
     // Group gesture (multi-select move/rotate) takes precedence.
     const g = groupDrag.current;
@@ -6195,11 +6346,10 @@ function Editor({
                     stroke={z.color}
                     strokeWidth={sel ? 2.5 : 1.5}
                     strokeDasharray="6 4"
-                    style={{ cursor: "pointer" }}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      selectZone(z.id);
+                    style={{
+                      cursor: sel && canManage ? "move" : "pointer",
                     }}
+                    onPointerDown={(e) => startZoneMove(e, z)}
                   />
                   <text
                     x={originX + cxFt * ppf}
@@ -6213,6 +6363,54 @@ function Editor({
                   >
                     {z.name ?? zoneKindLabel(z.kind)}
                   </text>
+                  {/* Edit handles on the selected zone (officers): midpoint "+"
+                  inserts a vertex, vertex handles drag to reshape, double-click
+                  removes. Segments wrap around the polygon close. */}
+                  {sel && canManage && drawMode === null ? (
+                    <>
+                      {z.points.map((p, i) => {
+                        const q = z.points[(i + 1) % z.points.length];
+                        if (!q) return null;
+                        return (
+                          <circle
+                            key={`${z.id}-add-${i}`}
+                            cx={originX + ((p.x + q.x) / 2) * ppf}
+                            cy={originY + ((p.y + q.y) / 2) * ppf}
+                            r={4}
+                            fill="#fff"
+                            stroke={z.color}
+                            strokeWidth={1.5}
+                            strokeDasharray="2 2"
+                            style={{ cursor: "copy" }}
+                            onPointerDown={(e) => startZoneInsertDrag(e, z, i)}
+                          >
+                            <title>Drag to add a point</title>
+                          </circle>
+                        );
+                      })}
+                      {z.points.map((p, i) => (
+                        <circle
+                          key={`${z.id}-vtx-${i}`}
+                          cx={originX + p.x * ppf}
+                          cy={originY + p.y * ppf}
+                          r={5}
+                          fill="#fff"
+                          stroke={z.color}
+                          strokeWidth={2.5}
+                          style={{ cursor: "grab" }}
+                          onPointerDown={(e) => startZoneVertexDrag(e, z, i)}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            deleteZoneVertex(z, i);
+                          }}
+                        >
+                          <title>
+                            Drag to reshape · double-click to remove
+                          </title>
+                        </circle>
+                      ))}
+                    </>
+                  ) : null}
                 </g>
               );
             })}
