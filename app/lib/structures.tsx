@@ -869,6 +869,31 @@ const CORE_KINDS = [
       },
     ],
   },
+  // Fire pit / burn barrel — an open flame. The map draws a keep-clear ring
+  // (default 20′, the Burning Man open-fire clearance kept free of combustibles).
+  {
+    value: "fire-pit",
+    label: "Fire pit / barrel",
+    color: "#f03e3e",
+    w: 4,
+    h: 4,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Power",
+    tags: ["structure"],
+    personal: false,
+    controls: [
+      {
+        key: "clearFt",
+        label: "Clearance (ft)",
+        min: 0,
+        max: 100,
+        step: 5,
+        default: 20,
+      },
+    ],
+  },
   // A solar/sun shower or shower stall.
   {
     value: "shower",

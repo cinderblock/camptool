@@ -6920,6 +6920,17 @@ function Editor({
                   ),
                 ];
               }
+              if (o.kind === "fire-pit") {
+                const cf = o.config.clearFt ?? 20;
+                return [
+                  ring(
+                    cf,
+                    "#f03e3e",
+                    `${Math.round(cf)}′ clear — no combustibles`,
+                    `${o.id}-fire`,
+                  ),
+                ];
+              }
               return [];
             })}
             {/* Canopies (shade/carport/popup/…) render last so they sit over the
