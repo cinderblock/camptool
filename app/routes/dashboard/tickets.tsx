@@ -18,15 +18,17 @@ import {
 } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
+import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { isBurningMan } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import {
+  attendee,
   campEdition,
   membership,
   ticket,
@@ -44,10 +46,16 @@ type TicketRow = {
   tier: string | null;
   priceCents: number | null;
   status: string;
-  assignedMembershipId: string | null;
+  // The assignee as a picker ref: `m:<membershipId>` | `a:<attendeeId>` | null.
+  assigneeRef: string | null;
   assigneeName: string | null;
+  // The assignee is a guest (vs the assigned member themselves).
+  assigneeIsGuest: boolean;
+  // The assignee is in the viewer's party (their own row or one of their guests).
+  mine: boolean;
   notes: string | null;
 };
+type AssignGroup = { group: string; items: { value: string; label: string }[] };
 type RequestRow = {
   id: string;
   membershipId: string;
@@ -64,33 +72,58 @@ export async function loader({ request }: Route.LoaderArgs) {
   const published = activeEdition.ticketsPublishedAt != null;
   const myMembershipId = active.membership.id;
 
-  const allTickets = (
-    await db
-      .select({
-        id: ticket.id,
-        tier: ticket.tier,
-        priceCents: ticket.priceCents,
-        status: ticket.status,
-        assignedMembershipId: ticket.assignedMembershipId,
-        assigneeName: user.name,
-        notes: ticket.notes,
-      })
-      .from(ticket)
-      .leftJoin(membership, eq(ticket.assignedMembershipId, membership.id))
-      .leftJoin(user, eq(membership.userId, user.id))
-      .where(eq(ticket.editionId, editionId))
-  ).sort(
-    (a, b) =>
-      (a.priceCents ?? Number.POSITIVE_INFINITY) -
-        (b.priceCents ?? Number.POSITIVE_INFINITY) || a.id.localeCompare(b.id),
-  ) satisfies TicketRow[];
+  const rawTickets = await db
+    .select({
+      id: ticket.id,
+      tier: ticket.tier,
+      priceCents: ticket.priceCents,
+      status: ticket.status,
+      notes: ticket.notes,
+      assignedAttendeeId: ticket.assignedAttendeeId,
+      attMembershipId: attendee.membershipId,
+      attHostId: attendee.hostMembershipId,
+      guestName: attendee.name,
+      memberName: user.name,
+    })
+    .from(ticket)
+    .leftJoin(attendee, eq(ticket.assignedAttendeeId, attendee.id))
+    .leftJoin(membership, eq(attendee.membershipId, membership.id))
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(eq(ticket.editionId, editionId));
+
+  const allTickets: TicketRow[] = rawTickets
+    .map((t) => ({
+      id: t.id,
+      tier: t.tier,
+      priceCents: t.priceCents,
+      status: t.status,
+      notes: t.notes,
+      // Members resolve to m:<membershipId> (stable even before an attendee row);
+      // guests to a:<attendeeId>.
+      assigneeRef: t.attMembershipId
+        ? `m:${t.attMembershipId}`
+        : t.assignedAttendeeId
+          ? `a:${t.assignedAttendeeId}`
+          : null,
+      assigneeName: t.guestName ?? t.memberName ?? null,
+      assigneeIsGuest:
+        t.assignedAttendeeId != null && t.attMembershipId == null,
+      mine:
+        t.attMembershipId === myMembershipId || t.attHostId === myMembershipId,
+    }))
+    .sort(
+      (a, b) =>
+        (a.priceCents ?? Number.POSITIVE_INFINITY) -
+          (b.priceCents ?? Number.POSITIVE_INFINITY) ||
+        a.id.localeCompare(b.id),
+    );
 
   // Assignments are a draft until published: officers see the whole allocation;
-  // a member sees only their own ticket, and only once it's published.
+  // a member sees only their party's tickets, and only once it's published.
   const tickets = isOfficer
     ? allTickets
     : published
-      ? allTickets.filter((t) => t.assignedMembershipId === myMembershipId)
+      ? allTickets.filter((t) => t.mine)
       : [];
 
   const requests = (await db
@@ -106,16 +139,45 @@ export async function loader({ request }: Route.LoaderArgs) {
     .leftJoin(user, eq(membership.userId, user.id))
     .where(eq(ticketRequest.editionId, editionId))) satisfies RequestRow[];
 
-  // Camp members for the officer assign Select.
-  const members = isOfficer
-    ? (
-        await db
-          .select({ id: membership.id, name: user.name })
-          .from(membership)
-          .innerJoin(user, eq(membership.userId, user.id))
-          .where(eq(membership.organizationId, active.camp.id))
-      ).sort((a, b) => a.name.localeCompare(b.name))
-    : [];
+  // Officer assign Select: camp members + all guests, grouped. Members carry a
+  // m:<membershipId> ref (their attendee row is created on assign if missing);
+  // guests carry a:<attendeeId>.
+  let assignGroups: AssignGroup[] = [];
+  if (isOfficer) {
+    const memberRows = (
+      await db
+        .select({ id: membership.id, name: user.name })
+        .from(membership)
+        .innerJoin(user, eq(membership.userId, user.id))
+        .where(eq(membership.organizationId, active.camp.id))
+    ).sort((a, b) => a.name.localeCompare(b.name));
+    const guestRows = await db
+      .select({ id: attendee.id, name: attendee.name })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          isNotNull(attendee.hostMembershipId),
+        ),
+      );
+    assignGroups = [
+      {
+        group: "Campers",
+        items: memberRows.map((m) => ({ value: `m:${m.id}`, label: m.name })),
+      },
+      ...(guestRows.length > 0
+        ? [
+            {
+              group: "Guests",
+              items: guestRows.map((g) => ({
+                value: `a:${g.id}`,
+                label: `${g.name ?? "Guest"} (guest)`,
+              })),
+            },
+          ]
+        : []),
+    ];
+  }
 
   return {
     isOfficer,
@@ -128,7 +190,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     saleEndsAt: activeEdition.ticketSaleEndsAt,
     tickets,
     requests,
-    members,
+    assignGroups,
   };
 }
 
@@ -202,19 +264,27 @@ export async function action({ request }: Route.ActionArgs) {
   // vendor. Scoped to their own assigned ticket so no one can flip another's.
   if (intent === "markPurchased" || intent === "unmarkPurchased") {
     const purchased = intent === "markPurchased";
+    const ticketId = String(form.get("ticketId"));
+    // The host may mark purchased for their own ticket OR one of their guests'.
+    const [row] = await db
+      .select({
+        attMid: attendee.membershipId,
+        attHostId: attendee.hostMembershipId,
+      })
+      .from(ticket)
+      .leftJoin(attendee, eq(ticket.assignedAttendeeId, attendee.id))
+      .where(and(eq(ticket.id, ticketId), eq(ticket.editionId, editionId)))
+      .limit(1);
+    if (!row || (row.attMid !== myMid && row.attHostId !== myMid)) {
+      return data({ error: "Not your ticket." }, { status: 403 });
+    }
     await db
       .update(ticket)
       .set({
         status: purchased ? "purchased" : "assigned",
         updatedAt: new Date(),
       })
-      .where(
-        and(
-          eq(ticket.id, String(form.get("ticketId"))),
-          eq(ticket.editionId, editionId),
-          eq(ticket.assignedMembershipId, myMid),
-        ),
-      );
+      .where(and(eq(ticket.id, ticketId), eq(ticket.editionId, editionId)));
     return data({ ok: purchased ? "Marked purchased." : "Undone." });
   }
 
@@ -302,34 +372,70 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "assignTicket") {
     const ticketId = String(form.get("ticketId"));
-    const targetMid = str("membershipId");
-    if (!targetMid) {
-      return data({ error: "Pick a member." }, { status: 400 });
+    // `m:<membershipId>` (a member) or `a:<attendeeId>` (a guest).
+    const ref = str("assigneeRef");
+    if (!ref) return data({ error: "Pick someone." }, { status: 400 });
+    let attendeeId: string | null = null;
+    let resolvedMid: string | null = null;
+    if (ref.startsWith("m:")) {
+      const targetMid = ref.slice(2);
+      const [tm] = await db
+        .select({ id: membership.id })
+        .from(membership)
+        .where(
+          and(
+            eq(membership.id, targetMid),
+            eq(membership.organizationId, campId),
+          ),
+        )
+        .limit(1);
+      if (!tm) return data({ error: "Unknown member." }, { status: 400 });
+      attendeeId = await ensureMemberAttendee(campId, editionId, targetMid);
+      resolvedMid = targetMid;
+    } else if (ref.startsWith("a:")) {
+      const aid = ref.slice(2);
+      const [g] = await db
+        .select({ id: attendee.id })
+        .from(attendee)
+        .where(
+          and(
+            eq(attendee.id, aid),
+            eq(attendee.campId, campId),
+            eq(attendee.editionId, editionId),
+          ),
+        )
+        .limit(1);
+      if (!g) return data({ error: "Unknown guest." }, { status: 400 });
+      attendeeId = aid;
     }
+    if (!attendeeId) return data({ error: "Pick someone." }, { status: 400 });
+
     await db
       .update(ticket)
       .set({
-        assignedMembershipId: targetMid,
+        assignedAttendeeId: attendeeId,
         status: "assigned",
         updatedAt: new Date(),
       })
       .where(ownTicket(ticketId));
-    // Auto-resolve any pending request from that member.
-    await db
-      .update(ticketRequest)
-      .set({
-        status: "approved",
-        resolvedTicketId: ticketId,
-        resolvedByMembershipId: myMid,
-        resolvedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(ticketRequest.editionId, editionId),
-          eq(ticketRequest.membershipId, targetMid),
-          eq(ticketRequest.status, "pending"),
-        ),
-      );
+    // Auto-resolve any pending request from that member (guests don't request).
+    if (resolvedMid) {
+      await db
+        .update(ticketRequest)
+        .set({
+          status: "approved",
+          resolvedTicketId: ticketId,
+          resolvedByMembershipId: myMid,
+          resolvedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(ticketRequest.editionId, editionId),
+            eq(ticketRequest.membershipId, resolvedMid),
+            eq(ticketRequest.status, "pending"),
+          ),
+        );
+    }
     return data({ ok: "Ticket assigned." });
   }
 
@@ -337,7 +443,7 @@ export async function action({ request }: Route.ActionArgs) {
     await db
       .update(ticket)
       .set({
-        assignedMembershipId: null,
+        assignedAttendeeId: null,
         status: "available",
         updatedAt: new Date(),
       })
@@ -402,7 +508,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
     saleEndsAt,
     tickets,
     requests,
-    members,
+    assignGroups,
   } = loaderData;
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
@@ -416,9 +522,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
         }.`
       : null;
 
-  const myTickets = tickets.filter(
-    (t) => t.assignedMembershipId === myMembershipId,
-  );
+  const myTickets = tickets.filter((t) => t.mine);
   const myRequest = requests.find(
     (r) => r.membershipId === myMembershipId && r.status === "pending",
   );
@@ -428,8 +532,6 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
   const assigned = tickets.filter((t) => t.status === "assigned").length;
   // What's still outstanding — anything not yet member-confirmed as purchased.
   const unpurchased = tickets.filter((t) => t.status !== "purchased").length;
-
-  const memberData = members.map((m) => ({ value: m.id, label: m.name }));
 
   return (
     <Container size="lg">
@@ -469,7 +571,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
               </Text>
             ) : myTickets.length === 0 ? (
               <Text size="sm" c="dimmed">
-                None assigned to you yet.
+                None assigned to you or your party yet.
               </Text>
             ) : (
               <Stack gap="sm">
@@ -642,7 +744,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
                       key={t.id}
                       t={t}
                       fetcher={fetcher}
-                      memberData={memberData}
+                      assignGroups={assignGroups}
                       locked={locked}
                     />
                   ))}
@@ -761,6 +863,17 @@ function MyTicket({
 }) {
   return (
     <Group gap="sm">
+      {t.assigneeName ? (
+        <Text size="sm" fw={500}>
+          {t.assigneeName}
+          {t.assigneeIsGuest ? (
+            <Text span c="dimmed" size="xs">
+              {" "}
+              (guest)
+            </Text>
+          ) : null}
+        </Text>
+      ) : null}
       <Badge size="lg" variant="light" color={STATUS_COLOR[t.status] ?? "gray"}>
         {t.tier ? `${t.tier} · ` : ""}
         {usd(t.priceCents)} · {t.status}
@@ -852,12 +965,12 @@ function SaleWindowForm({
 function TicketRowView({
   t,
   fetcher,
-  memberData,
+  assignGroups,
   locked,
 }: {
   t: TicketRow;
   fetcher: ReturnType<typeof useFetcher>;
-  memberData: { value: string; label: string }[];
+  assignGroups: AssignGroup[];
   locked: boolean;
 }) {
   return (
@@ -898,10 +1011,10 @@ function TicketRowView({
         ) : (
           <Select
             size="xs"
-            w={170}
+            w={190}
             placeholder="— pool —"
-            data={memberData}
-            value={t.assignedMembershipId}
+            data={assignGroups}
+            value={t.assigneeRef}
             searchable
             clearable
             onChange={(value) => {
@@ -910,7 +1023,7 @@ function TicketRowView({
                   {
                     intent: "assignTicket",
                     ticketId: t.id,
-                    membershipId: value,
+                    assigneeRef: value,
                   },
                   { method: "post" },
                 );

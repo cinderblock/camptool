@@ -163,8 +163,53 @@ files — shared tree); push + watch CI.
       `m:`/`a:` prefixed refs → resolved to an attendeeId via
       `ensureMemberAttendee`); occupant badges show guests in grape. `map.tsx`
       snapshot code is column-agnostic (untouched). typecheck + build + biome green.
-- [ ] Phase 3 — tickets + SAPs per attendee.
+      **DEPLOYED (commit 29d1613, Deploy to firefly green) + browser-checked live:**
+      the wizard Sharing step loaded on real prod data (occupant loader join works),
+      Cameron's Hyparhut showed the grouped "Add someone…" picker with a **Campers**
+      group listing members (no guests group since he had none). Didn't mutate prod.
+- [~] Phase 3 — tickets + SAPs per attendee (3a host-managed, user-picked).
+  - [x] **3a-tickets (CODE COMPLETE, green; not browser-tested).** 2026-07-07.
+    `ticket.assigned_membership_id` → `assigned_attendee_id` (member OR guest).
+    **Migration 0054** (add col + backfill: ensure attendee for each assigned
+    member, then link) + **0055** (drop membership col, rebuild). Verified full
+    chain + backfill on a DB copy. `tickets.tsx`: loader resolves each ticket's
+    assignee to a `m:`/`a:` ref + a `mine` flag (my own row OR my guests);
+    "Your tickets" shows the whole party with names + per-ticket mark-purchased
+    (host acts for guests); officer assign Select is grouped Campers/Guests;
+    assign resolves the ref via `ensureMemberAttendee`; request auto-resolve only
+    for member refs. typecheck (my files) + build + biome green.
+  - [ ] **3a-passes — DEFERRED (migration collision).** Another thread generated
+    migration **0056** concurrently (built on my uncommitted 0055), so my
+    setup_pass migration landed as 0057 on top of theirs — entangled. Reverted the
+    setup_pass schema change + deleted the 0057 files; will redo `setup_pass`
+    (`membership_id` → `attendee_id`) once 0056 is committed and the numbering
+    settles. `passes.tsx` stays member-only until then.
 - [ ] Phase 4 — promote attendee → recruit/member.
+
+## Design notes for Phases 3–4 (surfaced to user 2026-07-07)
+
+**Phase 3 tension.** Today `ticket.assignedMembershipId` / `setup_pass.membershipId`
+assume the assignee is a **logged-in member**: the member self-requests, sees
+"Your tickets", and self-marks purchased; SAPs are member-requested. A **guest has
+no account**, so a guest's ticket/SAP must be **managed by their host** (or an
+officer), not self-served. Options for guest tickets/SAPs:
+  - **(3a) Host-managed** — repoint assignee to `attendeeId`; a guest's
+    ticket/SAP is requested + marked-purchased by their host (the host sees their
+    party's tickets under "Your tickets"). Officers assign to any attendee. Most
+    faithful to "each body needs a ticket", moderate rework of tickets/passes.
+  - **(3b) Promote-first** — DON'T make tickets/SAPs guest-assignable; instead a
+    guest who needs their own ticket gets **promoted to a member** (Phase 4) and
+    then uses the normal self-service. Simplest; leans on Phase 4; a guest with no
+    account never holds a ticket row.
+  - **(3c) Headcount-only** — guests count toward "how many tickets/SAPs we need"
+    (a needs tally) but are never assigned individual ticket rows. Lightest.
+
+**Phase 4 (promotion) mechanics.** A guest with an `email` → officer/host sends a
+better-auth org **invitation** (role recruit/member). On accept, the new membership
+must **link back onto the guest's attendee row** (set `membership_id`, clear
+`host_membership_id`) so occupancy/tickets follow. Needs a stored
+"invitation → attendee" link applied at accept time (hook in the invite-redeem path,
+`i.$token.tsx` / org invitation accept).
 
 ## Findings / gotchas
 

@@ -30,6 +30,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { attendee } from "./attendee";
 import { user } from "./auth";
 import { camp, campEdition, membership } from "./camp";
 
@@ -49,9 +50,10 @@ export const ticket = sqliteTable(
     tier: text("tier"),
     // Integer cents — the ticket's value as set by the vendor. Null = TBD; 0 = free.
     priceCents: integer("price_cents"),
-    // The member this ticket is allocated to; null = still in the pool.
-    assignedMembershipId: text("assigned_membership_id").references(
-      () => membership.id,
+    // The attendee this ticket is allocated to — a member OR a host-managed
+    // guest (so a guest can hold their own ticket); null = still in the pool.
+    assignedAttendeeId: text("assigned_attendee_id").references(
+      () => attendee.id,
       { onDelete: "set null" },
     ),
     // available (in pool) -> assigned (allocated to a member) -> purchased
