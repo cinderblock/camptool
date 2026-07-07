@@ -1665,6 +1665,23 @@ export async function action({ request }: Route.ActionArgs) {
           .set({ groupId, updatedAt: new Date() })
           .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
       }
+      // Zones can share the block too.
+      let rawZ: unknown;
+      try {
+        rawZ = JSON.parse(String(form.get("zoneIds") ?? "[]"));
+      } catch {
+        rawZ = [];
+      }
+      if (Array.isArray(rawZ)) {
+        for (const v of rawZ.slice(0, 300)) {
+          const id = String(v ?? "");
+          if (!id) continue;
+          await db
+            .update(mapZone)
+            .set({ groupId, updatedAt: new Date() })
+            .where(and(eq(mapZone.id, id), eq(mapZone.editionId, editionId)));
+        }
+      }
       return data({ ok: true });
     }
 
@@ -3886,11 +3903,19 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                           selectedIds.includes(o.id) ? { ...o, groupId } : o,
                         ),
                       );
+                      setZones((prev) =>
+                        prev.map((z) =>
+                          selectedZoneIds.includes(z.id)
+                            ? { ...z, groupId }
+                            : z,
+                        ),
+                      );
                       fetcher.submit(
                         {
                           intent: "linkObjects",
                           groupId,
                           ids: JSON.stringify(selectedIds),
+                          zoneIds: JSON.stringify(selectedZoneIds),
                         },
                         { method: "post" },
                       );
@@ -3900,6 +3925,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                   </Button>
                   {objects.some(
                     (o) => selectedIds.includes(o.id) && o.groupId,
+                  ) ||
+                  zones.some(
+                    (z) => selectedZoneIds.includes(z.id) && z.groupId,
                   ) ? (
                     <Button
                       size="compact-xs"
@@ -3913,10 +3941,18 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                               : o,
                           ),
                         );
+                        setZones((prev) =>
+                          prev.map((z) =>
+                            selectedZoneIds.includes(z.id)
+                              ? { ...z, groupId: null }
+                              : z,
+                          ),
+                        );
                         fetcher.submit(
                           {
                             intent: "unlinkObjects",
                             ids: JSON.stringify(selectedIds),
+                            zoneIds: JSON.stringify(selectedZoneIds),
                           },
                           { method: "post" },
                         );
@@ -5082,19 +5118,29 @@ function Editor({
     setDragging(true);
   }
 
-  // Expand a set of ids to include every member of any linked block touched, so
-  // a "stuck" block always selects + moves as a whole.
-  function expandGroups(ids: string[]): string[] {
+  // Expand a mixed object/zone set to include every member of any linked block
+  // touched (a block may span objects AND zones sharing a `group_id`).
+  function expandBlock(
+    objIds: string[],
+    znIds: string[],
+  ): { objIds: string[]; znIds: string[] } {
     const groups = new Set<string>();
-    for (const id of ids) {
+    for (const id of objIds) {
       const o = objects.find((x) => x.id === id);
       if (o?.groupId) groups.add(o.groupId);
     }
-    if (groups.size === 0) return ids;
-    const set = new Set(ids);
+    for (const id of znIds) {
+      const z = zones.find((x) => x.id === id);
+      if (z?.groupId) groups.add(z.groupId);
+    }
+    if (groups.size === 0) return { objIds, znIds };
+    const oset = new Set(objIds);
+    const zset = new Set(znIds);
     for (const o of objects)
-      if (o.groupId && groups.has(o.groupId)) set.add(o.id);
-    return [...set];
+      if (o.groupId && groups.has(o.groupId)) oset.add(o.id);
+    for (const z of zones)
+      if (z.groupId && groups.has(z.groupId)) zset.add(z.id);
+    return { objIds: [...oset], znIds: [...zset] };
   }
 
   function startDrag(
@@ -5118,14 +5164,21 @@ function Editor({
       selectedIds[0] === o.id;
     if (mode === "move") setRotateArmedId(wasSole ? o.id : null);
 
-    // Shift-click toggles this object (or its whole linked block) in the selection.
+    // Shift-click toggles this object (+ its whole linked block, incl. any linked
+    // zones) in the selection.
     if (mode === "move" && e.shiftKey) {
       setRotateArmedId(null);
-      const grp = expandGroups([o.id]);
+      const blk = expandBlock([o.id], []);
+      const adding = !selectedIds.includes(o.id);
       setSelectedIds((prev) =>
-        prev.includes(o.id)
-          ? prev.filter((id) => !grp.includes(id))
-          : Array.from(new Set([...prev, ...grp])),
+        adding
+          ? Array.from(new Set([...prev, ...blk.objIds]))
+          : prev.filter((id) => !blk.objIds.includes(id)),
+      );
+      setSelectedZoneIds((prev) =>
+        adding
+          ? Array.from(new Set([...prev, ...blk.znIds]))
+          : prev.filter((id) => !blk.znIds.includes(id)),
       );
       setSelectedId(o.id);
       return;
@@ -5143,10 +5196,11 @@ function Editor({
       workIds = selectedIds;
       workZoneIds = selectedZoneIds;
     } else {
-      workIds = expandGroups([o.id]);
-      workZoneIds = [];
+      const blk = expandBlock([o.id], []);
+      workIds = blk.objIds;
+      workZoneIds = blk.znIds;
       setSelectedIds(workIds);
-      setSelectedZoneIds([]);
+      setSelectedZoneIds(workZoneIds);
     }
     setSelectedId(o.id);
     if (!editable(o)) return;
@@ -5248,22 +5302,22 @@ function Editor({
     const xHi = Math.max(m.x0, m.x1);
     const yLo = Math.min(m.y0, m.y1);
     const yHi = Math.max(m.y0, m.y1);
-    const boxed = expandGroups(
-      objects
-        .filter((o) => {
-          const cx = o.x + o.width / 2;
-          const cy = o.y + o.height / 2;
-          return cx >= xLo && cx <= xHi && cy >= yLo && cy <= yHi;
-        })
-        .map((o) => o.id),
-    );
-    // Zones whose centroid falls inside the box join the selection too.
-    const boxedZones = zones
+    // Objects + zones whose centroid falls inside the box (expanded to whole
+    // linked blocks).
+    const rawObjs = objects
+      .filter((o) => {
+        const cx = o.x + o.width / 2;
+        const cy = o.y + o.height / 2;
+        return cx >= xLo && cx <= xHi && cy >= yLo && cy <= yHi;
+      })
+      .map((o) => o.id);
+    const rawZones = zones
       .filter((z) => {
         const c = zoneCentroid(z);
         return c.x >= xLo && c.x <= xHi && c.y >= yLo && c.y <= yHi;
       })
       .map((z) => z.id);
+    const { objIds: boxed, znIds: boxedZones } = expandBlock(rawObjs, rawZones);
     setSelectedIds((prev) => {
       const ids = m.additive ? Array.from(new Set([...prev, ...boxed])) : boxed;
       setSelectedId(ids[ids.length - 1] ?? null);
@@ -5452,10 +5506,17 @@ function Editor({
     if (e.shiftKey && canManage) {
       e.preventDefault();
       setRotateArmedId(null);
+      const blk = expandBlock([], [zone.id]);
+      const adding = !selectedZoneIds.includes(zone.id);
       setSelectedZoneIds((prev) =>
-        prev.includes(zone.id)
-          ? prev.filter((id) => id !== zone.id)
-          : [...prev, zone.id],
+        adding
+          ? Array.from(new Set([...prev, ...blk.znIds]))
+          : prev.filter((id) => !blk.znIds.includes(id)),
+      );
+      setSelectedIds((prev) =>
+        adding
+          ? Array.from(new Set([...prev, ...blk.objIds]))
+          : prev.filter((id) => !blk.objIds.includes(id)),
       );
       setSelectedZoneId(zone.id);
       return;
@@ -5463,6 +5524,35 @@ function Editor({
     const inMulti =
       selectedIds.length + selectedZoneIds.length > 1 &&
       selectedZoneIds.includes(zone.id);
+    // A fresh grab of a LINKED zone selects + moves its whole block.
+    const blk = inMulti ? null : expandBlock([], [zone.id]);
+    if (blk && blk.objIds.length + blk.znIds.length > 1) {
+      setSelectedIds(blk.objIds);
+      setSelectedZoneIds(blk.znIds);
+      setSelectedZoneId(zone.id);
+      setSelectedId(blk.objIds[0] ?? null);
+      if (!canManage) return;
+      e.preventDefault();
+      const p = svgPoint(e);
+      const items = objects.filter((x) => blk.objIds.includes(x.id));
+      const zns = zones.filter((z) => blk.znIds.includes(z.id));
+      groupDrag.current = {
+        mode: "move",
+        startFx: fx(p.x),
+        startFy: fy(p.y),
+        cx: 0,
+        cy: 0,
+        items: items.map((x) => ({
+          id: x.id,
+          x: x.x,
+          y: x.y,
+          rotation: x.rotation,
+        })),
+        zoneItems: zns.map((z) => ({ id: z.id, points: z.points })),
+      };
+      setDragging(true);
+      return;
+    }
     if (!inMulti) selectZone(zone.id);
     if (!canManage) return;
     e.preventDefault();

@@ -62,4 +62,17 @@ points, `updateGroup` intent, marquee + shift-click + group-handle + rendering.
 zone ids → `map_zone.group_id`; the "Link" action groups a mixed selection.
 
 ## Progress log
-- (start) plan written; implementing P1.
+- P1 — `map_zone.group_id` (migration 0047, hand-trimmed to exclude another
+  thread's member_flag) + ZoneRow plumbing. Committed b559949, deploy green.
+- P2 — multi-select (shift-click/marquee) + group move/rotate incl. zones;
+  `updateObjects` carries a `zones` payload; group box/handle/count span both.
+  Committed 6b7fffc, deploy green. Verified: object+zone → "2 items selected" +
+  group box renders.
+- P3 — linked blocks incl. zones: `expandBlock(objIds,znIds)` spans both;
+  link/unlink accept `zoneIds` → `map_zone.group_id`; startDrag/startZoneMove/
+  marquee/shift-click pull in the whole block; removed dead `expandGroups`.
+
+## Known follow-ups (not done)
+- Keyboard group ops (arrows nudge, R/Space rotate, Del) still act on objects
+  only — a mixed group won't nudge/rotate/delete its zones via keyboard (the drag
+  handle covers move+rotate). Add if wanted.
