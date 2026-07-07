@@ -576,6 +576,8 @@ type ZoneRow = {
   kind: string;
   color: string;
   points: ZonePt[];
+  // Linked-block id (shared with objects/zones that move together). NULL = none.
+  groupId: string | null;
   notes: string | null;
 };
 
@@ -1011,6 +1013,7 @@ async function loadClientMap(editionId: string) {
       kind: z.kind,
       color: z.color,
       points: parseZonePoints(z.points),
+      groupId: z.groupId,
       notes: z.notes,
     })) satisfies ZoneRow[],
     cables: cableRows.map((c) => ({
@@ -1165,6 +1168,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       kind: z.kind,
       color: z.color,
       points: parseZonePoints(z.points),
+      groupId: z.groupId,
       notes: z.notes,
     })) satisfies ZoneRow[],
     cables: cableRows.map((c) => ({
@@ -1893,6 +1897,7 @@ export async function action({ request }: Route.ActionArgs) {
           kind: row.kind,
           color: row.color,
           points: parseZonePoints(row.points),
+          groupId: null,
           notes: row.notes,
         } satisfies ZoneRow,
       });
@@ -1923,6 +1928,7 @@ export async function action({ request }: Route.ActionArgs) {
           kind: z.kind,
           color: z.color,
           points: parseZonePoints(z.points),
+          groupId: z.groupId,
           notes: z.notes,
         } satisfies ZoneRow,
       });

@@ -183,6 +183,9 @@ export const mapZone = sqliteTable(
     color: text("color").notNull().default("#fa5252"),
     // JSON: array of plot-local feet points, e.g. [{"x":10,"y":20},…].
     points: text("points").notNull().default("[]"),
+    // Linked-block id: a zone sharing a `group_id` with objects/zones is "stuck"
+    // to them — moving/rotating any member moves the whole block. NULL = unlinked.
+    groupId: text("group_id"),
     notes: text("notes"),
     createdById: text("created_by_id").references(() => user.id, {
       onDelete: "set null",

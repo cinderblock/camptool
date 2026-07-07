@@ -1,0 +1,1 @@
+ALTER TABLE `map_zone` ADD `group_id` text;

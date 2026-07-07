@@ -330,6 +330,13 @@
       "when": 1783292090798,
       "tag": "0046_strike-to-departure",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1783401529076,
+      "tag": "0047_first_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }
