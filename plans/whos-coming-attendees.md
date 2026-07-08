@@ -167,7 +167,7 @@ files — shared tree); push + watch CI.
       the wizard Sharing step loaded on real prod data (occupant loader join works),
       Cameron's Hyparhut showed the grouped "Add someone…" picker with a **Campers**
       group listing members (no guests group since he had none). Didn't mutate prod.
-- [~] Phase 3 — tickets + SAPs per attendee (3a host-managed, user-picked).
+- [x] Phase 3 — tickets + SAPs per attendee (3a host-managed, user-picked).
   - [x] **3a-tickets (CODE COMPLETE, green; not browser-tested).** 2026-07-07.
     `ticket.assigned_membership_id` → `assigned_attendee_id` (member OR guest).
     **Migration 0054** (add col + backfill: ensure attendee for each assigned
@@ -183,12 +183,19 @@ files — shared tree); push + watch CI.
     the migration (shown via the new party "Your tickets" with his name label); the
     officer table resolved the assignee name; the assign Select opened grouped with
     a **Campers** section (Guests group would appear when guests exist). Didn't mutate.
-  - [ ] **3a-passes — DEFERRED (migration collision).** Another thread generated
-    migration **0056** concurrently (built on my uncommitted 0055), so my
-    setup_pass migration landed as 0057 on top of theirs — entangled. Reverted the
-    setup_pass schema change + deleted the 0057 files; will redo `setup_pass`
-    (`membership_id` → `attendee_id`) once 0056 is committed and the numbering
-    settles. `passes.tsx` stays member-only until then.
+  - [x] **3a-passes (CODE COMPLETE, green).** 2026-07-07. Was briefly deferred
+    when a concurrent thread's migration 0056/0057 collided with the numbering;
+    once those landed on remote (settling the head at 0057), redone cleanly:
+    `setup_pass.membership_id` → `attendee_id`. **Migration 0058** (add col +
+    backfill: ensure attendee for each pass member, then link) + **0059** (drop
+    membership col, rebuild, unique now `(pass_date_id, attendee_id)`). Verified
+    full chain 0000→0059 + backfill on a DB copy. `passes.tsx`: passes carry a
+    holder ref/name + `mine` (my party); "Your passes" shows my own + my guests'
+    (officer-granted) with names; officer grant Select grouped Campers/Guests;
+    `activePassFor`/quota now per-attendee. Member self-service request stays
+    self-only (ensures own attendee); officers grant guest passes directly.
+    `start.tsx` SAP prompt + auto-request repointed to attendee. typecheck +
+    build + biome green.
 - [ ] Phase 4 — promote attendee → recruit/member.
 
 ## Design notes for Phases 3–4 (surfaced to user 2026-07-07)

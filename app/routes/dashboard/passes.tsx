@@ -17,10 +17,11 @@ import {
 import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
+import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { setupPassWindowFor } from "~/lib/brc";
 import { isBurningMan } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
@@ -50,11 +51,17 @@ type PassRow = {
   // NULL while a request is unbound — the officer picks the "on or after"
   // date row at grant time.
   passDateId: string | null;
-  membershipId: string;
+  attendeeId: string | null;
+  // The holder as a grant-picker ref: `m:<membershipId>` | `a:<attendeeId>`.
+  holderRef: string | null;
   holderName: string | null;
+  holderIsGuest: boolean;
+  // The holder is in the viewer's party (their own row or one of their guests).
+  mine: boolean;
   status: string;
   note: string | null;
 };
+type GrantGroup = { group: string; items: { value: string; label: string }[] };
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
@@ -73,56 +80,106 @@ export async function loader({ request }: Route.LoaderArgs) {
       .where(eq(setupPassDate.editionId, editionId))
   ).sort((a, b) => a.date.localeCompare(b.date)) satisfies DateRow[];
 
-  const passes = (await db
+  const myMembershipId = active.membership.id;
+  const rawPasses = await db
     .select({
       id: setupPass.id,
       passDateId: setupPass.passDateId,
-      membershipId: setupPass.membershipId,
-      holderName: user.name,
+      attendeeId: setupPass.attendeeId,
+      attMembershipId: attendee.membershipId,
+      attHostId: attendee.hostMembershipId,
+      guestName: attendee.name,
+      memberName: user.name,
       status: setupPass.status,
       note: setupPass.note,
     })
     .from(setupPass)
-    .leftJoin(membership, eq(setupPass.membershipId, membership.id))
+    .leftJoin(attendee, eq(setupPass.attendeeId, attendee.id))
+    .leftJoin(membership, eq(attendee.membershipId, membership.id))
     .leftJoin(user, eq(membership.userId, user.id))
-    .where(eq(setupPass.editionId, editionId))) satisfies PassRow[];
+    .where(eq(setupPass.editionId, editionId));
+  const passes: PassRow[] = rawPasses.map((p) => ({
+    id: p.id,
+    passDateId: p.passDateId,
+    attendeeId: p.attendeeId,
+    holderRef: p.attMembershipId
+      ? `m:${p.attMembershipId}`
+      : p.attendeeId
+        ? `a:${p.attendeeId}`
+        : null,
+    holderName: p.guestName ?? p.memberName ?? null,
+    holderIsGuest: p.attendeeId != null && p.attMembershipId == null,
+    mine:
+      p.attMembershipId === myMembershipId || p.attHostId === myMembershipId,
+    status: p.status,
+    note: p.note,
+  }));
 
-  const members = isOfficer
-    ? (
-        await db
-          .select({ id: membership.id, name: user.name })
-          .from(membership)
-          .innerJoin(user, eq(membership.userId, user.id))
-          .where(eq(membership.organizationId, active.camp.id))
-      ).sort((a, b) => a.name.localeCompare(b.name))
-    : [];
+  // Officer grant Select: camp members (m:) + all guests (a:), grouped.
+  let grantGroups: GrantGroup[] = [];
+  if (isOfficer) {
+    const memberRows = (
+      await db
+        .select({ id: membership.id, name: user.name })
+        .from(membership)
+        .innerJoin(user, eq(membership.userId, user.id))
+        .where(eq(membership.organizationId, active.camp.id))
+    ).sort((a, b) => a.name.localeCompare(b.name));
+    const guestRows = await db
+      .select({ id: attendee.id, name: attendee.name })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          isNotNull(attendee.hostMembershipId),
+        ),
+      );
+    grantGroups = [
+      {
+        group: "Campers",
+        items: memberRows.map((m) => ({ value: `m:${m.id}`, label: m.name })),
+      },
+      ...(guestRows.length > 0
+        ? [
+            {
+              group: "Guests",
+              items: guestRows.map((g) => ({
+                value: `a:${g.id}`,
+                label: `${g.name ?? "Guest"} (guest)`,
+              })),
+            },
+          ]
+        : []),
+    ];
+  }
 
-  // Planned arrivals (from onboarding) — shown next to requests so officers
-  // can pick a pass date that covers each requester's arrival. Read from each
-  // member's own attendee row (membership_id set; guests excluded).
+  // Planned arrivals (from onboarding) — shown next to requests so officers can
+  // pick a pass date that covers the holder's arrival. Keyed by attendee id.
   const arrivalRows = await db
     .select({
+      id: attendee.id,
       membershipId: attendee.membershipId,
       arrivalDate: attendee.arrivalDate,
     })
     .from(attendee)
     .where(eq(attendee.editionId, editionId));
   const arrivals: Record<string, string> = {};
+  let myArrival: string | null = null;
   for (const r of arrivalRows) {
-    if (r.membershipId && r.arrivalDate)
-      arrivals[r.membershipId] = r.arrivalDate;
+    if (r.arrivalDate) arrivals[r.id] = r.arrivalDate;
+    if (r.membershipId === myMembershipId) myArrival = r.arrivalDate ?? null;
   }
 
   return {
     isOfficer,
     locked: activeEdition.locked,
     event: activeEdition.event,
-    myMembershipId: active.membership.id,
-    myArrival: arrivals[active.membership.id] ?? null,
+    myMembershipId,
+    myArrival,
     year: activeEdition.year,
     dates,
     passes,
-    members,
+    grantGroups,
     arrivals: isOfficer ? arrivals : {},
   };
 }
@@ -169,24 +226,27 @@ export async function action({ request }: Route.ActionArgs) {
     return granted.length < d.quota;
   }
 
-  // Does this member already hold an active (requested or granted) pass this
+  // Does this attendee already hold an active (requested or granted) pass this
   // year? One pass per person — requests are unbound (no date) until granted.
-  async function activePassFor(membershipId: string) {
+  async function activePassFor(attendeeId: string) {
     const rows = await db
       .select({ id: setupPass.id, status: setupPass.status })
       .from(setupPass)
       .where(
         and(
           eq(setupPass.editionId, editionId),
-          eq(setupPass.membershipId, membershipId),
+          eq(setupPass.attendeeId, attendeeId),
         ),
       );
     return rows.find((r) => r.status !== "denied") ?? null;
   }
 
   // --- Member self-service (any role) -------------------------------------
+  // A member requests a pass for themselves; officers grant guest passes
+  // directly (guests appear in the officer grant picker).
   if (intent === "requestPass") {
-    if (await activePassFor(myMid)) {
+    const myAttendeeId = await ensureMemberAttendee(campId, editionId, myMid);
+    if (await activePassFor(myAttendeeId)) {
       return data(
         { error: "You already have a pass or a pending request." },
         { status: 409 },
@@ -196,7 +256,7 @@ export async function action({ request }: Route.ActionArgs) {
       id: crypto.randomUUID(),
       campId,
       editionId,
-      membershipId: myMid,
+      attendeeId: myAttendeeId,
       status: "requested",
       note: str("note"),
       createdById: actor.id,
@@ -205,15 +265,24 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "cancelPass") {
-    await db
-      .delete(setupPass)
-      .where(
-        and(
-          eq(setupPass.id, String(form.get("id"))),
-          eq(setupPass.membershipId, myMid),
-          eq(setupPass.status, "requested"),
-        ),
-      );
+    // Cancel only my own party's requested pass.
+    const passId = String(form.get("id"));
+    const [row] = await db
+      .select({
+        attMid: attendee.membershipId,
+        attHostId: attendee.hostMembershipId,
+      })
+      .from(setupPass)
+      .leftJoin(attendee, eq(setupPass.attendeeId, attendee.id))
+      .where(and(eq(setupPass.id, passId), eq(setupPass.editionId, editionId)))
+      .limit(1);
+    if (row && (row.attMid === myMid || row.attHostId === myMid)) {
+      await db
+        .delete(setupPass)
+        .where(
+          and(eq(setupPass.id, passId), eq(setupPass.status, "requested")),
+        );
+    }
     return data({ ok: "Request cancelled." });
   }
 
@@ -296,12 +365,50 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "grantPass") {
     const passDateId = String(form.get("passDateId"));
-    const targetMid = str("membershipId");
-    if (!targetMid) return data({ error: "Pick a member." }, { status: 400 });
+    // `m:<membershipId>` (a member) or `a:<attendeeId>` (a guest).
+    const ref = str("granteeRef");
+    if (!ref) return data({ error: "Pick someone." }, { status: 400 });
+    let targetAttendeeId: string | null = null;
+    if (ref.startsWith("m:")) {
+      const targetMid = ref.slice(2);
+      const [tm] = await db
+        .select({ id: membership.id })
+        .from(membership)
+        .where(
+          and(
+            eq(membership.id, targetMid),
+            eq(membership.organizationId, campId),
+          ),
+        )
+        .limit(1);
+      if (!tm) return data({ error: "Unknown member." }, { status: 400 });
+      targetAttendeeId = await ensureMemberAttendee(
+        campId,
+        editionId,
+        targetMid,
+      );
+    } else if (ref.startsWith("a:")) {
+      const aid = ref.slice(2);
+      const [g] = await db
+        .select({ id: attendee.id })
+        .from(attendee)
+        .where(
+          and(
+            eq(attendee.id, aid),
+            eq(attendee.campId, campId),
+            eq(attendee.editionId, editionId),
+          ),
+        )
+        .limit(1);
+      if (!g) return data({ error: "Unknown guest." }, { status: 400 });
+      targetAttendeeId = aid;
+    }
+    if (!targetAttendeeId)
+      return data({ error: "Pick someone." }, { status: 400 });
     if (!(await hasRoom(passDateId))) {
       return data({ error: "That date is at its quota." }, { status: 409 });
     }
-    const existing = await activePassFor(targetMid);
+    const existing = await activePassFor(targetAttendeeId);
     if (existing?.status === "granted") {
       return data(
         { error: "They already have a granted pass." },
@@ -325,7 +432,7 @@ export async function action({ request }: Route.ActionArgs) {
         campId,
         editionId,
         passDateId,
-        membershipId: targetMid,
+        attendeeId: targetAttendeeId,
         status: "granted",
         resolvedByMembershipId: myMid,
         resolvedAt: new Date(),
@@ -424,7 +531,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
     year,
     dates,
     passes,
-    members,
+    grantGroups,
     arrivals,
   } = loaderData;
   const fetcher = useFetcher<FetcherData>();
@@ -435,8 +542,12 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
       .length;
   const dateById = new Map(dates.map((d) => [d.id, d]));
 
-  const myPasses = passes.filter((p) => p.membershipId === myMembershipId);
-  const myActive = myPasses.find((p) => p.status !== "denied");
+  // "mine" = my party (my own + my guests). The request form is self-only, so it
+  // keys off my OWN pass, not a guest's.
+  const myPasses = passes.filter((p) => p.mine);
+  const myOwnActive = passes.find(
+    (p) => p.holderRef === `m:${myMembershipId}` && p.status !== "denied",
+  );
   const pending = passes.filter((p) => p.status === "requested");
 
   return (
@@ -478,6 +589,15 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
                   const d = p.passDateId ? dateById.get(p.passDateId) : null;
                   return (
                     <Group key={p.id} gap="xs">
+                      {p.holderIsGuest ? (
+                        <Text size="sm" fw={500}>
+                          {p.holderName ?? "Guest"}
+                          <Text span c="dimmed" size="xs">
+                            {" "}
+                            (guest)
+                          </Text>
+                        </Text>
+                      ) : null}
                       <Badge
                         size="lg"
                         variant="light"
@@ -510,7 +630,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
               </Stack>
             )}
 
-            {!locked && !myActive ? (
+            {!locked && !myOwnActive ? (
               <RequestPassForm fetcher={fetcher} myArrival={myArrival} />
             ) : null}
           </Stack>
@@ -529,7 +649,9 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
                     <PendingRequestRow
                       key={p.id}
                       p={p}
-                      arrival={arrivals[p.membershipId] ?? null}
+                      arrival={
+                        p.attendeeId ? (arrivals[p.attendeeId] ?? null) : null
+                      }
                       dates={dates}
                       grantedFor={grantedFor}
                       fetcher={fetcher}
@@ -559,7 +681,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
                       passes={passes.filter(
                         (p) => p.passDateId === d.id && p.status === "granted",
                       )}
-                      members={members}
+                      grantGroups={grantGroups}
                       fetcher={fetcher}
                       locked={locked}
                     />
@@ -784,20 +906,25 @@ function DateRowView({
   d,
   granted,
   passes,
-  members,
+  grantGroups,
   fetcher,
   locked,
 }: {
   d: DateRow;
   granted: number;
   passes: PassRow[];
-  members: { id: string; name: string }[];
+  grantGroups: GrantGroup[];
   fetcher: ReturnType<typeof useFetcher>;
   locked: boolean;
 }) {
   const remaining = d.quota - granted;
-  const heldBy = new Set(passes.map((p) => p.membershipId));
-  const grantable = members.filter((m) => !heldBy.has(m.id));
+  const heldBy = new Set(passes.map((p) => p.holderRef).filter(Boolean));
+  const grantable = grantGroups
+    .map((g) => ({
+      group: g.group,
+      items: g.items.filter((i) => !heldBy.has(i.value)),
+    }))
+    .filter((g) => g.items.length > 0);
   return (
     <Paper withBorder p="sm" radius="sm">
       <Group justify="space-between" wrap="wrap" align="flex-start">
@@ -854,8 +981,8 @@ function DateRowView({
             <Select
               size="xs"
               placeholder="grant to…"
-              w={160}
-              data={grantable.map((m) => ({ value: m.id, label: m.name }))}
+              w={180}
+              data={grantable}
               searchable
               disabled={remaining <= 0}
               value={null}
@@ -865,7 +992,7 @@ function DateRowView({
                     {
                       intent: "grantPass",
                       passDateId: d.id,
-                      membershipId: value,
+                      granteeRef: value,
                     },
                     { method: "post" },
                   );

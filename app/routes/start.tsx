@@ -265,8 +265,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     })
     .from(setupPass)
     .leftJoin(setupPassDate, eq(setupPass.passDateId, setupPassDate.id))
+    .innerJoin(attendee, eq(setupPass.attendeeId, attendee.id))
     .where(
-      and(eq(setupPass.editionId, editionId), eq(setupPass.membershipId, mid)),
+      and(eq(setupPass.editionId, editionId), eq(attendee.membershipId, mid)),
     );
   const myPass = passRows.find((p) => p.status !== "denied") ?? null;
 
@@ -421,13 +422,14 @@ export async function action({ request }: Route.ActionArgs) {
     if (activeEdition.locked) {
       return data({ error: "This year is locked." }, { status: 403 });
     }
+    const myAttendeeId = await ensureMemberAttendee(campId, editionId, mid);
     const existing = await db
       .select({ id: setupPass.id, status: setupPass.status })
       .from(setupPass)
       .where(
         and(
           eq(setupPass.editionId, editionId),
-          eq(setupPass.membershipId, mid),
+          eq(setupPass.attendeeId, myAttendeeId),
         ),
       );
     if (existing.some((p) => p.status !== "denied")) {
@@ -437,7 +439,7 @@ export async function action({ request }: Route.ActionArgs) {
       id: crypto.randomUUID(),
       campId,
       editionId,
-      membershipId: mid,
+      attendeeId: myAttendeeId,
       status: "requested",
       note: "Requested during onboarding (arriving before gates open).",
       createdById: authUser.id,

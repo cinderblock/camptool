@@ -407,6 +407,20 @@
       "when": 1783468489502,
       "tag": "0057_concerned_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1783539928439,
+      "tag": "0058_closed_dark_phoenix",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1783539969976,
+      "tag": "0059_far_nocturne",
+      "breakpoints": true
     }
   ]
 }

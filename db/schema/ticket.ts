@@ -146,9 +146,11 @@ export const setupPass = sqliteTable(
     passDateId: text("pass_date_id").references(() => setupPassDate.id, {
       onDelete: "cascade",
     }),
-    membershipId: text("membership_id")
-      .notNull()
-      .references(() => membership.id, { onDelete: "cascade" }),
+    // The attendee this pass belongs to — a member OR a host-managed guest (so a
+    // guest can hold their own early-arrival pass).
+    attendeeId: text("attendee_id").references(() => attendee.id, {
+      onDelete: "cascade",
+    }),
     // requested -> granted (counts against quota) | denied.
     status: text("status").notNull().default("requested"),
     note: text("note"),
@@ -166,6 +168,6 @@ export const setupPass = sqliteTable(
   },
   (t) => [
     index("setup_pass_edition").on(t.editionId),
-    uniqueIndex("setup_pass_member_date").on(t.passDateId, t.membershipId),
+    uniqueIndex("setup_pass_attendee_date").on(t.passDateId, t.attendeeId),
   ],
 );
