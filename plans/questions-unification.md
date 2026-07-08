@@ -195,6 +195,16 @@ member/recruit detail view should show their question-bank answers in one place
 - [x] 2026-07-07 — docs: camp-lifecycle.md question-axes + two-doors
       sections; README link. typecheck green (only pre-existing peer-thread
       error in members.tsx, not this work); biome green on changed files.
-- [ ] Browser-test the golden path (apply with answers → review shows them →
-      accept → wizard shows imported answers; invited recruit gets asked the
-      seeded questions; required question blocks Next).
+- [x] 2026-07-07 — browser-tested the golden path on a scratch DB (fresh camp,
+      officer-authored questions via the new Scope/Surface selects): apply form
+      renders application-surfaced questions and hides wizard-only ones;
+      submitted answer lands on `/recruits` ("Which camp… — Camp Contact");
+      accept → recruit's wizard shows the answer IMPORTED + PRE-FILLED;
+      required consent question blocks Next/Skip (disabled + red hint), a raw
+      `resolveAsk` POST returns 400, and answering unblocks live. Flags also
+      verified end-to-end (see arrival-sap plan). **Gotcha for future browser
+      automation:** Mantine modals never open in a HIDDEN Chrome tab — Chrome
+      pauses requestAnimationFrame in occluded windows, so the modal mount
+      transition never runs. Looks exactly like a bug; it isn't. Shim
+      `window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 16)`
+      or make the tab visible.

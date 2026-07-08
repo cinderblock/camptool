@@ -86,6 +86,17 @@ Three user asks (2026-07-03):
   click-through on the live deploy: /start arrival + SAP prompt, /passes
   officer grant picker, /members Remove modal.
 
+## Flags browser-verified (2026-07-07)
+
+Flags clicked through on a scratch DB after landing migration 0057: member
+flags an officer via the modal → reporter's "Your open flags" card + Withdraw
+work; the flagged OFFICER sees no "Flagged concerns" queue at all (self-subject
+hiding); officer-raised flag about a member shows in the queue (ISO date) and
+Resolve clears it; recruits see no Flag button (member+ only); no self-flag
+button on your own row. NOTE: Mantine modals don't open in a hidden/occluded
+Chrome tab (rAF paused) — automation artifact, not an app bug; see
+plans/questions-unification.md progress log for the shim.
+
 ## Follow-up (user, 2026-07-03): private member flags
 
 User feedback after the first deploy: "members shouldn't be able to remove
