@@ -12,7 +12,7 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, ne } from "drizzle-orm";
 import { useEffect, useRef } from "react";
 import { data, redirect, useFetcher } from "react-router";
 import {
@@ -64,6 +64,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     at: e.createdAt.toISOString(),
   }));
 
+  // Open feedback only — items marked done are hidden so the list stays a live
+  // triage queue.
   const recentFeedback = (
     await db
       .select({
@@ -78,6 +80,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       })
       .from(feedback)
       .leftJoin(userTable, eq(feedback.userId, userTable.id))
+      .where(ne(feedback.status, "done"))
       .orderBy(desc(feedback.createdAt))
       .limit(25)
   ).map((f) => ({
@@ -134,6 +137,23 @@ export async function action({ request }: Route.ActionArgs) {
     const res = await revokeSuperAdmin(userId);
     if (!res.ok) return data({ error: res.reason }, { status: 400 });
     return data({ ok: true, message: "Super admin removed." });
+  }
+
+  // Mark a feedback item done (hidden from the triage list; reversible by
+  // re-opening in the DB) or delete it outright.
+  if (intent === "feedbackDone") {
+    await db
+      .update(feedback)
+      .set({ status: "done" })
+      .where(eq(feedback.id, String(form.get("id") ?? "")));
+    return data({ ok: true, message: "Marked done." });
+  }
+
+  if (intent === "deleteFeedback") {
+    await db
+      .delete(feedback)
+      .where(eq(feedback.id, String(form.get("id") ?? "")));
+    return data({ ok: true, message: "Feedback deleted." });
   }
 
   return data({ error: "Unknown action." }, { status: 400 });
@@ -205,15 +225,15 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>User feedback</Title>
             <Text size="sm" c="dimmed">
-              Bug reports and suggestions sent via the Feedback button (latest
-              25).
+              Bug reports and suggestions sent via the Feedback button. Mark an
+              item <b>Done</b> to clear it from this queue (latest 25 open).
             </Text>
             {recentFeedback.length === 0 ? (
               <Text size="sm" c="dimmed">
-                No feedback yet.
+                No open feedback. 🎉
               </Text>
             ) : (
-              <Table.ScrollContainer minWidth={560}>
+              <Table.ScrollContainer minWidth={620}>
                 <Table verticalSpacing="xs">
                   <Table.Thead>
                     <Table.Tr>
@@ -221,6 +241,7 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
                       <Table.Th>Type</Table.Th>
                       <Table.Th>Summary</Table.Th>
                       <Table.Th>Who</Table.Th>
+                      <Table.Th />
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
@@ -253,6 +274,9 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
                           <Text size="xs" c="dimmed">
                             {f.userName ?? "—"}
                           </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <FeedbackActions id={f.id} />
                         </Table.Td>
                       </Table.Tr>
                     ))}
@@ -424,6 +448,36 @@ function AdminTable({
         ))}
       </Table.Tbody>
     </Table>
+  );
+}
+
+function FeedbackActions({ id }: { id: string }) {
+  const fetcher = useFetcher<{ error?: string; message?: string }>();
+  const busy = fetcher.state !== "idle";
+  return (
+    <Group gap={4} wrap="nowrap" justify="flex-end">
+      <Button
+        size="compact-xs"
+        variant="light"
+        loading={busy && fetcher.formData?.get("intent") === "feedbackDone"}
+        onClick={() =>
+          fetcher.submit({ intent: "feedbackDone", id }, { method: "post" })
+        }
+      >
+        Done
+      </Button>
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        color="red"
+        loading={busy && fetcher.formData?.get("intent") === "deleteFeedback"}
+        onClick={() =>
+          fetcher.submit({ intent: "deleteFeedback", id }, { method: "post" })
+        }
+      >
+        Delete
+      </Button>
+    </Group>
   );
 }
 
