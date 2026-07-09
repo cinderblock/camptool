@@ -1,6 +1,7 @@
 import { Badge, Container, Stack, Table, Text, Title } from "@mantine/core";
 import { eq } from "drizzle-orm";
 import { data } from "react-router";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, kindDef } from "~/lib/structures";
@@ -23,6 +24,7 @@ type Row = {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "bringing");
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
   }

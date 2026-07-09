@@ -24,6 +24,7 @@ import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { isBurningMan } from "~/lib/events";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -66,6 +67,7 @@ type RequestRow = {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "tickets");
   const editionId = activeEdition.id;
   const isOfficer = hasAtLeast(active.membership.role, "officer");
 
@@ -200,6 +202,7 @@ export async function action({ request }: Route.ActionArgs) {
     active,
     activeEdition,
   } = await requireActiveEdition(request);
+  await requireFeature(active, "tickets");
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   const myMid = active.membership.id;

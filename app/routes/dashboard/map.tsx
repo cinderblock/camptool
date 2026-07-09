@@ -49,6 +49,7 @@ import {
   streetOptions,
 } from "~/lib/brc";
 import { isBurningMan } from "~/lib/events";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import {
   DEFAULT_ROAD_CUTBACK,
@@ -1095,6 +1096,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     active,
     activeEdition,
   } = await requireActiveEdition(request);
+  await requireFeature(active, "map");
   const editionId = activeEdition.id;
 
   const [lot] = await db
@@ -1236,6 +1238,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { user, active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "map");
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   if (!hasAtLeast(active.membership.role, "member")) {

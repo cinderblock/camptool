@@ -18,6 +18,7 @@ import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
 import { data, useFetcher } from "react-router";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -39,6 +40,7 @@ type Row = {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "announcements");
   const rows = (await db
     .select({
       id: announcement.id,
@@ -71,6 +73,7 @@ export async function action({ request }: Route.ActionArgs) {
     active,
     activeEdition,
   } = await requireActiveEdition(request);
+  await requireFeature(active, "announcements");
   if (!hasAtLeast(active.membership.role, "officer")) {
     return data({ error: "Officers post announcements." }, { status: 403 });
   }

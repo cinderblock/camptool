@@ -16,6 +16,7 @@ import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
 import { data, useFetcher } from "react-router";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -43,6 +44,7 @@ function normalizeUrl(raw: string): string | null {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active } = await requireActiveCamp(request);
+  await requireFeature(active, "documents");
   const docs = (
     await db
       .select({
@@ -75,6 +77,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { user: actor, active } = await requireActiveCamp(request);
+  await requireFeature(active, "documents");
   if (!hasAtLeast(active.membership.role, "officer")) {
     return data({ error: "Officers manage documents." }, { status: 403 });
   }

@@ -24,6 +24,7 @@ import {
   removeGuest,
   updateGuest,
 } from "~/lib/attendee.server";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/roster";
@@ -41,6 +42,7 @@ const STATUS_META: Record<AttendeeStatus, { label: string; color: string }> = {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "roster");
   const { members, headcount } = await loadRoster(
     active.camp.id,
     activeEdition.id,
@@ -69,6 +71,7 @@ function cleanDate(v: FormDataEntryValue | null): string | null {
 
 export async function action({ request }: Route.ActionArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "roster");
   if (activeEdition.locked) {
     return data({ error: "This year is locked." }, { status: 403 });
   }

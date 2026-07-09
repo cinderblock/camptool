@@ -24,6 +24,14 @@ import {
 import { redirect } from "react-router";
 import { FeedbackButton } from "~/components/FeedbackButton";
 import { authClient, signOut } from "~/lib/auth-client";
+import {
+  type FeatureKey,
+  type FeatureState,
+  featureDef,
+  featureForPath,
+  featureVisibleTo,
+} from "~/lib/features";
+import { loadFeatureStates } from "~/lib/features.server";
 import { isSuperAdmin } from "~/lib/instance.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { resolveActiveCamp } from "~/lib/session.server";
@@ -65,11 +73,17 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const superAdmin = await isSuperAdmin(user.id);
 
+  // Per-camp feature states (off / preview / on) drive which nav links exist
+  // for this viewer; route loaders enforce the same via requireFeature.
+  const features: Partial<Record<FeatureKey, FeatureState>> = active
+    ? Object.fromEntries(await loadFeatureStates(active.camp.id))
+    : {};
+
   return {
     user,
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
-    tracksDues: active?.camp.tracksDues ?? false,
+    features,
     superAdmin,
     showFinishSetup,
     impersonatedBy,
@@ -93,7 +107,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     camps,
     activeCampId,
     activeRole,
-    tracksDues,
+    features,
     superAdmin,
     showFinishSetup,
     impersonatedBy,
@@ -102,6 +116,16 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     activeEditionLocked,
   } = loaderData;
   const editionFetcher = useFetcher();
+  // A feature-gated nav link exists only when this viewer can see the feature
+  // (on = everyone; preview = officers+, badged so they know members can't).
+  const featureState = (key: FeatureKey): FeatureState =>
+    features[key] ?? "off";
+  const canSee = (key: FeatureKey) =>
+    !!activeRole && featureVisibleTo(featureState(key), activeRole);
+  const gated = (key: FeatureKey, to: string, label: string) =>
+    canSee(key)
+      ? [{ to, label, end: false, preview: featureState(key) === "preview" }]
+      : [];
   // Camp-scoped routes all bounce back to "/" for a camp-less user (e.g. an
   // applicant awaiting review), so only show them once there's an active camp.
   const nav = !activeCampId
@@ -114,34 +138,35 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     : [
         { to: "/", label: "Overview", end: true },
         { to: "/guide", label: "How it works", end: false },
-        { to: "/announcements", label: "Announcements", end: false },
+        ...gated("announcements", "/announcements", "Announcements"),
         ...(showFinishSetup
           ? [{ to: "/start", label: "Finish setup", end: false }]
           : []),
         { to: "/members", label: "Members", end: false },
-        { to: "/roster", label: "Who's coming", end: false },
+        ...gated("roster", "/roster", "Who's coming"),
         ...(activeRole && hasAtLeast(activeRole, "member")
           ? [{ to: "/invite", label: "Invite friends", end: false }]
           : []),
         { to: "/editions", label: "Years", end: false },
-        { to: "/map", label: "Map", end: false },
-        { to: "/bringing", label: "Bringing", end: false },
-        { to: "/supplies", label: "Supplies", end: false },
-        { to: "/documents", label: "Documents", end: false },
-        { to: "/tickets", label: "Tickets", end: false },
-        { to: "/passes", label: "Passes", end: false },
+        ...gated("map", "/map", "Map"),
+        ...gated("bringing", "/bringing", "Bringing"),
+        ...gated("supplies", "/supplies", "Supplies"),
+        ...gated("documents", "/documents", "Documents"),
+        ...gated("tickets", "/tickets", "Tickets"),
+        ...gated("passes", "/passes", "Passes"),
         ...(activeRole && hasAtLeast(activeRole, "officer")
           ? [
-              { to: "/recruits", label: "Recruits", end: false },
-              { to: "/inventory", label: "Inventory", end: false },
-              { to: "/finances", label: "Finances", end: false },
-              ...(tracksDues
-                ? [{ to: "/dues", label: "Dues", end: false }]
-                : []),
+              ...gated("recruiting", "/recruits", "Recruits"),
+              ...gated("bringing", "/inventory", "Inventory"),
+              ...gated("finances", "/finances", "Finances"),
+              ...gated("dues", "/dues", "Dues"),
             ]
           : []),
-        { to: "/questions", label: "Questions", end: false },
-        { to: "/onboarding", label: "Onboarding", end: false },
+        ...gated("questions", "/questions", "Questions"),
+        ...gated("onboarding", "/onboarding", "Onboarding"),
+        ...(activeRole === "admin"
+          ? [{ to: "/settings", label: "Camp settings", end: false }]
+          : []),
         ...(superAdmin
           ? [{ to: "/admin", label: "Site admin", end: false }]
           : []),
@@ -149,6 +174,13 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const [opened, { toggle }] = useDisclosure();
   const navigate = useNavigate();
   const location = useLocation();
+  // Officers+ viewing a previewed feature get a persistent reminder that the
+  // rest of the camp can't see it yet.
+  const previewKey = featureForPath(location.pathname);
+  const previewDef =
+    previewKey && featureState(previewKey) === "preview"
+      ? featureDef(previewKey)
+      : null;
 
   async function switchCamp(id: string | null) {
     if (!id || id === activeCampId) return;
@@ -246,6 +278,13 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             to={item.to}
             end={item.end}
             label={item.label}
+            rightSection={
+              "preview" in item && item.preview ? (
+                <Badge size="xs" color="grape" variant="light">
+                  preview
+                </Badge>
+              ) : undefined
+            }
             onClick={() => opened && toggle()}
           />
         ))}
@@ -276,6 +315,35 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                 Stop
               </Button>
             </Form>
+          </Group>
+        ) : null}
+        {previewDef ? (
+          <Group
+            wrap="nowrap"
+            justify="space-between"
+            mb="md"
+            px="md"
+            py="xs"
+            style={{
+              background: "var(--mantine-color-grape-light)",
+              borderRadius: "var(--mantine-radius-sm)",
+            }}
+          >
+            <Text size="sm">
+              <b>Preview</b> — only officers can see {previewDef.label} right
+              now. The rest of the camp won't see it until it's turned on.
+            </Text>
+            {activeRole === "admin" ? (
+              <Button
+                component={NavLink}
+                to="/settings"
+                size="xs"
+                variant="light"
+                color="grape"
+              >
+                Camp settings
+              </Button>
+            ) : null}
           </Group>
         ) : null}
         <Outlet />

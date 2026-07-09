@@ -38,6 +38,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { memo, useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { QuestionField } from "~/components/QuestionField";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import {
   QUESTION_AUDIENCES,
@@ -75,6 +76,7 @@ export function meta(_: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { user, active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "questions");
   const campId = active.camp.id;
   const role = active.membership.role;
   const canManage = hasAtLeast(role, "officer");
@@ -123,6 +125,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "questions");
   const campId = active.camp.id;
   const membershipId = active.membership.id;
   const role = active.membership.role;

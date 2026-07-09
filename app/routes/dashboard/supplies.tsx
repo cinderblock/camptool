@@ -17,6 +17,7 @@ import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
 import { useEffect, useRef } from "react";
 import { data, useFetcher } from "react-router";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -34,6 +35,7 @@ export function meta(_: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "supplies");
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   const role = active.membership.role;
@@ -115,6 +117,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "supplies");
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   const mid = active.membership.id;

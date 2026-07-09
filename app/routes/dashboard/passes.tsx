@@ -24,6 +24,7 @@ import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { setupPassWindowFor } from "~/lib/brc";
 import { isBurningMan } from "~/lib/events";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -65,6 +66,7 @@ type GrantGroup = { group: string; items: { value: string; label: string }[] };
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "passes");
   const editionId = activeEdition.id;
   const isOfficer = hasAtLeast(active.membership.role, "officer");
 
@@ -190,6 +192,7 @@ export async function action({ request }: Route.ActionArgs) {
     active,
     activeEdition,
   } = await requireActiveEdition(request);
+  await requireFeature(active, "passes");
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   const myMid = active.membership.id;

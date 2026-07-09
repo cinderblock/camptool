@@ -125,6 +125,30 @@ export const FEATURES: CampFeatureDef[] = [
 
 const BY_KEY = new Map(FEATURES.map((f) => [f.key, f]));
 
+/** Which feature gates a route path (first segment). The layout uses this to
+ * show the preview banner; route loaders call requireFeature themselves. */
+const ROUTE_FEATURES: Record<string, FeatureKey> = {
+  announcements: "announcements",
+  documents: "documents",
+  questions: "questions",
+  onboarding: "onboarding",
+  map: "map",
+  bringing: "bringing",
+  inventory: "bringing",
+  supplies: "supplies",
+  tickets: "tickets",
+  passes: "passes",
+  finances: "finances",
+  dues: "dues",
+  recruits: "recruiting",
+  roster: "roster",
+};
+
+export function featureForPath(pathname: string): FeatureKey | null {
+  const first = pathname.split("/").filter(Boolean)[0];
+  return first ? (ROUTE_FEATURES[first] ?? null) : null;
+}
+
 export function featureDef(key: FeatureKey): CampFeatureDef | undefined {
   return BY_KEY.get(key);
 }

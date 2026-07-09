@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { parseMultiValue } from "~/lib/questions";
 import { isMemberOf } from "~/lib/recruits.server";
@@ -52,6 +53,7 @@ const STATUS_RANK: Record<string, number> = {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active } = await requireActiveCamp(request);
+  await requireFeature(active, "recruiting");
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
   }
@@ -129,6 +131,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { user: actor, active } = await requireActiveCamp(request);
+  await requireFeature(active, "recruiting");
   const campId = active.camp.id;
   if (!hasAtLeast(active.membership.role, "officer")) {
     return data({ error: "You don't have permission." }, { status: 403 });

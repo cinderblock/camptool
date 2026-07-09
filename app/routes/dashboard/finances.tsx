@@ -23,6 +23,7 @@ import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
+import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -55,6 +56,7 @@ type EntryRow = {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "finances");
   // Officer-only: the ledger isn't shared with all campers.
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
@@ -119,6 +121,7 @@ export async function action({ request }: Route.ActionArgs) {
     active,
     activeEdition,
   } = await requireActiveEdition(request);
+  await requireFeature(active, "finances");
   if (!hasAtLeast(active.membership.role, "officer")) {
     return data({ error: "Officers manage finances." }, { status: 403 });
   }

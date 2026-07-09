@@ -16,6 +16,7 @@ import { and, eq } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { isKindBanned, parseBannedKinds } from "~/lib/bans";
+import { requireFeature } from "~/lib/features.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
 import { db } from "../../../db/client.server";
@@ -37,6 +38,7 @@ type Item = {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "bringing");
   const rows = await db
     .select()
     .from(mapObject)
@@ -101,6 +103,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { user, active, activeEdition } = await requireActiveEdition(request);
+  await requireFeature(active, "bringing");
   const campId = active.camp.id;
   const editionId = activeEdition.id;
   const mid = active.membership.id;

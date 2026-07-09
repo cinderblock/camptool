@@ -45,6 +45,7 @@ export default [
     route("recruits", "routes/dashboard/recruits.tsx"),
     route("questions", "routes/dashboard/questions.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
+    route("settings", "routes/dashboard/settings.tsx"),
     route("admin", "routes/dashboard/admin.tsx"),
   ]),
 ] satisfies RouteConfig;
