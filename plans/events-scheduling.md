@@ -35,6 +35,10 @@ User-facing copy may still say "events/schedule". Feature/route = **Schedule**.
 
 ## Locked decisions (user Q&A, 2026-07-07)
 
+0. **SEQUENCED BEHIND `plans/camp-features.md`.** The per-camp feature-gating
+   layer (off/preview/on) ships first; Schedule is then built as a registry
+   feature from day one (keys `schedule` + `training` are reserved there) and
+   naturally launches in `preview` for officers to explore.
 1. **Notifications = in-app first.** Surface upcoming gatherings + "my shifts" on
    the Overview home and a calendar. Real Discord-DM / email reminders ride the
    already-roadmapped **Phase 5 notification work**, NOT built in this slice.
