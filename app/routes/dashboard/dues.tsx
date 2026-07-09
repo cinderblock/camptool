@@ -61,8 +61,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
   }
-  // Camps that don't track dues never see this page (turn it on from Finances).
-  if (!active.camp.tracksDues) throw redirect("/finances");
   const tiers = (
     await db
       .select()

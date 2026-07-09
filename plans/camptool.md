@@ -582,18 +582,23 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   event-layer `event`. Edition-scoped (training defs camp-scoped). Full design +
   schema + phases: **`plans/events-scheduling.md`**. **Sequenced behind camp
   features (below) — Schedule ships as the first feature born in the registry.**
-- [~] **Camp features — per-camp opt-in feature gating (DESIGN LANDED, build
-  pending).** User direction (2026-07-07): features become **opt-in plugins per
-  camp** with states **off / preview / on** — `preview` = officers+ only, so the
-  leadership explores a feature before the admin opens it to the camp. Minimal
-  core (Overview, guide, members, invite, years, /start, site admin); everything
-  else gets a `FeatureKey` in a code registry (`app/lib/features.ts`) with state
-  in a camp-scoped `camp_feature` table (absence = default: starter set
-  announcements/documents/questions on for new camps; migration grandfathers
-  ALL features on for existing camps). Replaces `camp.tracksDues` (→ `dues`
-  key). Admin-only `/settings` page manages states. NOT the Phase 2.5
-  camp-theme package seam (build-time code) — this is runtime per-camp data.
-  Full design + registry table + phases: **`plans/camp-features.md`**.
+- [x] **Camp features — per-camp opt-in feature gating (LANDED, E2E-tested on a
+  scratch server; NOT yet deployed-verified).** User direction (2026-07-07):
+  features are **opt-in plugins per camp** with states **off / preview / on** —
+  `preview` = officers+ only, so leadership explores a feature before the admin
+  opens it to the camp. Minimal core (Overview, guide, members, invite, years,
+  /start, site admin); 13 features get a `FeatureKey` in the code registry
+  (`app/lib/features.ts`) with state in the camp-scoped `camp_feature` table
+  (absence = registry default: starter set announcements/documents/questions on
+  for new camps). **Migration 0060** grandfathers ALL features on for existing
+  camps; **0061 drops `camp.tracks_dues`** (dues is now a feature key).
+  `requireFeature` guards every gated route's loader AND action; nav +
+  Overview cards + wizard asks + guide prose follow the flags; preview pages
+  get a badge + banner; admin-only `/settings` manages states. **Behavior
+  change:** a NEW camp's public `/c/:slug` 404s until Recruiting is turned
+  fully on (preview does not publish public surfaces). `schedule`/`training`
+  keys are reserved for the Schedule feature. Details + deviations:
+  **`plans/camp-features.md`**.
 
 **Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
 the active year — finish setup (members), declare what you're bringing, dues owed

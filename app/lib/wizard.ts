@@ -10,6 +10,11 @@
  * hardcoded offsets from the event (see eventStartFor/weeksUntilEvent in brc.ts) —
  * no per-camp date config yet.
  */
+import {
+  type FeatureKey,
+  type FeatureState,
+  featureVisibleTo,
+} from "./features";
 import { hasAtLeast } from "./permissions";
 
 export type AskKey =
@@ -39,6 +44,10 @@ export type AskDef = {
    * through (and past) the event. closesWeeksBefore 0 closes at event start. */
   closesWeeksBefore?: number | null;
   priority: AskPriority;
+  /** Camp feature this ask belongs to; the ask is only scheduled when the camp
+   * has the feature visible to this camper (see plans/camp-features.md).
+   * Unset = core, always asked. */
+  feature?: FeatureKey;
 };
 
 /** Catalog order = the order the wizard presents asks. Roughly the season arc:
@@ -69,6 +78,7 @@ export const ASKS: AskDef[] = [
     audience: "all",
     opensWeeksBefore: 12,
     priority: "optional",
+    feature: "bringing",
   },
   {
     key: "extras",
@@ -85,6 +95,7 @@ export const ASKS: AskDef[] = [
     audience: "all",
     opensWeeksBefore: 12,
     priority: "optional",
+    feature: "bringing",
   },
   {
     key: "checklist",
@@ -93,6 +104,7 @@ export const ASKS: AskDef[] = [
     audience: "all",
     opensWeeksBefore: 8,
     priority: "optional",
+    feature: "onboarding",
   },
 ];
 
@@ -121,13 +133,20 @@ export function askInSeason(ask: AskDef, weeksUntilEvent: number): boolean {
   return true;
 }
 
-/** The ordered set of asks relevant to this camper right now. */
+/** The ordered set of asks relevant to this camper right now. When
+ * `featureStates` is given, an ask tied to a camp feature is dropped unless
+ * that feature is visible to this camper (on, or preview for officers+). */
 export function scheduleAsks(opts: {
   role: string;
   weeksUntilEvent: number;
+  featureStates?: Partial<Record<FeatureKey, FeatureState>>;
 }): AskDef[] {
   return ASKS.filter(
     (a) =>
-      askMatchesAudience(a, opts.role) && askInSeason(a, opts.weeksUntilEvent),
+      askMatchesAudience(a, opts.role) &&
+      askInSeason(a, opts.weeksUntilEvent) &&
+      (!a.feature ||
+        !opts.featureStates ||
+        featureVisibleTo(opts.featureStates[a.feature] ?? "off", opts.role)),
   );
 }

@@ -9,7 +9,6 @@ import { redirect } from "react-router";
 import { db } from "../../db/client.server";
 import { campFeature } from "../../db/schema";
 import {
-  type CampFeatureDef,
   FEATURES,
   type FeatureKey,
   type FeatureState,
@@ -94,13 +93,4 @@ export async function requireFeature(
   const state = await getFeatureState(active.camp.id, key);
   if (!featureVisibleTo(state, active.membership.role)) throw redirect("/");
   return state;
-}
-
-/** Registry defs whose current state fails their `requires` chain (for the
- * settings UI to warn about). */
-export function unmetRequirements(
-  def: CampFeatureDef,
-  states: Map<FeatureKey, FeatureState>,
-): FeatureKey[] {
-  return (def.requires ?? []).filter((dep) => states.get(dep) === "off");
 }

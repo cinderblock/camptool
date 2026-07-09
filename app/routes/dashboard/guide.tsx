@@ -13,6 +13,8 @@ import {
 import { Link } from "react-router";
 import { JoinFlowchart } from "~/components/JoinFlowchart";
 import { weeksUntilEvent } from "~/lib/brc";
+import { featureVisibleTo } from "~/lib/features";
+import { loadFeatureStates } from "~/lib/features.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { loadWizardState } from "~/lib/wizard.server";
 import type { Route } from "./+types/guide";
@@ -24,11 +26,15 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
   const state = await loadWizardState({
+    campId: active.camp.id,
     editionId: activeEdition.id,
     membershipId: active.membership.id,
     role: active.membership.role,
     year: activeEdition.year,
   });
+  const featureStates = await loadFeatureStates(active.camp.id);
+  const seeFeature = (key: Parameters<typeof featureStates.get>[0]) =>
+    featureVisibleTo(featureStates.get(key) ?? "off", active.membership.role);
   return {
     campName: active.camp.name,
     year: activeEdition.year,
@@ -40,12 +46,24 @@ export async function loader({ request }: Route.LoaderArgs) {
     })),
     resolved: state.resolved,
     pendingCount: state.pending.length,
+    // The narrative below only mentions features this camp actually uses.
+    features: {
+      map: seeFeature("map") || seeFeature("bringing"),
+      tickets: seeFeature("tickets") || seeFeature("passes"),
+    },
   };
 }
 
 export default function Guide({ loaderData }: Route.ComponentProps) {
-  const { campName, year, weeksToEvent, scheduled, resolved, pendingCount } =
-    loaderData;
+  const {
+    campName,
+    year,
+    weeksToEvent,
+    scheduled,
+    resolved,
+    pendingCount,
+    features,
+  } = loaderData;
   const doneCount = scheduled.filter((s) => resolved[s.key]).length;
 
   return (
@@ -137,9 +155,17 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
             <PhaseCard
               title="2 · Getting ready for the burn"
               items={[
-                "The setup wizard asks for what's relevant as the event nears: RSVP, a few questions, what you're bringing, tickets, and setup passes.",
-                "Declare your tents/vehicles; officers place them on the camp map (you can tweak your own spot).",
-                "Request a Directed Group Sale ticket and any early-arrival passes.",
+                "The setup wizard asks for what's relevant as the event nears — an RSVP and whatever else the camp collects.",
+                ...(features.map
+                  ? [
+                      "Declare your tents/vehicles; officers place them on the camp map (you can tweak your own spot).",
+                    ]
+                  : []),
+                ...(features.tickets
+                  ? [
+                      "Request a Directed Group Sale ticket and any early-arrival passes.",
+                    ]
+                  : []),
               ]}
             />
             <PhaseCard

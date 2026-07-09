@@ -24,6 +24,8 @@ import {
 import { type Headcount, headcountFor } from "~/lib/attendee.server";
 import { authClient } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
+import { featureVisibleTo } from "~/lib/features";
+import { loadFeatureStates } from "~/lib/features.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
 import { type Role, hasAtLeast } from "~/lib/permissions";
 import { pendingApplicationWhere } from "~/lib/recruits.server";
@@ -100,50 +102,65 @@ export async function loader({ request }: Route.LoaderArgs) {
   let overview: {
     year: number;
     isOfficer: boolean;
+    features: {
+      announcements: boolean;
+      bringing: boolean;
+      roster: boolean;
+    };
     announcements: { id: string; title: string; pinned: boolean }[];
     setupPending: number;
     bringingCount: number;
     pendingApprovals: number;
     dues: { expected: number; paid: number; owed: number } | null;
-    headcount: Headcount;
+    headcount: Headcount | null;
   } | null = null;
   if (active && activeEdition) {
     const editionId = activeEdition.id;
     const mid = active.membership.id;
     const role = active.membership.role;
     const isOfficer = hasAtLeast(role, "officer");
+    // Cards and to-dos for features this viewer can't see are omitted — no
+    // nudging toward pages that would bounce (see plans/camp-features.md).
+    const featureStates = await loadFeatureStates(active.camp.id);
+    const seeFeature = (key: Parameters<typeof featureStates.get>[0]) =>
+      featureVisibleTo(featureStates.get(key) ?? "off", role);
 
-    const anns = (
-      await db
-        .select({
-          id: announcement.id,
-          title: announcement.title,
-          pinned: announcement.pinned,
-          createdAt: announcement.createdAt,
-        })
-        .from(announcement)
-        .where(eq(announcement.editionId, editionId))
-    )
-      .sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-        return b.createdAt.getTime() - a.createdAt.getTime();
-      })
-      .slice(0, 3)
-      .map((a) => ({ id: a.id, title: a.title, pinned: a.pinned }));
+    const anns = seeFeature("announcements")
+      ? (
+          await db
+            .select({
+              id: announcement.id,
+              title: announcement.title,
+              pinned: announcement.pinned,
+              createdAt: announcement.createdAt,
+            })
+            .from(announcement)
+            .where(eq(announcement.editionId, editionId))
+        )
+          .sort((a, b) => {
+            if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+            return b.createdAt.getTime() - a.createdAt.getTime();
+          })
+          .slice(0, 3)
+          .map((a) => ({ id: a.id, title: a.title, pinned: a.pinned }))
+      : [];
 
-    const [bring] = await db
-      .select({ value: count() })
-      .from(mapObject)
-      .where(
-        and(
-          eq(mapObject.editionId, editionId),
-          eq(mapObject.ownerMembershipId, mid),
-        ),
-      );
-    const bringingCount = bring?.value ?? 0;
+    let bringingCount = 0;
+    if (seeFeature("bringing")) {
+      const [bring] = await db
+        .select({ value: count() })
+        .from(mapObject)
+        .where(
+          and(
+            eq(mapObject.editionId, editionId),
+            eq(mapObject.ownerMembershipId, mid),
+          ),
+        );
+      bringingCount = bring?.value ?? 0;
+    }
 
     let pendingApprovals = 0;
-    if (isOfficer) {
+    if (isOfficer && seeFeature("map")) {
       const [p] = await db
         .select({ value: count() })
         .from(mapObject)
@@ -159,6 +176,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     let setupPending = 0;
     if (!isOfficer) {
       const state = await loadWizardState({
+        campId: active.camp.id,
         editionId,
         membershipId: mid,
         role,
@@ -167,9 +185,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       setupPending = state.pending.length;
     }
 
-    // The viewer's own dues status (only if the camp tracks dues).
+    // The viewer's own dues status (only if the camp uses the Dues feature).
     let dues: { expected: number; paid: number; owed: number } | null = null;
-    if (active.camp.tracksDues) {
+    if (seeFeature("dues")) {
       const [mr] = await db
         .select({
           tierId: memberRequirement.tierId,
@@ -213,12 +231,17 @@ export async function loader({ request }: Route.LoaderArgs) {
     overview = {
       year: activeEdition.year,
       isOfficer,
+      features: {
+        announcements: seeFeature("announcements"),
+        bringing: seeFeature("bringing"),
+        roster: seeFeature("roster"),
+      },
       announcements: anns,
       setupPending,
       bringingCount,
       pendingApprovals,
       dues,
-      headcount: await headcountFor(editionId),
+      headcount: seeFeature("roster") ? await headcountFor(editionId) : null,
     };
   }
 
@@ -331,7 +354,7 @@ function CampOverview({
         label: `Finish setup — ${overview.setupPending} ${overview.setupPending === 1 ? "item" : "items"} left`,
         to: "/start",
       });
-    if (overview.bringingCount === 0)
+    if (overview.features.bringing && overview.bringingCount === 0)
       todos.push({
         key: "bringing",
         label: "Tell us what you're bringing",
@@ -421,39 +444,41 @@ function CampOverview({
               )}
             </Card>
 
-            <Card withBorder padding="lg" radius="md">
-              <Group justify="space-between" mb="xs">
-                <Text fw={600}>Announcements</Text>
-                <Anchor component={Link} to="/announcements" size="xs">
-                  View all
-                </Anchor>
-              </Group>
-              {overview.announcements.length === 0 ? (
-                <Text size="sm" c="dimmed">
-                  No announcements yet.
-                </Text>
-              ) : (
-                <Stack gap={6}>
-                  {overview.announcements.map((a) => (
-                    <Group key={a.id} gap={6} wrap="nowrap">
-                      {a.pinned ? (
-                        <Badge size="xs" variant="light" color="yellow">
-                          pinned
-                        </Badge>
-                      ) : null}
-                      <Anchor
-                        component={Link}
-                        to="/announcements"
-                        size="sm"
-                        lineClamp={1}
-                      >
-                        {a.title}
-                      </Anchor>
-                    </Group>
-                  ))}
-                </Stack>
-              )}
-            </Card>
+            {overview.features.announcements ? (
+              <Card withBorder padding="lg" radius="md">
+                <Group justify="space-between" mb="xs">
+                  <Text fw={600}>Announcements</Text>
+                  <Anchor component={Link} to="/announcements" size="xs">
+                    View all
+                  </Anchor>
+                </Group>
+                {overview.announcements.length === 0 ? (
+                  <Text size="sm" c="dimmed">
+                    No announcements yet.
+                  </Text>
+                ) : (
+                  <Stack gap={6}>
+                    {overview.announcements.map((a) => (
+                      <Group key={a.id} gap={6} wrap="nowrap">
+                        {a.pinned ? (
+                          <Badge size="xs" variant="light" color="yellow">
+                            pinned
+                          </Badge>
+                        ) : null}
+                        <Anchor
+                          component={Link}
+                          to="/announcements"
+                          size="sm"
+                          lineClamp={1}
+                        >
+                          {a.title}
+                        </Anchor>
+                      </Group>
+                    ))}
+                  </Stack>
+                )}
+              </Card>
+            ) : null}
           </SimpleGrid>
         ) : null}
 
@@ -467,7 +492,7 @@ function CampOverview({
             </Text>
           </Card>
 
-          {overview ? (
+          {overview?.headcount ? (
             <Card withBorder padding="lg" radius="md">
               <Group justify="space-between" mb={2}>
                 <Text size="xl" fw={700}>

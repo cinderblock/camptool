@@ -7,6 +7,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import { attendee, wizardAsk } from "../../db/schema";
 import { weeksUntilEvent } from "./brc";
+import { loadFeatureStates } from "./features.server";
 import { type AskDef, type AskKey, scheduleAsks } from "./wizard";
 
 export type ParticipationStatus = "unknown" | "coming" | "maybe" | "not_coming";
@@ -26,12 +27,13 @@ export type WizardState = {
 };
 
 export async function loadWizardState(opts: {
+  campId: string;
   editionId: string;
   membershipId: string;
   role: string;
   year: number;
 }): Promise<WizardState> {
-  const { editionId, membershipId, role, year } = opts;
+  const { campId, editionId, membershipId, role, year } = opts;
 
   const askRows = await db
     .select({ askKey: wizardAsk.askKey, status: wizardAsk.status })
@@ -64,6 +66,9 @@ export async function loadWizardState(opts: {
   const scheduled = scheduleAsks({
     role,
     weeksUntilEvent: weeksUntilEvent(year),
+    // Asks for features the camp turned off (or that this camper can't see
+    // yet) aren't scheduled — no nudging toward pages that would bounce.
+    featureStates: Object.fromEntries(await loadFeatureStates(campId)),
   });
   const pending = scheduled.filter((a) => !resolved[a.key]).map((a) => a.key);
 

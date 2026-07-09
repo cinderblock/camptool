@@ -3,7 +3,6 @@ import {
   Anchor,
   Autocomplete,
   Badge,
-  Checkbox,
   Container,
   Group,
   NumberInput,
@@ -23,11 +22,12 @@ import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
-import { requireFeature } from "~/lib/features.server";
+import { featureVisibleTo } from "~/lib/features";
+import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { camp, financeEntry, membership, user } from "../../../db/schema";
+import { financeEntry, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/finances";
 
 export function meta(_: Route.MetaArgs) {
@@ -107,7 +107,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   return {
     locked: activeEdition.locked,
     year: activeEdition.year,
-    tracksDues: active.camp.tracksDues,
+    // Dues is its own camp feature now (admin-managed on /settings).
+    duesEnabled: featureVisibleTo(
+      await getFeatureState(active.camp.id, "dues"),
+      active.membership.role,
+    ),
+    isAdmin: active.membership.role === "admin",
     entries,
     members,
     categories,
@@ -129,15 +134,6 @@ export async function action({ request }: Route.ActionArgs) {
   const editionId = activeEdition.id;
   const form = await request.formData();
   const intent = String(form.get("intent"));
-
-  // Camp-level setting (not edition data) — allowed even when the year is locked.
-  if (intent === "setTracksDues") {
-    await db
-      .update(camp)
-      .set({ tracksDues: form.get("tracksDues") === "true" })
-      .where(eq(camp.id, campId));
-    return data({ ok: true });
-  }
 
   if (activeEdition.locked) {
     return data({ error: "This year is locked." }, { status: 403 });
@@ -189,10 +185,17 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Finances({ loaderData }: Route.ComponentProps) {
-  const { locked, year, tracksDues, entries, members, categories, totals } =
-    loaderData;
+  const {
+    locked,
+    year,
+    duesEnabled,
+    isAdmin,
+    entries,
+    members,
+    categories,
+    totals,
+  } = loaderData;
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
-  const duesFetcher = useFetcher();
 
   const [kind, setKind] = useState("donation");
   const [amount, setAmount] = useState<number | string>("");
@@ -285,34 +288,28 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
         </SimpleGrid>
 
         <Paper withBorder p="sm" radius="md">
-          <Group justify="space-between" wrap="wrap">
-            <Checkbox
-              size="xs"
-              label="Track member dues & contribution tiers"
-              checked={tracksDues}
-              onChange={(e) =>
-                duesFetcher.submit(
-                  {
-                    intent: "setTracksDues",
-                    tracksDues: e.currentTarget.checked ? "true" : "false",
-                  },
-                  { method: "post" },
-                )
-              }
-            />
-            {tracksDues ? (
+          {duesEnabled ? (
+            <Group justify="space-between" wrap="wrap">
+              <Text size="xs" c="dimmed">
+                This camp tracks member dues & contribution tiers.
+              </Text>
               <Anchor component={Link} to="/dues" size="xs">
                 Open Dues →
               </Anchor>
-            ) : null}
-          </Group>
-          {!tracksDues ? (
-            <Text size="xs" c="dimmed" mt={4}>
-              Off by default — turn this on only if your camp has dues. It adds
-              a Dues page (officer-only) for contribution tiers and per-member
-              tracking.
-            </Text>
-          ) : null}
+            </Group>
+          ) : (
+            <Group justify="space-between" wrap="wrap">
+              <Text size="xs" c="dimmed">
+                Dues tracking is off. If your camp has dues, the camp admin can
+                turn on the Dues feature.
+              </Text>
+              {isAdmin ? (
+                <Anchor component={Link} to="/settings" size="xs">
+                  Camp settings →
+                </Anchor>
+              ) : null}
+            </Group>
+          )}
         </Paper>
 
         {locked ? null : (

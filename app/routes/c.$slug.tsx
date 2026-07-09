@@ -16,6 +16,7 @@ import { CampHero } from "~/components/CampHero";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
 import { discordEnabled } from "~/lib/auth.server";
+import { getFeatureState } from "~/lib/features.server";
 import {
   getInstanceSettings,
   setSignupUnlockCookie,
@@ -45,6 +46,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     .where(eq(camp.slug, params.slug))
     .limit(1);
   if (!found) throw data("Camp not found", { status: 404 });
+  // The public page exists only while Recruiting is fully ON — preview means
+  // "officers exploring internally", which must not publish a public surface.
+  // 404 (not a bounce): there's no session here, and a camp that turned
+  // recruiting off shouldn't advertise that the page ever existed.
+  if ((await getFeatureState(found.id, "recruiting")) !== "on") {
+    throw data("Camp not found", { status: 404 });
+  }
 
   // The camp's application-surfaced questions, rendered as part of the form.
   const questions = (await loadApplicationQuestions(found.id)).map((q) => ({
@@ -112,6 +120,10 @@ export async function action({ request, params }: Route.ActionArgs) {
     .where(eq(camp.slug, params.slug))
     .limit(1);
   if (!found) throw data("Camp not found", { status: 404 });
+  // Same gate as the loader: no applications while recruiting isn't fully on.
+  if ((await getFeatureState(found.id, "recruiting")) !== "on") {
+    throw data("Camp not found", { status: 404 });
+  }
 
   if (await isMemberOf(session.user.id, found.id)) {
     return data({ error: "You're already a member of this camp." });

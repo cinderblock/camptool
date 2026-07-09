@@ -205,7 +205,40 @@ watch CI green.
 ## Progress log
 
 - [x] 2026-07-07 — design + user Q&A (4 forks locked); plan written.
-- [ ] Phase 1 — registry + schema + migration (grandfather + tracksDues fold-in).
-- [ ] Phase 2 — gating + nav + preview UX + /settings.
-- [ ] Phase 3 — wizard/Overview/guide/public-page integrations.
+- [x] Phase 1 — registry (`app/lib/features.ts`) + `camp_feature` schema +
+      helpers (`features.server.ts`) + **migration 0060** (create + grandfather
+      DML: every existing camp × 12 features → on; dues follows tracks_dues).
+      Verified on a VACUUM copy (2 camps × 12 on-rows, 0 FK violations).
+      Commit dff21ea.
+- [x] Phase 2 — requireFeature in every gated route's loader AND action
+      (14 routes, incl. /inventory under the `bringing` key); layout nav built
+      from feature states with "preview" badges + an on-page preview banner
+      (grape, like the impersonation banner) with a Camp-settings shortcut for
+      admins; new admin-only `/settings` page (Off/Preview/On SegmentedControl
+      per feature, optimistic saves, "works best with X" note for unmet
+      requires). E2E over HTTP on a scratch server: starter defaults, bounce,
+      preview visibility, flips, 400 on bad input — 9/9. Commit dd647d5.
+- [x] Phase 3 — integrations: wizard asks carry `feature` keys (bringing/
+      sharing → bringing, checklist → onboarding) and `scheduleAsks` filters by
+      visibility (loadWizardState now takes campId; 4 call sites updated);
+      Overview loader + cards gated (announcements card, bringing to-do, map
+      approvals, roster headcount, dues card); guide prose bullets gated;
+      `/c/:slug` loader + action require recruiting **fully on** (preview must
+      not publish a public surface — 404 otherwise); dues fold-in complete:
+      dues.tsx tracksDues redirect removed, finances toggle replaced with a
+      pointer to /settings, **migration 0061 drops `camp.tracks_dues`** (clean
+      single ALTER, verified on a DB copy after the 0060 grandfather ran).
+      E2E: public page 404 (off) → 404 (preview) → 200 (on); 5/5.
 - [ ] Phase 4 — Schedule built as a feature (see plans/events-scheduling.md).
+
+**Deviations from the design (all deliberate):**
+- The registry does NOT carry navLinks/routes — the nav stays an ordered list
+  in `layout.tsx` (core + feature links interleave deliberately) with a
+  `gated(key, to, label)` helper; route loaders name their own feature key.
+  `featureForPath` in features.ts maps the first path segment → key for the
+  layout's preview banner only.
+- Hidden-feature requests redirect to `/` (both loader and action) rather than
+  404 — matches the camp-less bounce pattern.
+- New-camp behavior change worth knowing: a fresh camp's public apply page
+  (`/c/:slug`) 404s until the admin turns Recruiting on (it's not in the
+  starter set). Existing camps were grandfathered on.

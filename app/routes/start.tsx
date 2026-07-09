@@ -96,6 +96,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const state = await loadWizardState({
+    campId,
     editionId,
     membershipId: mid,
     role,

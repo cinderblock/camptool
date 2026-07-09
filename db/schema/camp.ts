@@ -27,11 +27,8 @@ export const camp = sqliteTable("camp", {
   // Officer-authored blurb shown on the public application page (/c/:slug) —
   // what/where/when/vibe for strangers arriving cold. Plain text, newlines kept.
   description: text("description"),
-  // Whether this camp tracks member dues / contribution tiers. Off by default —
-  // camps with no dues never see the Dues feature (hidden from nav + route).
-  tracksDues: integer("tracks_dues", { mode: "boolean" })
-    .notNull()
-    .default(false),
+  // NOTE: dues tracking used to be a `tracks_dues` column here; it's now the
+  // `dues` camp feature (camp_feature table, see plans/camp-features.md).
   // Placement/submission contact for the camp's map export (e.g. Burning Man
   // requires a name/email/phone on the layout). Camp-scoped — persists across
   // years — and officer-editable via the map export dialog. All nullable.

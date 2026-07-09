@@ -1,0 +1,1 @@
+ALTER TABLE `camp` DROP COLUMN `tracks_dues`;

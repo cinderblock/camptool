@@ -63,6 +63,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       throw redirect("/start");
     }
     const state = await loadWizardState({
+      campId: active.camp.id,
       editionId: activeEdition.id,
       membershipId: active.membership.id,
       role: active.membership.role,
