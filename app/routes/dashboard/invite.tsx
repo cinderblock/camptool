@@ -17,6 +17,7 @@ import { notifications } from "@mantine/notifications";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
+import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { newInviteToken } from "~/lib/invite.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveCamp } from "~/lib/session.server";
@@ -34,7 +35,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw data("Not authorized", { status: 403 });
   }
 
-  const baseUrl = process.env.PUBLIC_BASE_URL ?? "http://localhost:3000";
+  const baseUrl = PUBLIC_BASE_URL;
   // Officers oversee the camp's whole link inventory (with who created each);
   // everyone else manages just their own links.
   const isOfficer = hasAtLeast(active.membership.role, "officer");

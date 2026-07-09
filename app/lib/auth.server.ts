@@ -4,6 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { magicLink, organization } from "better-auth/plugins";
 import { db, schema } from "../../db/client.server";
+import { DEV_PORT, PUBLIC_BASE_URL } from "./env.server";
 import {
   ensureFirstUserSuperAdmin,
   getInstanceSettings,
@@ -12,7 +13,7 @@ import {
 } from "./instance.server";
 import { ac, roles } from "./permissions";
 
-const baseURL = process.env.PUBLIC_BASE_URL ?? "http://localhost:3000";
+const baseURL = PUBLIC_BASE_URL;
 
 // localhost cookies are scoped by host, not port, so on a shared dev box every
 // better-auth app collides on the default `better-auth.session_token`. We only
@@ -38,9 +39,9 @@ const devOrigins =
   process.env.NODE_ENV === "production"
     ? []
     : [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
+        `http://localhost:${DEV_PORT}`,
+        `http://127.0.0.1:${DEV_PORT}`,
+        `http://[::1]:${DEV_PORT}`,
       ];
 
 export const auth = betterAuth({

@@ -87,7 +87,7 @@ page — the bare login page won't offer signup). Super admins always bypass bot
 ```sh
 bun install
 cp .env.example .env   # set PUBLIC_BASE_URL + BETTER_AUTH_SECRET; Discord optional
-bun run dev            # http://localhost:3000
+bun run dev            # http://localhost:17923 (set PORT to change)
 ```
 
 The SQLite database is created and migrated automatically on first start

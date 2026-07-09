@@ -18,6 +18,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
+import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { parseMultiValue } from "~/lib/questions";
 import { isMemberOf } from "~/lib/recruits.server";
@@ -62,7 +63,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     .where(eq(recruitApplication.campId, campId))
     .orderBy(desc(recruitApplication.createdAt));
 
-  const baseUrl = process.env.PUBLIC_BASE_URL ?? "http://localhost:3000";
+  const baseUrl = PUBLIC_BASE_URL;
   const applyUrl = active.camp.slug ? `${baseUrl}/c/${active.camp.slug}` : null;
 
   const [campRow] = await db

@@ -36,7 +36,7 @@ DISCORD_GUILD_ID=
    this is `DISCORD_CLIENT_SECRET`. Store it somewhere safe; Discord only shows
    it once.
 4. Under **Redirects**, click **Add Redirect** and enter your callback URL:
-   - Local dev: `http://localhost:3000/api/auth/callback/discord`
+   - Local dev: `http://localhost:17923/api/auth/callback/discord` (match your `PORT`)
    - Production: `https://YOUR_DOMAIN/api/auth/callback/discord`
      (e.g. `https://tool.mathcamp.us/api/auth/callback/discord`)
 

@@ -20,7 +20,10 @@ export default defineConfig({
   plugins: [reactRouter(), tsconfigPaths()],
   resolve: { alias: themeAlias },
   server: {
-    port: Number(process.env.PORT ?? 3000),
+    // Uncommon default on purpose (see app/lib/env.server.ts — keep in sync):
+    // 3000/5173 collide with other dev apps, and Windows Hyper-V reserves
+    // port ranges around 3000 that make Vite walk the whole 3000s.
+    port: Number(process.env.PORT ?? 17923),
     allowedHosts: publicHost ? [publicHost] : undefined,
   },
   // We use the Drizzle adapter, never Kysely. better-auth still references the
