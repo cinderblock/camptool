@@ -162,6 +162,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
               membershipId: su.membershipId,
               status: su.status,
               origin: su.origin,
+              attendance: su.attendance,
               label: su.playaName || su.name,
             })),
         })),
@@ -238,7 +239,16 @@ export async function action({ request, params }: Route.ActionArgs) {
     membershipId: string;
     status: string;
     origin: string;
+    attendance?: string;
+    recordedByMembershipId?: string;
   }) {
+    const attendanceFields = opts.attendance
+      ? {
+          attendance: opts.attendance,
+          recordedByMembershipId: opts.recordedByMembershipId ?? null,
+          recordedAt: new Date(),
+        }
+      : {};
     await db
       .insert(gatheringSignup)
       .values({
@@ -249,12 +259,14 @@ export async function action({ request, params }: Route.ActionArgs) {
         membershipId: opts.membershipId,
         status: opts.status,
         origin: opts.origin,
+        ...attendanceFields,
       })
       .onConflictDoUpdate({
         target: [gatheringSignup.shiftId, gatheringSignup.membershipId],
         set: {
           status: opts.status,
           origin: opts.origin,
+          ...attendanceFields,
           updatedAt: new Date(),
         },
       });
@@ -480,6 +492,58 @@ export async function action({ request, params }: Route.ActionArgs) {
       status: "signed_up",
       origin: "assigned",
     });
+    return data({ ok: true });
+  }
+
+  if (intent === "walkIn") {
+    // The substitution record: someone covered this shift without signing up
+    // (e.g. the scheduled bartender no-showed and another camper stepped in).
+    // One upsert marks them signed_up + walk_in + attended.
+    const shift = await shiftInGathering(String(form.get("shiftId")));
+    if (!shift) return data({ error: "Shift not found." }, { status: 404 });
+    const [target] = await db
+      .select({ id: membership.id })
+      .from(membership)
+      .where(
+        and(
+          eq(membership.id, String(form.get("membershipId"))),
+          eq(membership.organizationId, active.camp.id),
+        ),
+      )
+      .limit(1);
+    if (!target) return data({ error: "Member not found." }, { status: 404 });
+    await upsertSignup({
+      shiftId: shift.id,
+      membershipId: target.id,
+      status: "signed_up",
+      origin: "walk_in",
+      attendance: "attended",
+      recordedByMembershipId: active.membership.id,
+    });
+    return data({ ok: true });
+  }
+
+  if (intent === "markAttendance") {
+    const shift = await shiftInGathering(String(form.get("shiftId")));
+    if (!shift) return data({ error: "Shift not found." }, { status: 404 });
+    const attendance = String(form.get("attendance"));
+    if (!["unknown", "attended", "no_show"].includes(attendance)) {
+      return data({ error: "Unknown attendance state." }, { status: 400 });
+    }
+    await db
+      .update(gatheringSignup)
+      .set({
+        attendance,
+        recordedByMembershipId: active.membership.id,
+        recordedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(gatheringSignup.shiftId, shift.id),
+          eq(gatheringSignup.membershipId, String(form.get("membershipId"))),
+        ),
+      );
     return data({ ok: true });
   }
 
@@ -963,7 +1027,7 @@ function ShiftRow({
     error?: string;
   }>();
   const assignFetcher = useFetcher();
-  const [assigning, setAssigning] = useState(false);
+  const [picker, setPicker] = useState<"assign" | "walkIn" | null>(null);
 
   useEffect(() => {
     if (fetcher.data?.error) {
@@ -1010,7 +1074,18 @@ function ShiftRow({
           </Group>
           {committed.length + maybes.length + waitlist.length > 0 ? (
             <Text size="xs" c="dimmed" mt={4}>
-              {committed.map((su) => su.label).join(", ")}
+              {committed
+                .map(
+                  (su) =>
+                    su.label +
+                    (su.origin === "walk_in" ? " (walk-in)" : "") +
+                    (su.attendance === "attended"
+                      ? " ✓"
+                      : su.attendance === "no_show"
+                        ? " ✗ no-show"
+                        : ""),
+                )
+                .join(", ")}
               {maybes.length > 0
                 ? `${committed.length ? " · " : ""}maybe: ${maybes
                     .map((su) => su.label)
@@ -1022,9 +1097,55 @@ function ShiftRow({
             </Text>
           ) : null}
           {canManage && s.signups.length > 0 ? (
-            <Group gap={6} mt={4} wrap="wrap">
+            <Stack gap={2} mt={4}>
               {s.signups.map((su) => (
-                <Group gap={2} key={su.id} wrap="nowrap">
+                <Group gap={4} key={su.id} wrap="nowrap">
+                  <Text size="xs" w={140} truncate>
+                    {su.label}
+                  </Text>
+                  {/* Attendance outcome — click the active state to unset. */}
+                  <ActionIcon
+                    size="xs"
+                    variant={su.attendance === "attended" ? "filled" : "subtle"}
+                    color="green"
+                    aria-label={`${su.label} attended`}
+                    onClick={() =>
+                      assignFetcher.submit(
+                        {
+                          intent: "markAttendance",
+                          shiftId: s.id,
+                          membershipId: su.membershipId,
+                          attendance:
+                            su.attendance === "attended"
+                              ? "unknown"
+                              : "attended",
+                        },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    ✓
+                  </ActionIcon>
+                  <ActionIcon
+                    size="xs"
+                    variant={su.attendance === "no_show" ? "filled" : "subtle"}
+                    color="orange"
+                    aria-label={`${su.label} didn't show`}
+                    onClick={() =>
+                      assignFetcher.submit(
+                        {
+                          intent: "markAttendance",
+                          shiftId: s.id,
+                          membershipId: su.membershipId,
+                          attendance:
+                            su.attendance === "no_show" ? "unknown" : "no_show",
+                        },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    ✗
+                  </ActionIcon>
                   {su.status === "waitlisted" ? (
                     <Button
                       size="compact-xs"
@@ -1040,7 +1161,7 @@ function ShiftRow({
                         )
                       }
                     >
-                      Promote {su.label}
+                      Promote
                     </Button>
                   ) : null}
                   <ActionIcon
@@ -1063,7 +1184,7 @@ function ShiftRow({
                   </ActionIcon>
                 </Group>
               ))}
-            </Group>
+            </Stack>
           ) : null}
         </div>
 
@@ -1107,30 +1228,47 @@ function ShiftRow({
           ) : null}
           {canManage ? (
             <Group gap="xs">
-              {assigning ? (
+              {picker ? (
                 <Select
                   size="xs"
-                  placeholder="Assign someone…"
+                  placeholder={
+                    picker === "assign"
+                      ? "Assign someone…"
+                      : "Who covered this shift?"
+                  }
                   data={members}
                   searchable
                   onChange={(id) => {
                     if (id) {
                       assignFetcher.submit(
-                        { intent: "assign", shiftId: s.id, membershipId: id },
+                        {
+                          intent: picker === "assign" ? "assign" : "walkIn",
+                          shiftId: s.id,
+                          membershipId: id,
+                        },
                         { method: "post" },
                       );
                     }
-                    setAssigning(false);
+                    setPicker(null);
                   }}
                 />
               ) : (
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  onClick={() => setAssigning(true)}
-                >
-                  Assign
-                </Button>
+                <>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() => setPicker("assign")}
+                  >
+                    Assign
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() => setPicker("walkIn")}
+                  >
+                    Walk-in
+                  </Button>
+                </>
               )}
               <ConfirmButton
                 label="Delete shift"
