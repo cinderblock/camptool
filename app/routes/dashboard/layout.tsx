@@ -140,6 +140,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         { to: "/", label: "Overview", end: true },
         { to: "/guide", label: "How it works", end: false },
         ...gated("announcements", "/announcements", "Announcements"),
+        ...gated("schedule", "/schedule", "Schedule"),
         ...(showFinishSetup
           ? [{ to: "/start", label: "Finish setup", end: false }]
           : []),

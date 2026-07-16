@@ -33,6 +33,11 @@ export default [
     route("roster", "routes/dashboard/roster.tsx"),
     route("invite", "routes/dashboard/invite.tsx"),
     route("editions", "routes/dashboard/editions.tsx"),
+    route("schedule", "routes/dashboard/schedule.tsx"),
+    route(
+      "schedule/:gatheringId",
+      "routes/dashboard/schedule.$gatheringId.tsx",
+    ),
     route("map", "routes/dashboard/map.tsx"),
     route("bringing", "routes/dashboard/bringing.tsx"),
     route("inventory", "routes/dashboard/inventory.tsx"),
