@@ -198,6 +198,101 @@ export async function loadGatheringDetail(
   return { gathering: g, occurrences, shifts, signups };
 }
 
+/**
+ * Occurrence-level agenda for the edition: every scheduled day with its
+ * gathering info, shift staffing summary, and the viewer's own signup state.
+ * Feeds the Agenda/Calendar/Mine views and the Overview card.
+ */
+export async function loadAgenda(editionId: string, membershipId: string) {
+  const rows = await db
+    .select({
+      occurrenceId: gatheringOccurrence.id,
+      date: gatheringOccurrence.date,
+      startTime: gatheringOccurrence.startTime,
+      endTime: gatheringOccurrence.endTime,
+      occurrenceStatus: gatheringOccurrence.status,
+      titleOverride: gatheringOccurrence.titleOverride,
+      locationOverride: gatheringOccurrence.locationOverride,
+      gatheringId: gathering.id,
+      title: gathering.title,
+      kind: gathering.kind,
+      location: gathering.location,
+    })
+    .from(gatheringOccurrence)
+    .innerJoin(gathering, eq(gathering.id, gatheringOccurrence.gatheringId))
+    .where(
+      and(
+        eq(gatheringOccurrence.editionId, editionId),
+        eq(gathering.status, "active"),
+      ),
+    )
+    .orderBy(asc(gatheringOccurrence.date), asc(gatheringOccurrence.startTime));
+
+  const occurrenceIds = rows.map((r) => r.occurrenceId);
+  const shifts = occurrenceIds.length
+    ? await db
+        .select({
+          id: gatheringShift.id,
+          occurrenceId: gatheringShift.occurrenceId,
+          role: gatheringShift.role,
+          staffing: gatheringShift.staffing,
+          minNeeded: gatheringShift.minNeeded,
+          capacity: gatheringShift.capacity,
+        })
+        .from(gatheringShift)
+        .where(inArray(gatheringShift.occurrenceId, occurrenceIds))
+    : [];
+  const shiftIds = shifts.map((s) => s.id);
+  const signups = shiftIds.length
+    ? await db
+        .select({
+          shiftId: gatheringSignup.shiftId,
+          membershipId: gatheringSignup.membershipId,
+          status: gatheringSignup.status,
+        })
+        .from(gatheringSignup)
+        .where(inArray(gatheringSignup.shiftId, shiftIds))
+    : [];
+
+  return rows.map((r) => {
+    const myStatuses: string[] = [];
+    let committed = 0;
+    let needed = 0;
+    for (const s of shifts) {
+      if (s.occurrenceId !== r.occurrenceId) continue;
+      for (const su of signups) {
+        if (su.shiftId !== s.id) continue;
+        if (su.status === "signed_up") committed++;
+        if (su.membershipId === membershipId && su.status !== "cancelled") {
+          myStatuses.push(su.status);
+        }
+      }
+      if (s.staffing === "needed" && s.minNeeded != null) needed += s.minNeeded;
+    }
+    return {
+      occurrenceId: r.occurrenceId,
+      gatheringId: r.gatheringId,
+      date: r.date,
+      startTime: r.startTime,
+      endTime: r.endTime,
+      cancelled: r.occurrenceStatus === "cancelled",
+      title: r.titleOverride ?? r.title,
+      kind: r.kind,
+      location: r.locationOverride ?? r.location,
+      committed,
+      needed,
+      // The viewer's strongest involvement on this day.
+      mine: myStatuses.includes("signed_up")
+        ? "signed_up"
+        : myStatuses.includes("waitlisted")
+          ? "waitlisted"
+          : myStatuses.includes("maybe")
+            ? "maybe"
+            : null,
+    };
+  });
+}
+
 /** Count of non-cancelled signups per shift (for capacity checks/labels). */
 export async function signupCounts(
   shiftIds: string[],

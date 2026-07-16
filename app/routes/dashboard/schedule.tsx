@@ -43,6 +43,7 @@ import {
 import {
   cleanTime,
   createGathering,
+  loadAgenda,
   loadGatherings,
 } from "~/lib/schedule.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -59,6 +60,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     year: activeEdition.year,
     locked: activeEdition.locked,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
+    agenda: await loadAgenda(activeEdition.id, active.membership.id),
     gatherings: await loadGatherings(activeEdition.id, todayIso()),
   };
 }
@@ -137,25 +139,36 @@ export async function action({ request }: Route.ActionArgs) {
   return redirect(`/schedule/${id}`);
 }
 
+type AgendaRow = Route.ComponentProps["loaderData"]["agenda"][number];
+
 export default function Schedule({ loaderData }: Route.ComponentProps) {
-  const { year, locked, isOfficer, gatherings } = loaderData;
+  const { year, locked, isOfficer, agenda, gatherings } = loaderData;
+  const [view, setView] = useState<"agenda" | "calendar" | "mine">("agenda");
   const today = todayIso();
-  const upcoming = gatherings.filter(
-    (g) => g.nextDate != null && g.nextDate >= today,
-  );
-  const past = gatherings.filter(
-    (g) => g.nextDate == null || g.nextDate < today,
-  );
+  // Gatherings whose days were all deleted/cancelled would otherwise be
+  // unreachable — surface them so officers can still manage/archive them.
+  const orphans = gatherings.filter((g) => g.nextDate == null);
 
   return (
     <Container size="md">
       <Stack gap="lg">
-        <div>
-          <Title order={2}>Schedule</Title>
-          <Text c="dimmed" size="sm">
-            Work parties, meetings, and shifts for {year}.
-          </Text>
-        </div>
+        <Group justify="space-between" align="flex-end">
+          <div>
+            <Title order={2}>Schedule</Title>
+            <Text c="dimmed" size="sm">
+              Work parties, meetings, and shifts for {year}.
+            </Text>
+          </div>
+          <SegmentedControl
+            value={view}
+            onChange={(v) => setView(v as typeof view)}
+            data={[
+              { value: "agenda", label: "Agenda" },
+              { value: "calendar", label: "Calendar" },
+              { value: "mine", label: "Mine" },
+            ]}
+          />
+        </Group>
 
         {locked ? (
           <Paper
@@ -172,56 +185,133 @@ export default function Schedule({ loaderData }: Route.ComponentProps) {
 
         {isOfficer && !locked ? <NewGatheringForm /> : null}
 
-        {gatherings.length === 0 ? (
-          <Text c="dimmed" size="sm">
-            Nothing scheduled yet
-            {isOfficer && !locked
-              ? " — create the first gathering above."
-              : "."}
-          </Text>
+        {view === "calendar" ? (
+          <MonthCalendar agenda={agenda} today={today} />
+        ) : view === "mine" ? (
+          <AgendaList
+            rows={agenda.filter((r) => r.mine != null)}
+            today={today}
+            emptyText="You're not signed up for anything yet — check the Agenda."
+          />
         ) : (
-          <>
-            {upcoming.map((g) => (
-              <GatheringCard key={g.id} g={g} />
-            ))}
-            {past.length > 0 ? (
-              <>
-                <Text size="sm" c="dimmed" fw={600}>
-                  Past
-                </Text>
-                {past.map((g) => (
-                  <GatheringCard key={g.id} g={g} />
-                ))}
-              </>
-            ) : null}
-          </>
+          <AgendaList
+            rows={agenda}
+            today={today}
+            emptyText={
+              gatherings.length === 0
+                ? `Nothing scheduled yet${isOfficer && !locked ? " — create the first gathering above." : "."}`
+                : "No days scheduled."
+            }
+          />
         )}
+
+        {isOfficer && orphans.length > 0 ? (
+          <div>
+            <Text size="sm" c="dimmed" fw={600} mb={4}>
+              Gatherings without scheduled days
+            </Text>
+            {orphans.map((g) => (
+              <Anchor
+                key={g.id}
+                component={Link}
+                to={`/schedule/${g.id}`}
+                size="sm"
+                display="block"
+              >
+                {g.title}
+              </Anchor>
+            ))}
+          </div>
+        ) : null}
       </Stack>
     </Container>
   );
 }
 
-function GatheringCard({
-  g,
+function AgendaList({
+  rows,
+  today,
+  emptyText,
 }: {
-  g: Route.ComponentProps["loaderData"]["gatherings"][number];
+  rows: AgendaRow[];
+  today: string;
+  emptyText: string;
 }) {
+  const upcoming = rows.filter((r) => r.date >= today);
+  const past = rows.filter((r) => r.date < today).reverse();
+  if (rows.length === 0) {
+    return (
+      <Text c="dimmed" size="sm">
+        {emptyText}
+      </Text>
+    );
+  }
   return (
-    <Card withBorder padding="md" component={Link} to={`/schedule/${g.id}`}>
+    <Stack gap="xs">
+      {upcoming.map((r) => (
+        <AgendaCard key={r.occurrenceId} r={r} />
+      ))}
+      {past.length > 0 ? (
+        <>
+          <Text size="sm" c="dimmed" fw={600} mt="sm">
+            Past
+          </Text>
+          {past.map((r) => (
+            <AgendaCard key={r.occurrenceId} r={r} />
+          ))}
+        </>
+      ) : null}
+    </Stack>
+  );
+}
+
+function AgendaCard({ r }: { r: AgendaRow }) {
+  return (
+    <Card
+      withBorder
+      padding="sm"
+      component={Link}
+      to={`/schedule/${r.gatheringId}`}
+      opacity={r.cancelled ? 0.55 : 1}
+    >
       <Group justify="space-between" wrap="nowrap">
-        <div>
-          <Group gap="xs">
-            <Text fw={600}>{g.title}</Text>
-            <Badge size="xs" color={kindColor(g.kind)} variant="light">
-              {kindLabel(g.kind)}
+        <div style={{ minWidth: 0 }}>
+          <Group gap="xs" wrap="wrap">
+            <Text
+              fw={600}
+              size="sm"
+              td={r.cancelled ? "line-through" : undefined}
+            >
+              {r.title}
+            </Text>
+            <Badge size="xs" color={kindColor(r.kind)} variant="light">
+              {kindLabel(r.kind)}
             </Badge>
+            {r.cancelled ? (
+              <Badge size="xs" color="red" variant="light">
+                cancelled
+              </Badge>
+            ) : null}
+            {r.mine ? (
+              <Badge
+                size="xs"
+                variant="light"
+                color={
+                  r.mine === "signed_up"
+                    ? "green"
+                    : r.mine === "waitlisted"
+                      ? "yellow"
+                      : "gray"
+                }
+              >
+                {r.mine === "signed_up" ? "you're in" : r.mine}
+              </Badge>
+            ) : null}
           </Group>
-          <Text size="sm" c="dimmed">
-            {g.nextDate
-              ? `${dateLabel(g.nextDate)} · ${timeRangeLabel(g.nextStartTime, g.nextEndTime)}`
-              : "No dates scheduled"}
-            {g.occurrenceCount > 1 ? ` · ${g.occurrenceCount} days` : ""}
-            {g.location ? ` · ${g.location}` : ""}
+          <Text size="xs" c="dimmed">
+            {dateLabel(r.date)} · {timeRangeLabel(r.startTime, r.endTime)}
+            {r.location ? ` · ${r.location}` : ""}
+            {r.needed > 0 ? ` · ${r.committed}/${r.needed} filled` : ""}
           </Text>
         </div>
         <Text size="sm" c="dimmed">
@@ -229,6 +319,132 @@ function GatheringCard({
         </Text>
       </Group>
     </Card>
+  );
+}
+
+/** DIY month grid — no calendar dependency. Weeks start Sunday. */
+function MonthCalendar({
+  agenda,
+  today,
+}: {
+  agenda: AgendaRow[];
+  today: string;
+}) {
+  // Default to the month of the next upcoming item, else today's month.
+  const firstUpcoming = agenda.find((r) => r.date >= today);
+  const [month, setMonth] = useState(
+    () => (firstUpcoming?.date ?? today).slice(0, 7), // YYYY-MM
+  );
+  const [y = 0, m = 1] = month.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const firstDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay();
+  const iso = (day: number) =>
+    `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const byDate = new Map<string, AgendaRow[]>();
+  for (const r of agenda) {
+    const list = byDate.get(r.date) ?? [];
+    list.push(r);
+    byDate.set(r.date, list);
+  }
+  const shiftMonth = (delta: number) => {
+    const next = new Date(Date.UTC(y, m - 1 + delta, 1));
+    setMonth(
+      `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`,
+    );
+  };
+  const monthLabel = new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(
+    "en-US",
+    { month: "long", year: "numeric", timeZone: "UTC" },
+  );
+  const cells: (number | null)[] = [
+    ...Array.from({ length: firstDow }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Group justify="space-between" mb="xs">
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          onClick={() => shiftMonth(-1)}
+        >
+          ← Prev
+        </Button>
+        <Text fw={600}>{monthLabel}</Text>
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          onClick={() => shiftMonth(1)}
+        >
+          Next →
+        </Button>
+      </Group>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(7, 1fr)",
+          gap: 4,
+        }}
+      >
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <Text key={d} size="xs" c="dimmed" ta="center">
+            {d}
+          </Text>
+        ))}
+        {cells.map((day, i) => (
+          <div
+            key={day ?? `blank-${i}`}
+            style={{
+              minHeight: 64,
+              borderRadius: 4,
+              padding: 2,
+              border: "1px solid var(--mantine-color-default-border)",
+              background:
+                day != null && iso(day) === today
+                  ? "var(--mantine-color-default-hover)"
+                  : undefined,
+              visibility: day == null ? "hidden" : undefined,
+            }}
+          >
+            {day != null ? (
+              <>
+                <Text size="xs" c="dimmed" ta="right" pr={2}>
+                  {day}
+                </Text>
+                <Stack gap={2}>
+                  {(byDate.get(iso(day)) ?? []).map((r) => (
+                    <Anchor
+                      key={r.occurrenceId}
+                      component={Link}
+                      to={`/schedule/${r.gatheringId}`}
+                      underline="never"
+                    >
+                      <Badge
+                        size="xs"
+                        color={kindColor(r.kind)}
+                        variant={r.mine ? "filled" : "light"}
+                        fullWidth
+                        style={{
+                          textDecoration: r.cancelled
+                            ? "line-through"
+                            : undefined,
+                        }}
+                      >
+                        {r.title}
+                      </Badge>
+                    </Anchor>
+                  ))}
+                </Stack>
+              </>
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <Text size="xs" c="dimmed" mt="xs">
+        Filled badges are days you're signed up for.
+      </Text>
+    </Paper>
   );
 }
 

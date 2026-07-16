@@ -29,6 +29,8 @@ import { loadFeatureStates } from "~/lib/features.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
 import { type Role, hasAtLeast } from "~/lib/permissions";
 import { pendingApplicationWhere } from "~/lib/recruits.server";
+import { dateLabel, timeRangeLabel, todayIso } from "~/lib/schedule";
+import { loadAgenda } from "~/lib/schedule.server";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { loadWizardState } from "~/lib/wizard.server";
 import { db } from "../../../db/client.server";
@@ -49,6 +51,18 @@ import type { Route } from "./+types/index";
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Dashboard · CampTool" }];
 }
+
+type ScheduleCard = {
+  myShifts: {
+    gatheringId: string;
+    title: string;
+    date: string;
+    startTime: string | null;
+    endTime: string | null;
+    waitlisted: boolean;
+  }[];
+  understaffedDays: number;
+};
 
 const ROLE_COLOR: Record<Role, string> = {
   admin: "red",
@@ -113,6 +127,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     pendingApprovals: number;
     dues: { expected: number; paid: number; owed: number } | null;
     headcount: Headcount | null;
+    schedule: ScheduleCard | null;
   } | null = null;
   if (active && activeEdition) {
     const editionId = activeEdition.id;
@@ -228,6 +243,33 @@ export async function loader({ request }: Route.LoaderArgs) {
       }
     }
 
+    // Upcoming schedule: the viewer's next shifts + (officers) days that
+    // still need people.
+    let schedule: ScheduleCard | null = null;
+    if (seeFeature("schedule")) {
+      const agenda = await loadAgenda(editionId, mid);
+      const upcoming = agenda.filter(
+        (r) => !r.cancelled && r.date >= todayIso(),
+      );
+      schedule = {
+        myShifts: upcoming
+          .filter((r) => r.mine === "signed_up" || r.mine === "waitlisted")
+          .slice(0, 3)
+          .map((r) => ({
+            gatheringId: r.gatheringId,
+            title: r.title,
+            date: r.date,
+            startTime: r.startTime,
+            endTime: r.endTime,
+            waitlisted: r.mine === "waitlisted",
+          })),
+        understaffedDays: isOfficer
+          ? upcoming.filter((r) => r.needed > 0 && r.committed < r.needed)
+              .length
+          : 0,
+      };
+    }
+
     overview = {
       year: activeEdition.year,
       isOfficer,
@@ -242,6 +284,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       pendingApprovals,
       dues,
       headcount: seeFeature("roster") ? await headcountFor(editionId) : null,
+      schedule,
     };
   }
 
@@ -477,6 +520,56 @@ function CampOverview({
                     ))}
                   </Stack>
                 )}
+              </Card>
+            ) : null}
+
+            {overview.schedule ? (
+              <Card withBorder padding="lg" radius="md">
+                <Group justify="space-between" mb="xs">
+                  <Text fw={600}>Your shifts</Text>
+                  <Anchor component={Link} to="/schedule" size="xs">
+                    Schedule
+                  </Anchor>
+                </Group>
+                {overview.schedule.myShifts.length === 0 ? (
+                  <Text size="sm" c="dimmed">
+                    Nothing signed up yet — see what's coming on the schedule.
+                  </Text>
+                ) : (
+                  <Stack gap={6}>
+                    {overview.schedule.myShifts.map((s) => (
+                      <Group
+                        key={`${s.gatheringId}-${s.date}`}
+                        gap={6}
+                        wrap="nowrap"
+                      >
+                        {s.waitlisted ? (
+                          <Badge size="xs" variant="light" color="yellow">
+                            waitlist
+                          </Badge>
+                        ) : null}
+                        <Anchor
+                          component={Link}
+                          to={`/schedule/${s.gatheringId}`}
+                          size="sm"
+                          lineClamp={1}
+                        >
+                          {dateLabel(s.date)} · {s.title}
+                          {s.startTime
+                            ? ` · ${timeRangeLabel(s.startTime, s.endTime)}`
+                            : ""}
+                        </Anchor>
+                      </Group>
+                    ))}
+                  </Stack>
+                )}
+                {overview.schedule.understaffedDays > 0 ? (
+                  <Text size="xs" c="orange" mt="xs">
+                    {overview.schedule.understaffedDays}{" "}
+                    {overview.schedule.understaffedDays === 1 ? "day" : "days"}{" "}
+                    still need people.
+                  </Text>
+                ) : null}
               </Card>
             ) : null}
           </SimpleGrid>
