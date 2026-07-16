@@ -435,6 +435,13 @@
       "when": 1783640984468,
       "tag": "0061_tidy_nekra",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1784226311362,
+      "tag": "0062_strange_ghost_rider",
+      "breakpoints": true
     }
   ]
 }

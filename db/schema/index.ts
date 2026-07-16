@@ -12,6 +12,8 @@ export * from "./inventory";
 export * from "./map";
 export * from "./question";
 export * from "./recruit";
+export * from "./schedule";
 export * from "./season";
+export * from "./training";
 export * from "./telemetry";
 export * from "./ticket";

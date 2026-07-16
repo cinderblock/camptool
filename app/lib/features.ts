@@ -26,8 +26,6 @@ export type FeatureKey =
   | "dues"
   | "recruiting"
   | "roster"
-  // Reserved for the upcoming Schedule feature (plans/events-scheduling.md);
-  // not in FEATURES yet, so they don't appear in settings until built.
   | "schedule"
   | "training";
 
@@ -121,6 +119,18 @@ export const FEATURES: CampFeatureDef[] = [
     description:
       "The per-year attendee roster and headcount — members and their guests.",
   },
+  {
+    key: "schedule",
+    label: "Schedule",
+    description:
+      "Work parties, camp meetings, and shifts — with sign-ups and a calendar.",
+  },
+  {
+    key: "training",
+    label: "Training",
+    description:
+      "Qualifications officers sign members off on — one-time, yearly, or per event.",
+  },
 ];
 
 const BY_KEY = new Map(FEATURES.map((f) => [f.key, f]));
@@ -142,6 +152,8 @@ const ROUTE_FEATURES: Record<string, FeatureKey> = {
   dues: "dues",
   recruits: "recruiting",
   roster: "roster",
+  schedule: "schedule",
+  training: "training",
 };
 
 export function featureForPath(pathname: string): FeatureKey | null {
