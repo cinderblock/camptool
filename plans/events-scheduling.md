@@ -274,18 +274,49 @@ tree); push + watch CI green.
 ## Things not to do
 
 - Don't name the entity `event` (collides with the event-layer concept).
-- Don't store wall-clock time strings or assume the browser/server tz — epoch ms
-  + event tz.
 - Don't build Discord/email delivery in this feature — in-app first; delivery is
   the parent plan's Phase 5.
 - Don't gate map/attendee migrations into this feature's migration (see gotcha).
 - Don't assume a single camp; every table carries `camp_id`.
 
+## Deviations from the original design (all deliberate)
+
+- **Times are wall-clock strings, NOT epoch ms + event tz** (supersedes the
+  original tz section + the old "don't store wall-clock strings" rule).
+  Occurrences carry `date` (ISO `YYYY-MM-DD`) + `startTime`/`endTime`
+  (`HH:MM`): the repo already stores event dates this way (setup passes,
+  arrival dates), there is no tz on the event layer, and pre-event work
+  parties happen in the camp's home city so one event-tz assumption breaks
+  anyway. "Work party at 10am" is a wall-clock concept. No Date-tz handling
+  anywhere; `todayIso()` is the one place local time enters.
+- **Requirements gate at the gathering level (as planned) but only while the
+  training feature is fully ON** — preview doesn't gate members on
+  qualifications they can't see; officer `assign` always bypasses.
+- **Shift creation**: every occurrence gets one starting shift from the create
+  form's staffing config (not a separate "default General shift" special case).
+
 ## Progress log
 
 - [x] 2026-07-07 — design + user Q&A (4 forks locked); plan written.
-- [ ] Phase 1 — schema + libs + migration.
-- [ ] Phase 2 — officer authoring UI.
-- [ ] Phase 3 — member signup + calendar + Overview card.
-- [ ] Phase 4 — training + signup gating.
-- [ ] Phase 5 — attendance + substitution.
+- [x] Phase 1 (3b6e793) — 7 tables (migration **0062**), `schedule`/`training`
+      feature-registry keys (default off — existing camps preview them via
+      /settings), pure libs (dailyDatesBetween capped+leap-safe, labels,
+      isValidSignoff). Script-verified 22/22 incl. migration chain on a DB copy.
+- [x] Phase 2 (57284f1) — /schedule list + create (one day / repeat-daily),
+      /schedule/:id management (days, role shifts, capacity) + member
+      sign-up/maybe/withdraw with waitlist; officer assign/promote/remove.
+      E2E 15/15 (waitlist path review-verified only — needs a 2nd account).
+- [x] Phase 3 (f79852a) — Agenda / Calendar (DIY month grid) / Mine views,
+      fill counts, orphaned-gathering rescue list, "Your shifts" Overview card
+      + officer "N days still need people".
+- [x] Phase 4 (c26d324) — /training (defs w/ validity, grant/revoke, history
+      kept), requirement chips + officer manage panel, sign-up gating with
+      named-training 403. E2E 12/12. (Rebuilt once: a session crash rolled the
+      working tree back; commits were restored from HEAD, only the then-
+      uncommitted Phase 4 needed rewriting — commit early, commit often.)
+- [x] Phase 5 (fbdfa90) — per-signup attendance ✓/✗ (reset to unknown, recorder
+      stamped), Walk-in control records substitutes (signed_up + walk_in +
+      attended), markers visible to everyone. E2E 8/8.
+- [ ] Later (parent Phase 5): Discord/email reminders; guest signups via
+      attendeeId; weekly/custom recurrence; map-linked locations; shift-level
+      requirements.

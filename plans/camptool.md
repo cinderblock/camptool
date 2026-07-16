@@ -571,17 +571,22 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   schedules, packing lists), grouped by category; everyone reads at `/documents`,
   officers add/remove. Links only (URL normalized/validated) — file upload would
   need storage infra (follow-up). **Phase 4 (Operations) complete.**
-- [~] **Schedule — gatherings/shifts/sign-ups + training/permissions (DESIGN
-  LANDED, build pending).** Officer-scheduled work parties / camp meetings / prep
-  sessions with **nested shifts/roles**, member sign-ups, capacity + all-hands /
-  all-available staffing, daily-through-event recurrence, **attendance +
-  substitution** tracking (record who actually covered a shift), and
-  **required-training sign-offs** gating signups (validity = lifetime /
-  per_edition / annual). Notifications = in-app first (Discord/email reminders
-  ride Phase 5). Named `gathering` internally to avoid colliding with the
-  event-layer `event`. Edition-scoped (training defs camp-scoped). Full design +
-  schema + phases: **`plans/events-scheduling.md`**. **Sequenced behind camp
-  features (below) — Schedule ships as the first feature born in the registry.**
+- [x] **Schedule — gatherings/shifts/sign-ups + training/permissions (LANDED +
+  DEPLOYED through training; attendance slice committed, E2E-tested on a scratch
+  server).** Officer-scheduled work parties / camp meetings / prep sessions with
+  **nested shifts/roles** (gathering → occurrence → shift → signup, migration
+  **0062**), member sign-ups with capacity → waitlist, all-hands / all-available
+  / needs-N staffing, daily-through-event recurrence (materialized rows),
+  **Agenda / Calendar / Mine** views + a "Your shifts" Overview card,
+  **attendance ✓/✗ + walk-in substitution** (who actually covered a shift), and
+  **/training** — sign-offs with lifetime / per_edition / annual validity gating
+  sign-up ("You need the X sign-off first"; officer assign bypasses; gate active
+  only when training is fully ON). Ships as the first features born in the camp
+  registry (`schedule` + `training`, default OFF — flip to Preview on /settings
+  to explore). Times are **wall-clock ISO date + HH:MM strings** (deliberate
+  deviation, documented). Named `gathering` internally (avoids the event-layer
+  `event`). In-app only; Discord/email reminders ride Phase 5. Full detail +
+  per-phase commits/E2E: **`plans/events-scheduling.md`**.
 - [x] **Camp features — per-camp opt-in feature gating (LANDED, E2E-tested on a
   scratch server; NOT yet deployed-verified).** User direction (2026-07-07):
   features are **opt-in plugins per camp** with states **off / preview / on** —
