@@ -27,7 +27,8 @@ import { notifications } from "@mantine/notifications";
 import { and, count, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
 import { Link, data, redirect, useFetcher } from "react-router";
-import { requireFeature } from "~/lib/features.server";
+import { featureVisibleTo } from "~/lib/features";
+import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import {
   GATHERING_KINDS,
@@ -41,13 +42,21 @@ import {
 } from "~/lib/schedule";
 import { cleanTime, loadGatheringDetail } from "~/lib/schedule.server";
 import { requireActiveEdition } from "~/lib/session.server";
+import {
+  loadRequirements,
+  loadTrainings,
+  missingRequirements,
+  validTrainingIds,
+} from "~/lib/training.server";
 import { db } from "../../../db/client.server";
 import {
   gathering,
   gatheringOccurrence,
+  gatheringRequirement,
   gatheringShift,
   gatheringSignup,
   membership,
+  training,
   user as userTable,
 } from "../../../db/schema";
 import type { Route } from "./+types/schedule.$gatheringId";
@@ -83,11 +92,44 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         .sort((a, b) => a.label.localeCompare(b.label))
     : [];
 
+  // Requirements only exist to the viewer when they can see the training
+  // feature (schedule can run without training entirely).
+  const trainingVisible = featureVisibleTo(
+    await getFeatureState(active.camp.id, "training"),
+    active.membership.role,
+  );
+  const requirements = trainingVisible
+    ? await loadRequirements([detail.gathering.id])
+    : [];
+  const myValid = trainingVisible
+    ? await validTrainingIds({
+        campId: active.camp.id,
+        membershipId: active.membership.id,
+        editionId: activeEdition.id,
+      })
+    : new Set<string>();
+  const trainingOptions =
+    trainingVisible && isOfficer
+      ? (await loadTrainings(active.camp.id)).map((t) => ({
+          value: t.id,
+          label: t.name,
+        }))
+      : [];
+
   return {
     locked: activeEdition.locked,
     isOfficer,
     canSignUp: hasAtLeast(active.membership.role, "member"),
     myMembershipId: active.membership.id,
+    trainingVisible,
+    requirements: requirements.map((r) => ({
+      id: r.id,
+      trainingId: r.trainingId,
+      name: r.name,
+      enforcement: r.enforcement,
+      iHaveIt: myValid.has(r.trainingId),
+    })),
+    trainingOptions,
     gathering: {
       id: detail.gathering.id,
       title: detail.gathering.title,
@@ -225,6 +267,28 @@ export async function action({ request, params }: Route.ActionArgs) {
     }
     const shift = await shiftInGathering(String(form.get("shiftId")));
     if (!shift) return data({ error: "Shift not found." }, { status: 404 });
+    // Training requirements block self-sign-up only while the training
+    // feature is fully ON (preview = officers exploring; don't gate members
+    // on qualifications they can't even see). Officer `assign` bypasses.
+    if ((await getFeatureState(active.camp.id, "training")) === "on") {
+      const missing = await missingRequirements({
+        campId: active.camp.id,
+        gatheringId,
+        membershipId: active.membership.id,
+        editionId: activeEdition.id,
+      });
+      const blocked = missing.filter((m) => m.enforcement === "required");
+      if (blocked.length > 0) {
+        return data(
+          {
+            error: `You need the ${blocked
+              .map((m) => m.name)
+              .join(" and ")} sign-off first — see the Training page.`,
+          },
+          { status: 403 },
+        );
+      }
+    }
     let status = intent === "maybe" ? "maybe" : "signed_up";
     // A full capacity-capped shift takes further sign-ups as waitlist.
     if (
@@ -419,6 +483,49 @@ export async function action({ request, params }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
+  if (intent === "addRequirement") {
+    const trainingId = String(form.get("trainingId") ?? "");
+    const [t] = await db
+      .select({ id: training.id })
+      .from(training)
+      .where(
+        and(eq(training.id, trainingId), eq(training.campId, active.camp.id)),
+      )
+      .limit(1);
+    if (!t) return data({ error: "Training not found." }, { status: 404 });
+    const enforcement =
+      String(form.get("enforcement")) === "warn" ? "warn" : "required";
+    await db
+      .insert(gatheringRequirement)
+      .values({
+        id: crypto.randomUUID(),
+        campId: active.camp.id,
+        gatheringId,
+        trainingId: t.id,
+        enforcement,
+      })
+      .onConflictDoUpdate({
+        target: [
+          gatheringRequirement.gatheringId,
+          gatheringRequirement.trainingId,
+        ],
+        set: { enforcement },
+      });
+    return data({ ok: true });
+  }
+
+  if (intent === "removeRequirement") {
+    await db
+      .delete(gatheringRequirement)
+      .where(
+        and(
+          eq(gatheringRequirement.id, String(form.get("requirementId"))),
+          eq(gatheringRequirement.gatheringId, gatheringId),
+        ),
+      );
+    return data({ ok: true });
+  }
+
   if (intent === "removeSignup") {
     const shift = await shiftInGathering(String(form.get("shiftId")));
     if (!shift) return data({ error: "Shift not found." }, { status: 404 });
@@ -482,6 +589,27 @@ export default function GatheringDetail({ loaderData }: Route.ComponentProps) {
               {g.description}
             </Text>
           ) : null}
+          {loaderData.requirements.length > 0 ? (
+            <Group gap={6} mt="xs">
+              {loaderData.requirements.map((r) => (
+                <Badge
+                  key={r.id}
+                  size="sm"
+                  variant={r.iHaveIt ? "light" : "outline"}
+                  color={
+                    r.iHaveIt
+                      ? "green"
+                      : r.enforcement === "required"
+                        ? "red"
+                        : "yellow"
+                  }
+                >
+                  {r.enforcement === "warn" ? "suggests" : "requires"} {r.name}
+                  {r.iHaveIt ? " ✓" : ""}
+                </Badge>
+              ))}
+            </Group>
+          ) : null}
         </div>
 
         {locked ? (
@@ -498,6 +626,9 @@ export default function GatheringDetail({ loaderData }: Route.ComponentProps) {
         ) : null}
 
         {canManage ? <EditGathering g={g} /> : null}
+        {canManage && loaderData.trainingVisible ? (
+          <ManageRequirements loaderData={loaderData} />
+        ) : null}
 
         {occurrences.map((o) => (
           <OccurrenceCard key={o.id} o={o} loaderData={loaderData} />
@@ -506,6 +637,101 @@ export default function GatheringDetail({ loaderData }: Route.ComponentProps) {
         {canManage ? <AddOccurrence /> : null}
       </Stack>
     </Container>
+  );
+}
+
+function ManageRequirements({ loaderData }: { loaderData: LoaderData }) {
+  const { requirements, trainingOptions } = loaderData;
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const [trainingId, setTrainingId] = useState<string | null>(null);
+  const [enforcement, setEnforcement] = useState("required");
+  useEffect(() => {
+    if (fetcher.data?.error) {
+      notifications.show({ color: "red", message: fetcher.data.error });
+    }
+  }, [fetcher.data]);
+  const available = trainingOptions.filter(
+    (t) => !requirements.some((r) => r.trainingId === t.value),
+  );
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Text fw={600} size="sm" mb="xs">
+        Required training
+      </Text>
+      {requirements.length === 0 ? (
+        <Text size="xs" c="dimmed" mb="xs">
+          No training required to sign up.
+        </Text>
+      ) : (
+        <Stack gap={4} mb="xs">
+          {requirements.map((r) => (
+            <Group key={r.id} gap="xs">
+              <Text size="sm">
+                {r.name}{" "}
+                <Text span size="xs" c="dimmed">
+                  ({r.enforcement === "warn" ? "suggested" : "required"})
+                </Text>
+              </Text>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color="red"
+                onClick={() =>
+                  fetcher.submit(
+                    { intent: "removeRequirement", requirementId: r.id },
+                    { method: "post" },
+                  )
+                }
+              >
+                Remove
+              </Button>
+            </Group>
+          ))}
+        </Stack>
+      )}
+      {available.length > 0 ? (
+        <Group align="flex-end" gap="xs">
+          <Select
+            size="xs"
+            placeholder="Add a training…"
+            data={available}
+            value={trainingId}
+            onChange={setTrainingId}
+            searchable
+          />
+          <Select
+            size="xs"
+            data={[
+              { value: "required", label: "Required" },
+              { value: "warn", label: "Suggested" },
+            ]}
+            value={enforcement}
+            onChange={(v) => setEnforcement(v ?? "required")}
+            allowDeselect={false}
+            w={110}
+          />
+          <Button
+            size="xs"
+            variant="light"
+            disabled={!trainingId}
+            onClick={() => {
+              if (!trainingId) return;
+              fetcher.submit(
+                { intent: "addRequirement", trainingId, enforcement },
+                { method: "post" },
+              );
+              setTrainingId(null);
+            }}
+          >
+            Add
+          </Button>
+        </Group>
+      ) : trainingOptions.length === 0 ? (
+        <Text size="xs" c="dimmed">
+          Define trainings on the Training page first.
+        </Text>
+      ) : null}
+    </Paper>
   );
 }
 

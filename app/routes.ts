@@ -48,6 +48,7 @@ export default [
     route("finances", "routes/dashboard/finances.tsx"),
     route("dues", "routes/dashboard/dues.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),
+    route("training", "routes/dashboard/training.tsx"),
     route("questions", "routes/dashboard/questions.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
     route("settings", "routes/dashboard/settings.tsx"),
