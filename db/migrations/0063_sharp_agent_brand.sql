@@ -1,0 +1,1 @@
+ALTER TABLE `camp_invite` ADD `promote_attendee_id` text REFERENCES attendee(id);

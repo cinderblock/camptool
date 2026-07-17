@@ -232,9 +232,17 @@ export async function getGuest(
   campId: string,
   editionId: string,
   guestId: string,
-): Promise<{ id: string; hostMembershipId: string | null } | null> {
+): Promise<{
+  id: string;
+  hostMembershipId: string | null;
+  name: string | null;
+} | null> {
   const [row] = await db
-    .select({ id: attendee.id, hostMembershipId: attendee.hostMembershipId })
+    .select({
+      id: attendee.id,
+      hostMembershipId: attendee.hostMembershipId,
+      name: attendee.name,
+    })
     .from(attendee)
     .where(
       and(

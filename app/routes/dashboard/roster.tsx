@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Container,
+  CopyButton,
   Group,
   Modal,
   SimpleGrid,
@@ -24,7 +25,9 @@ import {
   removeGuest,
   updateGuest,
 } from "~/lib/attendee.server";
+import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { requireFeature } from "~/lib/features.server";
+import { getOrCreatePromotionInvite } from "~/lib/invite.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/roster";
@@ -103,13 +106,33 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: `Added ${name} to your party.` });
   }
 
-  if (intent === "updateGuest" || intent === "removeGuest") {
+  if (
+    intent === "updateGuest" ||
+    intent === "removeGuest" ||
+    intent === "promoteGuest"
+  ) {
     const guestId = String(form.get("guestId"));
     const guest = await getGuest(campId, editionId, guestId);
     if (!guest) return data({ error: "Guest not found." }, { status: 404 });
     // A guest is editable by their host or an officer.
     if (guest.hostMembershipId !== myMid && !isOfficer) {
       return data({ error: "Not your guest." }, { status: 403 });
+    }
+    if (intent === "promoteGuest") {
+      // Phase 4: hand the host a one-use invite link; redeeming it creates
+      // the account AND adopts this guest's attendee row (RSVP, occupancy,
+      // tickets, passes follow — see i.$token).
+      const token = await getOrCreatePromotionInvite({
+        campId,
+        guestAttendeeId: guestId,
+        inviterMembershipId: myMid,
+        guestName: guest.name ?? "guest",
+      });
+      return data({
+        ok: `Invite link ready — share it with ${guest.name}.`,
+        promoteLink: `${PUBLIC_BASE_URL}/i/${token}`,
+        promoteName: guest.name,
+      });
     }
     if (intent === "removeGuest") {
       await removeGuest(guestId);
@@ -133,7 +156,12 @@ export async function action({ request }: Route.ActionArgs) {
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
-type FetcherData = { ok?: string; error?: string };
+type FetcherData = {
+  ok?: string;
+  error?: string;
+  promoteLink?: string;
+  promoteName?: string | null;
+};
 
 export default function Roster({ loaderData }: Route.ComponentProps) {
   const { members, headcount, myGuests, locked, year } = loaderData;
@@ -194,6 +222,7 @@ function MyParty({
 }) {
   const addFetcher = useFetcher<FetcherData>();
   const rowFetcher = useFetcher<FetcherData>();
+  const promoteFetcher = useFetcher<FetcherData>();
   const addRef = useRef<HTMLFormElement>(null);
   const [edit, setEdit] = useState<{
     id: string;
@@ -207,6 +236,7 @@ function MyParty({
   useFetcherNotifications(rowFetcher.data, rowFetcher.state, () =>
     setEdit(null),
   );
+  const promoteLink = promoteFetcher.data?.promoteLink ?? null;
 
   return (
     <Card withBorder padding="lg" radius="md">
@@ -236,6 +266,19 @@ function MyParty({
                 <Button
                   size="compact-xs"
                   variant="subtle"
+                  loading={promoteFetcher.state !== "idle"}
+                  onClick={() =>
+                    promoteFetcher.submit(
+                      { intent: "promoteGuest", guestId: g.id },
+                      { method: "post" },
+                    )
+                  }
+                >
+                  Invite to join
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
                   onClick={() =>
                     setEdit({ id: g.id, name: g.name, note: g.note })
                   }
@@ -259,6 +302,42 @@ function MyParty({
             </Group>
           ))}
         </Stack>
+      ) : null}
+
+      {promoteLink ? (
+        <Card
+          withBorder
+          radius="md"
+          padding="md"
+          mb="md"
+          bg="var(--mantine-color-default-hover)"
+        >
+          <Text size="sm" fw={600}>
+            Invite link for {promoteFetcher.data?.promoteName ?? "your guest"}
+          </Text>
+          <Text size="xs" c="dimmed" mb={6}>
+            Send them this link — signing up through it turns their guest spot
+            into a real account (their RSVP, tent spot, tickets, and passes come
+            along).
+          </Text>
+          <Group gap="sm" wrap="wrap">
+            <Text size="sm" style={{ wordBreak: "break-all" }}>
+              {promoteLink}
+            </Text>
+            <CopyButton value={promoteLink}>
+              {({ copied, copy }) => (
+                <Button
+                  size="compact-xs"
+                  variant="light"
+                  color={copied ? "green" : "blue"}
+                  onClick={copy}
+                >
+                  {copied ? "Copied" : "Copy link"}
+                </Button>
+              )}
+            </CopyButton>
+          </Group>
+        </Card>
       ) : null}
 
       <addFetcher.Form method="post" ref={addRef}>

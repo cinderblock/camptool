@@ -8,7 +8,7 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { Form, data, redirect } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { CampHero } from "~/components/CampHero";
@@ -25,7 +25,7 @@ import {
 import { isMemberOf } from "~/lib/recruits.server";
 import { getSession } from "~/lib/session.server";
 import { db } from "../../db/client.server";
-import { camp, campInvite, membership, user } from "../../db/schema";
+import { attendee, camp, campInvite, membership, user } from "../../db/schema";
 import type { Route } from "./+types/i.$token";
 
 export function meta({ data: d }: Route.MetaArgs) {
@@ -41,6 +41,7 @@ async function findInvite(token: string) {
       inviterMembershipId: campInvite.inviterMembershipId,
       role: campInvite.role,
       kind: campInvite.kind,
+      promoteAttendeeId: campInvite.promoteAttendeeId,
       maxUses: campInvite.maxUses,
       useCount: campInvite.useCount,
       expiresAt: campInvite.expiresAt,
@@ -118,8 +119,9 @@ export async function action({ request, params }: Route.ActionArgs) {
   // is the authorization. Inserting here also lets us record the invite edge
   // atomically. Only a personal link records its inviter on the new membership;
   // an open link is the camp's door, so the invite tree gets no edge.
+  const membershipId = crypto.randomUUID();
   await db.insert(membership).values({
-    id: crypto.randomUUID(),
+    id: membershipId,
     organizationId: invite.campId,
     userId: session.user.id,
     role: invite.role,
@@ -130,6 +132,30 @@ export async function action({ request, params }: Route.ActionArgs) {
     // personal inviter, but the link itself is still traceable.
     viaInviteId: invite.id,
   });
+
+  // A promotion invite adopts the guest's attendee row: their RSVP, occupancy,
+  // tickets, and passes all reference that row, so setting membership_id makes
+  // everything follow into the new account. Host/name/email clear because a
+  // member row resolves those from the account (guarded on it still being a
+  // guest, in case someone re-links it in the meantime).
+  if (invite.promoteAttendeeId) {
+    await db
+      .update(attendee)
+      .set({
+        membershipId,
+        hostMembershipId: null,
+        name: null,
+        email: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(attendee.id, invite.promoteAttendeeId),
+          eq(attendee.campId, invite.campId),
+          isNull(attendee.membershipId),
+        ),
+      );
+  }
 
   await db
     .update(campInvite)

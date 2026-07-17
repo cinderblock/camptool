@@ -14,6 +14,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { attendee } from "./attendee";
 import { user } from "./auth";
 import { camp, membership } from "./camp";
 
@@ -76,6 +77,14 @@ export const campInvite = sqliteTable("camp_invite", {
   // Free-text label for who/what the link is for ("For Alex", "2026 art crew
   // channel"). Internal bookkeeping — never shown to the redeemer.
   note: text("note"),
+  // Guest promotion (Who's-coming Phase 4): when set, redeeming this invite
+  // ADOPTS that guest attendee row — membership_id is set to the new
+  // membership, host/name/email cleared — so the guest's RSVP, occupancy,
+  // tickets, and passes follow them into the account. If the guest row is
+  // deleted first this nulls out and the link redeems as a plain invite.
+  promoteAttendeeId: text("promote_attendee_id").references(() => attendee.id, {
+    onDelete: "set null",
+  }),
   // null = unlimited uses; otherwise redemption stops once useCount hits it.
   maxUses: integer("max_uses"),
   useCount: integer("use_count").notNull().default(0),

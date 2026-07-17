@@ -196,7 +196,34 @@ files — shared tree); push + watch CI.
     self-only (ensures own attendee); officers grant guest passes directly.
     `start.tsx` SAP prompt + auto-request repointed to attendee. typecheck +
     build + biome green.
-- [ ] Phase 4 — promote attendee → recruit/member.
+- [x] Phase 4 — promote guest → recruit (2026-07-16). **Deviation from the
+    design note below:** promotion uses a one-use PERSONAL INVITE LINK
+    (`/i/:token`), not a better-auth org invitation — while building this we
+    found better-auth invitations are created (recruits accept-by-email path)
+    but have NO acceptance surface or invitation email anywhere in the app, so
+    that path dead-ends (standalone gap, noted under Open questions).
+    Implementation: `camp_invite.promote_attendee_id` (**migration 0063**,
+    FK → attendee, set-null); redeeming such an invite adopts the guest's
+    attendee row — `membership_id` set, host/name/email cleared — so RSVP,
+    occupancy, tickets, and passes follow into the account (i.$token.tsx).
+    Roster "Your party" rows get an "Invite to join" button (host or officer;
+    `getOrCreatePromotionInvite` is idempotent — re-click returns the same
+    link) showing a copyable URL. Invite tree records the host as inviter;
+    role locked to recruit. E2E over HTTP on a scratch server: full golden
+    path + probes (idempotency, one-use rejection after redemption, adoption
+    clears host/name/email) — 19/19. Gotcha: new camps default features OFF
+    (registry `starter` only) — the E2E had to enable `roster` via /settings.
+    typecheck + biome green; not browser-tested (plain button + copy link UI).
+
+## Open questions for the user
+
+1. **better-auth invitations dead-end** (found 2026-07-16): `/recruits` accept
+   for an applicant WITHOUT an account calls `auth.api.createInvitation`, but
+   no invitation email is sent and no accept surface exists — the applicant
+   never learns they were accepted. Options: (a) swap that path to the same
+   personal-invite-link mechanism as guest promotion (officer gets a copyable
+   link to send), (b) build invitation email + accept page. Recommendation:
+   **(a)** — consistent, works today, no email infra needed.
 
 ## Design notes for Phases 3–4 (surfaced to user 2026-07-07)
 
