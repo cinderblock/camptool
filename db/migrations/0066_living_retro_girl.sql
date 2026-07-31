@@ -1,0 +1,1 @@
+ALTER TABLE `map_object` ADD `place_near_vehicle` integer DEFAULT false NOT NULL;

@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Autocomplete,
+  Badge,
   Box,
   Button,
   Checkbox,
@@ -1136,6 +1137,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           kind: mapObject.kind,
           width: mapObject.width,
           height: mapObject.height,
+          placeNearVehicle: mapObject.placeNearVehicle,
           ownerName: user.name,
         })
         .from(mapObject)
@@ -1178,6 +1180,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       width: u.width,
       height: u.height,
       ownerName: u.ownerName,
+      placeNearVehicle: u.placeNearVehicle,
     })),
     campName: active.camp.name,
     // Placement/submission contact for the map export. Stored on the camp
@@ -4224,6 +4227,14 @@ function UnplacedTray({
                   <Text size="xs" c="dimmed" truncate maw={72}>
                     {u.ownerName}
                   </Text>
+                ) : null}
+                {/* The camper asked for this to sit next to their vehicle.
+                    Advisory only — shown here because this tray is where an
+                    officer actually decides where it goes. */}
+                {u.placeNearVehicle ? (
+                  <Badge size="xs" color="blue" variant="light">
+                    near car
+                  </Badge>
                 ) : null}
                 <Tooltip label="Delete permanently" withArrow openDelay={150}>
                   <ActionIcon

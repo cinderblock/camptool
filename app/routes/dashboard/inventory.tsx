@@ -1,4 +1,12 @@
-import { Badge, Container, Stack, Table, Text, Title } from "@mantine/core";
+import {
+  Badge,
+  Container,
+  Group,
+  Stack,
+  Table,
+  Text,
+  Title,
+} from "@mantine/core";
 import { eq } from "drizzle-orm";
 import { data } from "react-router";
 import { requireFeature } from "~/lib/features.server";
@@ -20,6 +28,7 @@ type Row = {
   height: number;
   placed: boolean;
   ownerName: string | null;
+  placeNearVehicle: boolean;
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -35,6 +44,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       width: mapObject.width,
       height: mapObject.height,
       placed: mapObject.placed,
+      placeNearVehicle: mapObject.placeNearVehicle,
       ownerName: user.name,
     })
     .from(mapObject)
@@ -51,6 +61,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       height: r.height,
       placed: r.placed,
       ownerName: r.ownerName,
+      placeNearVehicle: r.placeNearVehicle,
     }))
     .sort(
       (a, b) =>
@@ -113,7 +124,18 @@ export default function Inventory({ loaderData }: Route.ComponentProps) {
                       <Table.Td>
                         <ShapeSwatch kind={def} size={18} />
                       </Table.Td>
-                      <Table.Td>{def.label}</Table.Td>
+                      <Table.Td>
+                        <Group gap={6} wrap="wrap">
+                          {def.label}
+                          {/* The camper's placement preference — advisory, so
+                              whoever arranges the map can honour it. */}
+                          {item.placeNearVehicle ? (
+                            <Badge size="xs" color="blue" variant="light">
+                              near their vehicle
+                            </Badge>
+                          ) : null}
+                        </Group>
+                      </Table.Td>
                       <Table.Td>
                         {round(item.width)}′ × {round(item.height)}′
                       </Table.Td>

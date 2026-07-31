@@ -384,7 +384,35 @@ All four are net-new work; none is blocked. Migration numbering starts at
 **0066** (0065 is the FK repair). Remember: adding a `FeatureKey` needs **no**
 migration (absence of a `camp_feature` row = registry default); only new tables do.
 
-### #9 "Near my car" (smallest — do first)
+### #9 "Near my car" — ✅ DONE (2026-07-31, migration 0066)
+
+Shipped as a per-**domicile** boolean rather than a bare per-camper flag: the
+useful question is *which* thing goes next to the car, and most campers have one
+tent so it reads the same, while a camper with two structures can answer for each.
+
+- `map_object.place_near_vehicle` (migration **0066** — a single clean `ALTER`,
+  no FK involved, so none of the 0065 trap applies). Default `false` = "don't
+  care", which is the honest default given campers who cluster vehicles and
+  pitch tents elsewhere.
+- Checkbox on `/bringing`, shown **only on `group === "Domiciles"`** — asking
+  whether a car should be parked next to a car isn't a question. Required a new
+  `updateItem` branch, since that action previously accepted only
+  `width`/`height`/`name` (the same reason `map_object.notes` is still
+  unreachable from Bringing).
+- **Carried through "bring these again"** — the preference is as stable year to
+  year as size/config, so re-declaring keeps it.
+- Surfaced to whoever arranges the map in **both** places they'd look: a "near
+  their vehicle" badge on `/inventory`, and a compact "near car" badge in the
+  map's **Unplaced tray**, which is where placement actually happens.
+- Deliberately advisory — nothing auto-places. The ask was to *show* the
+  preference. Distinct from `groupId` ("these move together", an officer-side
+  multi-select).
+- Verified on a `VACUUM INTO` copy: rows 6 → 6, column `INTEGER notnull=1
+  default=false`, all existing rows default to don't-care, round-trip write
+  works, `foreign_key_check` clean. typecheck + build + biome green.
+  NOT browser-tested.
+
+### #9 "Near my car" — original design note (superseded by the above)
 
 One per-camper, per-item preference surfaced to whoever arranges the map.
 - **Storage:** `map_object` already has a `config` JSON column but it holds

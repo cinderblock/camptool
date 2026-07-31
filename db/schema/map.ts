@@ -91,6 +91,15 @@ export const mapObject = sqliteTable(
     // Declared-but-unplaced items sit in the officer queue (placed = false);
     // placed items have a position on the map.
     placed: integer("placed", { mode: "boolean" }).notNull().default(false),
+    // "Put my tent next to my car." A placement PREFERENCE the camper sets on
+    // their domicile, surfaced to whoever arranges the map — not a constraint
+    // the app enforces. Some campers cluster vehicles tightly and pitch tents
+    // elsewhere, so the default (false) means "don't care".
+    // Distinct from `groupId`, which means "these move together" and is an
+    // officer-side multi-select on the map.
+    placeNearVehicle: integer("place_near_vehicle", { mode: "boolean" })
+      .notNull()
+      .default(false),
     // Plot-local feet (see file header). Meaningful only when placed.
     x: real("x").notNull().default(0),
     y: real("y").notNull().default(0),

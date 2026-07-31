@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Badge,
   Button,
+  Checkbox,
   Container,
   Group,
   NumberInput,
@@ -34,6 +35,7 @@ type Item = {
   width: number;
   height: number;
   placed: boolean;
+  placeNearVehicle: boolean;
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -96,6 +98,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       width: r.width,
       height: r.height,
       placed: r.placed,
+      placeNearVehicle: r.placeNearVehicle,
     })) satisfies Item[],
     lastYear,
   };
@@ -172,6 +175,9 @@ export async function action({ request }: Route.ActionArgs) {
       const v = form.get("name");
       set.name = v == null || v === "" ? null : String(v);
     }
+    if (form.has("placeNearVehicle")) {
+      set.placeNearVehicle = form.get("placeNearVehicle") === "true";
+    }
     await db.update(mapObject).set(set).where(ownItem(id));
     return data({ ok: true });
   }
@@ -194,6 +200,7 @@ export async function action({ request }: Route.ActionArgs) {
         tallFt: mapObject.tallFt,
         config: mapObject.config,
         mirrored: mapObject.mirrored,
+        placeNearVehicle: mapObject.placeNearVehicle,
         year: campEdition.year,
       })
       .from(mapObject)
@@ -222,6 +229,7 @@ export async function action({ request }: Route.ActionArgs) {
         tallFt: s.tallFt,
         config: s.config,
         mirrored: s.mirrored,
+        placeNearVehicle: s.placeNearVehicle,
         placed: false,
         createdById: user.id,
       })),
@@ -385,6 +393,33 @@ function ItemRow({
                   ? `${round(item.width)}′ wide × adjustable length`
                   : "adjustable"}
             </Text>
+            {/* Only meaningful for something you sleep in — asking whether a
+                car should be parked next to a car isn't a question. Off means
+                "don't care", which is the common case: plenty of campers
+                cluster vehicles and pitch tents elsewhere. */}
+            {def.group === "Domiciles" ? (
+              <Checkbox
+                mt={6}
+                size="xs"
+                disabled={locked}
+                defaultChecked={item.placeNearVehicle}
+                onChange={(e) =>
+                  commit({
+                    placeNearVehicle: e.currentTarget.checked
+                      ? "true"
+                      : "false",
+                  })
+                }
+                label={
+                  <Text size="xs">
+                    Place next to my vehicle{" "}
+                    <Text span c="dimmed">
+                      — otherwise it goes wherever fits
+                    </Text>
+                  </Text>
+                }
+              />
+            ) : null}
           </div>
         </Group>
 
