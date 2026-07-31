@@ -378,6 +378,75 @@ Locked by the user 2026-07-31:
 
 **Deferred (design notes only):** #5, #6, #8.
 
+## Next up — design notes for the four remaining before-burn features
+
+All four are net-new work; none is blocked. Migration numbering starts at
+**0066** (0065 is the FK repair). Remember: adding a `FeatureKey` needs **no**
+migration (absence of a `camp_feature` row = registry default); only new tables do.
+
+### #9 "Near my car" (smallest — do first)
+
+One per-camper, per-item preference surfaced to whoever arranges the map.
+- **Storage:** `map_object` already has a `config` JSON column but it holds
+  **numbers only** (`{key,label,min,max,step?,default,toggle?}` controls), so a
+  new boolean fits as a `toggle` control — *but* controls are per-`CampStructure`
+  and this is a placement *preference*, not a structure setting. Cleaner: a
+  nullable `place_near_vehicle` integer(boolean) column on `map_object`, set on
+  the camper's **tent**, meaning "put this next to my car".
+- **Where to collect:** `/bringing` — note `updateItem` currently accepts only
+  `width`/`height`/`name`, so it needs a new branch (this is also why
+  `map_object.notes` is unreachable from Bringing today).
+- **Where to surface:** `/inventory` (the officer accounting table) and the map's
+  unplaced tray — a small "near car" chip. Don't auto-place; the ask is only to
+  *show* the preference to the person arranging.
+
+### #7 Fuel inventory + RV pump-out
+
+- **Storage:** a new `fuel_declaration` table (camp + edition scoped): owner
+  membership, `fuelType` (gasoline | propane | diesel), quantity + unit
+  (gal/lb), container type + count, notes. A per-camper row set, not a
+  `map_object` — the map already has a `fuel-storage` **kind** that auto-draws
+  the BM separation rings (10′ ignition / 20′ liquid↔propane / 50′ fuel↔fuel,
+  `structures.tsx:822-836`); this feature **feeds** that, it does not replace it.
+- **Why it matters:** surfacing **totals per type and container counts** for the
+  safety review (secondary containment, separation from living areas and
+  ignition sources).
+- **RV pump-out** is a separate, simpler thing: a boolean on the RV `map_object`
+  ("needs pump-out / cleanout access") so it gets placed reachable from the
+  service road or main street. Note `structures.tsx` already has a `cleanout`
+   0/1 **marker** control — that is a *drawing* marker for where the fitting is,
+  NOT an access requirement. Don't conflate them.
+- New feature key `fuel`, default off.
+
+### #10 Lecture scheduling → extend `programming`, do NOT touch `schedule`
+
+`programming` already models everything: `offering` (title, kind `lecture`,
+description, location, status), `offering_session` (date, start/end time,
+location override), `offering_presenter` (member via attendee, camp guest, **or
+a bare outside-speaker name**), plus a public `/c/:slug/schedule` grouped by day.
+- **The only net-new work is output**: (a) a **sandwich-board day sheet** —
+  one day, big type, print-friendly, for transcribing onto the physical board out
+  front; (b) an **in-hall per-day list**. Add a `?date=` + print stylesheet view.
+- Probably also a `location` filter so "the lecture hall" can be isolated.
+- **Do not** use the `schedule` feature for this: it has **no speaker field at
+  all**, no per-occurrence description, and `gathering_signup.membership_id` is a
+  hard FK to `membership` (members only, no public audience).
+- Caveat: `offering_session` has no per-session title, so "same speaker,
+  different talk each day" = one offering per talk. That's correct modelling.
+
+### #11 Shift signup — the schema is fine, the UI is the blocker
+
+Pie service at **15:14 daily** with prep from **~13:00**, roles cutter / server /
+cleanup, across ~8–9 days; plus warehouse work-party RSVP.
+- `15:14` is a valid `HH:MM`; daily recurrence already materializes real
+  occurrence rows (`dailyDatesBetween`, capped 100 days); `gathering_shift.role`
+  + `staffing` (`all_hands|open|needed`) + `capacity` → waitlist covers the roles.
+  Work parties already exist as `kind: work_party`.
+- **The blocker:** `createGathering` makes exactly ONE shift per occurrence, and
+  `addShift` adds one shift to **one** occurrence per submit. Three roles × nine
+  days = **27 manual form submissions**. Build a **bulk/template shift creator**:
+  define the roles once, apply to every occurrence in the range. No schema change.
+
 ## Merge design (bug 1 + bug 2)
 
 `app/lib/merge.server.ts`. Both duplicate shapes reduce to one primitive:
