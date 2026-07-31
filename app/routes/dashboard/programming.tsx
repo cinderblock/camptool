@@ -216,7 +216,11 @@ export default function Programming({ loaderData }: Route.ComponentProps) {
                 </Anchor>
                 .
               </>
-            ) : null}
+            ) : null}{" "}
+            <Anchor component={Link} to="/programming/board">
+              Print a day sheet
+            </Anchor>{" "}
+            for the sandwich board or the lecture hall.
           </Text>
         </div>
 

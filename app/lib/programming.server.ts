@@ -204,6 +204,54 @@ export async function loadPublicLineup(campId: string, editionId: string) {
   }));
 }
 
+/**
+ * Every scheduled session for the year, for the camp's OWN day sheets — unlike
+ * `loadPublicLineup` this does not filter on `audience`, because a camp-only
+ * session still occupies the lecture hall and still belongs on the list posted
+ * inside it. Each row carries `isPublic` so the board can mark the ones that
+ * shouldn't go on the sign out front.
+ */
+export async function loadDaySheet(campId: string, editionId: string) {
+  const rows = await db
+    .select({
+      sessionId: offeringSession.id,
+      date: offeringSession.date,
+      startTime: offeringSession.startTime,
+      endTime: offeringSession.endTime,
+      sessionLocation: offeringSession.location,
+      sessionStatus: offeringSession.status,
+      offeringId: offering.id,
+      title: offering.title,
+      description: offering.description,
+      kind: offering.kind,
+      durationMin: offering.durationMin,
+      audience: offering.audience,
+      location: offering.location,
+    })
+    .from(offeringSession)
+    .innerJoin(offering, eq(offering.id, offeringSession.offeringId))
+    .where(
+      and(
+        eq(offeringSession.campId, campId),
+        eq(offeringSession.editionId, editionId),
+        eq(offering.status, "accepted"),
+      ),
+    )
+    .orderBy(asc(offeringSession.date), asc(offeringSession.startTime));
+
+  const presenters = await loadPresenters([
+    ...new Set(rows.map((r) => r.offeringId)),
+  ]);
+  const presentersBy = groupBy(presenters);
+
+  return rows.map((r) => ({
+    ...r,
+    location: r.sessionLocation ?? r.location,
+    isPublic: r.audience === "public",
+    presenters: presentersBy.get(r.offeringId) ?? [],
+  }));
+}
+
 /** Add a dated session to an offering. Returns null when the date is invalid. */
 export async function addSession(opts: {
   campId: string;

@@ -41,6 +41,7 @@ export default [
       "routes/dashboard/schedule.$gatheringId.tsx",
     ),
     route("programming", "routes/dashboard/programming.tsx"),
+    route("programming/board", "routes/dashboard/programming.board.tsx"),
     route(
       "programming/:offeringId",
       "routes/dashboard/programming.$offeringId.tsx",

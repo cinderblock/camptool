@@ -446,7 +446,38 @@ One per-camper, per-item preference surfaced to whoever arranges the map.
   NOT an access requirement. Don't conflate them.
 - New feature key `fuel`, default off.
 
-### #10 Lecture scheduling → extend `programming`, do NOT touch `schedule`
+### #10 Lecture scheduling — ✅ DONE (2026-07-31, no migration)
+
+Confirmed the evaluation: this belonged in `programming`, which **already** had
+speaker / title / day / time / venue. **No schema change was needed** — the only
+gap was output.
+
+- `loadDaySheet(campId, editionId)` in `programming.server.ts` — like
+  `loadPublicLineup` but **does not filter on `audience`**, because a camp-only
+  session still occupies the lecture hall and still belongs on the list posted
+  inside it. Each row carries `isPublic` so the sheet can flag what shouldn't go
+  on the sign out front.
+- New route **`/programming/board`** (declared before `programming/:offeringId`
+  so the static segment wins). Two modes off one page:
+  - **Sign** — one day, big type, minimal words, for hand-transcribing onto the
+    sandwich board out front.
+  - **Handout** — same day plus descriptions, for posting inside the hall.
+- Day nav (prev / each date / next), `?date=` + `?mode=` in the URL so a sheet
+  is linkable. Defaults to **today** when the event is running, else the first
+  day.
+- Print-first: a `@media print` block drops the app chrome (nav, header,
+  banners) so `Print` yields something tapeable. Linked from `/programming`.
+- **Verified by actually rendering it** (SSR + memory router) against seeded
+  offerings: day nav lists all three dates, `?date=` selects correctly, handout
+  shows descriptions while sign omits them, the "camp only" badge appears, times
+  format as "2 pm – 3 pm", and presenters render across **all three** join paths
+  (member attendee, camp guest, bare outside name).
+- Gotcha for future tests: the dev DB has **three editions all with year 2026**
+  and multiple camps, so `SELECT ... LIMIT 1` without `ORDER BY` picks a
+  different one per run — anchor test fixtures to a known row instead. Also note
+  the real `audience` value for non-public is **`camp_only`**, not `camp`.
+
+### #10 — original design note (superseded by the above)
 
 `programming` already models everything: `offering` (title, kind `lecture`,
 description, location, status), `offering_session` (date, start/end time,
