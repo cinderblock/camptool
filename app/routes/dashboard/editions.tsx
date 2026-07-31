@@ -320,89 +320,99 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
           </Card>
         ) : null}
 
-        <Table verticalSpacing="sm">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Year</Table.Th>
-              <Table.Th>Event</Table.Th>
-              <Table.Th>Status</Table.Th>
-              {canManage ? <Table.Th>Actions</Table.Th> : null}
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {editions.map((e) => {
-              const isActive = e.id === activeEditionId;
-              return (
-                <Table.Tr key={e.id}>
-                  <Table.Td>
-                    {e.label ? `${e.year} · ${e.label}` : e.year}
-                    {isActive ? (
-                      <Badge ml={8} size="xs" variant="light">
-                        viewing
-                      </Badge>
-                    ) : null}
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm" c="dimmed">
-                      {eventLabel(e.event)}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    {e.locked ? (
-                      <Badge size="sm" color="gray" variant="light">
-                        locked
-                      </Badge>
-                    ) : (
-                      <Badge size="sm" color="green" variant="light">
-                        open
-                      </Badge>
-                    )}
-                  </Table.Td>
-                  {canManage ? (
+        <Table.ScrollContainer minWidth={640}>
+          <Table verticalSpacing="sm">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Year</Table.Th>
+                <Table.Th>Event</Table.Th>
+                <Table.Th>Status</Table.Th>
+                {canManage ? <Table.Th>Actions</Table.Th> : null}
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {editions.map((e) => {
+                const isActive = e.id === activeEditionId;
+                return (
+                  <Table.Tr key={e.id}>
                     <Table.Td>
-                      <Group gap="xs">
-                        {!isActive ? (
+                      {e.label ? `${e.year} · ${e.label}` : e.year}
+                      {isActive ? (
+                        <Badge ml={8} size="xs" variant="light">
+                          viewing
+                        </Badge>
+                      ) : null}
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c="dimmed">
+                        {eventLabel(e.event)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      {e.locked ? (
+                        <Badge size="sm" color="gray" variant="light">
+                          locked
+                        </Badge>
+                      ) : (
+                        <Badge size="sm" color="green" variant="light">
+                          open
+                        </Badge>
+                      )}
+                    </Table.Td>
+                    {canManage ? (
+                      <Table.Td>
+                        <Group gap="xs">
+                          {!isActive ? (
+                            <Form method="post">
+                              <input
+                                type="hidden"
+                                name="intent"
+                                value="setActive"
+                              />
+                              <input
+                                type="hidden"
+                                name="editionId"
+                                value={e.id}
+                              />
+                              <Button type="submit" size="xs" variant="light">
+                                View
+                              </Button>
+                            </Form>
+                          ) : null}
                           <Form method="post">
                             <input
                               type="hidden"
                               name="intent"
-                              value="setActive"
+                              value="setLock"
                             />
                             <input
                               type="hidden"
                               name="editionId"
                               value={e.id}
                             />
-                            <Button type="submit" size="xs" variant="light">
-                              View
+                            <input
+                              type="hidden"
+                              name="locked"
+                              value={e.locked ? "false" : "true"}
+                            />
+                            <Button
+                              type="submit"
+                              size="xs"
+                              variant="subtle"
+                              color={e.locked ? "blue" : "gray"}
+                            >
+                              {e.locked ? "Unlock" : "Lock"}
                             </Button>
                           </Form>
-                        ) : null}
-                        <Form method="post">
-                          <input type="hidden" name="intent" value="setLock" />
-                          <input type="hidden" name="editionId" value={e.id} />
-                          <input
-                            type="hidden"
-                            name="locked"
-                            value={e.locked ? "false" : "true"}
-                          />
-                          <Button
-                            type="submit"
-                            size="xs"
-                            variant="subtle"
-                            color={e.locked ? "blue" : "gray"}
-                          >
-                            {e.locked ? "Unlock" : "Lock"}
-                          </Button>
-                        </Form>
-                      </Group>
-                    </Table.Td>
-                  ) : null}
-                </Table.Tr>
-              );
-            })}
-          </Table.Tbody>
-        </Table>
+                        </Group>
+                      </Table.Td>
+                    ) : null}
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       </Stack>
     </Container>
   );

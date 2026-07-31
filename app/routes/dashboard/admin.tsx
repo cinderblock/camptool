@@ -409,45 +409,47 @@ function AdminTable({
   }, [fetcher.data]);
 
   return (
-    <Table>
-      <Table.Tbody>
-        {admins.map((a) => (
-          <Table.Tr key={a.userId}>
-            <Table.Td>
-              <Text fw={500}>{a.name}</Text>
-              <Text size="xs" c="dimmed">
-                {a.email}
-              </Text>
-            </Table.Td>
-            <Table.Td ta="right">
-              {a.userId === currentUserId ? (
-                <Badge variant="light" color="gray">
-                  you
-                </Badge>
-              ) : (
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  color="red"
-                  loading={
-                    fetcher.state !== "idle" &&
-                    fetcher.formData?.get("userId") === a.userId
-                  }
-                  onClick={() =>
-                    fetcher.submit(
-                      { intent: "removeAdmin", userId: a.userId },
-                      { method: "post" },
-                    )
-                  }
-                >
-                  Remove
-                </Button>
-              )}
-            </Table.Td>
-          </Table.Tr>
-        ))}
-      </Table.Tbody>
-    </Table>
+    <Table.ScrollContainer minWidth={560}>
+      <Table>
+        <Table.Tbody>
+          {admins.map((a) => (
+            <Table.Tr key={a.userId}>
+              <Table.Td>
+                <Text fw={500}>{a.name}</Text>
+                <Text size="xs" c="dimmed">
+                  {a.email}
+                </Text>
+              </Table.Td>
+              <Table.Td ta="right">
+                {a.userId === currentUserId ? (
+                  <Badge variant="light" color="gray">
+                    you
+                  </Badge>
+                ) : (
+                  <Button
+                    size="xs"
+                    variant="subtle"
+                    color="red"
+                    loading={
+                      fetcher.state !== "idle" &&
+                      fetcher.formData?.get("userId") === a.userId
+                    }
+                    onClick={() =>
+                      fetcher.submit(
+                        { intent: "removeAdmin", userId: a.userId },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    Remove
+                  </Button>
+                )}
+              </Table.Td>
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+    </Table.ScrollContainer>
   );
 }
 

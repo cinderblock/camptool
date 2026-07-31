@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -16,7 +17,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
-import { Form, data, useFetcher } from "react-router";
+import { Form, Link, data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
 import {
@@ -479,7 +480,18 @@ export default function Members({ loaderData }: Route.ComponentProps) {
   return (
     <Container size="lg">
       <Stack gap="lg">
-        <Title order={2}>Members</Title>
+        <Stack gap={2}>
+          <Title order={2}>Members</Title>
+          {/* People clicked the wrong one of these two pages during a camp
+              meeting, so each says what it is and points at the other. */}
+          <Text size="sm" c="dimmed">
+            Everyone associated with the camp, carried over year to year. Use
+            this to change roles or remove someone.{" "}
+            <Anchor component={Link} to="/roster" size="sm">
+              Looking for who's actually coming this year?
+            </Anchor>
+          </Text>
+        </Stack>
 
         {canManage ? (
           <Card withBorder padding="md" radius="md">

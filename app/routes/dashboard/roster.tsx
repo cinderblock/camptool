@@ -1,4 +1,5 @@
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -16,7 +17,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useRef, useState } from "react";
-import { data, useFetcher } from "react-router";
+import { Link, data, useFetcher } from "react-router";
 import {
   type AttendeeStatus,
   addGuest,
@@ -231,7 +232,18 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
     <Container size="lg">
       <Stack gap="lg">
         <Group justify="space-between" align="flex-end">
-          <Title order={2}>Who's coming · {year}</Title>
+          <Stack gap={2}>
+            <Title order={2}>Who's coming · {year}</Title>
+            {/* Paired with the same note on /members — the two were confused
+                for each other during a camp meeting. */}
+            <Text size="sm" c="dimmed">
+              This year's actual roster: members who RSVP'd, plus the guests
+              they're bringing.{" "}
+              <Anchor component={Link} to="/members" size="sm">
+                Looking for the full camp list?
+              </Anchor>
+            </Text>
+          </Stack>
           {locked ? (
             <Badge color="gray" variant="light">
               locked

@@ -6409,7 +6409,7 @@ function Editor({
               display: "block",
               width: `${renderW}px`,
               height: `${renderH}px`,
-              touchAction: "none",
+              touchAction: "pinch-zoom",
             }}
             onPointerDown={onCanvasDown}
             onDragOver={canManage ? (e) => e.preventDefault() : undefined}
@@ -7814,7 +7814,7 @@ function Compass({
           maxWidth: 190,
           height: "auto",
           display: "block",
-          touchAction: "none",
+          touchAction: "pinch-zoom",
         }}
         role="img"
         aria-label="Compass"

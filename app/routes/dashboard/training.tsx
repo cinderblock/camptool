@@ -414,49 +414,51 @@ function TrainingCard({
       </Group>
 
       {isOfficer && rows.length > 0 ? (
-        <Table mt="sm" verticalSpacing={4}>
-          <Table.Tbody>
-            {[...holders, ...stale].map((s) => (
-              <Table.Tr key={s.id}>
-                <Table.Td>
-                  <Text size="sm">{s.label}</Text>
-                </Table.Td>
-                <Table.Td>
-                  <Badge
-                    size="xs"
-                    variant="light"
-                    color={s.valid ? "green" : "gray"}
-                  >
-                    {s.valid ? "valid" : "expired"}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs" c="dimmed">
-                    granted {new Date(s.grantedAt).toISOString().slice(0, 10)}
-                    {s.expiresAt
-                      ? ` · until ${new Date(s.expiresAt).toISOString().slice(0, 10)}`
-                      : ""}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Button
-                    size="compact-xs"
-                    variant="subtle"
-                    color="red"
-                    onClick={() =>
-                      fetcher.submit(
-                        { intent: "revoke", signoffId: s.id },
-                        { method: "post" },
-                      )
-                    }
-                  >
-                    Revoke
-                  </Button>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+        <Table.ScrollContainer minWidth={640}>
+          <Table mt="sm" verticalSpacing={4}>
+            <Table.Tbody>
+              {[...holders, ...stale].map((s) => (
+                <Table.Tr key={s.id}>
+                  <Table.Td>
+                    <Text size="sm">{s.label}</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Badge
+                      size="xs"
+                      variant="light"
+                      color={s.valid ? "green" : "gray"}
+                    >
+                      {s.valid ? "valid" : "expired"}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" c="dimmed">
+                      granted {new Date(s.grantedAt).toISOString().slice(0, 10)}
+                      {s.expiresAt
+                        ? ` · until ${new Date(s.expiresAt).toISOString().slice(0, 10)}`
+                        : ""}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={() =>
+                        fetcher.submit(
+                          { intent: "revoke", signoffId: s.id },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Revoke
+                    </Button>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       ) : holders.length > 0 ? (
         <Text size="xs" c="dimmed" mt="xs">
           Signed off: {holders.map((s) => s.label).join(", ")}

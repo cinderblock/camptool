@@ -413,6 +413,34 @@ stale row.
 - [x] 2026-07-31 — read parent plan + camp-features/whos-coming plans; mapped
       routes, schema files, feature keys, migration head; confirmed the working
       tree is CRLF-noise-only. Plan created.
+- [x] **Nav clarity (#4) + the concrete mobile defects (#3).** 2026-07-31.
+      - Nav labels are now self-describing instead of two bare adjacent words:
+        **"Members · all years"** and **"Who's coming · 2026"** (year comes from
+        the active edition, so it tracks the year switcher). Each page also
+        gained a one-line description + a link to the other, so landing on the
+        wrong one self-corrects.
+      - **Pinch-zoom unblocked.** `touch-action: none` on the map SVG and
+        compass (`map.tsx:6412`, `:7817`) killed native pinch with no
+        replacement gesture — zoom was `+`/`−` buttons only. Now
+        `touch-action: pinch-zoom`, which still suppresses the pan/scroll
+        gestures that fight with dragging objects. **The viewport meta was
+        never the problem** (`root.tsx:51` is correct; no `maximum-scale` or
+        `user-scalable` anywhere in the repo).
+      - **Four `<Table>`s wrapped** in `Table.ScrollContainer` (`admin.tsx`,
+        `editions.tsx`, `dues.tsx` first table, `training.tsx`) — these
+        overflowed horizontally on a phone. `plans/mobile-support.md` claims
+        "every `<Table>` is already wrapped"; **that claim was wrong** and is
+        now true.
+      - **Header no longer overflows at 360px** — the camp + year Selects were
+        180px + 130px inside a non-wrapping row; both are now responsive
+        (`{ base: 120, sm: 180 }` / `{ base: 104, sm: 130 }`) and the row wraps.
+      - Roster guest chips render in a **wrapping** Group (was part of the same
+        overflow class).
+      typecheck + build + biome green.
+      ⚠️ **NOT browser-tested at a real small viewport** — these are structural
+      fixes to concrete, identified defects, but the authenticated pages still
+      need the visual pass that `plans/mobile-support.md` step 5 has been
+      blocked on. Worth 10 minutes on an actual phone before the burn.
 - [x] **Merge + hardened deletes (bugs 1 + 2 fixed end-to-end).** 2026-07-31.
       `app/lib/merge.server.ts` (see design above) + UI:
       - `/members`: a **Merge** button per editable row → modal that picks the

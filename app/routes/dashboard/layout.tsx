@@ -90,6 +90,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     impersonatedBy,
     activeEditionId: activeEdition?.id ?? null,
     activeEditionLocked: activeEdition?.locked ?? false,
+    activeEditionYear: activeEdition?.year ?? null,
     editions: editions.map((e) => ({
       id: e.id,
       label: e.label ? `${e.year} · ${e.label}` : String(e.year),
@@ -115,6 +116,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     editions,
     activeEditionId,
     activeEditionLocked,
+    activeEditionYear,
   } = loaderData;
   const editionFetcher = useFetcher();
   // A feature-gated nav link exists only when this viewer can see the feature
@@ -145,8 +147,14 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ...(showFinishSetup
           ? [{ to: "/start", label: "Finish setup", end: false }]
           : []),
-        { to: "/members", label: "Members", end: false },
-        ...gated("roster", "/roster", "Who's coming"),
+        { to: "/members", label: "Members · all years", end: false },
+        ...gated(
+          "roster",
+          "/roster",
+          activeEditionYear
+            ? `Who's coming · ${activeEditionYear}`
+            : "Who's coming",
+        ),
         ...(activeRole && hasAtLeast(activeRole, "member")
           ? [{ to: "/invite", label: "Invite friends", end: false }]
           : []),
@@ -219,7 +227,12 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             />
             <Title order={4}>CampTool</Title>
           </Group>
-          <Group gap="md">
+          <Group
+            gap="md"
+            wrap="wrap"
+            justify="flex-end"
+            style={{ minWidth: 0 }}
+          >
             {camps.length > 1 ? (
               <Select
                 size="xs"
@@ -228,7 +241,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                 onChange={switchCamp}
                 data={camps.map((c) => ({ value: c.id, label: c.name }))}
                 allowDeselect={false}
-                w={180}
+                w={{ base: 120, sm: 180 }}
               />
             ) : null}
             {editions.length > 0 ? (
@@ -247,7 +260,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                   }
                   data={editions.map((e) => ({ value: e.id, label: e.label }))}
                   allowDeselect={false}
-                  w={130}
+                  w={{ base: 104, sm: 130 }}
                 />
                 {activeEditionLocked ? (
                   <Badge size="sm" color="gray" variant="light">

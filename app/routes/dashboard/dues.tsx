@@ -342,64 +342,66 @@ export default function Dues({ loaderData }: Route.ComponentProps) {
               No tiers for {year} yet.
             </Text>
           ) : (
-            <Table verticalSpacing="sm">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Tier</Table.Th>
-                  <Table.Th>Expected</Table.Th>
-                  <Table.Th>Requirement</Table.Th>
-                  {locked ? null : <Table.Th />}
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {tiers.map((t) => (
-                  <Table.Tr key={t.id}>
-                    <Table.Td>
-                      <Text size="sm" fw={500}>
-                        {t.name}
-                      </Text>
-                      {t.description ? (
-                        <Text size="xs" c="dimmed">
-                          {t.description}
-                        </Text>
-                      ) : null}
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm">{usd(t.expectedCents)}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge
-                        size="sm"
-                        variant="light"
-                        color={reqColor(t.requirement)}
-                      >
-                        {t.requirement}
-                      </Badge>
-                    </Table.Td>
-                    {locked ? null : (
-                      <Table.Td>
-                        <Tooltip label="Delete">
-                          <ActionIcon
-                            size="sm"
-                            variant="subtle"
-                            color="red"
-                            aria-label="Delete tier"
-                            onClick={() =>
-                              fetcher.submit(
-                                { intent: "deleteTier", id: t.id },
-                                { method: "post" },
-                              )
-                            }
-                          >
-                            ✕
-                          </ActionIcon>
-                        </Tooltip>
-                      </Table.Td>
-                    )}
+            <Table.ScrollContainer minWidth={640}>
+              <Table verticalSpacing="sm">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Tier</Table.Th>
+                    <Table.Th>Expected</Table.Th>
+                    <Table.Th>Requirement</Table.Th>
+                    {locked ? null : <Table.Th />}
                   </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
+                </Table.Thead>
+                <Table.Tbody>
+                  {tiers.map((t) => (
+                    <Table.Tr key={t.id}>
+                      <Table.Td>
+                        <Text size="sm" fw={500}>
+                          {t.name}
+                        </Text>
+                        {t.description ? (
+                          <Text size="xs" c="dimmed">
+                            {t.description}
+                          </Text>
+                        ) : null}
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{usd(t.expectedCents)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge
+                          size="sm"
+                          variant="light"
+                          color={reqColor(t.requirement)}
+                        >
+                          {t.requirement}
+                        </Badge>
+                      </Table.Td>
+                      {locked ? null : (
+                        <Table.Td>
+                          <Tooltip label="Delete">
+                            <ActionIcon
+                              size="sm"
+                              variant="subtle"
+                              color="red"
+                              aria-label="Delete tier"
+                              onClick={() =>
+                                fetcher.submit(
+                                  { intent: "deleteTier", id: t.id },
+                                  { method: "post" },
+                                )
+                              }
+                            >
+                              ✕
+                            </ActionIcon>
+                          </Tooltip>
+                        </Table.Td>
+                      )}
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
           )}
         </Paper>
 
