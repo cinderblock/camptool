@@ -9,6 +9,8 @@ export default [
   // Public / full-screen routes (no app shell).
   route("login", "routes/login.tsx"),
   route("c/:slug", "routes/c.$slug.tsx"),
+  // The camp's public programming lineup (no auth; 404s unless fully on).
+  route("c/:slug/schedule", "routes/c.$slug.schedule.tsx"),
   route("i/:token", "routes/i.$token.tsx"),
   route("impersonate", "routes/impersonate.tsx"),
   route("start", "routes/start.tsx"),
@@ -37,6 +39,11 @@ export default [
     route(
       "schedule/:gatheringId",
       "routes/dashboard/schedule.$gatheringId.tsx",
+    ),
+    route("programming", "routes/dashboard/programming.tsx"),
+    route(
+      "programming/:offeringId",
+      "routes/dashboard/programming.$offeringId.tsx",
     ),
     route("map", "routes/dashboard/map.tsx"),
     route("bringing", "routes/dashboard/bringing.tsx"),

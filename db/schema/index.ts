@@ -10,6 +10,7 @@ export * from "./flag";
 export * from "./instance";
 export * from "./inventory";
 export * from "./map";
+export * from "./programming";
 export * from "./question";
 export * from "./recruit";
 export * from "./schedule";

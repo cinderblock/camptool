@@ -27,7 +27,8 @@ export type FeatureKey =
   | "recruiting"
   | "roster"
   | "schedule"
-  | "training";
+  | "training"
+  | "programming";
 
 export type CampFeatureDef = {
   key: FeatureKey;
@@ -131,6 +132,12 @@ export const FEATURES: CampFeatureDef[] = [
     description:
       "Qualifications officers sign members off on — one-time, yearly, or per event.",
   },
+  {
+    key: "programming",
+    label: "Programming",
+    description:
+      "What your camp offers the event — talks, workshops, classes. Campers propose, officers schedule, everyone can see the lineup.",
+  },
 ];
 
 const BY_KEY = new Map(FEATURES.map((f) => [f.key, f]));
@@ -154,6 +161,7 @@ const ROUTE_FEATURES: Record<string, FeatureKey> = {
   roster: "roster",
   schedule: "schedule",
   training: "training",
+  programming: "programming",
 };
 
 export function featureForPath(pathname: string): FeatureKey | null {
