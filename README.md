@@ -75,6 +75,17 @@ in and spends out (with optional member, category, and date) — and shows runni
 totals (in / out / net balance). It's deliberately not shared with all campers,
 and goes read-only when the year is locked.
 
+A **Programming** page organizes what the camp offers the wider event — talks,
+workshops, classes, performances. It runs as an open call: any camper proposes
+something (title, blurb, kind, rough length) without needing to know the
+schedule; officers accept or decline with a note, then give accepted items dates
+and times. Scheduling *is* publishing, so nothing goes public without a time and
+place. Presenters and co-presenters can be campers, their guests, or an outside
+speaker credited by name only (who never lands on the roster or headcount). The
+resulting lineup is served at `/c/<camp-slug>/schedule` as a public,
+no-login page — the thing to put on a flyer or a QR code — while offerings
+marked *camp only* stay internal.
+
 The deployment owner is a **super admin** (the first account to register; more
 can be granted in-app) with a **Site admin** page that controls two
 instance-wide lockdowns: turning off **new camp creation** (only super admins can

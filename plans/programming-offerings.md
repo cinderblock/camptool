@@ -163,18 +163,56 @@ automatically by iterating `FEATURES`):
 
 ## Plan / steps
 
-- [ ] **Phase 1 — Schema.** `db/schema/programming.ts` + export from
-      `db/schema/index.ts`; generate migration (next free number is **0064**;
-      re-check before generating). Verify by applying the full chain to a
-      throwaway DB.
-- [ ] **Phase 2 — Registry + `/programming`.** Feature key, route registration,
+- [x] **Phase 1 — Schema.** `db/schema/programming.ts` + export from
+      `db/schema/index.ts`; **migration 0064**. Verified by applying the full
+      64-migration chain to a throwaway DB: 3 tables, 4 indexes, 0 FK
+      violations.
+- [x] **Phase 2 — Registry + `/programming`.** Feature key, route registration,
       nav. Propose form, "your proposals", officer review queue
       (accept/decline with note).
-- [ ] **Phase 3 — `/programming/:offeringId`.** Sessions (add/cancel/delete)
-      and presenters (add member-or-guest-or-outside-name, reorder, remove).
-- [ ] **Phase 4 — Public `/c/:slug/schedule`.** Published lineup grouped by
-      date. No auth, 404 unless the feature is fully on.
-- [ ] **Phase 5 — Integration.** Overview card, guide prose, README if warranted.
+- [x] **Phase 3 — `/programming/:offeringId`.** Sessions (add/cancel/restore/
+      delete) and presenters (camp attendee or outside name, remove).
+- [x] **Phase 4 — Public `/c/:slug/schedule`.** Lineup grouped by date. No
+      auth, 404 unless the feature is fully on.
+- [x] **Phase 5 — Integration.** Nav link, `ROUTE_FEATURES`, README paragraph.
+- [ ] **Not done:** Overview home card and `/guide` prose. Both are one-block
+      additions following the existing `seeFeature("programming")` pattern;
+      deferred so the first commit stays reviewable.
+
+## Verification (2026-07-30, dev server on :17923, live dev DB)
+
+Driven end-to-end over HTTP as a fresh admin ("Prog Tester" / "Lecture Test
+Camp", 2026 edition), then eyeballed in a browser:
+
+- Migration 0064 applied on server start (65 applied, `offering*` tables live).
+- Feature defaults **off**; `/settings` set it on. Turned to **preview** →
+  public page **404**; back to **on** → **200**. The preview-must-not-publish
+  rule holds.
+- Propose → officer review queue renders "Awaiting review · 1" with
+  Accept/Decline + note → accept → schedule a session → appears publicly.
+- **All three presenter name paths resolve** (the riskiest join): outside
+  speaker by bare name ("Dr. Georg Cantor"), member via
+  attendee→membership→user ("Prog Tester"), guest via `attendee.name`
+  ("Ada Guest") — all three on one line.
+- A `camp_only` offering does **not** appear on the public page (0 occurrences).
+- Cancelling a session shows "Cancelled" publicly rather than vanishing;
+  restore works.
+- Public page renders unauthenticated: `Thu, Aug 27 · 4 pm – 4:45 pm ·
+  Lecture Hall · 45 min`.
+
+typecheck + build + biome all green.
+
+**Gotcha (test harness, not the app):** driving React Router actions with
+`curl -d` intermittently 500s with `ERR_FORMDATA_PARSE_ERROR` ("incorrect MIME
+type/boundary") — curl's `Expect: 100-continue` means the body never arrives,
+though the write had already landed. Add `-H "Expect:"` to curl when scripting
+action posts. The app itself is fine; all writes verified in the DB.
+
+**Leftover test data:** "Lecture Test Camp" + user `prog@test.local` (password
+`progtest123`) remain in the dev DB with a worked example, so the feature can be
+clicked through immediately. Two `attendee` rows (`att-member`, `att-guest`)
+were inserted directly to exercise the presenter join. Delete the camp to clear
+all of it.
 
 ## Deliberately out of scope (Cameron did not select these)
 
@@ -221,3 +259,6 @@ Not built, but the schema shouldn't fight them later:
 
 - [x] Design settled with Cameron via four locked questions (2026-07-30).
 - [x] Plan written.
+- [x] Phases 1–5 built, verified end-to-end, committed (2026-07-30).
+- [ ] Overview card + `/guide` prose.
+- [ ] Answer the two open questions above.
