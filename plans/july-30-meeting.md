@@ -431,10 +431,32 @@ Locked by the user 2026-07-31:
       deleting (the NO ACTION FKs block the implicit `DELETE FROM`). No data
       loss, but the app would refuse to start. The pragma toggle is load-bearing.
 
-      ⚠️ Verified against the LOCAL dev DB (4 memberships / 6 map objects), not
-      the firefly production DB (~25 campers). Schema chain is identical, so the
-      structural result is the same, but the row-count check is only as
-      representative as local data.
+      ⚠️ Pre-deploy verification used the LOCAL dev DB (4 memberships / 6 map
+      objects), not the firefly production DB (~25 campers). Schema chain is
+      identical, so the structural result is the same, but the row-count check
+      was only as representative as local data.
+
+      **DEPLOYED + PRODUCTION-VERIFIED (commit `d61bc46`).** Deploy to firefly
+      green in 48s including the `/_version` SHA gate, and
+      `https://camptool.mathcamp.us/_version` returns exactly `d61bc46…` — so
+      this is a real swap, not the known false-green. `/login` returns **200 and
+      renders SSR content**, which requires `db/client.server.ts` to have loaded
+      — meaning **migration 0065 applied to the production DB and the new
+      `foreign_key_check` assertion passed on real data**. If the rebuild had
+      lost or dangled anything, the module would have thrown and the route
+      would 500.
+
+      Gotcha for future sessions: `curl -o /dev/null -w '%{http_code}'` against
+      this host intermittently reports `000` at ~0.06s due to a local
+      schannel TLS-renegotiation quirk on Windows. The server is fine — confirm
+      with `curl -v` before concluding an outage.
+
+      ⚠️ **Side effect of the push:** remote `master` was at `9b16e90`, but local
+      `master` already carried two unpushed commits from a *different* session
+      (`a744b0a` "Programming: camp offerings", `e69335c` "Programming: README
+      section"). Pushing my commit necessarily published and deployed those too.
+      Nothing was overwritten or lost, but that Programming work went live
+      earlier than its author may have intended.
 
 ## Things not to do
 
