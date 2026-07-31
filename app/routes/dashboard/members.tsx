@@ -20,6 +20,11 @@ import { Form, data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
 import {
+  type MergePreview,
+  mergeMemberships,
+  previewMembershipMerge,
+} from "~/lib/merge.server";
+import {
   ROLES,
   type Role,
   hasAtLeast,
@@ -311,8 +316,85 @@ export async function action({ request }: Route.ActionArgs) {
     // grants member:delete only to admin, and the rank check above is the real
     // authorization (same pattern as invite redemption). FK cascades clear
     // their per-year rows; items they owned become communal (owner set null).
-    await db.delete(membership).where(eq(membership.id, memberId));
+    try {
+      await db.delete(membership).where(eq(membership.id, memberId));
+    } catch (e) {
+      // A rejected foreign key used to escape as an unhandled 500 with no clue
+      // what was holding the row (see migration 0065). Never let that happen
+      // silently again — and point at merge, which is usually what was wanted.
+      console.error("removeMember failed", e);
+      return data(
+        {
+          error:
+            "Couldn't remove them — something in the camp still references this member. If this is a duplicate account, use Merge instead so their gear and tickets are kept.",
+        },
+        { status: 409 },
+      );
+    }
     return data({ ok: `Removed ${u?.name ?? "member"} from the camp.` });
+  }
+
+  if (intent === "mergeMembers") {
+    const survivorId = String(form.get("survivorId"));
+    const staleId = String(form.get("staleId"));
+
+    const rows = await db
+      .select({
+        id: membership.id,
+        role: membership.role,
+        userId: membership.userId,
+      })
+      .from(membership)
+      .where(eq(membership.organizationId, campId));
+    const survivor = rows.find((r) => r.id === survivorId);
+    const stale = rows.find((r) => r.id === staleId);
+    if (!survivor || !stale) {
+      return data({ error: "Member not found." }, { status: 404 });
+    }
+    // Merging deletes the duplicate, so it needs the same authority as removal:
+    // you must strictly outrank the record being absorbed.
+    if (rankOf(actorRole) <= rankOf(stale.role)) {
+      return data(
+        { error: "You can only merge members ranked below you." },
+        { status: 403 },
+      );
+    }
+    if (stale.userId === actor.id) {
+      return data(
+        { error: "You can't merge your own account away." },
+        { status: 400 },
+      );
+    }
+
+    try {
+      const result = await mergeMemberships(campId, survivorId, staleId);
+      return data({
+        ok:
+          result.total === 0
+            ? "Merged. The duplicate had no data attached."
+            : `Merged — moved ${result.total} record${result.total === 1 ? "" : "s"} onto the surviving member.`,
+      });
+    } catch (e) {
+      console.error("mergeMembers failed", e);
+      return data(
+        { error: e instanceof Error ? e.message : "Merge failed." },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (intent === "previewMerge") {
+    const survivorId = String(form.get("survivorId"));
+    const staleId = String(form.get("staleId"));
+    try {
+      const preview = await previewMembershipMerge(campId, survivorId, staleId);
+      return data({ preview });
+    } catch (e) {
+      return data(
+        { error: e instanceof Error ? e.message : "Couldn't preview." },
+        { status: 400 },
+      );
+    }
   }
 
   return data({ error: "Unknown action." }, { status: 400 });
@@ -346,8 +428,40 @@ export default function Members({ loaderData }: Route.ComponentProps) {
     name: string;
   } | null>(null);
   const [flagBody, setFlagBody] = useState("");
+  const mergeFetcher = useFetcher<FetcherData>();
+  const previewFetcher = useFetcher<{
+    preview?: MergePreview;
+    error?: string;
+  }>();
+  const [mergeTarget, setMergeTarget] = useState<{
+    memberId: string;
+    name: string;
+  } | null>(null);
+  const [mergeInto, setMergeInto] = useState<string | null>(null);
+  const mergePreview = previewFetcher.data?.preview ?? null;
+
+  // Show what a merge would actually move before anyone commits to it — the
+  // operation deletes a record, so "6 records will move" beats a blind confirm.
+  // Driven from the Select's onChange rather than an effect: the survivor
+  // choice is the only thing it depends on, so there's nothing to synchronise.
+  const pickSurvivor = (survivorId: string | null) => {
+    setMergeInto(survivorId);
+    if (!mergeTarget || !survivorId) return;
+    previewFetcher.submit(
+      {
+        intent: "previewMerge",
+        survivorId,
+        staleId: mergeTarget.memberId,
+      },
+      { method: "post" },
+    );
+  };
 
   useFetcherNotifications(roleFetcher.data, roleFetcher.state);
+  useFetcherNotifications(mergeFetcher.data, mergeFetcher.state, () => {
+    setMergeTarget(null);
+    setMergeInto(null);
+  });
   useFetcherNotifications(addFetcher.data, addFetcher.state, () =>
     addFormRef.current?.reset(),
   );
@@ -593,6 +707,19 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                               >
                                 Remove
                               </Button>
+                              <Button
+                                size="xs"
+                                variant="subtle"
+                                color="orange"
+                                onClick={() =>
+                                  setMergeTarget({
+                                    memberId: m.memberId,
+                                    name: m.name,
+                                  })
+                                }
+                              >
+                                Merge
+                              </Button>
                             </>
                           ) : null}
                           {canFlag && !isSelf ? (
@@ -653,6 +780,88 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 }}
               >
                 Remove
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+
+        <Modal
+          opened={mergeTarget !== null}
+          onClose={() => {
+            setMergeTarget(null);
+            setMergeInto(null);
+          }}
+          title={`Merge ${mergeTarget?.name ?? "member"} into another member`}
+          centered
+        >
+          <Stack gap="md">
+            <Text size="sm">
+              Use this when the same person signed up twice. Everything attached
+              to <strong>{mergeTarget?.name}</strong> — declared gear, map
+              placements, tickets, passes, RSVP, answers, and any guests they're
+              bringing — moves onto the member you pick, and this duplicate
+              record is then deleted.
+            </Text>
+            <Select
+              label="Keep this member"
+              description="The account they can actually log into. This record survives."
+              placeholder="Pick the surviving member"
+              searchable
+              data={members
+                .filter((m) => m.memberId !== mergeTarget?.memberId)
+                .map((m) => ({
+                  value: m.memberId,
+                  label: m.playaName ? `${m.name} "${m.playaName}"` : m.name,
+                }))}
+              value={mergeInto}
+              onChange={pickSurvivor}
+            />
+            {mergePreview ? (
+              <Card withBorder padding="sm" radius="sm">
+                <Text size="sm" fw={500} mb={4}>
+                  {mergePreview.total === 0
+                    ? "This duplicate has no data attached."
+                    : `${mergePreview.total} record${mergePreview.total === 1 ? "" : "s"} will move:`}
+                </Text>
+                {mergePreview.moves.map((mv) => (
+                  <Text size="xs" c="dimmed" key={`${mv.table}.${mv.column}`}>
+                    {mv.rows} × {mv.table.replace(/_/g, " ")}
+                  </Text>
+                ))}
+              </Card>
+            ) : null}
+            <Text size="xs" c="dimmed">
+              This can't be undone. Where both records hold the same thing (both
+              answered a question, both signed up for a shift), the surviving
+              member's version is kept.
+            </Text>
+            <Group justify="flex-end">
+              <Button
+                variant="default"
+                onClick={() => {
+                  setMergeTarget(null);
+                  setMergeInto(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                color="orange"
+                disabled={!mergeInto}
+                loading={mergeFetcher.state !== "idle"}
+                onClick={() => {
+                  if (mergeTarget && mergeInto)
+                    mergeFetcher.submit(
+                      {
+                        intent: "mergeMembers",
+                        survivorId: mergeInto,
+                        staleId: mergeTarget.memberId,
+                      },
+                      { method: "post" },
+                    );
+                }}
+              >
+                Merge and delete duplicate
               </Button>
             </Group>
           </Stack>

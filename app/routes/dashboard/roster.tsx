@@ -28,6 +28,7 @@ import {
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { requireFeature } from "~/lib/features.server";
 import { getOrCreatePromotionInvite } from "~/lib/invite.server";
+import { claimGuestAsMember } from "~/lib/merge.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/roster";
@@ -106,6 +107,42 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: `Added ${name} to your party.` });
   }
 
+  // "That plus-one is me." Someone listed as another member's guest who has
+  // since made their own account claims the entry, so the roster stops counting
+  // them twice and their tent spot / ticket / pass follow into their account.
+  // Deliberately NOT gated on being the host — the whole point is that the
+  // person themselves resolves it without chasing down whoever added them.
+  // Trust assumption: a camp member won't claim a stranger's entry to take
+  // their ticket. Officers can see and undo the result on this page.
+  if (intent === "claimGuest") {
+    const guestId = String(form.get("guestId"));
+    const guest = await getGuest(campId, editionId, guestId);
+    if (!guest) return data({ error: "Guest not found." }, { status: 404 });
+    if (guest.hostMembershipId === myMid) {
+      return data(
+        {
+          error:
+            "That's a guest you're hosting. Use Remove if they're not coming, or Invite to join to give them their own account.",
+        },
+        { status: 400 },
+      );
+    }
+    try {
+      await claimGuestAsMember(campId, editionId, guestId, myMid);
+      return data({
+        ok: `Merged "${guest.name ?? "that guest"}" into your account — you're no longer double-counted.`,
+      });
+    } catch (e) {
+      console.error("claimGuest failed", e);
+      return data(
+        {
+          error: e instanceof Error ? e.message : "Couldn't claim that entry.",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   if (
     intent === "updateGuest" ||
     intent === "removeGuest" ||
@@ -135,8 +172,31 @@ export async function action({ request }: Route.ActionArgs) {
       });
     }
     if (intent === "removeGuest") {
-      await removeGuest(guestId);
-      return data({ ok: "Removed." });
+      try {
+        const { ticketsReleased, passesRevoked } = await removeGuest(guestId);
+        const extras = [
+          ticketsReleased
+            ? `${ticketsReleased} ticket${ticketsReleased === 1 ? "" : "s"} returned to the pool`
+            : null,
+          passesRevoked
+            ? `${passesRevoked} granted setup pass${passesRevoked === 1 ? "" : "es"} released`
+            : null,
+        ].filter(Boolean);
+        return data({
+          ok: extras.length
+            ? `Removed ${guest.name ?? "guest"} — ${extras.join(", ")}.`
+            : "Removed.",
+        });
+      } catch (e) {
+        console.error("removeGuest failed", e);
+        return data(
+          {
+            error:
+              "Couldn't remove them — something still references this guest. Try again, and tell an officer if it keeps failing.",
+          },
+          { status: 409 },
+        );
+      }
     }
     const name = String(form.get("name") ?? "")
       .trim()
@@ -164,7 +224,8 @@ type FetcherData = {
 };
 
 export default function Roster({ loaderData }: Route.ComponentProps) {
-  const { members, headcount, myGuests, locked, year } = loaderData;
+  const { members, headcount, myGuests, locked, year, myMembershipId } =
+    loaderData;
 
   return (
     <Container size="lg">
@@ -187,7 +248,11 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
 
         {!locked ? <MyParty guests={myGuests} /> : null}
 
-        <RosterTable members={members} />
+        <RosterTable
+          members={members}
+          myMembershipId={myMembershipId}
+          locked={locked}
+        />
       </Stack>
     </Container>
   );
@@ -435,10 +500,16 @@ function EditGuestForm({
   );
 }
 
-function RosterTable({
+function RosterTableInner({
   members,
+  myMembershipId,
+  locked,
+  onClaim,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
+  myMembershipId: string | null;
+  locked: boolean;
+  onClaim: (guest: { id: string; name: string }) => void;
 }) {
   return (
     <Table.ScrollContainer minWidth={640}>
@@ -454,6 +525,7 @@ function RosterTable({
         <Table.Tbody>
           {members.map((m) => {
             const st = STATUS_META[m.status];
+            const isHost = m.membershipId === myMembershipId;
             return (
               <Table.Tr key={m.membershipId}>
                 <Table.Td>
@@ -483,13 +555,39 @@ function RosterTable({
                       —
                     </Text>
                   ) : (
-                    <Text size="sm">
-                      +{m.guests.length}
-                      <Text span c="dimmed" size="xs">
-                        {" "}
-                        ({m.guests.map((g) => g.name).join(", ")})
-                      </Text>
-                    </Text>
+                    // wrap (not nowrap) so a long party doesn't blow out the
+                    // row on a phone.
+                    <Group gap={6} wrap="wrap">
+                      <Text size="sm">+{m.guests.length}</Text>
+                      {m.guests.map((g) => (
+                        <Badge
+                          key={g.id}
+                          variant="light"
+                          color="grape"
+                          size="sm"
+                        >
+                          {g.name}
+                        </Badge>
+                      ))}
+                      {/* Someone listed under another member who now has their
+                          own account can un-double-count themselves here. */}
+                      {!locked && !isHost
+                        ? m.guests.map((g) => (
+                            <Button
+                              key={`claim-${g.id}`}
+                              size="compact-xs"
+                              variant="subtle"
+                              onClick={() =>
+                                onClaim({ id: g.id, name: g.name })
+                              }
+                            >
+                              {m.guests.length === 1
+                                ? "That's me"
+                                : `“${g.name}” is me`}
+                            </Button>
+                          ))
+                        : null}
+                    </Group>
                   )}
                 </Table.Td>
               </Table.Tr>
@@ -498,6 +596,74 @@ function RosterTable({
         </Table.Tbody>
       </Table>
     </Table.ScrollContainer>
+  );
+}
+
+/**
+ * Wraps the roster table with the "that plus-one is me" flow. Kept separate so
+ * the table itself stays a pure render of loader data.
+ */
+function RosterTable({
+  members,
+  myMembershipId,
+  locked,
+}: {
+  members: Route.ComponentProps["loaderData"]["members"];
+  myMembershipId: string | null;
+  locked: boolean;
+}) {
+  const claimFetcher = useFetcher<FetcherData>();
+  const [claiming, setClaiming] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+  useFetcherNotifications(claimFetcher.data, claimFetcher.state, () =>
+    setClaiming(null),
+  );
+
+  return (
+    <>
+      <RosterTableInner
+        members={members}
+        myMembershipId={myMembershipId}
+        locked={locked}
+        onClaim={setClaiming}
+      />
+      <Modal
+        opened={claiming !== null}
+        onClose={() => setClaiming(null)}
+        title="Is this you?"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            You're saying <strong>{claiming?.name}</strong> — currently listed
+            as someone else's guest — is you. That entry will be merged into
+            your account, so you stop being counted twice, and anything attached
+            to it (a tent spot, ticket, or setup pass) comes with you.
+          </Text>
+          <Text size="xs" c="dimmed">
+            Only do this if it's genuinely you. Officers can see the result.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setClaiming(null)}>
+              Cancel
+            </Button>
+            <Button
+              loading={claimFetcher.state !== "idle"}
+              onClick={() => {
+                if (claiming)
+                  claimFetcher.submit(
+                    { intent: "claimGuest", guestId: claiming.id },
+                    { method: "post" },
+                  );
+              }}
+            >
+              Yes, that's me
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </>
   );
 }
 

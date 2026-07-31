@@ -10,7 +10,7 @@
  */
 import { and, count, eq, isNotNull } from "drizzle-orm";
 import { db } from "../../db/client.server";
-import { attendee, membership, user } from "../../db/schema";
+import { attendee, membership, setupPass, ticket, user } from "../../db/schema";
 
 export type AttendeeStatus = "unknown" | "coming" | "maybe" | "not_coming";
 
@@ -271,8 +271,43 @@ export async function updateGuest(
     .where(eq(attendee.id, guestId));
 }
 
-export async function removeGuest(guestId: string): Promise<void> {
+/**
+ * Remove a guest from their host's party.
+ *
+ * Deleting the row alone isn't enough. `ticket.assigned_attendee_id` is ON
+ * DELETE SET NULL, so a ticket held by this guest would keep `status =
+ * 'assigned'` with nobody assigned — invisible to the officer's available
+ * count and un-reassignable. And `setup_pass` cascades, so a *granted* pass
+ * would vanish silently and free its quota with no record. Release the ticket
+ * back to the pool explicitly and report what else went, so the caller can say
+ * so instead of the camp discovering it on playa.
+ */
+export async function removeGuest(guestId: string): Promise<{
+  ticketsReleased: number;
+  passesRevoked: number;
+}> {
+  const [{ value: ticketsReleased } = { value: 0 }] = await db
+    .select({ value: count() })
+    .from(ticket)
+    .where(eq(ticket.assignedAttendeeId, guestId));
+  const [{ value: passesRevoked } = { value: 0 }] = await db
+    .select({ value: count() })
+    .from(setupPass)
+    .where(
+      and(eq(setupPass.attendeeId, guestId), eq(setupPass.status, "granted")),
+    );
+
+  await db
+    .update(ticket)
+    .set({
+      status: "available",
+      assignedAttendeeId: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(ticket.assignedAttendeeId, guestId));
+
   await db.delete(attendee).where(eq(attendee.id, guestId));
+  return { ticketsReleased, passesRevoked };
 }
 
 /**

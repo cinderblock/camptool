@@ -378,6 +378,32 @@ Locked by the user 2026-07-31:
 
 **Deferred (design notes only):** #5, #6, #8.
 
+## Merge design (bug 1 + bug 2)
+
+`app/lib/merge.server.ts`. Both duplicate shapes reduce to one primitive:
+re-point every row referencing the stale id at the survivor, then delete the
+stale row.
+
+- **The FK reference list is derived at runtime** from `PRAGMA foreign_key_list`
+  over every table, not hardcoded — a table added later is covered without
+  anyone remembering to update the merge code.
+- The sweep uses **`UPDATE OR IGNORE`**. Where a unique constraint means both
+  people already have the equivalent row (both answered a question, both signed
+  up for a shift), the stale row can't move; it's left behind and cleaned up by
+  the FK rules when the stale record is deleted. **This deliberately leans on
+  migration 0065** — before that repair, merge could not have worked either.
+- `attendee` is reconciled **per edition before** the generic sweep (both rows
+  for the same year must become one body, or the roster still double-counts).
+  Guests hosted by the duplicate are re-hosted onto the survivor.
+- The survivor keeps its own role and identity; **only blank fields** are filled
+  in from the duplicate, so a merge never silently downgrades or renames anyone.
+- Merge requires the same authority as removal (strictly outrank the record
+  being absorbed) and refuses to merge your own account away.
+- `claimGuestAsMember` is the bug-2 self-service path and is **deliberately not
+  gated on being the host** — the point is the person resolves it themselves.
+  Trust assumption noted in code: a member won't claim a stranger's entry to
+  take their ticket; officers can see and undo the result.
+
 ## Open questions for the user
 
 *(none blocking — all four gating questions answered above)*
@@ -387,6 +413,34 @@ Locked by the user 2026-07-31:
 - [x] 2026-07-31 — read parent plan + camp-features/whos-coming plans; mapped
       routes, schema files, feature keys, migration head; confirmed the working
       tree is CRLF-noise-only. Plan created.
+- [x] **Merge + hardened deletes (bugs 1 + 2 fixed end-to-end).** 2026-07-31.
+      `app/lib/merge.server.ts` (see design above) + UI:
+      - `/members`: a **Merge** button per editable row → modal that picks the
+        surviving member and shows a **live preview of exactly what will move**
+        ("6 records: 2 × map object, 1 × question answer, …") before committing,
+        since the operation deletes a record. Officer+, rank-checked.
+      - `removeMember` / `removeGuest` no longer bare deletes — both catch and
+        return a **409 with a useful message** instead of an unhandled 500, and
+        the member one points at Merge, which is usually what was actually
+        wanted.
+      - `removeGuest` now **releases the guest's ticket back to the pool**
+        (previously it stayed `assigned` with a NULL assignee — invisible to the
+        officer's available count and un-reassignable) and **reports granted
+        setup passes** it cascaded away instead of silently freeing quota.
+      - `/roster`: guests render as chips in a **wrapping** Group (was a source
+        of the mobile overflow in bug 3), and anyone who isn't the host gets a
+        **"That's me"** button → confirm modal → `claimGuest`, folding the
+        plus-one into their own account so the roster stops double-counting.
+      Verified by seeding a realistic duplicate on a fresh migrated DB and
+      running the real functions: **14/14 assertions** on the membership merge
+      (gear moved, no gear orphaned, invite edge re-pointed, one attendee row
+      for the year, ticket + tent spot followed the surviving body, guest
+      re-hosted, survivor's own answer kept over the duplicate's, colliding
+      duplicate dropped, blank playa name backfilled, `foreign_key_check`
+      clean) and **11/11** on guest-claim across both branches (claimer with no
+      attendee row → promoted in place keeping their tent spot; claimer with an
+      existing row → folded together, headcount −1, ticket moved). Headcount
+      went 3 → 2 exactly as intended. typecheck + build + biome green.
 - [x] **Migration 0065 — FK repair (bugs 1 + 2 root cause). VERIFIED, committed.**
       Hand-written rebuild of `membership`, `map_object`, `camp_invite` fixing
       **five** wrong `ON DELETE` rules (the fifth, `map_object.edition_id`, was
