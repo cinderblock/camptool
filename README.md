@@ -137,6 +137,16 @@ server into a container. Both are documented in
   the **per-camp/event/year data** in the database. The Math Camp camp-theme and
   the Burning Man event layer are bundled in this repo for now but are designed to
   peel out into their own packages. One camp can attend multiple events.
+- **Privacy mode is a screen-share convenience, not an access control.** Camp
+  admins can flip a per-browser toggle that replaces every name, email, phone
+  and Discord handle with deterministic pseudonyms, so the live instance can be
+  demoed without building a fake dataset. Pseudonyms are seeded per word on the
+  real value, so the same person reads the same everywhere, and names mentioned
+  inside free-text notes are swapped too. It is deliberately **read-only** —
+  a form pre-filled from pseudonymized data would otherwise save the pseudonym
+  over the real record. It is *not* a permission tier: everyone who can turn it
+  on could already see the real data. See
+  [`plans/privacy-and-demo-mode.md`](plans/privacy-and-demo-mode.md).
 - **Multi-camp aware from day one:** every tenant-scoped table carries a
   `camp_id`, even though we run a single deployment now. Avoids a painful
   migration when cross-camp map sharing / multi-camp hosting arrives.

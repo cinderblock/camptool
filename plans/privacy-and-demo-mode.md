@@ -254,7 +254,7 @@ is for. Revisit only if read-only proves too limiting in practice.
 - [ ] **9. Manual false-positive pass** — walk every screen with the toggle on
       and confirm nothing non-PII got mangled. NOT YET DONE; see "Verified so
       far" below for what has been checked.
-- [ ] **10. README / docs note** — self-hosters get this too; document that it
+- [x] **10. README / docs note** — self-hosters get this too; document that it
       is not an access control.
 
 ## Verified so far (2026-08-03)
