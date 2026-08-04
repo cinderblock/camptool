@@ -3,9 +3,16 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { redirect } from "react-router";
 import { db } from "../../db/client.server";
-import { camp, campEdition, membership, user } from "../../db/schema";
+import { attendee, camp, campEdition, membership, user } from "../../db/schema";
 import { auth } from "./auth.server";
 import { hasAtLeast, rankOf } from "./permissions";
+import {
+  PRIVACY_OFF,
+  type PrivacyMode,
+  parsePrivacyMode,
+  serializePrivacyMode,
+} from "./privacy";
+import { type PrivacyLens, buildPrivacyLens } from "./privacy.server";
 
 export type Camp = typeof camp.$inferSelect;
 export type Membership = typeof membership.$inferSelect;
@@ -88,6 +95,38 @@ const EDITION_COOKIE = "camptool_edition";
 /** Set the active edition (validated against the active camp in resolveActiveCamp). */
 export function setEditionCookie(editionId: string) {
   return `${EDITION_COOKIE}=${editionId}; ${cookieBase}`;
+}
+
+// --- Privacy mode: pseudonymize PII for demos/screen-shares. ---
+//
+// Admin-only, and re-checked on every request rather than trusted from the
+// cookie, so demoting an admin ends their privacy session immediately. The
+// cookie is unsigned on purpose: it grants no authority and defaults to off,
+// so there is nothing worth forging. See `plans/privacy-and-demo-mode.md`.
+
+const PRIVACY_COOKIE = "camptool_privacy";
+
+export function setPrivacyCookie(mode: PrivacyMode) {
+  return `${PRIVACY_COOKIE}=${serializePrivacyMode(mode)}; ${cookieBase}`;
+}
+
+/** Every real identity in the camp, so free text can have names swapped out of
+ * it (and so the dev leak audit knows what a leak looks like). */
+async function loadCampIdentities(campId: string) {
+  const people = await db
+    .select({
+      name: user.name,
+      email: user.email,
+      playaName: membership.playaName,
+    })
+    .from(membership)
+    .innerJoin(user, eq(user.id, membership.userId))
+    .where(eq(membership.organizationId, campId));
+  const guests = await db
+    .select({ name: attendee.name, email: attendee.email })
+    .from(attendee)
+    .where(eq(attendee.campId, campId));
+  return { people, guests };
 }
 
 /** All editions for a camp, newest year first. */
@@ -204,6 +243,12 @@ export type ActiveCampContext = {
   // edition cookie, falling back to the newest). Null when the camp has none yet.
   editions: Edition[];
   activeEdition: Edition | null;
+  // Privacy mode (admin-only). `privacy` is the built lens to hand to
+  // `redact()`; null whenever the mode is off or the viewer isn't an admin, in
+  // which case `redact()` is a pass-through and costs nothing.
+  privacy: PrivacyLens | null;
+  privacyMode: PrivacyMode;
+  canUsePrivacy: boolean;
 };
 
 /**
@@ -230,6 +275,23 @@ export async function resolveActiveCamp(
       editions.find((e) => e.id === wantId) ?? editions[0] ?? null;
   }
 
+  const canUsePrivacy = !!active && hasAtLeast(active.membership.role, "admin");
+  const privacyMode = canUsePrivacy
+    ? parsePrivacyMode(readCookie(request, PRIVACY_COOKIE))
+    : PRIVACY_OFF;
+  const privacy =
+    active && privacyMode.on
+      ? buildPrivacyLens({
+          mode: privacyMode,
+          ...(await loadCampIdentities(active.camp.id)),
+          self: {
+            name: session.user.name,
+            email: session.user.email,
+            playaName: active.membership.playaName,
+          },
+        })
+      : null;
+
   return {
     user: session.user,
     camps,
@@ -237,6 +299,9 @@ export async function resolveActiveCamp(
     impersonatedBy: session.impersonatedBy ?? null,
     editions,
     activeEdition,
+    privacy,
+    privacyMode,
+    canUsePrivacy,
   };
 }
 
