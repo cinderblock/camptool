@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import { announcement, user } from "../../../db/schema";
@@ -39,7 +40,8 @@ type Row = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "announcements");
   const rows = (await db
     .select({
@@ -59,12 +61,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     return b.createdAt.getTime() - a.createdAt.getTime();
   });
 
-  return {
+  return redact(privacy, {
     isOfficer: hasAtLeast(active.membership.role, "officer"),
     locked: activeEdition.locked,
     year: activeEdition.year,
     announcements: rows,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

@@ -41,6 +41,7 @@ import { data, useFetcher } from "react-router";
 import { QuestionField } from "~/components/QuestionField";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { type QuestionType, parseOptions } from "~/lib/questions";
 import {
   filterByAudience,
@@ -58,7 +59,8 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "onboarding");
   const campId = active.camp.id;
   const membershipId = active.membership.id;
@@ -96,7 +98,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   });
   const invitedByName = await loadInviterName(membershipId);
 
-  return {
+  return redact(privacy, {
     canManage: hasAtLeast(role, "officer"),
     tasks: tasks.map((t) => ({ ...t, done: doneSet.has(t.id) })),
     questions,
@@ -104,7 +106,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     invitedByName,
     year: activeEdition.year,
     locked: activeEdition.locked,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

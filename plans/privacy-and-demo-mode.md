@@ -15,6 +15,8 @@ Two related capabilities:
 2. **Demo mode** — a throwaway sandbox where a viewer can click around and
    *make changes*, then reset everything back to a pristine state.
 
+## Status: privacy mode is BUILT (2026-08-03). Demo mode is not started.
+
 ## Locked decisions (user Q&A, 2026-08-03)
 
 1. **Deterministic pseudonyms, not redaction.** Real-looking fake names/emails,
@@ -29,8 +31,13 @@ Two related capabilities:
 4. **Privacy mode is a screen-share convenience, NEVER an access control.**
    It must not become "give the volunteer a privacy-mode login" — that's RBAC
    and a different feature. Say so in the code comment and the UI copy.
-5. **Privacy mode is read-only** (recommended default, see "Write footgun").
-   Demo mode is where writes are allowed, because it has a reset.
+5. **Privacy mode is read-only** (see "Write footgun"). Demo mode is where
+   writes are allowed, because it has a reset.
+6. **Admin-only** (user, 2026-08-03). Officers and below never see the toggle,
+   and the mode is re-derived from the role on every request, so a demoted
+   admin's stale cookie stops applying immediately.
+7. **"Keep my own name" is an option** (user, 2026-08-03), not the default. The
+   header menu offers off / on / on-but-keep-my-name.
 
 ## Environment / context
 
@@ -224,22 +231,62 @@ is for. Revisit only if read-only proves too limiting in practice.
 
 ## Plan / steps
 
-- [ ] **1. `app/lib/privacy.ts`** — `pseudonym()`, word lists, field registry,
-      `redactValue()`. Pure, unit-testable, no DB.
-- [ ] **2. Cookie + context** — `setPrivacyCookie()` / read in
-      `resolveActiveCamp`; add `privacy: boolean` to `ActiveCampContext`.
-- [ ] **3. `redact(request, data, opts)`** in `privacy.server.ts`.
-- [ ] **4. The crawl test** — build it BEFORE wrapping all 37 loaders, so it
-      drives the work and reports honest progress.
-- [ ] **5. Wrap loaders** — the 28 `requireActive*` ones first, then the 9
-      others from the table above. Hard-block `/export-db`.
-- [ ] **6. Read-only guard** on actions.
-- [ ] **7. Toggle UI + banner + chrome accent.**
-- [ ] **8. Manual false-positive pass** — walk every screen with the toggle on
-      and confirm nothing non-PII got mangled (talk titles, structure names,
-      camp name).
-- [ ] **9. README / docs note** — self-hosters get this too; document that it is
-      not an access control.
+- [x] **1. `app/lib/privacy.ts`** — cookie shape + field classification rules.
+      Pure, no crypto, no DB.
+- [x] **2. `app/lib/privacy.server.ts`** — pseudonyms, lens, `redact()`, the
+      dev leak audit. No DB import either (session.server does the queries), so
+      it is unit-testable without opening SQLite or running migrations.
+- [x] **3. Cookie + context** — `setPrivacyCookie()`, read in
+      `resolveActiveCamp`; `privacy` / `privacyMode` / `canUsePrivacy` on
+      `ActiveCampContext`.
+- [x] **4. Coverage guard** — `app/lib/privacy-coverage.test.ts` reads
+      `app/routes.ts` and fails any route with a loader that neither redacts nor
+      carries a written exemption. Also checks for stale exemptions and for
+      route files on disk missing from `routes.ts`.
+- [x] **5. Wrap loaders** — all 37, plus `/export-db` hard-blocked (409).
+- [x] **6. Read-only guard** — `assertWritable()`, applied centrally in
+      `resolveActiveCamp` for any non-GET/HEAD request. Opt out with
+      `{ allowWrite: true }` (used by `/privacy` and the year switcher).
+- [x] **7. Toggle UI + banner + chrome accent** — header menu (admin-only),
+      orange header background and a dismissible banner while on.
+- [x] **8. Unit tests** — 24 across pseudonymizer, classification, redaction,
+      keepSelf, and coverage.
+- [ ] **9. Manual false-positive pass** — walk every screen with the toggle on
+      and confirm nothing non-PII got mangled. NOT YET DONE; see "Verified so
+      far" below for what has been checked.
+- [ ] **10. README / docs note** — self-hosters get this too; document that it
+      is not an access control.
+
+## Verified so far (2026-08-03)
+
+- `bun run typecheck`, `bun test` (24 pass), `bunx biome check app/`, and
+  `bun run build` all green.
+- Exercised against the **real** `data/camptool.db` (read-only) with a
+  members-page-shaped payload built from real rows: 4 members + 3 attendees,
+  13 vocabulary tokens. Result: names/emails pseudonymized, `campName`
+  ("Math Camp") and `structures[].name` ("Big Shade Structure") left intact —
+  the personhood heuristic works on real data — the real name inside a
+  free-text note swapped to **the same pseudonym** as that person's roster row,
+  and **0 real tokens surviving anywhere in the output**.
+- NOT yet exercised through a running browser session. The manual sweep (step 9)
+  is what would catch over-redaction on screens whose payload shapes weren't
+  sampled, and `playaName` is null for every real member today so the playa path
+  is only covered by unit tests.
+
+## Known rough edges
+
+- **Forms stay clickable in privacy mode.** They fail loudly with a 403 from
+  `assertWritable` rather than being visually disabled. Acceptable (the banner
+  says editing is off) but it lands the user on an error boundary; disabling the
+  controls would mean touching every form in the app.
+- **Public routes are not redacted** — `/c/:slug`, `/c/:slug/schedule`,
+  `/i/:token`. They have no session to carry the cookie, and show only what the
+  camp deliberately published. Listed as exemptions in the coverage test.
+- **Site admin spans camps** but the lens vocabulary is camp-scoped, so free
+  text there may mention people from other camps without substitution. Keyed
+  fields (names, emails) still redact.
+- **Under impersonation**, "keep my own name" keeps the impersonated target's
+  name, not the real admin's — the lens is seeded from the effective session.
 
 Then, separately: **demo mode** — `DATABASE_PATH=./data/demo.db`, pristine
 snapshot generated by running the same pseudonymizer over a *copy* of the real
@@ -271,4 +318,23 @@ DB (offline script, not per-request), reset = file copy. Writes allowed there.
 - **2026-08-03** — Codebase surveyed (PII columns, 189 render sites, cookie vs
   localStorage precedent, loader funnel, export surfaces). Design decided:
   deterministic value-seeded pseudonyms, server-side, cookie-backed, enforced by
-  a route-crawl test. Nothing implemented yet.
+  a route-crawl test.
+- **2026-08-03** — Privacy mode implemented end to end. Two findings that
+  changed the design mid-build:
+  1. **Per-word seeding.** Seeding a pseudonym on the whole value meant a note
+     mentioning "Sarah" got a different fake first name than the roster row
+     "Sarah Chen". Names are now seeded per word, so partial mentions agree with
+     full ones — and two real Sarahs share a fake first name, as in life.
+  2. **The write-back footgun is real, not theoretical.** `BurningManExport` in
+     `map.tsx` submits its pre-filled contact fields back via
+     `setPlacementContact`; in privacy mode that would have persisted the
+     pseudonym over the camp's real placement contact. This is what the
+     read-only guard exists to stop, and it justified putting the check
+     centrally in `resolveActiveCamp` rather than per-action.
+- **2026-08-03** — Coverage guard chosen over the full HTTP crawl test
+  described earlier in this plan. The crawl would need a booted server plus a
+  synthesized better-auth session; the static guard catches the actual
+  maintenance risk (a new route forgetting to wrap) for a fraction of the
+  effort, and the dev-mode leak audit inside `redact()` covers the "registry
+  missed a field" case at runtime while clicking around. Revisit if the audit
+  proves too noisy or too quiet.

@@ -28,6 +28,7 @@ import { QuestionField } from "~/components/QuestionField";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { parseBannedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
+import { redact } from "~/lib/privacy.server";
 import type { QuestionType } from "~/lib/questions";
 import { isAnswered, parseOptions, surfacedInWizard } from "~/lib/questions";
 import {
@@ -71,6 +72,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     user: authUser,
     active,
     activeEdition,
+    privacy,
   } = await requireActiveEdition(request);
   const campId = active.camp.id;
   const editionId = activeEdition.id;
@@ -274,7 +276,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const arrivalWindow = eventWindowFor(activeEdition.year);
 
-  return {
+  return redact(privacy, {
     locked: activeEdition.locked,
     bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
     userName: authUser.name,
@@ -303,7 +305,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     myPass,
     // Gates open on `focus`; min/max bound the arrival picker.
     arrivalWindow,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

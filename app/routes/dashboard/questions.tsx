@@ -40,6 +40,7 @@ import { data, useFetcher } from "react-router";
 import { QuestionField } from "~/components/QuestionField";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import {
   QUESTION_AUDIENCES,
   QUESTION_PLACEMENTS,
@@ -75,7 +76,8 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { user, active, activeEdition } = await requireActiveEdition(request);
+  const { user, active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "questions");
   const campId = active.camp.id;
   const role = active.membership.role;
@@ -111,7 +113,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     exclusiveOption: q.exclusiveOption,
   }));
 
-  return {
+  return redact(privacy, {
     canManage,
     audience: audienceForRole(role),
     locked: activeEdition.locked,
@@ -120,7 +122,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     answers,
     invitedByName,
     inviterOptions,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

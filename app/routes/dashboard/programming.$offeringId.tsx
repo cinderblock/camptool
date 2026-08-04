@@ -26,6 +26,7 @@ import { useEffect } from "react";
 import { Link, data, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import {
   AUDIENCE_OPTIONS,
   DURATION_OPTIONS,
@@ -64,7 +65,8 @@ export function meta({ data: d }: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "programming");
   const detail = await loadOffering(params.offeringId, activeEdition.id);
   if (!detail) throw data("Not found", { status: 404 });
@@ -82,7 +84,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     .leftJoin(user, eq(user.id, membership.userId))
     .where(eq(attendee.editionId, activeEdition.id));
 
-  return {
+  return redact(privacy, {
     ...detail,
     locked: activeEdition.locked,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
@@ -93,7 +95,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         name: p.memberName ?? p.guestName ?? "Unnamed",
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
-  };
+  });
 }
 
 export async function action({ request, params }: Route.ActionArgs) {

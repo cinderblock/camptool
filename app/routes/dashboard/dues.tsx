@@ -22,6 +22,7 @@ import { useEffect, useState } from "react";
 import { Form, data, redirect, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { loadCampEditions, requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import {
@@ -56,7 +57,8 @@ function usd(cents: number | null): string {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "dues");
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
@@ -133,7 +135,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     };
   });
 
-  return {
+  return redact(privacy, {
     locked: activeEdition.locked,
     year: activeEdition.year,
     tiers: tiers.map((t) => ({
@@ -145,7 +147,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     })),
     otherEditions,
     roster,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

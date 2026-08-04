@@ -34,6 +34,8 @@ import {
 import { loadFeatureStates } from "~/lib/features.server";
 import { isSuperAdmin } from "~/lib/instance.server";
 import { hasAtLeast } from "~/lib/permissions";
+import type { PrivacyMode } from "~/lib/privacy";
+import { redact } from "~/lib/privacy.server";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { loadWizardState } from "~/lib/wizard.server";
 import { db } from "../../../db/client.server";
@@ -41,8 +43,17 @@ import { membership } from "../../../db/schema";
 import type { Route } from "./+types/layout";
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { user, camps, active, impersonatedBy, editions, activeEdition } =
-    await resolveActiveCamp(request);
+  const {
+    user,
+    camps,
+    active,
+    impersonatedBy,
+    editions,
+    activeEdition,
+    privacy,
+    privacyMode,
+    canUsePrivacy,
+  } = await resolveActiveCamp(request);
 
   // Guide brand-new campers (non-officers) through the onboarding wizard. The
   // forced redirect fires at most once (wizardStep flips to 1 the first time
@@ -80,14 +91,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     ? Object.fromEntries(await loadFeatureStates(active.camp.id))
     : {};
 
-  return {
+  return redact(privacy, {
     user,
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
     features,
     superAdmin,
     showFinishSetup,
-    impersonatedBy,
+    privacyMode,
+    canUsePrivacy,
+    // Flattened to `…Name` so the redaction registry classifies it as a person;
+    // a bare `name` on a `{ id, name }` object has no personhood signal to go on
+    // (that heuristic is what keeps camp and structure names intact).
+    impersonatedByName: impersonatedBy?.name ?? null,
     activeEditionId: activeEdition?.id ?? null,
     activeEditionLocked: activeEdition?.locked ?? false,
     activeEditionYear: activeEdition?.year ?? null,
@@ -100,7 +116,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       name: c.camp.name,
       role: c.membership.role,
     })),
-  };
+  });
 }
 
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
@@ -112,13 +128,21 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     features,
     superAdmin,
     showFinishSetup,
-    impersonatedBy,
+    impersonatedByName,
+    privacyMode,
+    canUsePrivacy,
     editions,
     activeEditionId,
     activeEditionLocked,
     activeEditionYear,
   } = loaderData;
   const editionFetcher = useFetcher();
+  const privacyFetcher = useFetcher();
+  const setPrivacy = (mode: PrivacyMode) =>
+    privacyFetcher.submit(
+      { on: String(mode.on), keepSelf: String(mode.keepSelf) },
+      { method: "post", action: "/privacy" },
+    );
   // A feature-gated nav link exists only when this viewer can see the feature
   // (on = everyone; preview = officers+, badged so they know members can't).
   const featureState = (key: FeatureKey): FeatureState =>
@@ -215,7 +239,16 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
       }}
       padding="md"
     >
-      <AppShell.Header>
+      <AppShell.Header
+        // Privacy mode recolours the whole chrome. A mode that makes fake data
+        // look real is a mode you forget you're in and then act on, so the
+        // signal has to be impossible to miss rather than a tidy little badge.
+        style={
+          privacyMode.on
+            ? { background: "var(--mantine-color-orange-light)" }
+            : undefined
+        }
+      >
         <Group h="100%" px="md" justify="space-between">
           <Group gap="sm">
             <Burger
@@ -269,6 +302,39 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                 ) : null}
               </Group>
             ) : null}
+            {canUsePrivacy ? (
+              <Menu position="bottom-end" withinPortal>
+                <Menu.Target>
+                  <Button
+                    size="xs"
+                    variant={privacyMode.on ? "filled" : "subtle"}
+                    color="orange"
+                  >
+                    {privacyMode.on ? "Privacy on" : "Privacy"}
+                  </Button>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>Privacy mode</Menu.Label>
+                  <Menu.Item
+                    onClick={() => setPrivacy({ on: false, keepSelf: false })}
+                  >
+                    {!privacyMode.on ? "✓ " : ""}Off — show real people
+                  </Menu.Item>
+                  <Menu.Item
+                    onClick={() => setPrivacy({ on: true, keepSelf: false })}
+                  >
+                    {privacyMode.on && !privacyMode.keepSelf ? "✓ " : ""}
+                    On — fake names for everyone
+                  </Menu.Item>
+                  <Menu.Item
+                    onClick={() => setPrivacy({ on: true, keepSelf: true })}
+                  >
+                    {privacyMode.on && privacyMode.keepSelf ? "✓ " : ""}
+                    On — but keep my own name
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+            ) : null}
             <FeedbackButton />
             <Menu position="bottom-end" withinPortal>
               <Menu.Target>
@@ -308,7 +374,36 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
       </AppShell.Navbar>
 
       <AppShell.Main id="main-content">
-        {impersonatedBy ? (
+        {privacyMode.on ? (
+          <Group
+            justify="space-between"
+            wrap="nowrap"
+            mb="md"
+            px="md"
+            py="xs"
+            // biome-ignore lint/a11y/useSemanticElements: an <output> element is for form results; this is a session-status banner, and role="status" makes SRs announce it when privacy mode starts.
+            role="status"
+            style={{
+              background: "var(--mantine-color-orange-light)",
+              borderRadius: "var(--mantine-radius-sm)",
+            }}
+          >
+            <Text size="sm">
+              <b>Privacy mode</b> — every name, email and phone number on screen
+              is fake{privacyMode.keepSelf ? " except your own" : ""}. Editing
+              is disabled so a fake name can't be saved over a real one.
+            </Text>
+            <Button
+              size="xs"
+              variant="filled"
+              color="orange"
+              onClick={() => setPrivacy({ on: false, keepSelf: false })}
+            >
+              Turn off
+            </Button>
+          </Group>
+        ) : null}
+        {impersonatedByName ? (
           <Group
             justify="space-between"
             wrap="nowrap"
@@ -324,7 +419,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           >
             <Text size="sm">
               Working as <b>{user.name}</b> — impersonated by{" "}
-              {impersonatedBy.name}.
+              {impersonatedByName}.
             </Text>
             <Form method="post" action="/impersonate">
               <input type="hidden" name="intent" value="stop" />

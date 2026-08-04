@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import { campDocument } from "../../../db/schema";
@@ -43,7 +44,7 @@ function normalizeUrl(raw: string): string | null {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active } = await requireActiveCamp(request);
+  const { active, privacy } = await requireActiveCamp(request);
   await requireFeature(active, "documents");
   const docs = (
     await db
@@ -68,11 +69,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     ...new Set(docs.map((d) => d.category).filter((c): c is string => !!c)),
   ].sort();
 
-  return {
+  return redact(privacy, {
     isOfficer: hasAtLeast(active.membership.role, "officer"),
     documents: docs,
     categories,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

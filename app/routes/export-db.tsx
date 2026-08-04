@@ -1,5 +1,5 @@
 import { isSuperAdmin } from "~/lib/instance.server";
-import { requireUser } from "~/lib/session.server";
+import { requireUser, resolveActiveCamp } from "~/lib/session.server";
 import { sqlite } from "../../db/client.server";
 import type { Route } from "./+types/export-db";
 
@@ -13,6 +13,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   const session = await requireUser(request);
   if (!(await isSuperAdmin(session.user.id))) {
     throw new Response("Not authorized", { status: 403 });
+  }
+  // Raw SQLite bytes cannot be pseudonymized in flight, so this is the one
+  // surface privacy mode has to refuse outright rather than transform.
+  const { privacyMode } = await resolveActiveCamp(request);
+  if (privacyMode.on) {
+    throw new Response(
+      "Turn off privacy mode to download a backup — the database file contains real data and can't be pseudonymized.",
+      { status: 409 },
+    );
   }
   // Copy into a plain Uint8Array (a valid Response body; Buffer's typing isn't).
   const bytes = new Uint8Array(sqlite.serialize());

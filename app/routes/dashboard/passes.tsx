@@ -26,6 +26,7 @@ import { setupPassWindowFor } from "~/lib/brc";
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import {
@@ -65,7 +66,8 @@ type PassRow = {
 type GrantGroup = { group: string; items: { value: string; label: string }[] };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "passes");
   const editionId = activeEdition.id;
   const isOfficer = hasAtLeast(active.membership.role, "officer");
@@ -172,7 +174,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (r.membershipId === myMembershipId) myArrival = r.arrivalDate ?? null;
   }
 
-  return {
+  return redact(privacy, {
     isOfficer,
     locked: activeEdition.locked,
     event: activeEdition.event,
@@ -183,7 +185,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     passes,
     grantGroups,
     arrivals: isOfficer ? arrivals : {},
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

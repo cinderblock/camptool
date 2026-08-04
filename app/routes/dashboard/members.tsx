@@ -32,6 +32,7 @@ import {
   isRole,
   rankOf,
 } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import { memberFlag, membership, user } from "../../../db/schema";
@@ -49,7 +50,7 @@ const ROLE_COLOR: Record<Role, string> = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { user: actor, active } = await requireActiveCamp(request);
+  const { user: actor, active, privacy } = await requireActiveCamp(request);
   const campId = active.camp.id;
   const actorRole = active.membership.role;
 
@@ -112,7 +113,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ? flagRows.filter((f) => f.reporterMembershipId === myMid).map(toView)
     : [];
 
-  return {
+  return redact(privacy, {
     campId,
     campName: active.camp.name,
     actorUserId: actor.id,
@@ -123,7 +124,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     members,
     officerFlags,
     myFlags,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

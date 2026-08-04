@@ -29,6 +29,7 @@ import { useEffect, useState } from "react";
 import { Link, data, redirect, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import {
   GATHERING_KINDS,
   STAFFING_OPTIONS,
@@ -54,15 +55,16 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "schedule");
-  return {
+  return redact(privacy, {
     year: activeEdition.year,
     locked: activeEdition.locked,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
     agenda: await loadAgenda(activeEdition.id, active.membership.id),
     gatherings: await loadGatherings(activeEdition.id, todayIso()),
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

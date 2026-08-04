@@ -28,6 +28,7 @@ import { featureVisibleTo } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
 import { type Role, hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { pendingApplicationWhere } from "~/lib/recruits.server";
 import { dateLabel, timeRangeLabel, todayIso } from "~/lib/schedule";
 import { loadAgenda } from "~/lib/schedule.server";
@@ -72,7 +73,8 @@ const ROLE_COLOR: Record<Role, string> = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { user, active, activeEdition } = await resolveActiveCamp(request);
+  const { user, active, activeEdition, privacy } =
+    await resolveActiveCamp(request);
 
   const hasDiscord = active
     ? (
@@ -288,7 +290,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     };
   }
 
-  return {
+  return redact(privacy, {
     userName: user.name,
     userEmail: user.email,
     discordEnabled,
@@ -300,7 +302,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     active: active
       ? { campName: active.camp.name, role: active.membership.role }
       : null,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

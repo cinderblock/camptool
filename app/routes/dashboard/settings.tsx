@@ -24,6 +24,7 @@ import {
   isFeatureState,
 } from "~/lib/features";
 import { loadFeatureStates, setFeatureState } from "~/lib/features.server";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import type { Route } from "./+types/settings";
 
@@ -32,10 +33,10 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active } = await requireActiveCamp(request);
+  const { active, privacy } = await requireActiveCamp(request);
   if (active.membership.role !== "admin") throw redirect("/");
   const states = await loadFeatureStates(active.camp.id);
-  return {
+  return redact(privacy, {
     campName: active.camp.name,
     features: FEATURES.map((def) => ({
       key: def.key,
@@ -44,7 +45,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       requires: def.requires ?? [],
       state: states.get(def.key) ?? "off",
     })),
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

@@ -15,6 +15,7 @@ import { JoinFlowchart } from "~/components/JoinFlowchart";
 import { weeksUntilEvent } from "~/lib/brc";
 import { featureVisibleTo } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { loadWizardState } from "~/lib/wizard.server";
 import type { Route } from "./+types/guide";
@@ -24,7 +25,8 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   const state = await loadWizardState({
     campId: active.camp.id,
     editionId: activeEdition.id,
@@ -35,7 +37,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const featureStates = await loadFeatureStates(active.camp.id);
   const seeFeature = (key: Parameters<typeof featureStates.get>[0]) =>
     featureVisibleTo(featureStates.get(key) ?? "off", active.membership.role);
-  return {
+  return redact(privacy, {
     campName: active.camp.name,
     year: activeEdition.year,
     weeksToEvent: weeksUntilEvent(activeEdition.year),
@@ -51,7 +53,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       map: seeFeature("map") || seeFeature("bringing"),
       tickets: seeFeature("tickets") || seeFeature("passes"),
     },
-  };
+  });
 }
 
 export default function Guide({ loaderData }: Route.ComponentProps) {

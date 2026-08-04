@@ -22,7 +22,9 @@ import {
 import { CURRENT_EVENT_YEAR } from "~/lib/brc";
 import { BURNING_MAN, EVENTS, eventLabel, isEvent } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import {
+  assertWritable,
   loadCampEditions,
   requireActiveCamp,
   setEditionCookie,
@@ -37,9 +39,9 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveCamp(request);
+  const { active, activeEdition, privacy } = await requireActiveCamp(request);
   const editions = await loadCampEditions(active.camp.id);
-  return {
+  return redact(privacy, {
     canManage: hasAtLeast(active.membership.role, "officer"),
     activeEditionId: activeEdition?.id ?? null,
     editions: editions.map((e) => ({
@@ -50,7 +52,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       locked: e.locked,
       bannedKinds: parseBannedKinds(e.bannedKinds),
     })),
-  };
+  });
 }
 
 /** Copy a source edition's **lot setup** (placement geometry) into a fresh
@@ -73,7 +75,12 @@ async function copyEditionContents(sourceId: string, targetId: string) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const { active } = await requireActiveCamp(request);
+  // Switching the active year is a per-browser view preference, not camp data,
+  // so it stays available in privacy mode — a demo that can't change years is
+  // a poor demo. Everything else below is a real write and is guarded.
+  const { active, privacy } = await requireActiveCamp(request, {
+    allowWrite: true,
+  });
   const campId = active.camp.id;
   const role = active.membership.role;
   const form = await request.formData();
@@ -93,6 +100,8 @@ export async function action({ request }: Route.ActionArgs) {
       { headers: { "Set-Cookie": setEditionCookie(editionId) } },
     );
   }
+
+  assertWritable(privacy);
 
   // Creating / locking years is an officer+ action.
   if (!hasAtLeast(role, "officer")) {

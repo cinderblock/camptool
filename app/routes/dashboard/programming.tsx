@@ -28,6 +28,7 @@ import { useEffect } from "react";
 import { Link, data, redirect, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import {
   AUDIENCE_OPTIONS,
   DURATION_OPTIONS,
@@ -55,9 +56,10 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   const state = await requireFeature(active, "programming");
-  return {
+  return redact(privacy, {
     year: activeEdition.year,
     locked: activeEdition.locked,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
@@ -68,7 +70,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     // officers to a URL that would 404 for them during preview.
     publicLive: state === "on",
     offerings: await loadOfferings(activeEdition.id),
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

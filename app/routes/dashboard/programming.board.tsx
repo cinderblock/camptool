@@ -16,6 +16,7 @@
 import { Badge, Button, Container, Group, Stack, Text } from "@mantine/core";
 import { Link, useSearchParams } from "react-router";
 import { requireFeature } from "~/lib/features.server";
+import { redact } from "~/lib/privacy.server";
 import { offeringKindLabel, presenterName } from "~/lib/programming";
 import { loadDaySheet } from "~/lib/programming.server";
 import { dateLabel, timeRangeLabel, todayIso } from "~/lib/schedule";
@@ -27,14 +28,15 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "programming");
   const sessions = await loadDaySheet(active.camp.id, activeEdition.id);
-  return {
+  return redact(privacy, {
     sessions: sessions.filter((s) => s.sessionStatus !== "cancelled"),
     year: activeEdition.year,
     campName: active.camp.name,
-  };
+  });
 }
 
 export default function ProgrammingBoard({ loaderData }: Route.ComponentProps) {

@@ -23,7 +23,12 @@ import {
   revokeSuperAdmin,
   setInstanceSettings,
 } from "~/lib/instance.server";
-import { requireUser } from "~/lib/session.server";
+import { redact } from "~/lib/privacy.server";
+import {
+  assertWritable,
+  requireUser,
+  resolveActiveCamp,
+} from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import { clientError, feedback, user as userTable } from "../../../db/schema";
 import type { Route } from "./+types/admin";
@@ -35,6 +40,7 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   const session = await requireUser(request);
   if (!(await isSuperAdmin(session.user.id))) throw redirect("/");
+  const { privacy } = await resolveActiveCamp(request);
 
   const [settings, admins] = await Promise.all([
     getInstanceSettings(),
@@ -95,7 +101,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     at: f.createdAt.toISOString(),
   }));
 
-  return {
+  // Site admin spans every camp, so the lens's free-text vocabulary (which is
+  // camp-scoped) won't know other camps' people — but the field rules do the
+  // heavy lifting here, and names/emails/telemetry are keyed, not prose.
+  return redact(privacy, {
     settings,
     currentUserId: session.user.id,
     admins: admins.map((a) => ({
@@ -105,12 +114,17 @@ export async function loader({ request }: Route.LoaderArgs) {
     })),
     recentErrors,
     recentFeedback,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {
   const session = await requireUser(request);
   if (!(await isSuperAdmin(session.user.id))) throw redirect("/");
+  // This route authorizes via requireUser, so it misses the read-only guard
+  // that resolveActiveCamp applies to every camp-scoped action.
+  assertWritable(
+    (await resolveActiveCamp(request, { allowWrite: true })).privacy,
+  );
 
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");

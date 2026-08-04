@@ -26,6 +26,7 @@ import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import {
@@ -66,7 +67,8 @@ type RequestRow = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "tickets");
   const editionId = activeEdition.id;
   const isOfficer = hasAtLeast(active.membership.role, "officer");
@@ -181,7 +183,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ];
   }
 
-  return {
+  return redact(privacy, {
     isOfficer,
     locked: activeEdition.locked,
     event: activeEdition.event,
@@ -193,7 +195,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     tickets,
     requests,
     assignGroups,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

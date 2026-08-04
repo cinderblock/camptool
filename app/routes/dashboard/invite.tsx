@@ -20,6 +20,7 @@ import { data, useFetcher } from "react-router";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { newInviteToken } from "~/lib/invite.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import { campInvite, membership, user } from "../../../db/schema";
@@ -30,7 +31,7 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active } = await requireActiveCamp(request);
+  const { active, privacy } = await requireActiveCamp(request);
   if (!hasAtLeast(active.membership.role, "member")) {
     throw data("Not authorized", { status: 403 });
   }
@@ -94,7 +95,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     revoked: Boolean(r.revokedAt),
   }));
 
-  return { invites, isOfficer };
+  return redact(privacy, { invites, isOfficer });
 }
 
 export async function action({ request }: Route.ActionArgs) {

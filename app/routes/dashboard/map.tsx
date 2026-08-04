@@ -52,6 +52,7 @@ import {
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import {
   DEFAULT_ROAD_CUTBACK,
   ROAD_KINDS,
@@ -1096,6 +1097,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     user: account,
     active,
     activeEdition,
+    privacy,
   } = await requireActiveEdition(request);
   await requireFeature(active, "map");
   const editionId = activeEdition.id;
@@ -1156,7 +1158,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     loadSuggestions(editionId),
   ]);
 
-  return {
+  return redact(privacy, {
     canEdit:
       hasAtLeast(active.membership.role, "member") && !activeEdition.locked,
     locked: activeEdition.locked,
@@ -1236,7 +1238,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       points: parseZonePoints(r.points),
       notes: r.notes,
     })) satisfies RoadRow[],
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

@@ -21,6 +21,7 @@ import { auth } from "~/lib/auth.server";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { parseMultiValue } from "~/lib/questions";
 import { isMemberOf } from "~/lib/recruits.server";
 import { requireActiveCamp } from "~/lib/session.server";
@@ -52,7 +53,7 @@ const STATUS_RANK: Record<string, number> = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active } = await requireActiveCamp(request);
+  const { active, privacy } = await requireActiveCamp(request);
   await requireFeature(active, "recruiting");
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
@@ -126,7 +127,11 @@ export async function loader({ request }: Route.LoaderArgs) {
         b.createdAt.localeCompare(a.createdAt),
     );
 
-  return { applications, applyUrl, description: campRow?.description ?? null };
+  return redact(privacy, {
+    applications,
+    applyUrl,
+    description: campRow?.description ?? null,
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

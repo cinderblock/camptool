@@ -25,6 +25,7 @@ import { Link, data, useFetcher } from "react-router";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import { financeEntry, membership, user } from "../../../db/schema";
@@ -55,7 +56,8 @@ type EntryRow = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "finances");
   // Officer-only: the ledger isn't shared with all campers.
   if (!hasAtLeast(active.membership.role, "officer")) {
@@ -104,7 +106,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ...new Set(entries.map((e) => e.category).filter((c): c is string => !!c)),
   ].sort();
 
-  return {
+  return redact(privacy, {
     locked: activeEdition.locked,
     year: activeEdition.year,
     // Dues is its own camp feature now (admin-managed on /settings).
@@ -117,7 +119,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     members,
     categories,
     totals: { donations, expenses, net: donations - expenses },
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

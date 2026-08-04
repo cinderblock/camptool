@@ -13,6 +13,8 @@ export default [
   route("c/:slug/schedule", "routes/c.$slug.schedule.tsx"),
   route("i/:token", "routes/i.$token.tsx"),
   route("impersonate", "routes/impersonate.tsx"),
+  // Privacy-mode toggle (admin-only; sets the per-browser cookie).
+  route("privacy", "routes/privacy.tsx"),
   route("start", "routes/start.tsx"),
   // Super-admin DB backup download (resource route; self-gated).
   route("export-db", "routes/export-db.tsx"),

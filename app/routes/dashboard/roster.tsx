@@ -31,6 +31,7 @@ import { requireFeature } from "~/lib/features.server";
 import { getOrCreatePromotionInvite } from "~/lib/invite.server";
 import { claimGuestAsMember } from "~/lib/merge.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/roster";
 
@@ -46,7 +47,8 @@ const STATUS_META: Record<AttendeeStatus, { label: string; color: string }> = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "roster");
   const { members, headcount } = await loadRoster(
     active.camp.id,
@@ -54,7 +56,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   );
   const myMembershipId = active.membership.id;
   const me = members.find((m) => m.membershipId === myMembershipId) ?? null;
-  return {
+  return redact(privacy, {
     members,
     headcount,
     myMembershipId,
@@ -63,7 +65,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     isOfficer: hasAtLeast(active.membership.role, "officer"),
     locked: activeEdition.locked,
     year: activeEdition.year,
-  };
+  });
 }
 
 const MAX_NAME = 120;

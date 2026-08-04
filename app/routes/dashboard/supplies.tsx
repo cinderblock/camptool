@@ -19,6 +19,7 @@ import { useEffect, useRef } from "react";
 import { data, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import {
@@ -34,7 +35,8 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "supplies");
   const campId = active.camp.id;
   const editionId = activeEdition.id;
@@ -104,7 +106,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     }));
   }
 
-  return {
+  return redact(privacy, {
     canManage,
     locked: activeEdition.locked,
     year: activeEdition.year,
@@ -112,7 +114,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     categories: categories.map((c) => ({ id: c.id, name: c.name })),
     items,
     roster,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

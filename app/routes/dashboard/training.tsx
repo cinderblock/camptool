@@ -28,6 +28,7 @@ import { useEffect, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import {
   ANNUAL_VALIDITY_MS,
@@ -50,7 +51,8 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "training");
   const isOfficer = hasAtLeast(active.membership.role, "officer");
 
@@ -88,7 +90,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         .sort((a, b) => a.label.localeCompare(b.label))
     : [];
 
-  return {
+  return redact(privacy, {
     isOfficer,
     myMembershipId: active.membership.id,
     trainings: trainings.map((t) => ({
@@ -99,7 +101,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     })),
     signoffs: rows,
     members,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {

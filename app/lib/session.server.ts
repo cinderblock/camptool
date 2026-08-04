@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
-import { redirect } from "react-router";
+import { data, redirect } from "react-router";
 import { db } from "../../db/client.server";
 import { attendee, camp, campEdition, membership, user } from "../../db/schema";
 import { auth } from "./auth.server";
@@ -108,6 +108,24 @@ const PRIVACY_COOKIE = "camptool_privacy";
 
 export function setPrivacyCookie(mode: PrivacyMode) {
   return `${PRIVACY_COOKIE}=${serializePrivacyMode(mode)}; ${cookieBase}`;
+}
+
+/**
+ * Privacy mode is read-only, and this is why: a form pre-filled from
+ * pseudonymized loader data would write the PSEUDONYM back to the database on
+ * save — silent, permanent corruption of exactly the data the mode exists to
+ * protect. Blocking mutating requests kills the whole class of bug in one check
+ * instead of auditing every form in the app.
+ */
+export function assertWritable(privacy: PrivacyLens | null): void {
+  if (!privacy) return;
+  throw data(
+    {
+      error:
+        "Privacy mode is read-only — turn it off to make changes. (Names on screen are fake; saving would overwrite the real ones.)",
+    },
+    { status: 403 },
+  );
 }
 
 /** Every real identity in the camp, so free text can have names swapped out of
@@ -256,8 +274,16 @@ export type ActiveCampContext = {
  * activeOrganizationId, falling back to the first membership), plus the active
  * per-year edition of that camp. Redirects to /login if unauthenticated.
  */
+export type ResolveOptions = {
+  /** Skip the privacy-mode read-only guard. Only for routes whose "write" is a
+   * per-browser view preference rather than camp data (the privacy toggle
+   * itself, switching the active year). */
+  allowWrite?: boolean;
+};
+
 export async function resolveActiveCamp(
   request: Request,
+  opts: ResolveOptions = {},
 ): Promise<ActiveCampContext> {
   const session = await requireUser(request);
   const camps = await loadUserCamps(session.user.id);
@@ -292,6 +318,11 @@ export async function resolveActiveCamp(
         })
       : null;
 
+  // One check covers every action in the app: they all land here first, so no
+  // form anywhere can write a pseudonym back over real data.
+  const mutating = request.method !== "GET" && request.method !== "HEAD";
+  if (mutating && !opts.allowWrite) assertWritable(privacy);
+
   return {
     user: session.user,
     camps,
@@ -309,8 +340,9 @@ export async function resolveActiveCamp(
  * the "create your camp" screen) if none. */
 export async function requireActiveCamp(
   request: Request,
+  opts: ResolveOptions = {},
 ): Promise<ActiveCampContext & { active: CampMembership }> {
-  const ctx = await resolveActiveCamp(request);
+  const ctx = await resolveActiveCamp(request, opts);
   if (!ctx.active) throw redirect("/");
   return { ...ctx, active: ctx.active };
 }
@@ -319,10 +351,11 @@ export async function requireActiveCamp(
  * editions page (to create one) if the camp has none yet. */
 export async function requireActiveEdition(
   request: Request,
+  opts: ResolveOptions = {},
 ): Promise<
   ActiveCampContext & { active: CampMembership; activeEdition: Edition }
 > {
-  const ctx = await requireActiveCamp(request);
+  const ctx = await requireActiveCamp(request, opts);
   if (!ctx.activeEdition) throw redirect("/editions");
   return { ...ctx, activeEdition: ctx.activeEdition };
 }

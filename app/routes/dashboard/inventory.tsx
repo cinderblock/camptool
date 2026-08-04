@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import { data } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, kindDef } from "~/lib/structures";
 import { db } from "../../../db/client.server";
@@ -32,7 +33,8 @@ type Row = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "bringing");
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
@@ -68,7 +70,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         Number(a.placed) - Number(b.placed) || a.kind.localeCompare(b.kind),
     ) satisfies Row[];
 
-  return { items };
+  return redact(privacy, { items });
 }
 
 function round(v: number) {

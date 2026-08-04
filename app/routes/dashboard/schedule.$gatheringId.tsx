@@ -30,6 +30,7 @@ import { Link, data, redirect, useFetcher } from "react-router";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
+import { redact } from "~/lib/privacy.server";
 import {
   GATHERING_KINDS,
   STAFFING_OPTIONS,
@@ -66,7 +67,8 @@ export function meta({ data: d }: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "schedule");
   const detail = await loadGatheringDetail(
     params.gatheringId,
@@ -116,7 +118,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         }))
       : [];
 
-  return {
+  return redact(privacy, {
     locked: activeEdition.locked,
     isOfficer,
     canSignUp: hasAtLeast(active.membership.role, "member"),
@@ -168,7 +170,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         })),
     })),
     members,
-  };
+  });
 }
 
 export async function action({ request, params }: Route.ActionArgs) {

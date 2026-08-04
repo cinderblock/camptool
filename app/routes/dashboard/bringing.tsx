@@ -18,6 +18,7 @@ import { data, useFetcher } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { requireFeature } from "~/lib/features.server";
+import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
 import { db } from "../../../db/client.server";
@@ -39,7 +40,8 @@ type Item = {
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { active, activeEdition } = await requireActiveEdition(request);
+  const { active, activeEdition, privacy } =
+    await requireActiveEdition(request);
   await requireFeature(active, "bringing");
   const rows = await db
     .select()
@@ -88,7 +90,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
       : null;
 
-  return {
+  return redact(privacy, {
     locked: activeEdition.locked,
     bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
     items: rows.map((r) => ({
@@ -101,7 +103,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       placeNearVehicle: r.placeNearVehicle,
     })) satisfies Item[],
     lastYear,
-  };
+  });
 }
 
 export async function action({ request }: Route.ActionArgs) {
