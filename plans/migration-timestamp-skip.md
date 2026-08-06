@@ -95,10 +95,38 @@ scripts and there is no CI workflow but `deploy.yml`.
 3. [x] Add guards to `scripts/verify-migrations.ts`: strictly-increasing `when`,
        contiguous `idx`, and journal/folder agreement.
 4. [x] Add `db:verify` to `package.json` and run it in `deploy.yml` before build.
-5. [ ] **Repair production** (needs explicit authorization — prod DB write):
-       back up the DB, then
+5. [x] **Repair production** (authorized 2026-08-06): backed up to
+       `/srv/camptool/data/camptool.pre-0066-repair.db` (integrity ok, 66
+       migrations / 48 map_objects / 34 users), then applied the one-row
        `UPDATE __drizzle_migrations SET created_at = 1785534973000 WHERE created_at = 1785552302568;`
-6. [ ] Push; watch the deploy; confirm 0066 applies and `/map` loads.
+       (guarded to refuse unless exactly one row matched).
+6. [x] Deployed `3dbbb22`. 0066 applied on boot: 67 migration rows, newest stamp
+       `1785539885096`, `place_near_vehicle` present, row counts unchanged.
+       `/map` renders fully; zero `SQLiteError` in the log since restart.
+
+## Status: resolved
+
+Production is fixed. The backup at
+`/srv/camptool/data/camptool.pre-0066-repair.db` can be deleted once you're
+satisfied — it is a pre-repair snapshot, so restoring it would reintroduce the
+bug; it exists only as an undo for the `UPDATE` itself.
+
+### Follow-ups (not blocking, not done here)
+
+- **The push to master did not create a workflow run.** `3dbbb22` reached
+  `refs/heads/master`, Actions was enabled, and the `firefly-camptool` runner was
+  online and idle, but GitHub created no run — the deploy had to be started with
+  `gh workflow run`. Every prior push (through 2026-07-31) triggered normally.
+  Worth watching on the next push; if it recurs, it is a GitHub-side trigger
+  problem, not a workflow-file one.
+- **`bun run typecheck` fails with `TS2688: Cannot find type definition file for
+  'node'`.** Pre-existing and unrelated: `@types/node` is not declared in
+  `package.json` at all, while `tsconfig.json` asks for the `node` types library.
+- **`bun run lint` reports 8 pre-existing format errors** on
+  `db/migrations/meta/*.json` (CRLF line endings on drizzle-generated files).
+  Pre-existing; a prior reformat of these was deliberately reverted (see
+  `stash@{1}`, "pre-revert snapshot: … biome reformat of 0058-0062 drizzle
+  snapshots"), so leaving them alone looks intentional.
 
 ## Findings / gotchas
 
