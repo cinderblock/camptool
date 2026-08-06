@@ -113,12 +113,19 @@ bug; it exists only as an undo for the `UPDATE` itself.
 
 ### Follow-ups (not blocking, not done here)
 
-- **The push to master did not create a workflow run.** `3dbbb22` reached
-  `refs/heads/master`, Actions was enabled, and the `firefly-camptool` runner was
-  online and idle, but GitHub created no run — the deploy had to be started with
-  `gh workflow run`. Every prior push (through 2026-07-31) triggered normally.
-  Worth watching on the next push; if it recurs, it is a GitHub-side trigger
-  problem, not a workflow-file one.
+- **Pushes to master no longer create workflow runs.** Confirmed on two
+  consecutive pushes (`3dbbb22`, `dbf7f84`): both reached `refs/heads/master`,
+  but GitHub created no run for either. The deploy of `3dbbb22` had to be started
+  with `gh workflow run "Deploy to firefly" --ref master`, which worked fine
+  (45s, all steps green). Ruled out: `actions/permissions` is
+  `{enabled: true, allowed_actions: "all"}`, `gh workflow list --all` shows
+  "Deploy to firefly / active", and the `firefly-camptool` runner is online and
+  idle. Every push through 2026-07-31 triggered normally, and the only change to
+  `deploy.yml` since is the added verify step — which cannot suppress the `push:`
+  trigger. Looks GitHub-side.
+
+  **Until this is understood, a push is not a deploy.** Dispatch manually and
+  confirm `/_version` reports the expected SHA.
 - **`bun run typecheck` fails with `TS2688: Cannot find type definition file for
   'node'`.** Pre-existing and unrelated: `@types/node` is not declared in
   `package.json` at all, while `tsconfig.json` asks for the `node` types library.
