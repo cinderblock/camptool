@@ -46,6 +46,14 @@ jobs:
           bun install --frozen-lockfile
           bun run build
 
+      - name: Verify the migration chain
+        # The app migrates on boot, so a broken chain is a production crash with
+        # no rollback. Checked here, before the release is staged or the app is
+        # restarted. Catches a missing SQL file and — the one that actually bit
+        # us — a non-monotonic journal `when`, which drizzle skips in silence
+        # (see plans/migration-timestamp-skip.md).
+        run: bun run db:verify
+
       - name: Stage release tree
         run: |
           set -euo pipefail
