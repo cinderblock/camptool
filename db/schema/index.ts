@@ -15,6 +15,7 @@ export * from "./question";
 export * from "./recruit";
 export * from "./schedule";
 export * from "./season";
+export * from "./swap";
 export * from "./training";
 export * from "./telemetry";
 export * from "./ticket";

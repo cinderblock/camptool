@@ -204,6 +204,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ...gated("documents", "/documents", "Documents"),
         ...gated("tickets", "/tickets", "Tickets"),
         ...gated("passes", "/passes", "Passes"),
+        ...gated("swaps", "/swaps", "Spares board"),
         ...(activeRole && hasAtLeast(activeRole, "officer")
           ? [
               ...gated("recruiting", "/recruits", "Recruits"),

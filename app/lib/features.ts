@@ -22,6 +22,7 @@ export type FeatureKey =
   | "supplies"
   | "tickets"
   | "passes"
+  | "swaps"
   | "finances"
   | "dues"
   | "recruiting"
@@ -98,6 +99,12 @@ export const FEATURES: CampFeatureDef[] = [
       "Early-arrival passes — per-date quotas, member requests, officer grants.",
   },
   {
+    key: "swaps",
+    label: "Spares board",
+    description:
+      "Campers post spare tickets and vehicle passes, or ask for one — with an asking price and a way to mark it taken. The camp isn't a party to the arrangement.",
+  },
+  {
     key: "finances",
     label: "Finances",
     description: "An officer-only ledger of camp donations and spending.",
@@ -155,6 +162,7 @@ const ROUTE_FEATURES: Record<string, FeatureKey> = {
   supplies: "supplies",
   tickets: "tickets",
   passes: "passes",
+  swaps: "swaps",
   finances: "finances",
   dues: "dues",
   recruits: "recruiting",
