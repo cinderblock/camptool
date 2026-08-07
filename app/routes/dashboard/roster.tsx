@@ -37,7 +37,10 @@ import { eventStartIso } from "~/lib/brc";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState, requireFeature } from "~/lib/features.server";
-import { getOrCreatePromotionInvite } from "~/lib/invite.server";
+import {
+  getOrCreatePromotionInvite,
+  loadPromotionInvites,
+} from "~/lib/invite.server";
 import { claimGuestAsMember } from "~/lib/merge.server";
 import { partyMapObjects } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
@@ -77,6 +80,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     : new Map<string, string[]>();
   const myMembershipId = active.membership.id;
   const me = members.find((m) => m.membershipId === myMembershipId) ?? null;
+  // Persist the per-guest invite link with the page instead of only in the
+  // fetcher response, so a host can see at a glance which of their plus-ones
+  // already has a link out and which has already used it.
+  const invites = await loadPromotionInvites(
+    active.camp.id,
+    (me?.guests ?? []).map((g) => g.id),
+  );
   return redact(privacy, {
     members: members.map((m) => ({
       ...m,
@@ -85,7 +95,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     headcount,
     mapVisible,
     myMembershipId,
-    myGuests: me?.guests ?? [],
+    myGuests: (me?.guests ?? []).map((g) => {
+      const invite = invites.get(g.id);
+      return {
+        ...g,
+        inviteLink: invite ? `${PUBLIC_BASE_URL}/i/${invite.token}` : null,
+        inviteRedeemed: invite?.redeemed ?? false,
+      };
+    }),
     myStatus: me?.status ?? ("unknown" as AttendeeStatus),
     isOfficer: hasAtLeast(active.membership.role, "officer"),
     locked: activeEdition.locked,
@@ -461,6 +478,10 @@ type PartyGuest = {
   arrivalDate: string | null;
   departureDate: string | null;
   note: string | null;
+  /** A promotion link already exists for this guest — durable, not transient. */
+  inviteLink?: string | null;
+  /** They've signed up through it, so their plus-one slot became a real member. */
+  inviteRedeemed?: boolean;
 };
 
 /** Self-service management of the viewer's own party (guests they bring). */
@@ -486,66 +507,125 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
       </Text>
       <Text size="sm" c="dimmed" mb="md">
         Bringing people who don't have their own account (a partner, a friend)?
-        Add them here so they're counted and can be placed on the map. They can
-        be promoted to a full account later.
+        Add them here so they're counted and can be placed on the map. Each one
+        can get their own <b>sign-up link</b> — when they use it, their spot in
+        your party turns into their own account, so the camp doesn't end up
+        counting them twice.
       </Text>
 
       {guests.length > 0 ? (
-        <Stack gap="xs" mb="md">
+        <Stack gap="sm" mb="md">
           {guests.map((g) => (
-            <Group key={g.id} justify="space-between" wrap="nowrap">
-              <Group gap={6} wrap="wrap">
-                <Text size="sm">
-                  {g.name}
-                  {g.note ? (
-                    <Text span c="dimmed" size="xs">
-                      {" "}
-                      — {g.note}
-                    </Text>
+            <Paper key={g.id} withBorder p="xs" radius="sm">
+              <Group justify="space-between" wrap="wrap" gap="xs">
+                <Group gap={6} wrap="wrap" style={{ minWidth: 0 }}>
+                  <Text size="sm">
+                    {g.name}
+                    {g.note ? (
+                      <Text span c="dimmed" size="xs">
+                        {" "}
+                        — {g.note}
+                      </Text>
+                    ) : null}
+                  </Text>
+                  <DayRange
+                    arrival={g.arrivalDate}
+                    departure={g.departureDate}
+                    year={year}
+                  />
+                  {g.inviteRedeemed ? (
+                    <Badge size="xs" color="green" variant="light">
+                      has their own account
+                    </Badge>
+                  ) : g.inviteLink ? (
+                    <Badge size="xs" color="blue" variant="light">
+                      link sent, not used yet
+                    </Badge>
                   ) : null}
-                </Text>
-                <DayRange
-                  arrival={g.arrivalDate}
-                  departure={g.departureDate}
-                  year={year}
-                />
+                </Group>
+                <Group gap="xs" wrap="wrap">
+                  {!g.inviteLink && !g.inviteRedeemed ? (
+                    <Button
+                      size="compact-xs"
+                      variant="light"
+                      loading={promoteFetcher.state !== "idle"}
+                      onClick={() =>
+                        promoteFetcher.submit(
+                          { intent: "promoteGuest", guestId: g.id },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Get their sign-up link
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() => setEdit(g)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="red"
+                    onClick={() =>
+                      rowFetcher.submit(
+                        { intent: "removeGuest", guestId: g.id },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    Remove
+                  </Button>
+                </Group>
               </Group>
-              <Group gap="xs" wrap="nowrap">
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  loading={promoteFetcher.state !== "idle"}
-                  onClick={() =>
-                    promoteFetcher.submit(
-                      { intent: "promoteGuest", guestId: g.id },
-                      { method: "post" },
-                    )
-                  }
-                >
-                  Invite to join
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  onClick={() => setEdit(g)}
-                >
-                  Edit
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="red"
-                  onClick={() =>
-                    rowFetcher.submit(
-                      { intent: "removeGuest", guestId: g.id },
-                      { method: "post" },
-                    )
-                  }
-                >
-                  Remove
-                </Button>
-              </Group>
-            </Group>
+              {/* The link persists with the page rather than only living in a
+                  fetcher response that disappears on the next navigation —
+                  that disappearing act is what made this feature "confusing".
+                  Redeemed links are not re-offered: they're one-use. */}
+              {g.inviteLink && !g.inviteRedeemed ? (
+                <Group gap="xs" mt={6} wrap="wrap">
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    style={{ wordBreak: "break-all", flex: 1, minWidth: 0 }}
+                  >
+                    {g.inviteLink}
+                  </Text>
+                  <CopyButton value={g.inviteLink}>
+                    {({ copied, copy }) => (
+                      <Button size="compact-xs" variant="light" onClick={copy}>
+                        {copied ? "Copied" : "Copy link"}
+                      </Button>
+                    )}
+                  </CopyButton>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    component="a"
+                    href={`sms:?&body=${encodeURIComponent(
+                      `Here's your sign-up link for camp: ${g.inviteLink}`,
+                    )}`}
+                  >
+                    Text it
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    component="a"
+                    href={`mailto:?subject=${encodeURIComponent(
+                      "Your camp sign-up link",
+                    )}&body=${encodeURIComponent(
+                      `Here's your sign-up link for camp: ${g.inviteLink}`,
+                    )}`}
+                  >
+                    Email it
+                  </Button>
+                </Group>
+              ) : null}
+            </Paper>
           ))}
         </Stack>
       ) : null}
