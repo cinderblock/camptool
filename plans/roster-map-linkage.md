@@ -71,6 +71,28 @@ map, then an embedded mini-map that highlights a person's structures in place.
 - The roster only renders the link for a party that actually has placed objects,
   so there are no dead links.
 
+## Design (Phase 2) — the shared read-only view
+
+User chose (2026-08-07) to **extract a shared view** rather than write a second
+simplified renderer, so the mini-map can never drift from the real map.
+
+**What gets shared is everything that decides how the map LOOKS; what stays in
+`Editor` is everything that decides how it BEHAVES.** The mini-map has no
+gestures, no zoom frame, no selection handles — copying that machinery in would
+be the risky, low-value half. So:
+
+- Shared: the geometry (`VIEW_W`/`MARGIN`/`PAD_FT`, the pixels-per-foot and
+  origin math derived from the lot), the lot outline, and `MapObjectShape` —
+  which is what actually determines that a shade structure looks like a shade
+  structure. A new structure kind then looks right in both places for free.
+- Not shared: the `<svg>` wrapper's interaction layers, zoom/pan frame, drag
+  gestures, keyboard handling, zones/cables/roads/wind/shadow overlays. `Editor`
+  keeps those and composes the shared pieces inside its own `<svg>`.
+
+Done in behaviour-preserving stages, verifying the real map in a browser after
+each — this is the feature the user touches most, so a silent regression here is
+worse than not having a mini-map.
+
 ## Open questions for the user
 
 *(none right now)*
@@ -110,6 +132,28 @@ map, then an embedded mini-map that highlights a person's structures in place.
   - typecheck + build green; lint/tests clean for these files (the repo also had
     failures from a peer thread's unregistered `swaps.*` route at the time).
 - [ ] Phase 2 — embedded mini-map with row selection.
+  - [x] **Stage 1 — extract the object renderer. DONE, proven equivalent.**
+        `app/lib/map-shapes.tsx` now owns `ObjRow`/`PendingPrev`, the door
+        components, `KindGlyph`, `footprintOutline`, `MapObjectShape`, and a new
+        `MapShapeDefs`; `app/lib/num.ts` owns `clamp`/`round`. `map.tsx` drops
+        ~1,150 lines (10,192 → 9,046) and imports them back.
+        **`MapShapeDefs` exists because of a trap the recon caught:**
+        `MapObjectShape` fills hypar and hexayurt roofs with
+        `url(#hypar-roof)`/`url(#hexayurt-roof)`, whose gradients lived in
+        `Editor`'s `<defs>`. A mini-map that just rendered the shape would have
+        shown those roofs flat, with no error. The defs now travel with the
+        component that references them, and the module header says so.
+        **Equivalence proof:** ran the pre-refactor code (HEAD, in a throwaway
+        worktree on :17924) and the refactored code (:17923) against the SAME
+        seeded database, fetched the SSR'd `/map` from both, and diffed the
+        `#camp-map-svg` subtree — **byte-identical, 54,698 chars each**, on a
+        map seeded with one of every drawable kind (hexayurt, hyparhut, RV,
+        container, dome, shade, vehicles, tents) so doors, glyphs, hexagons and
+        both gradient roofs were all exercised. Compared server-rendered rather
+        than screenshots because the sun position (hence shadows) moves between
+        two page loads and would swamp a pixel diff.
+  - [ ] Stage 2 — extract `layoutFor(lot)` + the lot backdrop.
+  - [ ] Stage 3 — `CampMapView` + the roster mini-map with row selection.
 
 ## Things not to do
 
