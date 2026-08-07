@@ -93,6 +93,18 @@ Done in behaviour-preserving stages, verifying the real map in a browser after
 each — this is the feature the user touches most, so a silent regression here is
 worse than not having a mini-map.
 
+## Deployed
+
+- Phase 1 (Where column + `/map?party=` deep link) — `b9a28e7`, 2026-08-07.
+- Phase 2 (all three extraction stages + mini-map) — `a41d58b`, 2026-08-07.
+  Deploy green in 56s, `/_version` confirmed. **Verified against the live camp
+  data**, not just the seeded fixture: the mini-map drew the real lot and all
+  48 placed objects, and selecting a party with 6 items lit exactly 6 and
+  dimmed 42. Read-only — nothing on production was mutated.
+  (Note: `curl -o /dev/null -w '%{http_code}'` returns `000` with `curl: (43)`
+  on this machine — a local curl quirk, NOT the site being down. Use
+  `curl -s -D - <url> --output nul` to check a status here.)
+
 ## Open questions for the user
 
 *(none right now)*
