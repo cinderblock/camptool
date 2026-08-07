@@ -132,3 +132,64 @@ describe("arrivalDistribution", () => {
     expect(d.days.length).toBeLessThanOrEqual(90);
   });
 });
+
+describe("projecting the people who haven't given dates", () => {
+  test("is zero when everybody has answered", () => {
+    const d = arrivalDistribution([p("2026-08-30"), p("2026-08-31")], YEAR);
+    expect(d.undated).toBe(0);
+    expect(d.days.every((x) => x.projected === 0)).toBe(true);
+  });
+
+  test("scales each day by the share of answered people on site", () => {
+    // 2 answered, both on site the whole span; 2 unanswered. Every day is
+    // 100% of the answered pool, so the projection is the whole unanswered
+    // pool: the peak reads 2 known + 2 estimated = everyone.
+    const d = arrivalDistribution(
+      [
+        p("2026-08-30", "2026-08-31"),
+        p("2026-08-30", "2026-08-31"),
+        p(null),
+        p(null),
+      ],
+      YEAR,
+    );
+    expect(d.dated).toBe(2);
+    expect(d.undated).toBe(2);
+    for (const day of d.days) expect(day.projected).toBe(2);
+  });
+
+  test("a half-attended day projects half the unanswered pool", () => {
+    // Day 1: only the early arriver is on site (1 of 2 answered = 50%), so
+    // half of the 4 unanswered are projected. Day 2: both, so all 4.
+    const d = arrivalDistribution(
+      [
+        p("2026-08-30", "2026-08-31"),
+        p("2026-08-31", "2026-08-31"),
+        p(null),
+        p(null),
+        p(null),
+        p(null),
+      ],
+      YEAR,
+    );
+    expect(d.days[0]?.onSite).toBe(1);
+    expect(d.days[0]?.projected).toBe(2);
+    expect(d.days[1]?.onSite).toBe(2);
+    expect(d.days[1]?.projected).toBe(4);
+  });
+
+  test("never folds the estimate into the counted number", () => {
+    const d = arrivalDistribution([p("2026-08-30"), p(null), p(null)], YEAR);
+    // onSite stays a fact about people who actually gave dates.
+    expect(d.days[0]?.onSite).toBe(1);
+    expect(d.days[0]?.projected).toBe(2);
+  });
+
+  test("undated people alone produce no chart rather than a guessed one", () => {
+    // With nothing to derive a shape from, projecting would be inventing a
+    // distribution outright.
+    const d = arrivalDistribution([p(null), p(null)], YEAR);
+    expect(d.days).toHaveLength(0);
+    expect(d.undated).toBe(2);
+  });
+});

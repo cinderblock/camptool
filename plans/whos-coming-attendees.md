@@ -258,6 +258,30 @@ files — shared tree); push + watch CI.
     transitive dep of `bun-types`, so a reinstall dropped it and `bun run
     typecheck` failed with TS2688.
 
+- [x] **Arrivals chart: show the missing half, don't guess it away (2026-08-07).**
+      The chart's peak read 14 while the headcount read 26, which looked like a
+      bug and wasn't: **exactly half the roster (14 of 28) has given no dates**,
+      and every single person who HAS given dates is on site at the peak — so
+      the gap was entirely missing data, not overlap.
+      User asked whether to add a flat baseline (assume undated present the
+      whole time) or scale the peak up to the total. Both were rejected because
+      they diverge worst exactly where it matters: a flat baseline puts 14
+      unplanned people on site from the FIRST setup day (backwards — non-planners
+      arrive last, and you'd staff build crews against phantom labour), and
+      scaling doubles setup bars by arithmetic while hiding that it's a guess.
+      **Chosen: a projected band.** `arrivalDay.projected` estimates the undated
+      per day by the observed shape of the answered population
+      (`onSite/dated × undated`), is NEVER folded into `onSite`, and renders as
+      a hatched, semi-transparent segment stacked above the solid counted bar —
+      a different FILL, not just a different shade. The peak reads as a range
+      ("14 known, up to ~28"). Caption states the assumption and the known bias
+      (setup days are probably overstated).
+      **Better source exists for setup days, unused so far:** anyone arriving
+      before gates open needs a Setup Access Pass, which the app already tracks
+      — so setup-week presence is *known* independent of self-reported dates.
+      Worth wiring in before trusting the projection there.
+      5 new tests in `arrival.test.ts` (96 pass total).
+
 ## Open questions for the user
 
 1. **better-auth invitations dead-end** (found 2026-07-16): `/recruits` accept

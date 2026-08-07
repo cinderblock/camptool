@@ -85,6 +85,12 @@ export type ArrivalDay = DayChip & {
   arriving: number;
   /** People here on this day: arrived on or before it, not yet departed. */
   onSite: number;
+  /**
+   * ESTIMATED extra people on this day from those who haven't given dates —
+   * never added into `onSite`, so a guess can never be mistaken for a count.
+   * Render it as a visually distinct band on top. 0 when everyone has answered.
+   */
+  projected: number;
 };
 
 export type ArrivalDistribution = {
@@ -98,6 +104,29 @@ export type ArrivalDistribution = {
   /** The day the most people are on site at once. Ties go to the earlier day. */
   fullest: ArrivalDay | null;
 };
+
+/**
+ * Estimate how many of the undated would be on site each day, by assuming they
+ * turn up in the same pattern as the people who DID answer.
+ *
+ * The alternative — assuming they're present the whole time — puts everyone who
+ * hasn't planned on site from the first setup day, which is backwards: the
+ * people who haven't answered are the least likely to be there early.
+ *
+ * Known bias, stated because the number is shown to humans: answered people
+ * probably skew earlier than unanswered ones (anyone arriving before gates open
+ * needs a Setup Access Pass, so early arrivals have a reason to have answered).
+ * So this most likely OVERSTATES the setup days. It's reported separately from
+ * `onSite` and drawn as a distinct band precisely so it can't be read as fact.
+ */
+function projectUndated(
+  onSite: number,
+  dated: number,
+  undated: number,
+): number {
+  if (undated <= 0 || dated <= 0) return 0;
+  return Math.round((onSite / dated) * undated);
+}
 
 /** A span longer than this is a typo, not a camping trip; bail rather than
  * building thousands of day rows for one bad date. */
@@ -159,7 +188,12 @@ export function arrivalDistribution(
       // ISO dates compare correctly as plain strings. No departure = still here.
       if (p.arrival <= iso && (!p.departure || p.departure >= iso)) onSite++;
     }
-    days.push({ ...chip, arriving, onSite });
+    days.push({
+      ...chip,
+      arriving,
+      onSite,
+      projected: projectUndated(onSite, dated.length, undated),
+    });
   }
 
   // `>` not `>=` so a tie keeps the earlier day — an earlier potluck gives

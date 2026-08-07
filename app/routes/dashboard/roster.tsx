@@ -402,7 +402,9 @@ function Arrivals({
     );
   }
 
-  const peak = Math.max(...dist.days.map((d) => d.onSite), 1);
+  // Scale to the tallest STACK (known + projected) so the projected band can't
+  // overflow the plot when half the roster hasn't answered.
+  const peak = Math.max(...dist.days.map((d) => d.onSite + d.projected), 1);
 
   return (
     <Paper withBorder p="md" radius="md">
@@ -418,7 +420,15 @@ function Arrivals({
         </div>
         {dist.fullest ? (
           <Text size="xs" c="dimmed">
-            Fullest: <b>{dist.fullest.long}</b> ({dist.fullest.onSite} people)
+            Fullest: <b>{dist.fullest.long}</b> (
+            {dist.fullest.projected > 0
+              ? // A range, not a point — with dates missing, a single number
+                // here would be the most confident-looking lie on the page.
+                `${dist.fullest.onSite} known, up to ~${
+                  dist.fullest.onSite + dist.fullest.projected
+                }`
+              : `${dist.fullest.onSite} people`}
+            )
             {dist.busiest ? (
               <>
                 {" · "}Most arrivals: <b>{dist.busiest.long}</b> (
@@ -435,20 +445,38 @@ function Arrivals({
             <Text size="xs" c={d.arriving > 0 ? undefined : "dimmed"} fw={600}>
               {d.arriving > 0 ? `+${d.arriving}` : "·"}
             </Text>
-            <div
-              // Proportional to the fullest day. A minimum of 2px so a day with
-              // one person still reads as a day rather than a gap.
-              style={{
-                width: "100%",
-                height: Math.max(2, Math.round((d.onSite / peak) * 56)),
-                borderRadius: 3,
-                background: `var(--mantine-color-${d.color}-5)`,
-                // Same dashed-means-setup channel the date chips use, so the
-                // two readings of "before gates open" match.
-                border: dayChipBorder(d.setup),
-                boxSizing: "border-box",
-              }}
-            />
+            {/* Two stacked segments: the solid one is counted people, the
+                faint outlined one is the estimate for those who haven't given
+                dates. Deliberately different in FILL, not just shade, so the
+                guess never reads as part of the count. */}
+            <div style={{ width: "100%" }}>
+              {d.projected > 0 ? (
+                <div
+                  style={{
+                    width: "100%",
+                    height: Math.max(2, Math.round((d.projected / peak) * 56)),
+                    borderRadius: "3px 3px 0 0",
+                    background: `repeating-linear-gradient(45deg, var(--mantine-color-${d.color}-5) 0 2px, transparent 2px 5px)`,
+                    opacity: 0.55,
+                    boxSizing: "border-box",
+                  }}
+                />
+              ) : null}
+              <div
+                // Proportional to the fullest day. A minimum of 2px so a day
+                // with one person still reads as a day rather than a gap.
+                style={{
+                  width: "100%",
+                  height: Math.max(2, Math.round((d.onSite / peak) * 56)),
+                  borderRadius: d.projected > 0 ? "0 0 3px 3px" : 3,
+                  background: `var(--mantine-color-${d.color}-5)`,
+                  // Same dashed-means-setup channel the date chips use, so the
+                  // two readings of "before gates open" match.
+                  border: dayChipBorder(d.setup),
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
             <Text size="xs" c="dimmed">
               {d.short}
             </Text>
@@ -460,10 +488,23 @@ function Arrivals({
       </Group>
 
       <Text size="xs" c="dimmed" mt="xs">
-        Dashed bars are setup days, before gates open.
-        {dist.undated > 0
-          ? ` ${dist.undated} ${dist.undated === 1 ? "person hasn't" : "people haven't"} given dates yet, so the real numbers are higher.`
-          : ""}
+        Dashed bars are setup days, before gates open. Solid = counted.
+        {dist.undated > 0 ? (
+          <>
+            {" "}
+            Hatched ={" "}
+            <b>
+              estimate for the {dist.undated}{" "}
+              {dist.undated === 1 ? "person" : "people"}
+            </b>{" "}
+            who {dist.undated === 1 ? "hasn't" : "haven't"} given dates, spread
+            the same way as everyone who has. Treat it as a rough ceiling —
+            people who haven't answered are the least likely to be here for
+            setup, so the early days are probably overstated.
+          </>
+        ) : (
+          ""
+        )}
       </Text>
     </Paper>
   );
