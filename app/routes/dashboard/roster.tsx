@@ -414,8 +414,9 @@ function Arrivals({
             Arrivals
           </Text>
           <Text size="xs" c="dimmed">
-            How many people are here each day — the bar is who's on site, the
-            number above it is who arrives that day.
+            How many people are here each day. Above each bar is who arrives
+            that day; below it, the number we know and — when dates are missing
+            — the estimated total.
           </Text>
         </div>
         {dist.fullest ? (
@@ -480,9 +481,17 @@ function Arrivals({
             <Text size="xs" c="dimmed">
               {d.short}
             </Text>
-            <Text size="xs" fw={600}>
+            {/* Both numbers, matching the two bar segments: the count we have,
+                then the estimated total. One number alone was the problem —
+                the bar showed an estimate the figures didn't. */}
+            <Text size="xs" fw={600} lh={1.1}>
               {d.onSite}
             </Text>
+            {d.projected > 0 ? (
+              <Text size="xs" c="dimmed" lh={1.1}>
+                ~{d.onSite + d.projected}
+              </Text>
+            ) : null}
           </Stack>
         ))}
       </Group>
