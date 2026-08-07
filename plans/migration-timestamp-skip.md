@@ -126,12 +126,23 @@ bug; it exists only as an undo for the `UPDATE` itself.
 
   **Until this is understood, a push is not a deploy.** Dispatch manually and
   confirm `/_version` reports the expected SHA.
-- **`bun run typecheck` fails with `TS2688: Cannot find type definition file for
-  'node'`.** Pre-existing and unrelated: `@types/node` is not declared in
-  `package.json` at all, while `tsconfig.json` asks for the `node` types library.
-- **`bun run lint` reports 8 pre-existing format errors** on
-  `db/migrations/meta/*.json` (CRLF line endings on drizzle-generated files).
-  Pre-existing; a prior reformat of these was deliberately reverted (see
+
+  **2026-08-07: the trigger worked again.** Pushing `5f0b9df` created run
+  `31211675372` on its own (`event: push`, 45s, all steps green, `/_version`
+  confirmed `5f0b9df`). Nothing in `deploy.yml` changed between the two failing
+  pushes and this one, which supports the GitHub-side theory and suggests it has
+  resolved itself. Keep confirming `/_version` after a push until this has held
+  for several more deploys — a silent no-run is invisible otherwise.
+- ~~**`bun run typecheck` fails with `TS2688: Cannot find type definition file
+  for 'node'`.**~~ FIXED 2026-08-07 (`d838efd`): `@types/node` is now an explicit
+  devDependency. It had only ever arrived as a transitive dep of `bun-types`, so
+  a reinstall dropped it while `tsconfig.json` still asked for the `node` types
+  library.
+- ~~**`bun run lint` reports 8 pre-existing format errors** on
+  `db/migrations/meta/*.json` (CRLF line endings on drizzle-generated files).~~
+  FIXED 2026-08-07 (`d838efd`): `db/migrations/**` is now in biome's ignore list,
+  so the formatter leaves drizzle's generated files alone in both directions.
+  Original note: a prior reformat of these was deliberately reverted (see
   `stash@{1}`, "pre-revert snapshot: … biome reformat of 0058-0062 drizzle
   snapshots"), so leaving them alone looks intentional.
 
