@@ -70,6 +70,40 @@ arriving before gates open) and an officer grants each one a date that covers
 the requester's planned arrival, quota-enforced. Both are scoped to the active
 year and go read-only when that year is locked.
 
+A **Schedule** organizes what the camp does together — work parties, meetings,
+and daily service — with sign-ups. Each day of a gathering is split into
+**shifts**: one job, on one day, that needs people. A gathering that repeats
+daily can be given a whole **role template** at once (a prep crew, cutters, a
+serving push, cleanup — each with its own hours and headcount), stamped across
+every day in one action instead of one form submission per role per day;
+re-applying it later only fills gaps, and editing a shift in place never
+disturbs the people already signed up. What a shift *is* is explained on the
+page rather than assumed, and a schedule that's switched on but still empty
+hides itself from campers until there's something in it.
+
+A **Spares board** is where campers post a spare ticket or vehicle pass, or ask
+for one — asking price optional, with a way to mark it taken so nobody chases
+something already gone. Ticket and vehicle pass are separate kinds throughout,
+since people routinely have one and need the other. It is deliberately separate
+from the camp's own ticket allocation, and the camp is not a party to the
+arrangements.
+
+A **Fuel** page records who's bringing what fuel, how much, and in what
+containers, and rolls it up per type with container counts and a secondary-
+containment tally — the numbers a fire-safety review actually needs. Gallons and
+pounds are never added together, and the page flags when the camp has both
+liquid fuel and propane, which need separating. Relatedly, an RV can be marked
+as needing **pump-out / cleanout access**, which whoever lays out the map sees
+alongside the existing "near my car" preference.
+
+On **Supplies**, campers claim what's listed *and* add what they're bringing
+that isn't — with matches from every group shown as they type, so nobody
+discovers at the gate that six people brought whiskey and nobody brought ice.
+
+The roster shows **when everyone is actually here**: arrivals per day and how
+many people are on site each day, which is the number you need to pick a night
+for a camp dinner.
+
 An officer-only **Finances** page tracks the camp's money for the year — donations
 in and spends out (with optional member, category, and date) — and shows running
 totals (in / out / net balance). It's deliberately not shared with all campers,
