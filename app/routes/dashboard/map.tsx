@@ -54,6 +54,17 @@ import {
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import {
+  MARGIN,
+  PAD_FT,
+  VIEW_W,
+  frontageRadiusOf,
+  layoutFor,
+  lotHalfWidthAt,
+  rearWidthOf,
+  straightLotPoints,
+  wedgeFor,
+} from "~/lib/map-geometry";
+import {
   MapObjectShape,
   MapShapeDefs,
   type ObjRow,
@@ -1948,13 +1959,6 @@ export async function action({ request }: Route.ActionArgs) {
 
 // ---- Geometry helpers -------------------------------------------------------
 
-const VIEW_W = 920;
-const MARGIN = 28;
-// Annotation margin (feet) drawn around the lot so officers can mark things
-// outside the border — and room for the surroundings swaths (the ~45ft street
-// in front, the ~20ft rear service road, and neighbor lots on each side).
-// Objects stay inside the lot; zones and power lines may extend into this area.
-const PAD_FT = 50;
 // Surroundings swath widths (feet): BRC annular streets run ~40–50ft, the shared
 // rear service alley ~20ft.
 const STREET_W_FT = 45;
@@ -2428,39 +2432,6 @@ function shadowPolygon(
   // the ground — a floating shadow, not a solid extrusion connected to the base.
   if (def.canopyShade) return [convexHull(tips)];
   return [convexHull(corners.concat(tips))];
-}
-
-/** Effective frontage radius (ft from the Man): the manual override if set,
- * else derived from the lot's street letter + year. Null → no taper. */
-function frontageRadiusOf(lot: {
-  innerRadiusFt: number | null;
-  streetLetter: string | null;
-  year: number | null;
-}): number | null {
-  return lot.innerRadiusFt ?? radiusForStreet(lot.year, lot.streetLetter);
-}
-
-/** Rear (service-alley) edge width in feet. A Man-facing lot widens outward;
- * a mountain-facing lot narrows toward the Man. */
-function rearWidthOf(lot: Lot, radius: number | null): number {
-  if (!radius) return lot.frontageFt;
-  const rearRadius = lot.frontsToMan
-    ? radius + lot.depthFt
-    : radius - lot.depthFt;
-  if (rearRadius <= 0) return lot.frontageFt;
-  return (lot.frontageFt * rearRadius) / radius;
-}
-
-/** Half-width (ft) of the lot trapezoid at depth `y` — interpolates the frontage
- * half-width to the rear half-width. */
-function lotHalfWidthAt(
-  y: number,
-  frontageFt: number,
-  depthFt: number,
-  rear: number,
-): number {
-  const t = depthFt > 0 ? clamp(y / depthFt, 0, 1) : 0;
-  return (frontageFt / 2) * (1 - t) + (rear / 2) * t;
 }
 
 /** A kind's footprint vertices as offsets from the object center, rotated by
@@ -4497,19 +4468,20 @@ function Editor({
     return () => window.removeEventListener("keydown", onKey);
   }, [drawMode, draftPoints]);
 
-  // Trapezoid taper: rear edge widens (Man-facing) or narrows (mountain-facing)
-  // with depth, from the derived/overridden frontage radius.
-  const rear = rearWidthOf(lot, frontageRadiusOf(lot));
-  const maxWidthFt = Math.max(lot.frontageFt, rear);
-  // Fit the lot plus a PAD_FT annotation margin on every side into the view.
-  const ppf = (VIEW_W - 2 * MARGIN) / (maxWidthFt + 2 * PAD_FT);
-  const padPx = PAD_FT * ppf;
-  const viewH = Math.round(MARGIN * 2 + (lot.depthFt + 2 * PAD_FT) * ppf);
-  // Plot-local (0,0) = front-left corner of the frontage edge, in screen px.
-  const originX = MARGIN + padPx + ((maxWidthFt - lot.frontageFt) / 2) * ppf;
-  const originY = MARGIN + padPx;
-  const rearCenterX = MARGIN + padPx + (maxWidthFt / 2) * ppf;
-  const yBot = originY + lot.depthFt * ppf;
+  // Shared with the read-only view (roster mini-map) so the two can't disagree
+  // about where the lot is — see lib/map-geometry.ts.
+  const layout = layoutFor(lot);
+  const {
+    rear,
+    maxWidthFt,
+    ppf,
+    padPx,
+    viewH,
+    originX,
+    originY,
+    rearCenterX,
+    yBot,
+  } = layout;
 
   // Rendered svg size: fit the whole view into the frame at zoom 1, scale up
   // from there. Explicit px (not a CSS max) so zoom grows past the intrinsic
@@ -4595,8 +4567,7 @@ function Editor({
   // front corners stay pinned to (originX/originY ± frontage) so objects, which
   // live on the plot-local grid, don't shift. Falls back to a straight trapezoid
   // when no radius is derivable (innerRadius unset + no street).
-  const rFront = frontageRadiusOf(lot);
-  const halfFt = lot.frontageFt / 2;
+  const wedge = wedgeFor(lot, layout);
   let lotPoints: string;
   // Curved surroundings (concentric annular sectors centered on the Man) that
   // share the lot wedge's geometry, so the street/service-road/neighbors follow
@@ -4612,44 +4583,11 @@ function Editor({
     neighborLLabel: { x: number; y: number; angle: number };
     neighborRLabel: { x: number; y: number; angle: number };
   } | null = null;
-  if (rFront != null && rFront > halfFt) {
-    const sDir = lot.frontsToMan ? 1 : -1; // +1: Man above (front at top); −1: below
-    const h = ppf * Math.sqrt(rFront * rFront - halfFt * halfFt);
-    const manY = originY - sDir * h; // Man on the frontage's perpendicular bisector
-    const frontCx = originX + halfFt * ppf;
-    const theta = Math.asin(halfFt / rFront); // half-angle subtended by the frontage
-    const rRear = lot.frontsToMan
-      ? rFront + lot.depthFt
-      : Math.max(1, rFront - lot.depthFt);
-    const SEG = 24;
-    // Point on the circle of feet-radius r at polar angle phi (0 = toward the
-    // frontage centerline), as an "x,y" px string; numeric variant for labels.
-    const ptXY = (r: number, phi: number) => ({
-      x: frontCx + r * ppf * Math.sin(phi),
-      y: manY + sDir * r * ppf * Math.cos(phi),
-    });
-    const pt = (r: number, phi: number) => {
-      const p = ptXY(r, phi);
-      return `${p.x},${p.y}`;
-    };
-    const arcPts = (r: number, phi0: number, phi1: number) => {
-      const out: string[] = [];
-      for (let i = 0; i <= SEG; i++)
-        out.push(pt(r, phi0 + ((phi1 - phi0) * i) / SEG));
-      return out;
-    };
-    // Annular sector (rIn..rOut, phi0..phi1) as a closed polygon point list.
-    const sector = (rIn: number, rOut: number, phi0: number, phi1: number) =>
-      [...arcPts(rOut, phi0, phi1), ...arcPts(rIn, phi1, phi0)].join(" ");
-
-    const front: string[] = [];
-    const back: string[] = [];
-    for (let i = 0; i <= SEG; i++) {
-      const phi = -theta + (2 * theta * i) / SEG;
-      front.push(pt(rFront, phi));
-      back.push(pt(rRear, phi));
-    }
-    lotPoints = [...front, ...back.reverse()].join(" ");
+  if (wedge) {
+    // The lot outline and these surroundings share one wedge, so the street,
+    // service road and neighbours follow the SAME arc as the lot's own edges.
+    const { rFront, rRear, theta, frontCx, ptXY, sector } = wedge;
+    lotPoints = wedge.lotPoints;
 
     // Radial direction from the frontage into the lot (+1 if the rear is at a
     // larger radius, as for a Man-facing lot; −1 for a mountain-facing lot). The
@@ -4693,7 +4631,7 @@ function Editor({
       neighborRLabel: lbl((nIn + nOut) / 2, midNbr),
     };
   } else {
-    lotPoints = `${originX},${originY} ${originX + lot.frontageFt * ppf},${originY} ${rearCenterX + (rear / 2) * ppf},${yBot} ${rearCenterX - (rear / 2) * ppf},${yBot}`;
+    lotPoints = straightLotPoints(lot, layout);
   }
   // The lettered street the camp fronts (override → per-year name → letter).
   const frontageStreet =

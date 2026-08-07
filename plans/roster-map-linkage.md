@@ -152,7 +152,21 @@ worse than not having a mini-map.
         both gradient roofs were all exercised. Compared server-rendered rather
         than screenshots because the sun position (hence shadows) moves between
         two page loads and would swamp a pixel diff.
-  - [ ] Stage 2 — extract `layoutFor(lot)` + the lot backdrop.
+  - [x] **Stage 2 — extract the coordinate system. DONE, proven equivalent.**
+        `app/lib/map-geometry.ts` owns `VIEW_W`/`MARGIN`/`PAD_FT`,
+        `frontageRadiusOf`/`rearWidthOf`/`lotHalfWidthAt`, `layoutFor(lot)` (the
+        pixels-per-foot and origin math) and `wedgeFor(lot, layout)`.
+        `wedgeFor` returns the lot outline **and** the polar helpers
+        (`ptXY`/`sector`), so the editor draws the street, service road and
+        neighbour lots from the SAME wedge as the lot edges — no duplicated
+        trigonometry, and the mini-map's lot can't drift from the real one.
+        `straightLotPoints` is the no-radius fallback.
+        **Equivalence proof:** same side-by-side harness against Stage 1
+        (`a0b9c3b`), across all four lot geometries, all byte-identical:
+        curved wedge from a derived street radius (54,698 chars), the
+        straight-trapezoid fallback with no radius (34,975), a mountain-facing
+        lot where the wedge direction flips (47,197), and a wide lot with an
+        explicit `innerRadiusFt` override (52,234).
   - [ ] Stage 3 — `CampMapView` + the roster mini-map with row selection.
 
 ## Things not to do
