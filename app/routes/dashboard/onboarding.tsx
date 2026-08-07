@@ -293,7 +293,10 @@ function SortableTask({
         color="gray"
         aria-label="Drag to reorder"
         mt={6}
-        style={{ cursor: "grab", touchAction: "none" }}
+        // pinch-zoom, not none: `none` swallows a pinch that happens to start
+        // on the handle, which is how a camper ended up unable to zoom this
+        // page on a phone. It still suppresses pan/scroll, so dragging works.
+        style={{ cursor: "grab", touchAction: "pinch-zoom" }}
         {...attributes}
         {...listeners}
       >

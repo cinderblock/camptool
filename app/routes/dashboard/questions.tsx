@@ -674,7 +674,10 @@ const SortableQuestion = memo(function SortableQuestion({
           variant="subtle"
           color="gray"
           aria-label="Drag to reorder"
-          style={{ cursor: "grab", touchAction: "none" }}
+          // pinch-zoom, not none — see the same fix on the map and onboarding:
+          // `none` kills a pinch that starts on the handle, and pan/scroll is
+          // still suppressed so dnd-kit dragging is unaffected.
+          style={{ cursor: "grab", touchAction: "pinch-zoom" }}
           {...attributes}
           {...listeners}
         >
