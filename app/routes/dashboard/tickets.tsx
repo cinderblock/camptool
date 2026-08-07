@@ -25,6 +25,7 @@ import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
+import { canManageAttendee, inMyParty } from "~/lib/party";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -112,8 +113,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       assigneeName: t.guestName ?? t.memberName ?? null,
       assigneeIsGuest:
         t.assignedAttendeeId != null && t.attMembershipId == null,
-      mine:
-        t.attMembershipId === myMembershipId || t.attHostId === myMembershipId,
+      mine: inMyParty(
+        { membershipId: t.attMembershipId, hostMembershipId: t.attHostId },
+        myMembershipId,
+      ),
     }))
     .sort(
       (a, b) =>
@@ -266,21 +269,22 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   // The assignee confirms (or un-confirms) they bought their ticket from the
-  // vendor. Scoped to their own assigned ticket so no one can flip another's.
+  // vendor. Whether it got bought is a fact about the world rather than a
+  // statement about oneself, so a party host may do it for their household and
+  // an officer may do it for anyone while reconciling the allocation.
   if (intent === "markPurchased" || intent === "unmarkPurchased") {
     const purchased = intent === "markPurchased";
     const ticketId = String(form.get("ticketId"));
-    // The host may mark purchased for their own ticket OR one of their guests'.
     const [row] = await db
       .select({
-        attMid: attendee.membershipId,
-        attHostId: attendee.hostMembershipId,
+        membershipId: attendee.membershipId,
+        hostMembershipId: attendee.hostMembershipId,
       })
       .from(ticket)
       .leftJoin(attendee, eq(ticket.assignedAttendeeId, attendee.id))
       .where(and(eq(ticket.id, ticketId), eq(ticket.editionId, editionId)))
       .limit(1);
-    if (!row || (row.attMid !== myMid && row.attHostId !== myMid)) {
+    if (!row || !canManageAttendee(row, active.membership)) {
       return data({ error: "Not your ticket." }, { status: 403 });
     }
     await db

@@ -25,6 +25,7 @@ import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { setupPassWindowFor } from "~/lib/brc";
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
+import { canManageAttendee, inMyParty, isMe } from "~/lib/party";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -58,8 +59,11 @@ type PassRow = {
   holderRef: string | null;
   holderName: string | null;
   holderIsGuest: boolean;
-  // The holder is in the viewer's party (their own row or one of their guests).
+  // The holder is in the viewer's party — their own row, or anyone they host.
   mine: boolean;
+  // The holder IS the viewer, not merely someone they host. Requesting a pass
+  // is a statement about your own arrival, so that form keys off this.
+  isSelf: boolean;
   status: string;
   note: string | null;
 };
@@ -113,8 +117,14 @@ export async function loader({ request }: Route.LoaderArgs) {
         : null,
     holderName: p.guestName ?? p.memberName ?? null,
     holderIsGuest: p.attendeeId != null && p.attMembershipId == null,
-    mine:
-      p.attMembershipId === myMembershipId || p.attHostId === myMembershipId,
+    mine: inMyParty(
+      { membershipId: p.attMembershipId, hostMembershipId: p.attHostId },
+      myMembershipId,
+    ),
+    // Whether this pass is *personally* mine, as opposed to my party's — the
+    // request form keys off this, since a pass request is a statement about
+    // one's own arrival.
+    isSelf: isMe({ membershipId: p.attMembershipId }, myMembershipId),
     status: p.status,
     note: p.note,
   }));
@@ -270,24 +280,25 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "cancelPass") {
-    // Cancel only my own party's requested pass.
+    // A party host may cancel for their household; an officer for anyone.
     const passId = String(form.get("id"));
     const [row] = await db
       .select({
-        attMid: attendee.membershipId,
-        attHostId: attendee.hostMembershipId,
+        membershipId: attendee.membershipId,
+        hostMembershipId: attendee.hostMembershipId,
       })
       .from(setupPass)
       .leftJoin(attendee, eq(setupPass.attendeeId, attendee.id))
       .where(and(eq(setupPass.id, passId), eq(setupPass.editionId, editionId)))
       .limit(1);
-    if (row && (row.attMid === myMid || row.attHostId === myMid)) {
-      await db
-        .delete(setupPass)
-        .where(
-          and(eq(setupPass.id, passId), eq(setupPass.status, "requested")),
-        );
+    // Previously this reported "Request cancelled." even when the check failed,
+    // so a mis-scoped cancel looked like it worked. Say what happened.
+    if (!row || !canManageAttendee(row, active.membership)) {
+      return data({ error: "Not your pass." }, { status: 403 });
     }
+    await db
+      .delete(setupPass)
+      .where(and(eq(setupPass.id, passId), eq(setupPass.status, "requested")));
     return data({ ok: "Request cancelled." });
   }
 
@@ -547,12 +558,10 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
       .length;
   const dateById = new Map(dates.map((d) => [d.id, d]));
 
-  // "mine" = my party (my own + my guests). The request form is self-only, so it
-  // keys off my OWN pass, not a guest's.
+  // "mine" = my whole party. The request form is self-only, so it keys off
+  // `isSelf` — my own pass, not one belonging to someone I host.
   const myPasses = passes.filter((p) => p.mine);
-  const myOwnActive = passes.find(
-    (p) => p.holderRef === `m:${myMembershipId}` && p.status !== "denied",
-  );
+  const myOwnActive = passes.find((p) => p.isSelf && p.status !== "denied");
   const pending = passes.filter((p) => p.status === "requested");
 
   return (

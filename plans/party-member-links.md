@@ -40,6 +40,19 @@ double-count is cleaned up (see Findings).
 4. **One level deep.** A member who is hosted cannot themselves host; you cannot
    host yourself. Keeps the party roll-up a single hop and matches how a household
    actually has one anchor.
+5. **A party host is an officer scoped to their party.** Albert can manage
+   tickets and setup passes for everyone in his party; the people in it can also
+   still manage their own. Authority is **directional** — Grace being in Albert's
+   party gives him reach over her things, not her over his. This resolves the
+   open question about ticket/SAP visibility: yes, and deliberately so.
+
+   Two predicates fall out, and the distinction matters:
+
+   - `inMyParty(att, myMembershipId)` — self **or** someone I host. Drives
+     *visibility* ("Your tickets"). Officers must NOT be folded in, or an
+     officer's own party card would swell to the whole camp.
+   - `canManageAttendee(att, viewer)` — `inMyParty` **or** camp officer. Drives
+     *mutation*.
 
 ## Findings / gotchas
 
@@ -131,15 +144,34 @@ separately means the destructive path is closed before anything can exercise it.
       `plans/migration-timestamp-skip.md` and the db:generate gotchas before
       committing to it. App-level enforcement is required either way.
 
-### Phase 2 — party roll-up
+### Phase 2 — party roll-up and one authorization helper *(done)*
 
-- [ ] `party-map.server.ts:74` → `add(r.hostMembershipId ?? r.membershipId, …)`,
-      and update the file header comment (`:12-13`) to say the roll-up follows the
-      party host for members too. Verify the roster mini-map and `?party=` still
-      agree.
-- [ ] `loadRoster` returns, per member, both `guests` (unchanged) and a new
-      `partyWith: { membershipId, name } | null` plus `partyMembers: […]` for the
-      host side.
+- [x] `app/lib/party.ts` — `inMyParty` (visibility), `canManageAttendee`
+      (mutation), `isMe` (self only). Pure, unit-tested in `party.test.ts`.
+      Replaces six inlined comparisons: `tickets.tsx` loader + `markPurchased`,
+      `passes.tsx` loader + `cancelPass`, `roster.tsx` guest edit.
+- [x] `party-map.server.ts` → `add(r.hostMembershipId ?? r.membershipId, …)`.
+- [x] `loadRoster` returns `partyHost: {membershipId,name} | null` and
+      `partyMembers: […]` per member.
+- [x] Roster resolves a linked member's map items **through their host**, since
+      the roll-up gives a household one key. Without this Grace's row reads "not
+      placed" while she is asleep in Albert's tent.
+- [x] Roster visibility filter keeps a party anchor visible even with no RSVP —
+      the same reason the `guests.length > 0` clause already existed. Found by
+      driving the page: Bob's row vanished, orphaning the link.
+
+Behavior changes to be aware of:
+
+- **Officers gained two powers.** `markPurchased`/`unmarkPurchased` and
+  `cancelPass` previously excluded officers; `canManageAttendee` includes them.
+  Deliberate — whether a ticket got bought is a fact about the world, and an
+  officer reconciling the allocation should be able to record it.
+- **`cancelPass` stopped lying.** It used to return `ok: "Request cancelled."`
+  even when the authorization check failed. Now 403 "Not your pass."
+- `passes.tsx` gained a server-computed `isSelf` so the request form keys off a
+  real self test instead of rebuilding `m:${id}` on the client.
+
+### Phase 3 — write paths *(next)*
 
 ### Phase 3 — write paths
 
@@ -152,15 +184,22 @@ separately means the destructive path is closed before anything can exercise it.
 - [ ] Officer control on any roster row to set/clear the host.
 - [ ] `claimGuest` ("That's me") gains a **link instead of merge** option.
 
-### Phase 4 — make it visible
+### Phase 4 — make it visible *(mostly done)*
 
-- [ ] Roster Party cell (`roster.tsx:1078-1124`): linked members as a chip
-      distinct from the grape guest badges (guests stay grape per the convention
-      at `start.tsx:1185`), showing the member's name.
-- [ ] The hosted member's own row reads the relationship back — "with Albert" —
-      so it's legible from either direction.
-- [ ] Where cell: name the structure ("Albert's yurt") rather than "1 on map",
-      so co-domicile is finally visible on the roster.
+- [x] Roster Party cell: a linked member renders as a default-coloured badge,
+      visibly distinct from the grape guest badges (guests stay grape per the
+      convention at `start.tsx:1185`) because they have accounts of their own.
+- [x] The relationship reads from both sides — the host's row lists the member,
+      the member's row shows an outline `with <host>` badge. Verified in the
+      running app against a seeded link:
+
+      Name             | RSVP     | Arrives | Departs | Party            | Where
+      Bob              | No reply | -       | -       | Cameron Tacklind | 6 on map
+      Cameron Tacklind | Maybe    | -       | -       | with Bob         | 6 on map
+
+- [ ] Where cell: name the structure ("Albert's yurt") rather than "6 on map",
+      so co-domicile is legible without opening the map. Both rows currently
+      point at the same party, which is right but under-explains.
 
 ### Phase 5 — occupants beyond the wizard *(optional, separable)*
 
@@ -169,15 +208,13 @@ separately means the destructive path is closed before anything can exercise it.
 
 ## Open questions for the user
 
-1. Should Albert see Grace's **ticket and setup pass** in his party view? The
-   "mine" test at `tickets.tsx:116`,`:283` and `passes.tsx:94`,`:278` is
-   `attMembershipId === myMid || attHostId === myMid`, so linking them grants
-   this *automatically* unless we exclude member rows. My recommendation: allow
-   it (that's what a household means), but call it out in the UI so it isn't a
-   surprise — Grace is an officer, not a dependent.
+1. ~~Should Albert see Grace's ticket and setup pass?~~ **Answered: yes** — see
+   decision 5. A host is an officer for their own party.
 2. Should a party link be **per-edition** (it lives on `attendee`, so it already
    is) or sticky year-to-year? Recommendation: leave it per-edition; households
    change, and re-affirming it each year is a feature.
+3. Officers gained two powers they didn't have (see the Phase 2 note on
+   `markPurchased` / `cancelPass`). Flag if that's wrong.
 
 ## Things not to do
 
@@ -197,4 +234,34 @@ separately means the destructive path is closed before anything can exercise it.
 - [x] 2026-08-07 — Investigated. Established that the domicile half is modeled
       but nearly invisible, the person half is not modeled at all, and the
       existing "That's me" flow destroys the link. Decisions 1-4 locked with the
-      user. Nothing implemented yet.
+      user.
+- [x] 2026-08-07 — Phase 1 shipped (`83677ee`): `isGuestRow`, the `getGuest`
+      guard, schema comment. Verified against a seeded DB that the old predicate
+      both matched a linked member in `getGuest` (so `removeGuest` would have
+      deleted them) and inflated the guest count.
+- [x] 2026-08-07 — Decision 5 locked: a party host is an officer scoped to their
+      party, directional.
+- [x] 2026-08-07 — Phases 2 and most of 4 built. Verified by driving the roster
+      in a dev server against a seeded link, not just by unit test — which is how
+      the orphaned-host filter bug surfaced.
+
+### How to drive the app locally (this cost an hour to work out)
+
+`bun run dev` on port 17923 against a throwaway DB copy, with a forged session:
+
+- Copy the dev DB with **`VACUUM INTO`**, not `cp` — the database is in WAL mode,
+  so a plain copy silently loses everything still in `-wal` (the copy came up
+  with no `attendee` table at all).
+- The session cookie name is **`__Secure-better-auth.session_token`**, NOT
+  `camptool.session_token`. `auth.server.ts:22` only applies the `camptool`
+  prefix when `PUBLIC_BASE_URL` is localhost, and this checkout points at
+  `https://camptool.isozilla.com`. Read the truth from
+  `(await auth.$context).authCookies.sessionToken.name`.
+- Sign the token with better-auth's own `makeSignature(token, secret)` from
+  `better-auth/crypto` — standard base64 **with** padding, not base64url. The
+  cookie value is `` `${token}.${sig}` `` URL-encoded.
+- `/dashboard/*` bounces to `/start` unless `membership.wizard_step != 0`
+  (`layout.tsx:74`) — it is `wizard_step`, not `wizard_completed_at`.
+- `bun -e` and Git-Bash disagree about `/tmp`; keep scratch files in the repo.
+- Kill the dev server by the PID holding port 17923, not `pkill bun` — there are
+  usually other bun processes around that belong to other work.

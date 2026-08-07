@@ -46,6 +46,7 @@ import {
 } from "~/lib/invite.server";
 import { loadMapView } from "~/lib/map.server";
 import { claimGuestAsMember } from "~/lib/merge.server";
+import { canManageAttendee } from "~/lib/party";
 import { partyMapObjects } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
@@ -97,13 +98,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     (me?.guests ?? []).map((g) => g.id),
   );
   return redact(privacy, {
-    members: members.map((m) => ({
-      ...m,
-      mapItems: mapCounts.get(m.membershipId)?.length ?? 0,
-      // Ids, not just a count, so selecting a row can light them up without a
-      // round trip.
-      mapObjectIds: mapCounts.get(m.membershipId) ?? [],
-    })),
+    members: members.map((m) => {
+      // `partyMapObjects` keys a whole household under its host, so someone
+      // attending as part of another member's party has no key of their own.
+      // Ask under their host, or their row would read "not placed" while they
+      // are in fact asleep in that host's tent.
+      const ids = mapCounts.get(m.partyHost?.membershipId ?? m.membershipId);
+      return {
+        ...m,
+        mapItems: ids?.length ?? 0,
+        // Ids, not just a count, so selecting a row can light them up without a
+        // round trip.
+        mapObjectIds: ids ?? [],
+      };
+    }),
     headcount,
     mapVisible,
     mapLot: mapView.lot,
@@ -210,8 +218,10 @@ export async function action({ request }: Route.ActionArgs) {
     const guestId = String(form.get("guestId"));
     const guest = await getGuest(campId, editionId, guestId);
     if (!guest) return data({ error: "Guest not found." }, { status: 404 });
-    // A guest is editable by their host or an officer.
-    if (guest.hostMembershipId !== myMid && !isOfficer) {
+    // A guest is editable by their host or an officer. `getGuest` guarantees a
+    // guest row, so there is no self branch to consider — a guest has no
+    // account to act from.
+    if (!canManageAttendee(guest, active.membership)) {
       return data({ error: "Not your guest." }, { status: 403 });
     }
     if (intent === "promoteGuest") {
@@ -1076,7 +1086,9 @@ function RosterTableInner({
                   <DayCell iso={m.departureDate} year={year} />
                 </Table.Td>
                 <Table.Td>
-                  {m.guests.length === 0 ? (
+                  {m.guests.length === 0 &&
+                  m.partyMembers.length === 0 &&
+                  !m.partyHost ? (
                     <Text size="sm" c="dimmed">
                       —
                     </Text>
@@ -1084,7 +1096,23 @@ function RosterTableInner({
                     // wrap (not nowrap) so a long party doesn't blow out the
                     // row on a phone.
                     <Group gap={6} wrap="wrap">
-                      <Text size="sm">+{m.guests.length}</Text>
+                      {/* Reads from this row's side: whose household this
+                          person belongs to, or who belongs to theirs. Members
+                          keep the default colour so they stay visibly distinct
+                          from grape guests — they have their own accounts. */}
+                      {m.partyHost ? (
+                        <Badge variant="outline" size="sm">
+                          with {m.partyHost.name}
+                        </Badge>
+                      ) : null}
+                      {m.partyMembers.map((p) => (
+                        <Badge key={p.membershipId} variant="light" size="sm">
+                          {p.name}
+                        </Badge>
+                      ))}
+                      {m.guests.length > 0 ? (
+                        <Text size="sm">+{m.guests.length}</Text>
+                      ) : null}
                       {m.guests.map((g) => (
                         <Badge
                           key={g.id}
@@ -1127,11 +1155,13 @@ function RosterTableInner({
                     {m.mapItems > 0 ? (
                       // Deep-links the map with this whole party highlighted —
                       // the member's own structures plus anything their guests
-                      // occupy. No link when they have nothing placed, rather
-                      // than a link to a map with nothing lit up.
+                      // occupy. Someone in another member's party is keyed under
+                      // that host, so link there or the map lights up nothing.
+                      // No link when nothing is placed, rather than a link to a
+                      // map with nothing lit up.
                       <Anchor
                         component={Link}
-                        to={`/map?party=${m.membershipId}`}
+                        to={`/map?party=${m.partyHost?.membershipId ?? m.membershipId}`}
                         size="sm"
                       >
                         {m.mapItems} on map
@@ -1192,10 +1222,15 @@ function RosterTable({
   );
 
   const { shown, notComing, noReply } = useMemo(() => {
-    // A member who declined but still has guests listed stays visible — their
-    // guests are coming, and hiding the host would hide (and orphan) them.
+    // A member who declined but still anchors a party stays visible — the rest
+    // of that household is coming, and hiding the host would hide (and orphan)
+    // them. That holds for members attending as part of their party just as
+    // much as for guests they brought.
     const coming = (m: (typeof members)[number]) =>
-      m.status === "coming" || m.status === "maybe" || m.guests.length > 0;
+      m.status === "coming" ||
+      m.status === "maybe" ||
+      m.guests.length > 0 ||
+      m.partyMembers.length > 0;
     const sorted = [...members].sort((a, b) => {
       const rank = (m: typeof a) => (coming(m) ? 0 : 1);
       return (

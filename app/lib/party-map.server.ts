@@ -9,9 +9,10 @@
  * they bring — which is what the roster groups by, and what answers "where is
  * this household?" rather than "where is this one body?".
  *
- * Everything is keyed by the **host membership id**, so a guest's tent shows up
- * under the member who brought them. Unplaced objects are excluded: they're the
- * officer's staging queue, not a location.
+ * Everything is keyed by the **host membership id**, so an attendee's tent shows
+ * up under the member whose party they're in — a guest brought along, or a
+ * member linked into someone's household. Unplaced objects are excluded: they're
+ * the officer's staging queue, not a location.
  */
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "../../db/client.server";
@@ -69,9 +70,13 @@ export async function partyMapObjects(
   };
 
   for (const r of ownerRows) add(r.membershipId, r.objectId);
-  // A guest's occupancy rolls up to their host; a member's to themselves.
+  // Host first: an attendee in someone's party rolls up to that party, whether
+  // they're a guest or a member with an account of their own. Preferring
+  // `membershipId` would key a linked member's tent under themselves, so the
+  // roster (which groups by host) and the map would disagree about whose
+  // household it is.
   for (const r of occupantRows)
-    add(r.membershipId ?? r.hostMembershipId, r.objectId);
+    add(r.hostMembershipId ?? r.membershipId, r.objectId);
 
   return new Map([...byMember].map(([k, v]) => [k, [...v]]));
 }

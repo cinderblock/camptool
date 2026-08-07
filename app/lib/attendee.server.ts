@@ -49,6 +49,14 @@ export type RosterMember = {
   departureDate: string | null;
   note: string | null;
   guests: RosterGuest[];
+  /**
+   * This member is attending as part of another member's party — NULL for
+   * almost everyone. Set means their household anchor is someone else, so
+   * "where are they camped?" resolves through that person.
+   */
+  partyHost: { membershipId: string; name: string } | null;
+  /** Members (not guests) attending as part of THIS member's party. */
+  partyMembers: { membershipId: string; name: string }[];
 };
 
 export type Headcount = {
@@ -78,6 +86,7 @@ export async function loadRoster(
       arrivalDate: attendee.arrivalDate,
       departureDate: attendee.departureDate,
       note: attendee.note,
+      partyHostMembershipId: attendee.hostMembershipId,
     })
     .from(membership)
     .innerJoin(user, eq(user.id, membership.userId))
@@ -117,18 +126,42 @@ export async function loadRoster(
     guestsByHost.set(g.hostMembershipId, list);
   }
 
-  const members: RosterMember[] = memberRows.map((r) => ({
-    membershipId: r.membershipId,
-    userId: r.userId,
-    name: r.userName,
-    playaName: r.playaName,
-    role: r.role,
-    status: (r.status as AttendeeStatus | null) ?? "unknown",
-    arrivalDate: r.arrivalDate,
-    departureDate: r.departureDate,
-    note: r.note,
-    guests: guestsByHost.get(r.membershipId) ?? [],
-  }));
+  // Party links point one way, so both directions are resolved from the same
+  // pass: who each member is attending *with*, and who is attending with them.
+  const nameOf = new Map(memberRows.map((r) => [r.membershipId, r.userName]));
+  const partyMembersByHost = new Map<
+    string,
+    { membershipId: string; name: string }[]
+  >();
+  for (const r of memberRows) {
+    const host = r.partyHostMembershipId;
+    if (!host || host === r.membershipId) continue;
+    const list = partyMembersByHost.get(host) ?? [];
+    list.push({ membershipId: r.membershipId, name: r.userName });
+    partyMembersByHost.set(host, list);
+  }
+
+  const members: RosterMember[] = memberRows.map((r) => {
+    const host = r.partyHostMembershipId;
+    // Guard against a self-link making someone their own household anchor,
+    // which would deadlock "resolve my location through my host".
+    const hostName = host && host !== r.membershipId ? nameOf.get(host) : null;
+    return {
+      membershipId: r.membershipId,
+      userId: r.userId,
+      name: r.userName,
+      playaName: r.playaName,
+      role: r.role,
+      status: (r.status as AttendeeStatus | null) ?? "unknown",
+      arrivalDate: r.arrivalDate,
+      departureDate: r.departureDate,
+      note: r.note,
+      guests: guestsByHost.get(r.membershipId) ?? [],
+      partyHost:
+        host && hostName ? { membershipId: host, name: hostName } : null,
+      partyMembers: partyMembersByHost.get(r.membershipId) ?? [],
+    };
+  });
 
   let membersComing = 0;
   let membersMaybe = 0;
@@ -253,12 +286,16 @@ export async function getGuest(
   guestId: string,
 ): Promise<{
   id: string;
+  membershipId: string | null;
   hostMembershipId: string | null;
   name: string | null;
 } | null> {
   const [row] = await db
     .select({
       id: attendee.id,
+      // Always NULL here (that's what makes it a guest), but selected so the row
+      // satisfies `AttendeeParty` and can go straight into `canManageAttendee`.
+      membershipId: attendee.membershipId,
       hostMembershipId: attendee.hostMembershipId,
       name: attendee.name,
     })
