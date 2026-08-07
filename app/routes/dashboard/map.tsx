@@ -71,6 +71,13 @@ import {
   type PendingPrev,
   footprintOutline,
 } from "~/lib/map-shapes";
+import {
+  type ObjSelectRow,
+  objSelect,
+  parseConfig,
+  parsePending,
+  toObjRow,
+} from "~/lib/map.server";
 import { clamp, round } from "~/lib/num";
 import { partyMapObjectsFor } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
@@ -186,6 +193,19 @@ type Suggestion = {
 };
 
 type ZonePt = { x: number; y: number };
+
+/** Parse the stored points JSON into a clean {x,y}[] (bad data → []). */
+function parseZonePoints(json: string): ZonePt[] {
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((p) => ({ x: Number(p?.x), y: Number(p?.y) }))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  } catch {
+    return [];
+  }
+}
 type ZoneRow = {
   id: string;
   name: string | null;
@@ -232,130 +252,6 @@ type RoadRow = {
   points: ZonePt[];
   notes: string | null;
 };
-
-/** Parse the stored points JSON into a clean {x,y}[] (bad data → []). */
-function parseZonePoints(json: string): ZonePt[] {
-  try {
-    const arr = JSON.parse(json);
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .map((p) => ({ x: Number(p?.x), y: Number(p?.y) }))
-      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-  } catch {
-    return [];
-  }
-}
-
-/** Build the `pending` field from the raw columns. */
-function parsePending(
-  pendingAt: Date | null,
-  prevJson: string | null,
-  pendingBy: string | null = null,
-): { prev: PendingPrev; by: string | null } | null {
-  if (!pendingAt || !prevJson) return null;
-  try {
-    const p = JSON.parse(prevJson);
-    return {
-      prev: {
-        x: Number(p.x) || 0,
-        y: Number(p.y) || 0,
-        width: Number(p.width) || 0,
-        height: Number(p.height) || 0,
-        rotation: Number(p.rotation) || 0,
-      },
-      by: pendingBy,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Columns + joins to read a placed object with its owner name. */
-const objSelect = {
-  id: mapObject.id,
-  name: mapObject.name,
-  kind: mapObject.kind,
-  x: mapObject.x,
-  y: mapObject.y,
-  width: mapObject.width,
-  height: mapObject.height,
-  rotation: mapObject.rotation,
-  tallFt: mapObject.tallFt,
-  showDoor: mapObject.showDoor,
-  mirrored: mapObject.mirrored,
-  config: mapObject.config,
-  color: mapObject.color,
-  notes: mapObject.notes,
-  groupId: mapObject.groupId,
-  ownerMembershipId: mapObject.ownerMembershipId,
-  ownerName: user.name,
-  pendingAt: mapObject.pendingAt,
-  pendingPrev: mapObject.pendingPrev,
-  pendingBy: mapObject.pendingByMembershipId,
-} as const;
-
-type ObjSelectRow = {
-  id: string;
-  name: string | null;
-  kind: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-  tallFt: number;
-  showDoor: boolean;
-  mirrored: boolean;
-  config: string | null;
-  color: string | null;
-  notes: string | null;
-  groupId: string | null;
-  ownerMembershipId: string | null;
-  ownerName: string | null;
-  pendingAt: Date | null;
-  pendingPrev: string | null;
-  pendingBy: string | null;
-};
-
-/** Parse the stored config JSON into a clean Record<string, number> (bad → {}). */
-function parseConfig(json: string | null): StructureConfig {
-  if (!json) return {};
-  try {
-    const obj = JSON.parse(json);
-    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
-    const out: Record<string, number> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      const n = Number(v);
-      if (Number.isFinite(n)) out[k] = n;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-function toObjRow(r: ObjSelectRow): ObjRow {
-  return {
-    id: r.id,
-    name: r.name,
-    kind: r.kind,
-    x: r.x,
-    y: r.y,
-    width: r.width,
-    height: r.height,
-    rotation: r.rotation,
-    tallFt: r.tallFt,
-    showDoor: r.showDoor,
-    mirrored: r.mirrored,
-    config: parseConfig(r.config),
-    color: r.color,
-    notes: r.notes,
-    groupId: r.groupId,
-    ownerMembershipId: r.ownerMembershipId,
-    ownerName: r.ownerName,
-    pending: parsePending(r.pendingAt, r.pendingPrev, r.pendingBy),
-  };
-}
 
 /** Read one placed object (with owner name) as an ObjRow, scoped to the edition. */
 async function loadObjRow(

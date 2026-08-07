@@ -19,6 +19,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
+import { CampMapView } from "~/components/CampMapView";
 import {
   arrivalDistribution,
   arrivalSortKey,
@@ -41,6 +42,7 @@ import {
   getOrCreatePromotionInvite,
   loadPromotionInvites,
 } from "~/lib/invite.server";
+import { loadMapView } from "~/lib/map.server";
 import { claimGuestAsMember } from "~/lib/merge.server";
 import { partyMapObjects } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
@@ -78,6 +80,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const mapCounts = mapVisible
     ? await partyMapObjects(activeEdition.id)
     : new Map<string, string[]>();
+  // The mini-map draws with the editor's own renderer and geometry, so it needs
+  // the same object rows the map page loads — see lib/map.server.ts.
+  const mapView = mapVisible
+    ? await loadMapView(activeEdition.id)
+    : { lot: null, objects: [] };
   const myMembershipId = active.membership.id;
   const me = members.find((m) => m.membershipId === myMembershipId) ?? null;
   // Persist the per-guest invite link with the page instead of only in the
@@ -91,9 +98,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     members: members.map((m) => ({
       ...m,
       mapItems: mapCounts.get(m.membershipId)?.length ?? 0,
+      // Ids, not just a count, so selecting a row can light them up without a
+      // round trip.
+      mapObjectIds: mapCounts.get(m.membershipId) ?? [],
     })),
     headcount,
     mapVisible,
+    mapLot: mapView.lot,
+    mapObjects: mapView.objects,
     myMembershipId,
     myGuests: (me?.guests ?? []).map((g) => {
       const invite = invites.get(g.id);
@@ -277,6 +289,8 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
     year,
     myMembershipId,
     mapVisible,
+    mapLot,
+    mapObjects,
   } = loaderData;
 
   return (
@@ -319,6 +333,8 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
           locked={locked}
           year={year}
           mapVisible={mapVisible}
+          mapLot={mapLot}
+          mapObjects={mapObjects}
         />
       </Stack>
     </Container>
@@ -886,6 +902,10 @@ function RosterTableInner({
   year,
   mapVisible,
   onClaim,
+  selected,
+  onSelect,
+  onHover,
+  selectable,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
   myMembershipId: string | null;
@@ -893,6 +913,11 @@ function RosterTableInner({
   year: number;
   mapVisible: boolean;
   onClaim: (guest: { id: string; name: string }) => void;
+  selected: string | null;
+  onSelect: (membershipId: string | null) => void;
+  onHover: (membershipId: string | null) => void;
+  /** Whether rows drive the mini-map at all (no map, no interaction). */
+  selectable: boolean;
 }) {
   return (
     <Table.ScrollContainer minWidth={mapVisible ? 920 : 820}>
@@ -911,8 +936,52 @@ function RosterTableInner({
           {members.map((m) => {
             const st = STATUS_META[m.status];
             const isHost = m.membershipId === myMembershipId;
+            // Only rows with something placed do anything, so a click that
+            // couldn't change the map isn't offered as if it could.
+            const canSelect = selectable && m.mapItems > 0;
+            const isSelected = selected === m.membershipId;
+            const toggle = () => onSelect(isSelected ? null : m.membershipId);
             return (
-              <Table.Tr key={m.membershipId}>
+              <Table.Tr
+                key={m.membershipId}
+                onClick={
+                  canSelect
+                    ? (e) => {
+                        // The row owns the click, but not on top of its own
+                        // links and buttons ("That's me", the map link).
+                        if ((e.target as HTMLElement).closest("a,button"))
+                          return;
+                        toggle();
+                      }
+                    : undefined
+                }
+                onMouseEnter={
+                  canSelect ? () => onHover(m.membershipId) : undefined
+                }
+                onMouseLeave={canSelect ? () => onHover(null) : undefined}
+                onKeyDown={
+                  canSelect
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggle();
+                        }
+                      }
+                    : undefined
+                }
+                tabIndex={canSelect ? 0 : undefined}
+                aria-pressed={canSelect ? isSelected : undefined}
+                style={
+                  canSelect
+                    ? {
+                        cursor: "pointer",
+                        background: isSelected
+                          ? "var(--mantine-color-default-hover)"
+                          : undefined,
+                      }
+                    : undefined
+                }
+              >
                 <Table.Td>
                   <Text size="sm">
                     {m.name}
@@ -1022,12 +1091,16 @@ function RosterTable({
   locked,
   year,
   mapVisible,
+  mapLot,
+  mapObjects,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
   myMembershipId: string | null;
   locked: boolean;
   year: number;
   mapVisible: boolean;
+  mapLot: Route.ComponentProps["loaderData"]["mapLot"];
+  mapObjects: Route.ComponentProps["loaderData"]["mapObjects"];
 }) {
   const claimFetcher = useFetcher<FetcherData>();
   const [claiming, setClaiming] = useState<{ id: string; name: string } | null>(
@@ -1038,6 +1111,11 @@ function RosterTable({
   // and belong on /members. Still reachable behind the toggle, since chasing
   // no-replies is a real officer job.
   const [showAll, setShowAll] = useState(false);
+  // Which party the mini-map is lighting up. SELECTION, not hover: a hover-only
+  // highlight doesn't exist on a touch screen. Hover merely previews it on a
+  // device that has a pointer, and never clobbers an explicit selection.
+  const [selected, setSelected] = useState<string | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
   useFetcherNotifications(claimFetcher.data, claimFetcher.state, () =>
     setClaiming(null),
   );
@@ -1068,8 +1146,55 @@ function RosterTable({
 
   const hidden = notComing + noReply;
 
+  // Hover only previews while nothing is pinned, so a stray mouse crossing the
+  // table can't silently replace what you chose.
+  const active = selected ?? hovered;
+  const activeMember = active
+    ? (members.find((m) => m.membershipId === active) ?? null)
+    : null;
+
   return (
     <Stack gap="xs">
+      {mapVisible && mapLot && mapObjects.length > 0 ? (
+        <Paper withBorder radius="md" p="sm">
+          <Group justify="space-between" align="center" mb={6} wrap="wrap">
+            <Text size="sm" fw={600}>
+              {activeMember
+                ? `${activeMember.name}'s party on the map`
+                : "Camp map"}
+            </Text>
+            <Group gap="sm" wrap="nowrap">
+              <Text size="xs" c="dimmed">
+                {activeMember
+                  ? `${activeMember.mapObjectIds.length} highlighted`
+                  : "Pick someone below to light up their spot"}
+              </Text>
+              {selected ? (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  onClick={() => setSelected(null)}
+                >
+                  Clear
+                </Button>
+              ) : null}
+            </Group>
+          </Group>
+          <CampMapView
+            lot={mapLot}
+            objects={mapObjects}
+            highlightIds={
+              activeMember ? new Set(activeMember.mapObjectIds) : null
+            }
+            label={
+              activeMember
+                ? `Camp map with ${activeMember.name}'s structures highlighted`
+                : "Camp map"
+            }
+          />
+        </Paper>
+      ) : null}
+
       <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
         <DayLegend year={year} />
         {hidden > 0 ? (
@@ -1100,6 +1225,10 @@ function RosterTable({
         year={year}
         mapVisible={mapVisible}
         onClaim={setClaiming}
+        selected={selected}
+        onSelect={setSelected}
+        onHover={setHovered}
+        selectable={mapVisible && !!mapLot && mapObjects.length > 0}
       />
       <Modal
         opened={claiming !== null}

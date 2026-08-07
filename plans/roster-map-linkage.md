@@ -167,7 +167,30 @@ worse than not having a mini-map.
         straight-trapezoid fallback with no radius (34,975), a mountain-facing
         lot where the wedge direction flips (47,197), and a wide lot with an
         explicit `innerRadiusFt` override (52,234).
-  - [ ] Stage 3 — `CampMapView` + the roster mini-map with row selection.
+  - [x] **Stage 3 — `CampMapView` + the roster mini-map. DONE + browser-tested.**
+        `app/lib/map.server.ts` now owns the object query shape (`objSelect`,
+        `toObjRow`, `parseConfig`, `parsePending`) plus `loadMapView(editionId)`,
+        so the mini-map reads identically-shaped rows to the editor rather than
+        via a second hand-written query. `app/components/CampMapView.tsx` is the
+        read-only composition: lot outline + `MapObjectShape` per object, no
+        zoom/pan/drag/overlays.
+        Roster gets a **Camp map** card above the table; clicking a row lights
+        up that party and dims the rest, clicking again clears, and there's a
+        Clear button. Hover only *previews* while nothing is pinned, so a mouse
+        crossing the table can't silently replace a deliberate choice.
+        Rows are `tabIndex`/Enter/Space reachable with `aria-pressed`, and the
+        SVG carries an `aria-label` naming whose party is lit.
+        **Gotchas handled:** a fixed SVG height letterboxed a deep lot into a
+        useless sliver — it now fills the width and derives height from the
+        lot's proportions with a cap (`aspectRatio` so the cap shrinks width
+        rather than distorting). And the row click ignores events originating in
+        its own `<a>`/`<button>`, so the "N on map" link and "That's me" still
+        work instead of being swallowed by row selection.
+        Verified live: selecting Ada → "9 highlighted", 9 of 18 groups dimmed,
+        `aria-pressed=true`; toggling off clears; switching to Grace → 4; Clear
+        resets the prompt; the map link still navigates and its deep-link banner
+        still works; console clean. `/map` re-diffed against Stage 2 after the
+        `objSelect` move — **byte-identical, 56,429 chars**.
 
 ## Things not to do
 
