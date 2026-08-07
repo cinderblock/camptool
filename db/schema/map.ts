@@ -100,6 +100,15 @@ export const mapObject = sqliteTable(
     placeNearVehicle: integer("place_near_vehicle", { mode: "boolean" })
       .notNull()
       .default(false),
+    // "This RV needs pump-out / cleanout access." A placement REQUIREMENT: a
+    // truck has to physically reach it, so it belongs near the service road or
+    // main street rather than buried mid-block. Set by the camper on their RV.
+    // NOT the same thing as the `cleanout` control in structures.tsx — that is
+    // a drawing marker for which side the fitting is on, which says nothing
+    // about whether a truck can get to it.
+    needsPumpout: integer("needs_pumpout", { mode: "boolean" })
+      .notNull()
+      .default(false),
     // Plot-local feet (see file header). Meaningful only when placed.
     x: real("x").notNull().default(0),
     y: real("y").notNull().default(0),

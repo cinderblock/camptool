@@ -37,6 +37,7 @@ type Item = {
   height: number;
   placed: boolean;
   placeNearVehicle: boolean;
+  needsPumpout: boolean;
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -101,6 +102,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       height: r.height,
       placed: r.placed,
       placeNearVehicle: r.placeNearVehicle,
+      needsPumpout: r.needsPumpout,
     })) satisfies Item[],
     lastYear,
   });
@@ -180,6 +182,9 @@ export async function action({ request }: Route.ActionArgs) {
     if (form.has("placeNearVehicle")) {
       set.placeNearVehicle = form.get("placeNearVehicle") === "true";
     }
+    if (form.has("needsPumpout")) {
+      set.needsPumpout = form.get("needsPumpout") === "true";
+    }
     await db.update(mapObject).set(set).where(ownItem(id));
     return data({ ok: true });
   }
@@ -203,6 +208,7 @@ export async function action({ request }: Route.ActionArgs) {
         config: mapObject.config,
         mirrored: mapObject.mirrored,
         placeNearVehicle: mapObject.placeNearVehicle,
+        needsPumpout: mapObject.needsPumpout,
         year: campEdition.year,
       })
       .from(mapObject)
@@ -232,6 +238,7 @@ export async function action({ request }: Route.ActionArgs) {
         config: s.config,
         mirrored: s.mirrored,
         placeNearVehicle: s.placeNearVehicle,
+        needsPumpout: s.needsPumpout,
         placed: false,
         createdById: user.id,
       })),
@@ -417,6 +424,34 @@ function ItemRow({
                     Place next to my vehicle{" "}
                     <Text span c="dimmed">
                       — otherwise it goes wherever fits
+                    </Text>
+                  </Text>
+                }
+              />
+            ) : null}
+            {/* A pump-out truck has to physically reach the RV, so this is a
+                placement REQUIREMENT rather than a preference — it decides
+                whether the RV can go mid-block at all.
+                Asked of anything whose kind declares a `cleanout` marker,
+                which is exactly "this thing has a sewer fitting". That keeps
+                the question general: a camp-theme adding its own trailer with
+                a cleanout gets asked too, with no core change. */}
+            {def.controls?.some((c) => c.key === "cleanout") ? (
+              <Checkbox
+                mt={6}
+                size="xs"
+                disabled={locked}
+                defaultChecked={item.needsPumpout}
+                onChange={(e) =>
+                  commit({
+                    needsPumpout: e.currentTarget.checked ? "true" : "false",
+                  })
+                }
+                label={
+                  <Text size="xs">
+                    Needs pump-out / cleanout access{" "}
+                    <Text span c="dimmed">
+                      — a truck has to be able to reach it
                     </Text>
                   </Text>
                 }

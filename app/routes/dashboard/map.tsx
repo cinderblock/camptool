@@ -1166,6 +1166,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           width: mapObject.width,
           height: mapObject.height,
           placeNearVehicle: mapObject.placeNearVehicle,
+          needsPumpout: mapObject.needsPumpout,
           ownerName: user.name,
         })
         .from(mapObject)
@@ -1220,6 +1221,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       height: u.height,
       ownerName: u.ownerName,
       placeNearVehicle: u.placeNearVehicle,
+      needsPumpout: u.needsPumpout,
     })),
     campName: active.camp.name,
     // Placement/submission contact for the map export. Stored on the camp
@@ -4316,6 +4318,13 @@ function UnplacedTray({
                 {u.placeNearVehicle ? (
                   <Badge size="xs" color="blue" variant="light">
                     near car
+                  </Badge>
+                ) : null}
+                {/* Harder than a preference: a truck has to physically reach
+                    it, so it can't go mid-block. */}
+                {u.needsPumpout ? (
+                  <Badge size="xs" color="orange" variant="light">
+                    pump-out
                   </Badge>
                 ) : null}
                 <Tooltip label="Delete permanently" withArrow openDelay={150}>

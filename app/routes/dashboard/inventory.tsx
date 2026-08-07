@@ -30,6 +30,7 @@ type Row = {
   placed: boolean;
   ownerName: string | null;
   placeNearVehicle: boolean;
+  needsPumpout: boolean;
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -47,6 +48,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       height: mapObject.height,
       placed: mapObject.placed,
       placeNearVehicle: mapObject.placeNearVehicle,
+      needsPumpout: mapObject.needsPumpout,
       ownerName: user.name,
     })
     .from(mapObject)
@@ -64,6 +66,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       placed: r.placed,
       ownerName: r.ownerName,
       placeNearVehicle: r.placeNearVehicle,
+      needsPumpout: r.needsPumpout,
     }))
     .sort(
       (a, b) =>
@@ -134,6 +137,13 @@ export default function Inventory({ loaderData }: Route.ComponentProps) {
                           {item.placeNearVehicle ? (
                             <Badge size="xs" color="blue" variant="light">
                               near their vehicle
+                            </Badge>
+                          ) : null}
+                          {/* Not a preference: a pump-out truck has to reach
+                              it, so this constrains where it can go at all. */}
+                          {item.needsPumpout ? (
+                            <Badge size="xs" color="orange" variant="light">
+                              needs pump-out access
                             </Badge>
                           ) : null}
                         </Group>

@@ -56,6 +56,7 @@ export default [
     route("tickets", "routes/dashboard/tickets.tsx"),
     route("passes", "routes/dashboard/passes.tsx"),
     route("swaps", "routes/dashboard/swaps.tsx"),
+    route("fuel", "routes/dashboard/fuel.tsx"),
     route("finances", "routes/dashboard/finances.tsx"),
     route("dues", "routes/dashboard/dues.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),

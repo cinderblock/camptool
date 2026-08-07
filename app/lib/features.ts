@@ -23,6 +23,7 @@ export type FeatureKey =
   | "tickets"
   | "passes"
   | "swaps"
+  | "fuel"
   | "finances"
   | "dues"
   | "recruiting"
@@ -105,6 +106,12 @@ export const FEATURES: CampFeatureDef[] = [
       "Campers post spare tickets and vehicle passes, or ask for one — with an asking price and a way to mark it taken. The camp isn't a party to the arrangement.",
   },
   {
+    key: "fuel",
+    label: "Fuel",
+    description:
+      "Who's bringing fuel, how much, and in what — with totals and container counts for the fire-safety review and the map's fuel-storage area.",
+  },
+  {
     key: "finances",
     label: "Finances",
     description: "An officer-only ledger of camp donations and spending.",
@@ -163,6 +170,7 @@ const ROUTE_FEATURES: Record<string, FeatureKey> = {
   tickets: "tickets",
   passes: "passes",
   swaps: "swaps",
+  fuel: "fuel",
   finances: "finances",
   dues: "dues",
   recruits: "recruiting",
