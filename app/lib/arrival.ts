@@ -79,3 +79,121 @@ export function dayChipBorder(setup: boolean): string {
 export function arrivalSortKey(iso: string | null | undefined): string {
   return iso && isIsoDate(iso) ? iso : "9999-12-31";
 }
+
+export type ArrivalDay = DayChip & {
+  /** People whose arrival date is this day. */
+  arriving: number;
+  /** People here on this day: arrived on or before it, not yet departed. */
+  onSite: number;
+};
+
+export type ArrivalDistribution = {
+  days: ArrivalDay[];
+  /** Nobody's told us when they're coming — the number that qualifies the rest. */
+  undated: number;
+  /** People with an arrival date, i.e. everyone counted in `days`. */
+  dated: number;
+  /** The day the most people show up. Ties go to the earlier day. */
+  busiest: ArrivalDay | null;
+  /** The day the most people are on site at once. Ties go to the earlier day. */
+  fullest: ArrivalDay | null;
+};
+
+/** A span longer than this is a typo, not a camping trip; bail rather than
+ * building thousands of day rows for one bad date. */
+const MAX_SPAN_DAYS = 90;
+
+/**
+ * When is everyone showing up? Asked for so camp leadership can pick a date for
+ * an early-week potluck without reading down a roster and counting by hand.
+ *
+ * Two different numbers, because they answer two different questions.
+ * `arriving` is "how busy is the gate that day" — who needs greeting, parking,
+ * a hand with their tent. `onSite` is "how many people would come to a thing on
+ * that evening", which is the one the potluck question is actually about, and
+ * it needs departures to be honest: somebody who leaves Wednesday shouldn't be
+ * counted at a Friday dinner.
+ *
+ * Anyone without an arrival date is reported separately rather than guessed at.
+ */
+export function arrivalDistribution(
+  people: {
+    arrivalDate?: string | null;
+    departureDate?: string | null;
+  }[],
+  year: number,
+): ArrivalDistribution {
+  const dated = people
+    .map((p) => ({
+      arrival: p.arrivalDate && isIsoDate(p.arrivalDate) ? p.arrivalDate : null,
+      departure:
+        p.departureDate && isIsoDate(p.departureDate) ? p.departureDate : null,
+    }))
+    .filter((p): p is { arrival: string; departure: string | null } =>
+      Boolean(p.arrival),
+    );
+  const undated = people.length - dated.length;
+  if (dated.length === 0) {
+    return { days: [], undated, dated: 0, busiest: null, fullest: null };
+  }
+
+  // The span runs from the first arrival to the last date mentioned by anyone.
+  // A departure BEFORE its own arrival is ignored for the end bound (it's a
+  // data-entry slip) but still shortens that person's own stay below.
+  let first = dated[0]?.arrival ?? "";
+  let last = first;
+  for (const p of dated) {
+    if (p.arrival < first) first = p.arrival;
+    if (p.arrival > last) last = p.arrival;
+    if (p.departure && p.departure > last) last = p.departure;
+  }
+
+  const days: ArrivalDay[] = [];
+  for (const iso of daysBetween(first, last)) {
+    const chip = dayChip(iso, year);
+    if (!chip) continue;
+    let arriving = 0;
+    let onSite = 0;
+    for (const p of dated) {
+      if (p.arrival === iso) arriving++;
+      // ISO dates compare correctly as plain strings. No departure = still here.
+      if (p.arrival <= iso && (!p.departure || p.departure >= iso)) onSite++;
+    }
+    days.push({ ...chip, arriving, onSite });
+  }
+
+  // `>` not `>=` so a tie keeps the earlier day — an earlier potluck gives
+  // people more warning, and it reads better than silently picking the last.
+  let busiest: ArrivalDay | null = null;
+  let fullest: ArrivalDay | null = null;
+  for (const d of days) {
+    if (!busiest || d.arriving > busiest.arriving) busiest = d;
+    if (!fullest || d.onSite > fullest.onSite) fullest = d;
+  }
+  return {
+    days,
+    undated,
+    dated: dated.length,
+    busiest: busiest && busiest.arriving > 0 ? busiest : null,
+    fullest: fullest && fullest.onSite > 0 ? fullest : null,
+  };
+}
+
+/** Every ISO date from `start` to `end` inclusive, capped. Pure UTC string
+ * math, like `dailyDatesBetween` in schedule.ts — same reasoning, different
+ * cap, and kept local so arrival presentation doesn't depend on the scheduler. */
+function daysBetween(start: string, end: string): string[] {
+  const toUtc = (iso: string) => {
+    const [y = 0, m = 1, d = 1] = iso.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  const startMs = toUtc(start);
+  const endMs = toUtc(end);
+  if (endMs < startMs) return [];
+  const out: string[] = [];
+  const DAY = 24 * 60 * 60 * 1000;
+  for (let ms = startMs; ms <= endMs && out.length < MAX_SPAN_DAYS; ms += DAY) {
+    out.push(new Date(ms).toISOString().slice(0, 10));
+  }
+  return out;
+}

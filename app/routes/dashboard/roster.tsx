@@ -7,6 +7,7 @@ import {
   CopyButton,
   Group,
   Modal,
+  Paper,
   SimpleGrid,
   Stack,
   Table,
@@ -18,7 +19,12 @@ import {
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
-import { arrivalSortKey, dayChip, dayChipBorder } from "~/lib/arrival";
+import {
+  arrivalDistribution,
+  arrivalSortKey,
+  dayChip,
+  dayChipBorder,
+} from "~/lib/arrival";
 import {
   type AttendeeStatus,
   addGuest,
@@ -286,6 +292,8 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
           <Stat value={headcount.membersMaybe} label="maybe" />
         </SimpleGrid>
 
+        <Arrivals members={members} year={year} />
+
         {!locked ? <MyParty guests={myGuests} year={year} /> : null}
 
         <RosterTable
@@ -297,6 +305,132 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
         />
       </Stack>
     </Container>
+  );
+}
+
+/**
+ * When is everybody actually here? Asked for so camp leadership could pick a
+ * night for an early-week potluck without reading down the roster counting by
+ * hand.
+ *
+ * Two bars per day rather than one, because they answer different questions:
+ * how many people ARRIVE that day (gate traffic, who needs a hand with a tent)
+ * and how many are ON SITE that day (who could come to a dinner). The second
+ * is the one the potluck question is about, and it's the one you can't work out
+ * by eye from a list of dates.
+ *
+ * Guests count as people — they eat too. Members who aren't coming contribute
+ * nothing because they have no arrival date.
+ */
+function Arrivals({
+  members,
+  year,
+}: {
+  members: Route.ComponentProps["loaderData"]["members"];
+  year: number;
+}) {
+  const dist = useMemo(() => {
+    const people: {
+      arrivalDate: string | null;
+      departureDate: string | null;
+    }[] = [];
+    for (const m of members) {
+      if (m.status === "coming" || m.status === "maybe") {
+        people.push({
+          arrivalDate: m.arrivalDate,
+          departureDate: m.departureDate,
+        });
+      }
+      // A guest is a head on the roster whatever their host's RSVP says.
+      for (const g of m.guests) {
+        people.push({
+          arrivalDate: g.arrivalDate,
+          departureDate: g.departureDate,
+        });
+      }
+    }
+    return arrivalDistribution(people, year);
+  }, [members, year]);
+
+  if (dist.days.length === 0) {
+    return (
+      <Paper withBorder p="md" radius="md">
+        <Text size="sm" fw={600}>
+          Arrivals
+        </Text>
+        <Text size="sm" c="dimmed">
+          Nobody has said when they're arriving yet
+          {dist.undated > 0 ? ` (${dist.undated} still to answer)` : ""}. Once
+          people fill in their dates this shows how many are on site each day.
+        </Text>
+      </Paper>
+    );
+  }
+
+  const peak = Math.max(...dist.days.map((d) => d.onSite), 1);
+
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Group justify="space-between" align="flex-end" wrap="wrap" mb="xs">
+        <div>
+          <Text size="sm" fw={600}>
+            Arrivals
+          </Text>
+          <Text size="xs" c="dimmed">
+            How many people are here each day — the bar is who's on site, the
+            number above it is who arrives that day.
+          </Text>
+        </div>
+        {dist.fullest ? (
+          <Text size="xs" c="dimmed">
+            Fullest: <b>{dist.fullest.long}</b> ({dist.fullest.onSite} people)
+            {dist.busiest ? (
+              <>
+                {" · "}Most arrivals: <b>{dist.busiest.long}</b> (
+                {dist.busiest.arriving})
+              </>
+            ) : null}
+          </Text>
+        ) : null}
+      </Group>
+
+      <Group gap={4} align="flex-end" wrap="wrap">
+        {dist.days.map((d) => (
+          <Stack key={d.iso} gap={2} align="center" style={{ width: 40 }}>
+            <Text size="xs" c={d.arriving > 0 ? undefined : "dimmed"} fw={600}>
+              {d.arriving > 0 ? `+${d.arriving}` : "·"}
+            </Text>
+            <div
+              // Proportional to the fullest day. A minimum of 2px so a day with
+              // one person still reads as a day rather than a gap.
+              style={{
+                width: "100%",
+                height: Math.max(2, Math.round((d.onSite / peak) * 56)),
+                borderRadius: 3,
+                background: `var(--mantine-color-${d.color}-5)`,
+                // Same dashed-means-setup channel the date chips use, so the
+                // two readings of "before gates open" match.
+                border: dayChipBorder(d.setup),
+                boxSizing: "border-box",
+              }}
+            />
+            <Text size="xs" c="dimmed">
+              {d.short}
+            </Text>
+            <Text size="xs" fw={600}>
+              {d.onSite}
+            </Text>
+          </Stack>
+        ))}
+      </Group>
+
+      <Text size="xs" c="dimmed" mt="xs">
+        Dashed bars are setup days, before gates open.
+        {dist.undated > 0
+          ? ` ${dist.undated} ${dist.undated === 1 ? "person hasn't" : "people haven't"} given dates yet, so the real numbers are higher.`
+          : ""}
+      </Text>
+    </Paper>
   );
 }
 
