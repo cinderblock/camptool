@@ -122,6 +122,29 @@ export function weeksUntilEvent(year: number, from: Date = new Date()): number {
   return Math.floor(ms / (7 * 24 * 60 * 60 * 1000));
 }
 
+/** Local `YYYY-MM-DD` for a Date — the string form every window helper here
+ * returns. Local (not UTC) because these dates come from / feed date pickers. */
+function ymdLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** `days` after gate-open, as a local `YYYY-MM-DD`. Negative = before. */
+function shiftFromStart(year: number, days: number): string {
+  const start = eventStartFor(year);
+  return ymdLocal(
+    new Date(start.getFullYear(), start.getMonth(), start.getDate() + days),
+  );
+}
+
+/** Gate-open as a local `YYYY-MM-DD` — the setup / event-week boundary. An
+ * arrival strictly before this needs a Setup Access Pass. */
+export function eventStartIso(year: number): string {
+  return shiftFromStart(year, 0);
+}
+
 /** A bounded date window around the event for arrival / strike date questions —
  * a couple of weeks each side of gate-open — so the picker shows only the
  * relevant span instead of a generic calendar. `focus` is the month to open on.
@@ -131,34 +154,18 @@ export function eventWindowFor(year: number): {
   max: string;
   focus: string;
 } {
-  const start = eventStartFor(year);
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-      d.getDate(),
-    ).padStart(2, "0")}`;
-  const shift = (days: number) =>
-    fmt(
-      new Date(start.getFullYear(), start.getMonth(), start.getDate() + days),
-    );
+  const shift = (days: number) => shiftFromStart(year, days);
   // Gates open the Sunday; setup access runs up to ~2 weeks earlier and strike a
   // few days past Labor Day Monday (+8) — bound generously but not a full year.
-  return { min: shift(-14), max: shift(12), focus: fmt(start) };
+  return { min: shift(-14), max: shift(12), focus: eventStartIso(year) };
 }
 
 /** The pre-event Setup Access window: the **Monday before gate-open through the
  * Saturday before** (the 6 build days leading up to the Sunday gates open). For
  * bounding the Setup Access Pass date picker. Returns local `YYYY-MM-DD`. */
 export function setupPassWindowFor(year: number): { min: string; max: string } {
-  const start = eventStartFor(year); // the Sunday gates open
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-      d.getDate(),
-    ).padStart(2, "0")}`;
-  const shift = (days: number) =>
-    fmt(
-      new Date(start.getFullYear(), start.getMonth(), start.getDate() + days),
-    );
-  return { min: shift(-6), max: shift(-1) };
+  // Offsets are from the Sunday gates open.
+  return { min: shiftFromStart(year, -6), max: shiftFromStart(year, -1) };
 }
 
 /** The handful of named days inside the event week, for calendar callouts. Day
@@ -168,18 +175,7 @@ export function setupPassWindowFor(year: number): { min: string; max: string } {
 export function eventDayLabels(
   year: number,
 ): { date: string; short: string; label: string }[] {
-  const start = eventStartFor(year);
-  const fmt = (days: number) => {
-    const d = new Date(
-      start.getFullYear(),
-      start.getMonth(),
-      start.getDate() + days,
-    );
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-      2,
-      "0",
-    )}-${String(d.getDate()).padStart(2, "0")}`;
-  };
+  const fmt = (days: number) => shiftFromStart(year, days);
   return [
     { date: fmt(0), short: "Gates", label: "Gates open (Sun)" },
     { date: fmt(6), short: "Burn", label: "Man burn (Sat)" },

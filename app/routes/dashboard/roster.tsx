@@ -16,8 +16,9 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
+import { arrivalSortKey, dayChip, dayChipBorder } from "~/lib/arrival";
 import {
   type AttendeeStatus,
   addGuest,
@@ -26,12 +27,14 @@ import {
   removeGuest,
   updateGuest,
 } from "~/lib/attendee.server";
+import { eventStartIso } from "~/lib/brc";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { requireFeature } from "~/lib/features.server";
 import { getOrCreatePromotionInvite } from "~/lib/invite.server";
 import { claimGuestAsMember } from "~/lib/merge.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
+import { dateLabel } from "~/lib/schedule";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/roster";
 
@@ -260,12 +263,13 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
           <Stat value={headcount.membersMaybe} label="maybe" />
         </SimpleGrid>
 
-        {!locked ? <MyParty guests={myGuests} /> : null}
+        {!locked ? <MyParty guests={myGuests} year={year} /> : null}
 
         <RosterTable
           members={members}
           myMembershipId={myMembershipId}
           locked={locked}
+          year={year}
         />
       </Stack>
     </Container>
@@ -293,21 +297,21 @@ function Stat({
   );
 }
 
+type PartyGuest = {
+  id: string;
+  name: string;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  note: string | null;
+};
+
 /** Self-service management of the viewer's own party (guests they bring). */
-function MyParty({
-  guests,
-}: {
-  guests: { id: string; name: string; note: string | null }[];
-}) {
+function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
   const addFetcher = useFetcher<FetcherData>();
   const rowFetcher = useFetcher<FetcherData>();
   const promoteFetcher = useFetcher<FetcherData>();
   const addRef = useRef<HTMLFormElement>(null);
-  const [edit, setEdit] = useState<{
-    id: string;
-    name: string;
-    note: string | null;
-  } | null>(null);
+  const [edit, setEdit] = useState<PartyGuest | null>(null);
 
   useFetcherNotifications(addFetcher.data, addFetcher.state, () =>
     addRef.current?.reset(),
@@ -332,15 +336,22 @@ function MyParty({
         <Stack gap="xs" mb="md">
           {guests.map((g) => (
             <Group key={g.id} justify="space-between" wrap="nowrap">
-              <Text size="sm">
-                {g.name}
-                {g.note ? (
-                  <Text span c="dimmed" size="xs">
-                    {" "}
-                    — {g.note}
-                  </Text>
-                ) : null}
-              </Text>
+              <Group gap={6} wrap="wrap">
+                <Text size="sm">
+                  {g.name}
+                  {g.note ? (
+                    <Text span c="dimmed" size="xs">
+                      {" "}
+                      — {g.note}
+                    </Text>
+                  ) : null}
+                </Text>
+                <DayRange
+                  arrival={g.arrivalDate}
+                  departure={g.departureDate}
+                  year={year}
+                />
+              </Group>
               <Group gap="xs" wrap="nowrap">
                 <Button
                   size="compact-xs"
@@ -358,9 +369,7 @@ function MyParty({
                 <Button
                   size="compact-xs"
                   variant="subtle"
-                  onClick={() =>
-                    setEdit({ id: g.id, name: g.name, note: g.note })
-                  }
+                  onClick={() => setEdit(g)}
                 >
                   Edit
                 </Button>
@@ -471,12 +480,17 @@ function EditGuestForm({
   fetcher,
   onCancel,
 }: {
-  guest: { id: string; name: string; note: string | null };
+  guest: PartyGuest;
   fetcher: ReturnType<typeof useFetcher<FetcherData>>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(guest.name);
   const [note, setNote] = useState(guest.note ?? "");
+  // The dates MUST be in this form: `updateGuest` writes whatever the submit
+  // carries, so an edit that omitted them silently cleared the guest's arrival
+  // and departure.
+  const [arrivalDate, setArrivalDate] = useState(guest.arrivalDate ?? "");
+  const [departureDate, setDepartureDate] = useState(guest.departureDate ?? "");
   return (
     <Stack gap="md">
       <TextInput
@@ -485,6 +499,20 @@ function EditGuestForm({
         onChange={(e) => setName(e.currentTarget.value)}
         maxLength={MAX_NAME}
       />
+      <Group grow align="flex-start">
+        <TextInput
+          type="date"
+          label="Arrives"
+          value={arrivalDate}
+          onChange={(e) => setArrivalDate(e.currentTarget.value)}
+        />
+        <TextInput
+          type="date"
+          label="Departs"
+          value={departureDate}
+          onChange={(e) => setDepartureDate(e.currentTarget.value)}
+        />
+      </Group>
       <Textarea
         label="Note"
         value={note}
@@ -502,7 +530,14 @@ function EditGuestForm({
           loading={fetcher.state !== "idle"}
           onClick={() =>
             fetcher.submit(
-              { intent: "updateGuest", guestId: guest.id, name, note },
+              {
+                intent: "updateGuest",
+                guestId: guest.id,
+                name,
+                note,
+                arrivalDate,
+                departureDate,
+              },
               { method: "post" },
             )
           }
@@ -514,25 +549,120 @@ function EditGuestForm({
   );
 }
 
+/** One arrival/departure date as a weekday chip. Color = day of week, dashed
+ * border = setup (before gates open) — both spelled out in `DayLegend`. */
+function DayCell({ iso, year }: { iso: string | null; year: number }) {
+  const chip = dayChip(iso, year);
+  if (!chip)
+    return (
+      <Text size="sm" c="dimmed">
+        —
+      </Text>
+    );
+  return (
+    <Group gap={6} wrap="nowrap">
+      <Badge
+        variant="light"
+        color={chip.color}
+        size="sm"
+        style={{ border: dayChipBorder(chip.setup) }}
+      >
+        {chip.short}
+      </Badge>
+      <Text size="xs" c="dimmed">
+        {chip.iso}
+      </Text>
+    </Group>
+  );
+}
+
+/** Compact "Thu → Mon" for places without their own columns (a guest badge, a
+ * party row). Plain text, so it nests inside a Badge. */
+function DayRange({
+  arrival,
+  departure,
+  year,
+}: {
+  arrival: string | null;
+  departure: string | null;
+  year: number;
+}) {
+  const a = dayChip(arrival, year);
+  const d = dayChip(departure, year);
+  if (!a && !d) return null;
+  // "(setup)" hangs off the arrival, not the end of the range — it qualifies
+  // when they show up, and a reader shouldn't have to work that out.
+  const arrives = a ? `${a.short}${a.setup ? " (setup)" : ""}` : null;
+  return (
+    <Text span size="xs" c="dimmed">
+      {arrives && d
+        ? `${arrives} → ${d.short}`
+        : arrives
+          ? `arrives ${arrives}`
+          : `departs ${d?.short}`}
+    </Text>
+  );
+}
+
+/** What the chip colors and borders mean — the page can't lean on a tooltip. */
+function DayLegend({ year }: { year: number }) {
+  return (
+    <Group gap="lg" wrap="wrap">
+      <Text size="xs" c="dimmed">
+        Chips are colored by day of the week.
+      </Text>
+      <Group gap={6} wrap="nowrap">
+        <Badge
+          variant="light"
+          color="gray"
+          size="sm"
+          style={{ border: dayChipBorder(true) }}
+        >
+          Fri
+        </Badge>
+        <Text size="xs" c="dimmed">
+          setup — before gates open ({dateLabel(eventStartIso(year))})
+        </Text>
+      </Group>
+      <Group gap={6} wrap="nowrap">
+        <Badge
+          variant="light"
+          color="gray"
+          size="sm"
+          style={{ border: dayChipBorder(false) }}
+        >
+          Wed
+        </Badge>
+        <Text size="xs" c="dimmed">
+          during the event
+        </Text>
+      </Group>
+    </Group>
+  );
+}
+
 function RosterTableInner({
   members,
   myMembershipId,
   locked,
+  year,
   onClaim,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
   myMembershipId: string | null;
   locked: boolean;
+  year: number;
   onClaim: (guest: { id: string; name: string }) => void;
 }) {
   return (
-    <Table.ScrollContainer minWidth={640}>
+    <Table.ScrollContainer minWidth={820}>
       <Table verticalSpacing="sm" highlightOnHover>
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Name</Table.Th>
             <Table.Th>RSVP</Table.Th>
             <Table.Th>Arrives</Table.Th>
+            <Table.Th>Departs</Table.Th>
             <Table.Th>Party</Table.Th>
           </Table.Tr>
         </Table.Thead>
@@ -559,9 +689,10 @@ function RosterTableInner({
                   </Badge>
                 </Table.Td>
                 <Table.Td>
-                  <Text size="sm" c="dimmed">
-                    {m.arrivalDate ?? "—"}
-                  </Text>
+                  <DayCell iso={m.arrivalDate} year={year} />
+                </Table.Td>
+                <Table.Td>
+                  <DayCell iso={m.departureDate} year={year} />
                 </Table.Td>
                 <Table.Td>
                   {m.guests.length === 0 ? (
@@ -581,6 +712,12 @@ function RosterTableInner({
                           size="sm"
                         >
                           {g.name}
+                          {g.arrivalDate || g.departureDate ? " · " : ""}
+                          <DayRange
+                            arrival={g.arrivalDate}
+                            departure={g.departureDate}
+                            year={year}
+                          />
                         </Badge>
                       ))}
                       {/* Someone listed under another member who now has their
@@ -621,25 +758,82 @@ function RosterTable({
   members,
   myMembershipId,
   locked,
+  year,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
   myMembershipId: string | null;
   locked: boolean;
+  year: number;
 }) {
   const claimFetcher = useFetcher<FetcherData>();
   const [claiming, setClaiming] = useState<{ id: string; name: string } | null>(
     null,
   );
+  // "Who's coming" means the people who are coming. Not-coming and no-reply
+  // members are the whole camp list wearing a gray badge — they drown the page
+  // and belong on /members. Still reachable behind the toggle, since chasing
+  // no-replies is a real officer job.
+  const [showAll, setShowAll] = useState(false);
   useFetcherNotifications(claimFetcher.data, claimFetcher.state, () =>
     setClaiming(null),
   );
 
+  const { shown, notComing, noReply } = useMemo(() => {
+    // A member who declined but still has guests listed stays visible — their
+    // guests are coming, and hiding the host would hide (and orphan) them.
+    const coming = (m: (typeof members)[number]) =>
+      m.status === "coming" || m.status === "maybe" || m.guests.length > 0;
+    const sorted = [...members].sort((a, b) => {
+      const rank = (m: typeof a) => (coming(m) ? 0 : 1);
+      return (
+        rank(a) - rank(b) ||
+        arrivalSortKey(a.arrivalDate).localeCompare(
+          arrivalSortKey(b.arrivalDate),
+        ) ||
+        a.name.localeCompare(b.name)
+      );
+    });
+    return {
+      shown: showAll ? sorted : sorted.filter(coming),
+      notComing: members.filter((m) => !coming(m) && m.status === "not_coming")
+        .length,
+      noReply: members.filter((m) => !coming(m) && m.status === "unknown")
+        .length,
+    };
+  }, [members, showAll]);
+
+  const hidden = notComing + noReply;
+
   return (
-    <>
+    <Stack gap="xs">
+      <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
+        <DayLegend year={year} />
+        {hidden > 0 ? (
+          <Group gap="xs" wrap="nowrap">
+            <Text size="xs" c="dimmed">
+              {[
+                notComing ? `${notComing} not coming` : null,
+                noReply ? `${noReply} no reply` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </Text>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              onClick={() => setShowAll((v) => !v)}
+            >
+              {showAll ? "Hide them" : "Show them"}
+            </Button>
+          </Group>
+        ) : null}
+      </Group>
+
       <RosterTableInner
-        members={members}
+        members={shown}
         myMembershipId={myMembershipId}
         locked={locked}
+        year={year}
         onClaim={setClaiming}
       />
       <Modal
@@ -677,7 +871,7 @@ function RosterTable({
           </Group>
         </Stack>
       </Modal>
-    </>
+    </Stack>
   );
 }
 

@@ -215,6 +215,49 @@ files — shared tree); push + watch CI.
     (registry `starter` only) — the E2E had to enable `roster` via /settings.
     typecheck + biome green; not browser-tested (plain button + copy link UI).
 
+- [x] **Roster readability pass (2026-08-07, user ask).** Three changes plus a
+      bug found while making them:
+  - **Hide the noise.** `/roster` listed every member including `not_coming`
+    and `unknown` — that's just the camp list wearing a gray badge, and it
+    buried the people actually coming. Now only coming/maybe show, with a
+    `N not coming · M no reply` count and a **Show them** toggle (client-side;
+    the loader is unchanged, so nothing new is exposed). A declined member who
+    still has guests listed stays visible — hiding the host would hide and
+    orphan their guests.
+  - **Arrives is a weekday chip**, not a bare ISO date: day name, a per-weekday
+    color (Sun red → Sat grape) so same-day arrivals match at a glance, and a
+    **dashed border for setup** (before gates open) vs solid during the event.
+    The ISO date stays beside it. Color is never the only channel — the weekday
+    is always spelled out and the border is a second, non-color signal — and a
+    legend under the header states both, since `title=` tooltips are banned.
+  - **Departs column added**; rows sort by arrival (undated last, then by name),
+    so the column reads as a timeline.
+  - Guest badges in the Party column now carry their own `Tue (setup) → Mon`,
+    and "Your party" rows show their dates.
+  - **Bug fixed:** the guest Edit modal submitted only name + note, but the
+    `updateGuest` action writes whatever the submit carries — so renaming a
+    guest silently **wiped their arrival and departure dates**. The modal now
+    has both date fields. Verified over HTTP: a modal-shaped edit preserves
+    both dates.
+  - New `app/lib/arrival.ts` (client-safe weekday chip + setup classification);
+    `eventStartIso` added to `brc.ts`, which also de-duplicates the three copies
+    of its local `YYYY-MM-DD` formatter. Setup/event boundary uses the
+    BRC-approximate `eventStartFor` the wizard and SAP flow already use for all
+    events — `eventStartIso` is the one place to repoint when a real per-edition
+    event calendar exists.
+  - **Browser-verified** on a VACUUM-INTO copy of the live DB seeded with 10
+    members across all four statuses and dates spanning setup + event week:
+    filtering (9 shown / 13 with toggle), sort order, weekday colors, dashed-vs-
+    solid borders, the legend's gate-open date (Sun, Aug 30 for 2026), guest
+    chips, and the date-preservation fix. typecheck + lint + build + tests green.
+  - Repo hygiene fixed in passing: `bun run format` was reformatting drizzle's
+    generated `db/migrations/meta/*.json` on every run (churn that has bitten at
+    least one earlier session — see the stash log) — `db/migrations/**` is now in
+    biome's ignore list. And `@types/node` is now an explicit devDependency:
+    `tsconfig.json` names `"node"` in `types`, but it was only ever present as a
+    transitive dep of `bun-types`, so a reinstall dropped it and `bun run
+    typecheck` failed with TS2688.
+
 ## Open questions for the user
 
 1. **better-auth invitations dead-end** (found 2026-07-16): `/recruits` accept
