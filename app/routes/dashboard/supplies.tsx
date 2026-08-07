@@ -15,12 +15,17 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
+import {
+  duplicateGroups,
+  findSimilarSupplies,
+  resolveSupplyClaim,
+} from "~/lib/supplies";
 import { db } from "../../../db/client.server";
 import {
   inventoryCategory,
@@ -146,6 +151,104 @@ export async function action({ request }: Route.ActionArgs) {
       .limit(1);
     return row ?? null;
   };
+
+  /**
+   * Member self-service: add a line for something you're bringing that nobody
+   * listed. Before this, only officers could add items, so a camper who wanted
+   * to bring liquor genuinely had nowhere to say so — which is the bug that was
+   * reported, dressed up as a dedupe request.
+   *
+   * Coarse names are fine on purpose ("whiskey" now, "2 handles of rye" later),
+   * so the only automatic dedupe is the unambiguous one: if a line with the
+   * same name is sitting there UNCLAIMED, claim it rather than adding a second
+   * row. Anything already claimed gets a second row — two people each bringing
+   * whiskey is two facts, not a conflict — and the form warns first.
+   */
+  if (intent === "addMine") {
+    const categoryId = String(form.get("categoryId"));
+    const [cat] = await db
+      .select({ id: inventoryCategory.id })
+      .from(inventoryCategory)
+      .where(
+        and(
+          eq(inventoryCategory.id, categoryId),
+          eq(inventoryCategory.campId, campId),
+        ),
+      )
+      .limit(1);
+    if (!cat) return data({ error: "Group not found." }, { status: 404 });
+    const name = String(form.get("name") ?? "").trim();
+    if (!name || name.length > 120) {
+      return data({ error: "Give it a name." }, { status: 400 });
+    }
+    const qtyRaw = Number(form.get("quantity"));
+    const quantity =
+      Number.isFinite(qtyRaw) && qtyRaw > 0 ? Math.round(qtyRaw) : 1;
+
+    const siblings = await db
+      .select({
+        id: inventoryItem.id,
+        name: inventoryItem.name,
+        owner: inventoryItem.ownerMembershipId,
+      })
+      .from(inventoryItem)
+      .where(
+        and(
+          eq(inventoryItem.campId, campId),
+          eq(inventoryItem.editionId, editionId),
+          eq(inventoryItem.categoryId, categoryId),
+        ),
+      );
+    const resolved = resolveSupplyClaim(name, siblings);
+    if (resolved.action === "claim") {
+      await db
+        .update(inventoryItem)
+        .set({ ownerMembershipId: mid, updatedAt: new Date() })
+        .where(eq(inventoryItem.id, resolved.target.id));
+      return data({
+        ok: true,
+        message: `"${resolved.target.name}" was already on the list — you're down for it.`,
+      });
+    }
+    await db.insert(inventoryItem).values({
+      id: crypto.randomUUID(),
+      campId,
+      editionId,
+      categoryId,
+      name,
+      quantity,
+      ownerMembershipId: mid,
+    });
+    return data({ ok: true, message: `Added ${name}.` });
+  }
+
+  // --- Member self-service: refine a line you own. "Whiskey" on Monday can
+  // become "2 handles of Bulleit rye" once you've actually bought it. ---
+  if (intent === "updateMine") {
+    const id = String(form.get("id"));
+    const item = await ownItem(id);
+    if (!item) return data({ error: "Item not found." }, { status: 404 });
+    if (item.owner !== mid && !canManage) {
+      return data({ error: "That isn't yours." }, { status: 403 });
+    }
+    const name = String(form.get("name") ?? "").trim();
+    if (!name || name.length > 120) {
+      return data({ error: "Give it a name." }, { status: 400 });
+    }
+    const qtyRaw = Number(form.get("quantity"));
+    const notes = String(form.get("notes") ?? "").trim();
+    await db
+      .update(inventoryItem)
+      .set({
+        name,
+        quantity:
+          Number.isFinite(qtyRaw) && qtyRaw > 0 ? Math.round(qtyRaw) : 1,
+        notes: notes || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(inventoryItem.id, id));
+    return data({ ok: true });
+  }
 
   // --- Member self-service: claim / unclaim an item to bring. ---
   if (intent === "claim" || intent === "unclaim") {
@@ -300,7 +403,7 @@ export async function action({ request }: Route.ActionArgs) {
   }
 }
 
-type FetcherData = { ok?: boolean; error?: string };
+type FetcherData = { ok?: boolean; error?: string; message?: string };
 type LoaderData = Route.ComponentProps["loaderData"];
 type Item = LoaderData["items"][number];
 
@@ -315,7 +418,10 @@ export default function Supplies({ loaderData }: Route.ComponentProps) {
           <Title order={2}>Camp supplies</Title>
           <Text c="dimmed" size="sm">
             Shared camp gear for {year}, by group — what we need and who's
-            bringing it. (Your own tents/vehicles live under Bringing.)
+            bringing it. Claim anything unclaimed, or add what you're bringing
+            that isn't listed; you'll see what's already covered as you type, so
+            we don't end up with six of one thing and none of another. (Your own
+            tents and vehicles live under Bringing.)
           </Text>
         </div>
 
@@ -335,6 +441,8 @@ export default function Supplies({ loaderData }: Route.ComponentProps) {
               key={c.id}
               category={c}
               items={items.filter((i) => i.categoryId === c.id)}
+              allItems={items}
+              categories={categories}
               canManage={canManage}
               locked={locked}
               roster={roster}
@@ -352,6 +460,8 @@ export default function Supplies({ loaderData }: Route.ComponentProps) {
 function CategoryCard({
   category,
   items,
+  allItems,
+  categories,
   canManage,
   locked,
   roster,
@@ -359,6 +469,8 @@ function CategoryCard({
 }: {
   category: { id: string; name: string };
   items: Item[];
+  allItems: Item[];
+  categories: { id: string; name: string }[];
   canManage: boolean;
   locked: boolean;
   roster: { value: string; label: string }[];
@@ -367,6 +479,9 @@ function CategoryCard({
   const fetcher = useFetcher<FetcherData>();
   useFetcherError(fetcher.data, fetcher.state);
   const claimed = items.filter((i) => i.ownerMembershipId).length;
+  // Two lines in the same group that mean the same thing — worth an officer's
+  // attention, but never merged automatically: they may be two real people.
+  const dupes = canManage ? duplicateGroups(items, (i) => i.name) : [];
 
   return (
     <Card withBorder padding="md" radius="md">
@@ -438,9 +553,27 @@ function CategoryCard({
         )}
       </Stack>
 
+      {dupes.length > 0 ? (
+        <Text size="xs" c="orange" mt="xs">
+          Possible duplicates in this group:{" "}
+          {dupes.map((g) => g.map((i) => i.name).join(" / ")).join("; ")}. Two
+          people bringing the same thing is fine — merge only if it's one thing
+          listed twice.
+        </Text>
+      ) : null}
+
+      {!locked ? (
+        <AddMine
+          category={category}
+          allItems={allItems}
+          categories={categories}
+          myMembershipId={myMembershipId}
+        />
+      ) : null}
+
       {canManage && !locked ? (
         <Button
-          mt="sm"
+          mt="xs"
           size="compact-xs"
           variant="subtle"
           loading={fetcher.state !== "idle"}
@@ -451,9 +584,171 @@ function CategoryCard({
             )
           }
         >
-          + Add item
+          + Add a blank line for someone else to claim
         </Button>
       ) : null}
+    </Card>
+  );
+}
+
+/**
+ * "I'm bringing something" — the member-facing add box, and the whole point of
+ * this pass. A camper told a meeting they'd bring liquor and had no way to see
+ * what anyone else had claimed; there was also no way for them to record it.
+ *
+ * The dedupe happens WHILE THEY TYPE, not after they submit: matches from
+ * every group, with who has already claimed each, appear under the field. That
+ * is the difference between "you can look it up" and "you can't miss it".
+ * Coarse names are explicitly welcome — refine the line later.
+ */
+function AddMine({
+  category,
+  allItems,
+  categories,
+  myMembershipId,
+}: {
+  category: { id: string; name: string };
+  allItems: Item[];
+  categories: { id: string; name: string }[];
+  myMembershipId: string;
+}) {
+  const fetcher = useFetcher<FetcherData>();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [quantity, setQuantity] = useState<string | number>(1);
+  useFetcherError(fetcher.data, fetcher.state);
+  const done = useRef<FetcherData | undefined>(undefined);
+  useEffect(() => {
+    if (
+      fetcher.state !== "idle" ||
+      !fetcher.data ||
+      fetcher.data === done.current
+    )
+      return;
+    done.current = fetcher.data;
+    if (fetcher.data.ok) {
+      if (fetcher.data.message) {
+        notifications.show({ color: "green", message: fetcher.data.message });
+      }
+      setName("");
+      setQuantity(1);
+      setOpen(false);
+    }
+  }, [fetcher.data, fetcher.state]);
+
+  const matches = useMemo(
+    () => findSimilarSupplies(name, allItems, (i) => i.name),
+    [name, allItems],
+  );
+  const groupName = (id: string) =>
+    categories.find((c) => c.id === id)?.name ?? "";
+  // An exact match sitting unclaimed is what the submit will silently take
+  // over, so say so before they press the button.
+  const freeExact = matches.find(
+    (m) => m.kind === "exact" && !m.item.ownerMembershipId,
+  );
+
+  if (!open) {
+    return (
+      <Button
+        mt="sm"
+        size="compact-xs"
+        variant="light"
+        w="fit-content"
+        onClick={() => setOpen(true)}
+      >
+        + I'm bringing something for {category.name}
+      </Button>
+    );
+  }
+
+  return (
+    <Card withBorder mt="sm" padding="sm" radius="sm">
+      <Group gap="xs" align="flex-end" wrap="wrap">
+        <NumberInput
+          size="xs"
+          w={72}
+          min={1}
+          label="How many"
+          value={quantity}
+          onChange={setQuantity}
+        />
+        <TextInput
+          size="xs"
+          style={{ flex: 1, minWidth: 160 }}
+          label="What are you bringing?"
+          placeholder="e.g. whiskey — you can get specific later"
+          value={name}
+          onChange={(e) => setName(e.currentTarget.value)}
+          maxLength={120}
+        />
+        <Button
+          size="xs"
+          disabled={!name.trim()}
+          loading={fetcher.state !== "idle"}
+          onClick={() =>
+            fetcher.submit(
+              {
+                intent: "addMine",
+                categoryId: category.id,
+                name,
+                quantity: String(quantity || 1),
+              },
+              { method: "post" },
+            )
+          }
+        >
+          {freeExact ? "Claim it" : "Add"}
+        </Button>
+        <Button size="xs" variant="subtle" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </Group>
+
+      {matches.length > 0 ? (
+        <Stack gap={2} mt="xs">
+          <Text size="xs" c="dimmed">
+            Already on the list:
+          </Text>
+          {matches.map((m) => (
+            <Text key={m.item.id} size="xs" c="dimmed" pl="sm">
+              ×{m.item.quantity} {m.item.name}
+              {m.item.categoryId !== category.id
+                ? ` (in ${groupName(m.item.categoryId)})`
+                : ""}{" "}
+              —{" "}
+              {m.item.ownerMembershipId ? (
+                <Text
+                  span
+                  c={
+                    m.item.ownerMembershipId === myMembershipId
+                      ? "green"
+                      : "orange"
+                  }
+                >
+                  {m.item.ownerMembershipId === myMembershipId
+                    ? "you're already down for this"
+                    : `${m.item.ownerName} is bringing it`}
+                </Text>
+              ) : (
+                <Text span c="blue">
+                  nobody's claimed it
+                </Text>
+              )}
+            </Text>
+          ))}
+          {freeExact ? (
+            <Text size="xs" c="dimmed" pl="sm">
+              Adding this will put you down for the existing "
+              {freeExact.item.name}" line rather than making a second one.
+            </Text>
+          ) : null}
+        </Stack>
+      ) : null}
+      <Text size="xs" c="dimmed" mt="xs">
+        Rough is fine — "whiskey" now, "2 handles of rye" once you've bought it.
+        You can edit your own lines any time.
+      </Text>
     </Card>
   );
 }
@@ -473,6 +768,7 @@ function ItemRow({
 }) {
   const fetcher = useFetcher<FetcherData>();
   useFetcherError(fetcher.data, fetcher.state);
+  const [editing, setEditing] = useState(false);
   const save = (field: string, value: string) =>
     fetcher.submit(
       { intent: "updateItem", id: item.id, field, value },
@@ -568,19 +864,28 @@ function ItemRow({
           {!locked ? (
             item.ownerMembershipId ? (
               mine ? (
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="gray"
-                  onClick={() =>
-                    fetcher.submit(
-                      { intent: "unclaim", id: item.id },
-                      { method: "post" },
-                    )
-                  }
-                >
-                  Unclaim
-                </Button>
+                <>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    onClick={() => setEditing((v) => !v)}
+                  >
+                    {editing ? "Cancel" : "Edit"}
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="gray"
+                    onClick={() =>
+                      fetcher.submit(
+                        { intent: "unclaim", id: item.id },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    Unclaim
+                  </Button>
+                </>
               ) : null
             ) : (
               <Button
@@ -596,6 +901,50 @@ function ItemRow({
                 I'll bring this
               </Button>
             )
+          ) : null}
+          {editing ? (
+            // A real form with named inputs: the browser owns the values, so a
+            // re-render can't lose what's half-typed.
+            <fetcher.Form
+              method="post"
+              style={{ width: "100%" }}
+              onSubmit={() => setEditing(false)}
+            >
+              <input type="hidden" name="intent" value="updateMine" />
+              <input type="hidden" name="id" value={item.id} />
+              <Group gap="xs" align="flex-end" wrap="wrap">
+                <NumberInput
+                  size="xs"
+                  w={72}
+                  min={1}
+                  name="quantity"
+                  label="How many"
+                  defaultValue={item.quantity}
+                />
+                <TextInput
+                  size="xs"
+                  style={{ flex: 1, minWidth: 140 }}
+                  name="name"
+                  label="What"
+                  defaultValue={item.name}
+                  maxLength={120}
+                />
+                <TextInput
+                  size="xs"
+                  w={160}
+                  name="notes"
+                  label="Notes"
+                  defaultValue={item.notes ?? ""}
+                />
+                <Button
+                  type="submit"
+                  size="xs"
+                  loading={fetcher.state !== "idle"}
+                >
+                  Save
+                </Button>
+              </Group>
+            </fetcher.Form>
           ) : null}
         </>
       )}
