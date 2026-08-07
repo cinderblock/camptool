@@ -15,6 +15,8 @@ import {
   TextInput,
   Textarea,
   Title,
+  Tooltip,
+  VisuallyHidden,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -814,19 +816,30 @@ function DayCell({ iso, year }: { iso: string | null; year: number }) {
       </Text>
     );
   return (
-    <Group gap={6} wrap="nowrap">
+    // The weekday is the answer; the exact date is a detail, so it moves behind
+    // a tap. `events.touch` matters — a hover-only tooltip would put the date
+    // out of reach on a phone, which is exactly why `title=` is banned here.
+    <Tooltip
+      label={`${chip.long} ${chip.iso}${chip.setup ? " · setup" : ""}`}
+      withArrow
+      events={{ hover: true, focus: true, touch: true }}
+    >
       <Badge
         variant="light"
         color={chip.color}
         size="sm"
-        style={{ border: dayChipBorder(chip.setup) }}
+        style={{ border: dayChipBorder(chip.setup), cursor: "help" }}
       >
         {chip.short}
+        {/* Read out in full rather than made a tab stop: two chips per row
+            would add ~70 stops to this table for a secondary detail. */}
+        <VisuallyHidden>
+          {" "}
+          {chip.long} {chip.iso}
+          {chip.setup ? " (setup)" : ""}
+        </VisuallyHidden>
       </Badge>
-      <Text size="xs" c="dimmed">
-        {chip.iso}
-      </Text>
-    </Group>
+    </Tooltip>
   );
 }
 
@@ -932,13 +945,22 @@ function RosterTableInner({
             {mapVisible ? <Table.Th>Where</Table.Th> : null}
           </Table.Tr>
         </Table.Thead>
-        <Table.Tbody>
+        {/* Clearing the hover preview belongs to the whole body, not each row:
+            per-row it fires on every row-to-row move, flashing the map back to
+            full brightness between rows. */}
+        <Table.Tbody
+          onMouseLeave={selectable ? () => onHover(null) : undefined}
+        >
           {members.map((m) => {
             const st = STATUS_META[m.status];
             const isHost = m.membershipId === myMembershipId;
             // Only rows with something placed do anything, so a click that
             // couldn't change the map isn't offered as if it could.
-            const canSelect = selectable && m.mapItems > 0;
+            // Every row is selectable, including people with nothing placed —
+            // "none of this is theirs" (a fully dimmed map) is a real answer,
+            // and it stops the map snapping back to full brightness as the
+            // pointer crosses those rows.
+            const canSelect = selectable;
             const isSelected = selected === m.membershipId;
             const toggle = () => onSelect(isSelected ? null : m.membershipId);
             return (
@@ -958,7 +980,6 @@ function RosterTableInner({
                 onMouseEnter={
                   canSelect ? () => onHover(m.membershipId) : undefined
                 }
-                onMouseLeave={canSelect ? () => onHover(null) : undefined}
                 onKeyDown={
                   canSelect
                     ? (e) => {
@@ -1165,9 +1186,12 @@ function RosterTable({
             </Text>
             <Group gap="sm" wrap="nowrap">
               <Text size="xs" c="dimmed">
-                {activeMember
-                  ? `${activeMember.mapObjectIds.length} highlighted`
-                  : "Pick someone below to light up their spot"}
+                {!activeMember
+                  ? "Pick someone below to light up their spot"
+                  : activeMember.mapObjectIds.length === 0
+                    ? // The dimmed map is the answer here, so say what it means.
+                      "Nothing of theirs is placed yet"
+                    : `${activeMember.mapObjectIds.length} highlighted`}
               </Text>
               {selected ? (
                 <Button
@@ -1187,9 +1211,11 @@ function RosterTable({
               activeMember ? new Set(activeMember.mapObjectIds) : null
             }
             label={
-              activeMember
-                ? `Camp map with ${activeMember.name}'s structures highlighted`
-                : "Camp map"
+              !activeMember
+                ? "Camp map"
+                : activeMember.mapObjectIds.length === 0
+                  ? `Camp map — nothing of ${activeMember.name}'s is placed`
+                  : `Camp map with ${activeMember.name}'s structures highlighted`
             }
           />
         </Paper>

@@ -30,9 +30,13 @@ export function CampMapView({
   lot: MapLot;
   objects: ObjRow[];
   /**
-   * When non-null, these objects stay lit and everything else dims. Null (not
-   * an empty set) means "no selection" — an empty set would dim the whole map,
-   * which reads as a bug rather than as an answer.
+   * When non-null, these objects stay lit and everything else dims.
+   *
+   * The empty set is meaningful and NOT the same as null: it dims the whole
+   * map, which is the honest answer for someone with nothing placed. Null means
+   * "nobody is picked" and leaves the map at full brightness. Keeping the two
+   * distinct is what stops the map flashing back to full brightness as the
+   * pointer crosses rows for people who aren't on it.
    */
   highlightIds: Set<string> | null;
   /** Cap on the drawn height; the map keeps its aspect ratio within it. */
