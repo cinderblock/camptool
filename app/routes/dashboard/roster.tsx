@@ -29,9 +29,11 @@ import {
 } from "~/lib/attendee.server";
 import { eventStartIso } from "~/lib/brc";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
-import { requireFeature } from "~/lib/features.server";
+import { featureVisibleTo } from "~/lib/features";
+import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { getOrCreatePromotionInvite } from "~/lib/invite.server";
 import { claimGuestAsMember } from "~/lib/merge.server";
+import { partyMapObjects } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { dateLabel } from "~/lib/schedule";
@@ -57,11 +59,25 @@ export async function loader({ request }: Route.LoaderArgs) {
     active.camp.id,
     activeEdition.id,
   );
+  // "Where are they camped?" is only answerable when this camp actually runs
+  // the map — and only linkable for someone whose party has something placed,
+  // so the column never offers a link to an empty map.
+  const mapVisible = featureVisibleTo(
+    await getFeatureState(active.camp.id, "map"),
+    active.membership.role,
+  );
+  const mapCounts = mapVisible
+    ? await partyMapObjects(activeEdition.id)
+    : new Map<string, string[]>();
   const myMembershipId = active.membership.id;
   const me = members.find((m) => m.membershipId === myMembershipId) ?? null;
   return redact(privacy, {
-    members,
+    members: members.map((m) => ({
+      ...m,
+      mapItems: mapCounts.get(m.membershipId)?.length ?? 0,
+    })),
     headcount,
+    mapVisible,
     myMembershipId,
     myGuests: me?.guests ?? [],
     myStatus: me?.status ?? ("unknown" as AttendeeStatus),
@@ -230,8 +246,15 @@ type FetcherData = {
 };
 
 export default function Roster({ loaderData }: Route.ComponentProps) {
-  const { members, headcount, myGuests, locked, year, myMembershipId } =
-    loaderData;
+  const {
+    members,
+    headcount,
+    myGuests,
+    locked,
+    year,
+    myMembershipId,
+    mapVisible,
+  } = loaderData;
 
   return (
     <Container size="lg">
@@ -270,6 +293,7 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
           myMembershipId={myMembershipId}
           locked={locked}
           year={year}
+          mapVisible={mapVisible}
         />
       </Stack>
     </Container>
@@ -646,16 +670,18 @@ function RosterTableInner({
   myMembershipId,
   locked,
   year,
+  mapVisible,
   onClaim,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
   myMembershipId: string | null;
   locked: boolean;
   year: number;
+  mapVisible: boolean;
   onClaim: (guest: { id: string; name: string }) => void;
 }) {
   return (
-    <Table.ScrollContainer minWidth={820}>
+    <Table.ScrollContainer minWidth={mapVisible ? 920 : 820}>
       <Table verticalSpacing="sm" highlightOnHover>
         <Table.Thead>
           <Table.Tr>
@@ -664,6 +690,7 @@ function RosterTableInner({
             <Table.Th>Arrives</Table.Th>
             <Table.Th>Departs</Table.Th>
             <Table.Th>Party</Table.Th>
+            {mapVisible ? <Table.Th>Where</Table.Th> : null}
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -741,6 +768,27 @@ function RosterTableInner({
                     </Group>
                   )}
                 </Table.Td>
+                {mapVisible ? (
+                  <Table.Td>
+                    {m.mapItems > 0 ? (
+                      // Deep-links the map with this whole party highlighted —
+                      // the member's own structures plus anything their guests
+                      // occupy. No link when they have nothing placed, rather
+                      // than a link to a map with nothing lit up.
+                      <Anchor
+                        component={Link}
+                        to={`/map?party=${m.membershipId}`}
+                        size="sm"
+                      >
+                        {m.mapItems} on map
+                      </Anchor>
+                    ) : (
+                      <Text size="sm" c="dimmed">
+                        not placed
+                      </Text>
+                    )}
+                  </Table.Td>
+                ) : null}
               </Table.Tr>
             );
           })}
@@ -759,11 +807,13 @@ function RosterTable({
   myMembershipId,
   locked,
   year,
+  mapVisible,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
   myMembershipId: string | null;
   locked: boolean;
   year: number;
+  mapVisible: boolean;
 }) {
   const claimFetcher = useFetcher<FetcherData>();
   const [claiming, setClaiming] = useState<{ id: string; name: string } | null>(
@@ -834,6 +884,7 @@ function RosterTable({
         myMembershipId={myMembershipId}
         locked={locked}
         year={year}
+        mapVisible={mapVisible}
         onClaim={setClaiming}
       />
       <Modal

@@ -1,5 +1,7 @@
 import {
   ActionIcon,
+  Alert,
+  Anchor,
   Autocomplete,
   Badge,
   Box,
@@ -35,7 +37,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { data, useFetcher } from "react-router";
+import { Link, data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { BLOCKS, blockById } from "~/lib/blocks";
@@ -51,6 +53,7 @@ import {
 } from "~/lib/brc";
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
+import { partyMapObjectsFor } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
@@ -1092,6 +1095,29 @@ async function loadClientMap(editionId: string) {
   };
 }
 
+/**
+ * Resolve `?party=<membershipId>` into the objects to highlight plus a name to
+ * say so with. Returns null for an absent, malformed, or foreign membership —
+ * a bad link should show a normal map, not an error, and the camp scope stops
+ * the param being used to probe another camp's memberships.
+ */
+async function resolveParty(
+  campId: string,
+  editionId: string,
+  raw: string | null,
+): Promise<{ membershipId: string; name: string; objectIds: string[] } | null> {
+  if (!raw) return null;
+  const [row] = await db
+    .select({ id: membership.id, name: user.name })
+    .from(membership)
+    .innerJoin(user, eq(user.id, membership.userId))
+    .where(and(eq(membership.id, raw), eq(membership.organizationId, campId)))
+    .limit(1);
+  if (!row) return null;
+  const objectIds = await partyMapObjectsFor(editionId, row.id);
+  return { membershipId: row.id, name: row.name, objectIds };
+}
+
 export async function loader({ request }: Route.LoaderArgs) {
   const {
     user: account,
@@ -1158,7 +1184,18 @@ export async function loader({ request }: Route.LoaderArgs) {
     loadSuggestions(editionId),
   ]);
 
+  // `/map?party=<membershipId>` — arriving from the roster's "N on map" link.
+  // Resolved here rather than by shipping object ids in the URL: ids go stale
+  // the moment the map changes, and a membership id stays meaningful and
+  // shareable. Costs nothing on a normal map load, since the param is absent.
+  const party = await resolveParty(
+    active.camp.id,
+    editionId,
+    new URL(request.url).searchParams.get("party"),
+  );
+
   return redact(privacy, {
+    party,
     canEdit:
       hasAtLeast(active.membership.role, "member") && !activeEdition.locked,
     locked: activeEdition.locked,
@@ -3541,7 +3578,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [roads, setRoads] = useState<RoadRow[]>(loaderData.roads);
   const [selectedRoadId, setSelectedRoadId] = useState<string | null>(null);
   // Highlight filter: dims everything that doesn't match the chosen category.
-  const [highlight, setHighlight] = useState<string>("none");
+  // Arriving from the roster with ?party=… starts on that party, so the link
+  // lands on the answer rather than on a map you then have to filter yourself.
+  const party = loaderData.party;
+  const [highlight, setHighlight] = useState<string>(party ? "party" : "none");
   // Global door visibility — master switch over each object's own showDoor flag.
   const [showDoors, setShowDoors] = useState(true);
   // Fire-access overlay: shade the lot by 125′ hose reach from the street/alley.
@@ -3878,6 +3918,42 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         </Group>
       </Group>
 
+      {/* A dimmed map must never be unexplained: say whose party is showing,
+          and give a way out that doesn't require finding the Highlight
+          control in a side panel that's collapsed on a phone. */}
+      {party && highlight === "party" ? (
+        <Alert
+          variant="light"
+          color="blue"
+          mb="sm"
+          title={
+            party.objectIds.length > 0
+              ? `Showing ${party.name}'s party`
+              : `${party.name}'s party isn't on the map yet`
+          }
+        >
+          <Group gap="sm" wrap="wrap">
+            <Text size="sm">
+              {party.objectIds.length > 0
+                ? `${party.objectIds.length} item${
+                    party.objectIds.length === 1 ? "" : "s"
+                  } highlighted — everything else is dimmed.`
+                : "Nothing of theirs has been placed yet, so nothing is highlighted."}
+            </Text>
+            <Button
+              size="compact-xs"
+              variant="default"
+              onClick={() => setHighlight("none")}
+            >
+              Show everyone
+            </Button>
+            <Anchor component={Link} to="/roster" size="sm">
+              Back to Who's coming
+            </Anchor>
+          </Group>
+        </Alert>
+      ) : null}
+
       <Flex
         align="stretch"
         gap="lg"
@@ -3930,6 +4006,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             bannedKinds={bannedKinds}
             mapStatus={mapStatus}
             highlight={highlight}
+            party={party}
             lotOpen={lotOpen}
             setLotOpen={setLotOpen}
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
@@ -3975,6 +4052,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               data={[
                 { label: "All", value: "none" },
                 { label: "Mine", value: "mine" },
+                // Only offered while a ?party= link is in play — there is no
+                // party to filter to otherwise.
+                ...(party ? [{ label: "Party", value: "party" }] : []),
                 { label: "Homes", value: "domicile" },
                 { label: "Vehicles", value: "vehicle" },
                 { label: "Builds", value: "structure" },
@@ -4393,6 +4473,7 @@ function Editor({
   bannedKinds,
   mapStatus,
   highlight,
+  party,
   lotOpen,
   setLotOpen,
   mapUpBearing,
@@ -4434,6 +4515,8 @@ function Editor({
   /** Free-text doneness label drawn as a watermark over the map (null = none). */
   mapStatus: string | null;
   highlight: string;
+  /** Set when arrived via ?party=… — the objects to light up, and whose. */
+  party: { membershipId: string; name: string; objectIds: string[] } | null;
   lotOpen: boolean;
   setLotOpen: (v: boolean) => void;
   mapUpBearing: number | null;
@@ -4631,9 +4714,16 @@ function Editor({
     (o.ownerMembershipId === null || o.ownerMembershipId === myMembershipId);
 
   // Highlight filter: an object matches the active category (or all when "none").
+  const partyIds = useMemo(
+    () => new Set(party?.objectIds ?? []),
+    [party?.objectIds],
+  );
   const matches = (o: ObjRow) => {
     if (highlight === "none") return true;
     if (highlight === "mine") return o.ownerMembershipId === myMembershipId;
+    // Resolved server-side across owner AND occupant, so a guest's tent counts
+    // toward the host's party — see party-map.server.ts.
+    if (highlight === "party") return partyIds.has(o.id);
     return hasTag(o.kind, highlight as "domicile" | "vehicle" | "structure");
   };
 
