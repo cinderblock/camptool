@@ -248,8 +248,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Upcoming schedule: the viewer's next shifts + (officers) days that
     // still need people.
     let schedule: ScheduleCard | null = null;
-    if (seeFeature("schedule")) {
-      const agenda = await loadAgenda(editionId, mid);
+    const agenda = seeFeature("schedule")
+      ? await loadAgenda(editionId, mid)
+      : null;
+    // Same rule as the nav: an on-but-empty schedule stays hidden from members
+    // rather than showing them a card that points at a blank page.
+    if (agenda && (agenda.length > 0 || isOfficer)) {
       const upcoming = agenda.filter(
         (r) => !r.cancelled && r.date >= todayIso(),
       );

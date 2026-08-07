@@ -27,11 +27,17 @@ import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
 import { Link, data, redirect, useFetcher } from "react-router";
+import {
+  type RoleDraft,
+  ShiftRoleBuilder,
+  emptyRole,
+} from "~/components/ShiftRoleBuilder";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
   GATHERING_KINDS,
+  MAX_TEMPLATE_ROLES,
   STAFFING_OPTIONS,
   dailyDatesBetween,
   dateLabel,
@@ -46,6 +52,7 @@ import {
   createGathering,
   loadAgenda,
   loadGatherings,
+  parseShiftTemplate,
 } from "~/lib/schedule.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/schedule";
@@ -123,6 +130,9 @@ export async function action({ request }: Route.ActionArgs) {
     staffing === "needed" && Number.isInteger(capacityRaw) && capacityRaw > 0
       ? capacityRaw
       : null;
+  // Optional role template: several jobs per day, stamped onto every day. When
+  // empty this falls back to the single general shift it always made.
+  const shifts = parseShiftTemplate(form);
 
   const id = await createGathering({
     campId: active.camp.id,
@@ -136,6 +146,7 @@ export async function action({ request }: Route.ActionArgs) {
     startTime: cleanTime(form.get("startTime")),
     endTime: cleanTime(form.get("endTime")),
     shift: { staffing, minNeeded: capacity, capacity },
+    shifts,
     recurrenceRule,
   });
   return redirect(`/schedule/${id}`);
@@ -185,6 +196,8 @@ export default function Schedule({ loaderData }: Route.ComponentProps) {
           </Paper>
         ) : null}
 
+        <WhatIsThis isOfficer={isOfficer} empty={agenda.length === 0} />
+
         {isOfficer && !locked ? <NewGatheringForm /> : null}
 
         {view === "calendar" ? (
@@ -227,6 +240,83 @@ export default function Schedule({ loaderData }: Route.ComponentProps) {
         ) : null}
       </Stack>
     </Container>
+  );
+}
+
+/**
+ * Items 12 + 13. Two reports from the same meeting: a camper found the Shifts
+ * feature and asked what a shift even *is*, and another went looking for an
+ * agenda that had just been switched on and was still empty. Both are answered
+ * on the page itself — no tooltip (invisible on a phone), no separate doc.
+ */
+function WhatIsThis({
+  isOfficer,
+  empty,
+}: {
+  isOfficer: boolean;
+  empty: boolean;
+}) {
+  const [open, { toggle }] = useDisclosure(false);
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Group justify="space-between" wrap="nowrap" gap="xs" align="flex-start">
+        <div style={{ minWidth: 0 }}>
+          <Text size="sm">
+            Everything the camp does together on a schedule — and where you say
+            you'll be there.
+          </Text>
+          {empty ? (
+            <Text size="sm" c="dimmed" mt={4}>
+              {isOfficer
+                ? "Nothing is on the calendar yet, so campers can't see this page at all — it stays hidden from them until there's something here. Create the first gathering below."
+                : "Nothing is on the calendar yet. When the camp posts work parties, meetings, or daily shifts, they'll appear here and you'll be able to sign up."}
+            </Text>
+          ) : null}
+        </div>
+        <Button size="compact-xs" variant="subtle" onClick={toggle}>
+          {open ? "Less" : "What's this?"}
+        </Button>
+      </Group>
+      <Collapse in={open}>
+        <Stack gap={6} mt="xs">
+          <Text size="xs" c="dimmed">
+            A <b>gathering</b> is one thing the camp does — it can happen once,
+            or repeat every day. Kinds:
+          </Text>
+          <Group gap={6} pl="sm" wrap="wrap">
+            {GATHERING_KINDS.map((k) => (
+              <Badge
+                key={k.value}
+                size="xs"
+                variant="light"
+                color={kindColor(k.value)}
+              >
+                {k.label}
+              </Badge>
+            ))}
+          </Group>
+          <Text size="xs" c="dimmed">
+            Each day of a gathering is split into <b>shifts</b>. A shift is{" "}
+            <b>one job, on one day, that needs people</b> — like the prep crew
+            before a service, the people serving during it, and cleanup
+            afterwards. Sign up for a shift and you're on the list for that job
+            on that day. A day with no named roles is just one general sign-up
+            sheet. How many people a shift wants:
+          </Text>
+          <Stack gap={2} pl="sm">
+            {STAFFING_OPTIONS.map((s) => (
+              <Text key={s.value} size="xs" c="dimmed">
+                <b>{s.label}</b> — {s.hint}
+              </Text>
+            ))}
+          </Stack>
+          <Text size="xs" c="dimmed">
+            Signing up isn't a contract — you can withdraw any time, and if a
+            shift is already full you'll go on its waitlist instead.
+          </Text>
+        </Stack>
+      </Collapse>
+    </Paper>
   );
 }
 
@@ -455,6 +545,10 @@ function NewGatheringForm() {
   const [opened, { toggle }] = useDisclosure(false);
   const [repeat, setRepeat] = useState<"single" | "daily">("single");
   const [staffing, setStaffing] = useState("open");
+  // "roles" turns the one general sheet into several named slots per day — the
+  // thing that made a multi-job daily service practical to set up.
+  const [split, setSplit] = useState<"single" | "roles">("single");
+  const [roles, setRoles] = useState<RoleDraft[]>(() => [emptyRole()]);
   const busy = fetcher.state !== "idle";
 
   useEffect(() => {
@@ -534,30 +628,54 @@ function NewGatheringForm() {
               <TextInput type="time" name="startTime" label="Starts" />
               <TextInput type="time" name="endTime" label="Ends" />
             </Group>
-            <Group grow align="flex-end">
-              <Select
-                label="Who's needed"
-                value={staffing}
-                onChange={(v) => setStaffing(v ?? "open")}
-                data={STAFFING_OPTIONS.map((s) => ({
-                  value: s.value,
-                  label: s.label,
-                }))}
-                allowDeselect={false}
-              />
-              {staffing === "needed" ? (
-                <NumberInput
-                  name="capacity"
-                  label="How many people"
-                  min={1}
-                  placeholder="e.g. 2"
+            <SegmentedControl
+              value={split}
+              onChange={(v) => setSplit(v as "single" | "roles")}
+              data={[
+                { value: "single", label: "One sign-up sheet" },
+                { value: "roles", label: "Split into roles" },
+              ]}
+            />
+            {split === "single" ? (
+              <>
+                <Group grow align="flex-end">
+                  <Select
+                    label="Who's needed"
+                    value={staffing}
+                    onChange={(v) => setStaffing(v ?? "open")}
+                    data={STAFFING_OPTIONS.map((s) => ({
+                      value: s.value,
+                      label: s.label,
+                    }))}
+                    allowDeselect={false}
+                  />
+                  {staffing === "needed" ? (
+                    <NumberInput
+                      name="capacity"
+                      label="How many people"
+                      min={1}
+                      placeholder="e.g. 2"
+                    />
+                  ) : null}
+                </Group>
+                <input type="hidden" name="staffing" value={staffing} />
+                <Text size="xs" c="dimmed">
+                  {STAFFING_OPTIONS.find((s) => s.value === staffing)?.hint}
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text size="xs" c="dimmed">
+                  Each role becomes its own sign-up slot, on every day above.
+                  You can change any single day's counts afterwards.
+                </Text>
+                <ShiftRoleBuilder
+                  rows={roles}
+                  onChange={setRoles}
+                  maxRoles={MAX_TEMPLATE_ROLES}
                 />
-              ) : null}
-            </Group>
-            <input type="hidden" name="staffing" value={staffing} />
-            <Text size="xs" c="dimmed">
-              {STAFFING_OPTIONS.find((s) => s.value === staffing)?.hint}
-            </Text>
+              </>
+            )}
             <Group justify="flex-end">
               <Button type="submit" loading={busy}>
                 Create gathering

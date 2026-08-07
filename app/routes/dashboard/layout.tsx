@@ -36,6 +36,7 @@ import { isSuperAdmin } from "~/lib/instance.server";
 import { hasAtLeast } from "~/lib/permissions";
 import type { PrivacyMode } from "~/lib/privacy";
 import { redact } from "~/lib/privacy.server";
+import { hasScheduledDays } from "~/lib/schedule.server";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { loadWizardState } from "~/lib/wizard.server";
 import { db } from "../../../db/client.server";
@@ -91,12 +92,22 @@ export async function loader({ request }: Route.LoaderArgs) {
     ? Object.fromEntries(await loadFeatureStates(active.camp.id))
     : {};
 
+  // A feature that's switched on but has nothing in it yet is worse than a
+  // missing one — a camper clicked Schedule looking for the camp's programme
+  // and found a blank page. Hide it from members until it has content; officers
+  // keep it, since they're the ones who have to put something there.
+  const scheduleEmpty =
+    active && activeEdition && features.schedule && features.schedule !== "off"
+      ? !(await hasScheduledDays(activeEdition.id))
+      : false;
+
   return redact(privacy, {
     user,
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
     features,
     superAdmin,
+    scheduleEmpty,
     showFinishSetup,
     privacyMode,
     canUsePrivacy,
@@ -127,6 +138,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     activeRole,
     features,
     superAdmin,
+    scheduleEmpty,
     showFinishSetup,
     impersonatedByName,
     privacyMode,
@@ -166,7 +178,10 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         { to: "/", label: "Overview", end: true },
         { to: "/guide", label: "How it works", end: false },
         ...gated("announcements", "/announcements", "Announcements"),
-        ...gated("schedule", "/schedule", "Schedule"),
+        // An on-but-empty Schedule stays hidden from members (see the loader).
+        ...(scheduleEmpty && !hasAtLeast(activeRole ?? "", "officer")
+          ? []
+          : gated("schedule", "/schedule", "Schedule")),
         ...gated("programming", "/programming", "Programming"),
         ...(showFinishSetup
           ? [{ to: "/start", label: "Finish setup", end: false }]

@@ -27,12 +27,18 @@ import { notifications } from "@mantine/notifications";
 import { and, count, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
 import { Link, data, redirect, useFetcher } from "react-router";
+import {
+  type RoleDraft,
+  ShiftRoleBuilder,
+  emptyRole,
+} from "~/components/ShiftRoleBuilder";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
   GATHERING_KINDS,
+  MAX_TEMPLATE_ROLES,
   STAFFING_OPTIONS,
   dateLabel,
   isIsoDate,
@@ -41,7 +47,12 @@ import {
   staffingLabel,
   timeRangeLabel,
 } from "~/lib/schedule";
-import { cleanTime, loadGatheringDetail } from "~/lib/schedule.server";
+import {
+  applyShiftTemplate,
+  cleanTime,
+  loadGatheringDetail,
+  parseShiftTemplate,
+} from "~/lib/schedule.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import {
   loadRequirements,
@@ -465,6 +476,72 @@ export async function action({ request, params }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
+  // Define the roles once and stamp them across every day at once. Without
+  // this, a nine-day service with four roles is 36 separate form submits.
+  if (intent === "applyTemplate") {
+    const shifts = parseShiftTemplate(form);
+    if (shifts.length === 0) {
+      return data(
+        { error: "Give each role a name before applying." },
+        { status: 400 },
+      );
+    }
+    const from = String(form.get("fromDate") ?? "");
+    const to = String(form.get("toDate") ?? "");
+    const result = await applyShiftTemplate({
+      campId: active.camp.id,
+      editionId: activeEdition.id,
+      gatheringId,
+      shifts,
+      fromDate: isIsoDate(from) ? from : null,
+      toDate: isIsoDate(to) ? to : null,
+    });
+    if (result.days === 0) {
+      return data(
+        { error: "No scheduled days in that range." },
+        { status: 400 },
+      );
+    }
+    const skipped = result.skipped ? `, ${result.skipped} already there` : "";
+    return data({
+      ok: true,
+      message: `Added ${result.created} shift${result.created === 1 ? "" : "s"} across ${result.days} day${result.days === 1 ? "" : "s"}${skipped}.`,
+    });
+  }
+
+  // Editing beats delete+re-add: deleting a shift cascades its sign-ups away,
+  // which is exactly wrong when the change is "we need more servers today".
+  if (intent === "updateShift") {
+    const shift = await shiftInGathering(String(form.get("shiftId")));
+    if (!shift) return data({ error: "Shift not found." }, { status: 404 });
+    const staffing = String(form.get("staffing") ?? "open");
+    if (!STAFFING_OPTIONS.some((s) => s.value === staffing)) {
+      return data({ error: "Unknown staffing." }, { status: 400 });
+    }
+    const role = String(form.get("role") ?? "").trim();
+    if (role.length > 80) {
+      return data({ error: "That role name is too long." }, { status: 400 });
+    }
+    const countRaw = Number(form.get("capacity"));
+    const wanted =
+      staffing === "needed" && Number.isInteger(countRaw) && countRaw > 0
+        ? countRaw
+        : null;
+    await db
+      .update(gatheringShift)
+      .set({
+        role: role || null,
+        staffing,
+        minNeeded: wanted,
+        capacity: wanted,
+        startTime: cleanTime(form.get("startTime")),
+        endTime: cleanTime(form.get("endTime")),
+        updatedAt: new Date(),
+      })
+      .where(eq(gatheringShift.id, shift.id));
+    return data({ ok: true });
+  }
+
   if (intent === "deleteShift") {
     const shift = await shiftInGathering(String(form.get("shiftId")));
     if (!shift) return data({ error: "Shift not found." }, { status: 404 });
@@ -691,9 +768,14 @@ export default function GatheringDetail({ loaderData }: Route.ComponentProps) {
           </Paper>
         ) : null}
 
+        <WhatIsAShift />
+
         {canManage ? <EditGathering g={g} /> : null}
         {canManage && loaderData.trainingVisible ? (
           <ManageRequirements loaderData={loaderData} />
+        ) : null}
+        {canManage && occurrences.length > 0 ? (
+          <BulkRoles occurrences={occurrences} />
         ) : null}
 
         {occurrences.map((o) => (
@@ -703,6 +785,149 @@ export default function GatheringDetail({ loaderData }: Route.ComponentProps) {
         {canManage ? <AddOccurrence /> : null}
       </Stack>
     </Container>
+  );
+}
+
+/**
+ * Item 13 — a camper found this feature and asked what a shift even is. The
+ * answer has to be on the page, not in a tooltip (invisible on a phone) and not
+ * in a doc nobody opens.
+ */
+function WhatIsAShift() {
+  const [open, { toggle }] = useDisclosure(false);
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Group justify="space-between" wrap="nowrap" gap="xs">
+        <Text size="sm" c="dimmed">
+          A <b>shift</b> is one job, on one day, that needs people — sign up and
+          you're on the list for it.
+        </Text>
+        <Button size="compact-xs" variant="subtle" onClick={toggle}>
+          {open ? "Less" : "More"}
+        </Button>
+      </Group>
+      <Collapse in={open}>
+        <Stack gap={4} mt="xs">
+          <Text size="xs" c="dimmed">
+            Each day below is broken into shifts. A shift has a <b>role</b>{" "}
+            (what you'd be doing), optionally its own <b>hours</b> inside the
+            day, and how many people it needs:
+          </Text>
+          <Stack gap={2} pl="sm">
+            {STAFFING_OPTIONS.map((s) => (
+              <Text key={s.value} size="xs" c="dimmed">
+                <b>{s.label}</b> — {s.hint}
+              </Text>
+            ))}
+          </Stack>
+          <Text size="xs" c="dimmed">
+            A day with no roles is just one general sign-up sheet. Signing up
+            isn't a contract — you can withdraw, and if a "needs people" shift
+            is already full you'll go on the waitlist instead.
+          </Text>
+        </Stack>
+      </Collapse>
+    </Paper>
+  );
+}
+
+/**
+ * Stamp a set of roles across every day at once. Without this, setting up a
+ * multi-day service with several jobs per day means adding each role to each
+ * day by hand — the reason no such schedule ever got built.
+ */
+function BulkRoles({
+  occurrences,
+}: {
+  occurrences: LoaderData["occurrences"];
+}) {
+  const fetcher = useFetcher<{
+    ok?: boolean;
+    error?: string;
+    message?: string;
+  }>();
+  const [open, { toggle }] = useDisclosure(false);
+  const [rows, setRows] = useState<RoleDraft[]>(() => [emptyRole()]);
+  const scheduled = occurrences.filter((o) => o.status === "scheduled");
+  const first = scheduled[0]?.date ?? "";
+  const last = scheduled[scheduled.length - 1]?.date ?? "";
+  const [from, setFrom] = useState(first);
+  const [to, setTo] = useState(last);
+
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (fetcher.data.error) {
+      notifications.show({ color: "red", message: fetcher.data.error });
+    } else if (fetcher.data.message) {
+      notifications.show({ color: "green", message: fetcher.data.message });
+    }
+  }, [fetcher.data, fetcher.state]);
+
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Group justify="space-between" wrap="nowrap">
+        <div style={{ minWidth: 0 }}>
+          <Text fw={600} size="sm">
+            Roles on every day
+          </Text>
+          <Text size="xs" c="dimmed">
+            Define the jobs once and add them to all {scheduled.length}{" "}
+            scheduled day{scheduled.length === 1 ? "" : "s"} at once.
+          </Text>
+        </div>
+        <Button size="xs" variant="light" onClick={toggle}>
+          {open ? "Close" : "Set up"}
+        </Button>
+      </Group>
+      <Collapse in={open}>
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="applyTemplate" />
+          <Stack gap="sm" mt="sm">
+            <ShiftRoleBuilder
+              rows={rows}
+              onChange={setRows}
+              maxRoles={MAX_TEMPLATE_ROLES}
+            />
+            <Group grow align="flex-end">
+              <TextInput
+                type="date"
+                name="fromDate"
+                label="From day"
+                value={from}
+                min={first}
+                max={last}
+                onChange={(e) => setFrom(e.currentTarget.value)}
+              />
+              <TextInput
+                type="date"
+                name="toDate"
+                label="Through day"
+                value={to}
+                min={first}
+                max={last}
+                onChange={(e) => setTo(e.currentTarget.value)}
+              />
+            </Group>
+            <Text size="xs" c="dimmed">
+              A day that already has a role with the same name is left alone, so
+              you can run this again after adding a day. Existing sign-ups are
+              never touched. Need more people on later days? Add the role
+              everywhere, then edit the count on the individual days.
+            </Text>
+            <Group justify="flex-end">
+              <Button
+                type="submit"
+                size="xs"
+                loading={fetcher.state !== "idle"}
+                disabled={rows.every((r) => !r.role.trim())}
+              >
+                Add to these days
+              </Button>
+            </Group>
+          </Stack>
+        </fetcher.Form>
+      </Collapse>
+    </Paper>
   );
 }
 
@@ -1030,6 +1255,7 @@ function ShiftRow({
   }>();
   const assignFetcher = useFetcher();
   const [picker, setPicker] = useState<"assign" | "walkIn" | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     if (fetcher.data?.error) {
@@ -1272,6 +1498,13 @@ function ShiftRow({
                   </Button>
                 </>
               )}
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                onClick={() => setEditing((v) => !v)}
+              >
+                {editing ? "Cancel" : "Edit"}
+              </Button>
               <ConfirmButton
                 label="Delete shift"
                 confirmLabel="Really?"
@@ -1286,7 +1519,94 @@ function ShiftRow({
           ) : null}
         </Stack>
       </Group>
+      {canManage && editing ? (
+        <EditShift shift={s} onDone={() => setEditing(false)} />
+      ) : null}
     </Paper>
+  );
+}
+
+/**
+ * Change a shift in place. Delete-and-re-add would cascade the sign-ups away,
+ * which is precisely wrong for the common case — "we need more servers on the
+ * back half of the week" — where the people already on the list should stay.
+ */
+function EditShift({ shift: s, onDone }: { shift: Shift; onDone: () => void }) {
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const [staffing, setStaffing] = useState(s.staffing);
+  const committed = s.signups.filter((su) => su.status === "signed_up").length;
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (fetcher.data.error) {
+      notifications.show({ color: "red", message: fetcher.data.error });
+    } else if (fetcher.data.ok) {
+      onDone();
+    }
+  }, [fetcher.data, fetcher.state, onDone]);
+  return (
+    <fetcher.Form method="post">
+      <input type="hidden" name="intent" value="updateShift" />
+      <input type="hidden" name="shiftId" value={s.id} />
+      <input type="hidden" name="staffing" value={staffing} />
+      <Group align="flex-end" wrap="wrap" mt="sm" gap="xs">
+        <TextInput
+          name="role"
+          label="Role"
+          size="xs"
+          defaultValue={s.role ?? ""}
+          placeholder="General"
+          maxLength={80}
+        />
+        <Select
+          label="Who's needed"
+          size="xs"
+          w={130}
+          value={staffing}
+          onChange={(v) => setStaffing(v ?? "open")}
+          data={STAFFING_OPTIONS.map((so) => ({
+            value: so.value,
+            label: so.label,
+          }))}
+          allowDeselect={false}
+          comboboxProps={{ withinPortal: true }}
+        />
+        {staffing === "needed" ? (
+          <NumberInput
+            name="capacity"
+            label="How many"
+            min={1}
+            size="xs"
+            w={90}
+            defaultValue={s.capacity ?? undefined}
+          />
+        ) : null}
+        <TextInput
+          type="time"
+          name="startTime"
+          label="Starts"
+          size="xs"
+          defaultValue={s.startTime ?? ""}
+        />
+        <TextInput
+          type="time"
+          name="endTime"
+          label="Ends"
+          size="xs"
+          defaultValue={s.endTime ?? ""}
+        />
+        <Button type="submit" size="xs" loading={fetcher.state !== "idle"}>
+          Save
+        </Button>
+      </Group>
+      {committed > 0 ? (
+        <Text size="xs" c="dimmed" mt={4}>
+          {committed} {committed === 1 ? "person is" : "people are"} already
+          signed up — they keep their spot whatever you change here. Lowering
+          the count below {committed} doesn't remove anyone; it only waitlists
+          the next person to sign up.
+        </Text>
+      ) : null}
+    </fetcher.Form>
   );
 }
 

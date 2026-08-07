@@ -64,6 +64,11 @@ export function staffingLabel(staffing: string): string {
   return STAFFING_OPTIONS.find((s) => s.value === staffing)?.label ?? staffing;
 }
 
+/** Max roles in one shift template — a guard against a runaway form, not a real
+ * limit; no camp runs more than a handful of roles on one gathering. Lives here
+ * (not in schedule.server.ts) because the role builder renders it. */
+export const MAX_TEMPLATE_ROLES = 12;
+
 export type SignupStatus = "signed_up" | "maybe" | "waitlisted" | "cancelled";
 export type Attendance = "unknown" | "attended" | "no_show";
 export type SignupOrigin = "self" | "assigned" | "walk_in";
