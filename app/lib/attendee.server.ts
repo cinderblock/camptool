@@ -367,6 +367,153 @@ export async function removeGuest(guestId: string): Promise<{
 }
 
 /**
+ * Put a member into another member's party, or take them out of one (`host` =
+ * NULL). The subject is identified by membership, not attendee id, because the
+ * caller is picking a person off the roster; the row is created if they haven't
+ * RSVP'd yet.
+ *
+ * Refuses rather than silently repairing, because every refusal here means the
+ * caller believes something about the roster that isn't true:
+ *
+ *   - **Self-host.** Would make someone their own household anchor, and
+ *     "resolve my location through my host" would never terminate.
+ *   - **Host is itself hosted.** Parties are one level deep (see the schema
+ *     comment). Chains would make the single-hop roll-up in `party-map.server`
+ *     wrong and there'd be no single answer to "whose household is this?".
+ *   - **Subject already hosts people.** Same reason from the other side: their
+ *     guests would end up a level deeper than the roll-up looks.
+ *
+ * Returns a human-readable reason on refusal so the caller can pass it straight
+ * to the person, who is usually the one who can fix it.
+ */
+export async function setPartyHost(opts: {
+  campId: string;
+  editionId: string;
+  membershipId: string;
+  hostMembershipId: string | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { campId, editionId, membershipId, hostMembershipId } = opts;
+
+  if (hostMembershipId === membershipId) {
+    return { ok: false, error: "Someone can't be in their own party." };
+  }
+
+  // Guests are accountless, so this only ever moves member rows.
+  const attendeeId = await ensureMemberAttendee(
+    campId,
+    editionId,
+    membershipId,
+  );
+
+  if (hostMembershipId) {
+    const [host] = await db
+      .select({ id: membership.id, name: user.name })
+      .from(membership)
+      .innerJoin(user, eq(user.id, membership.userId))
+      .where(
+        and(
+          eq(membership.id, hostMembershipId),
+          eq(membership.organizationId, campId),
+        ),
+      )
+      .limit(1);
+    if (!host) return { ok: false, error: "That person isn't in this camp." };
+
+    const [hostRow] = await db
+      .select({ hostMembershipId: attendee.hostMembershipId })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          eq(attendee.membershipId, hostMembershipId),
+        ),
+      )
+      .limit(1);
+    if (hostRow?.hostMembershipId) {
+      return {
+        ok: false,
+        error: `${host.name} is already in someone else's party. Pick whoever anchors that household instead.`,
+      };
+    }
+
+    const [{ n: hosting } = { n: 0 }] = await db
+      .select({ n: count() })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          eq(attendee.hostMembershipId, membershipId),
+        ),
+      );
+    if (hosting > 0) {
+      return {
+        ok: false,
+        error:
+          "They have their own party. Move those people over first, then link them.",
+      };
+    }
+  }
+
+  await db
+    .update(attendee)
+    .set({ hostMembershipId, updatedAt: new Date() })
+    .where(eq(attendee.id, attendeeId));
+  return { ok: true };
+}
+
+/** Who currently anchors this member's party, if anyone. */
+export async function getPartyHostOf(
+  editionId: string,
+  membershipId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ hostMembershipId: attendee.hostMembershipId })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        eq(attendee.membershipId, membershipId),
+      ),
+    )
+    .limit(1);
+  return row?.hostMembershipId ?? null;
+}
+
+/**
+ * Members who could anchor a party, for a picker: everyone in the camp except
+ * the subject and anyone already in someone else's party, since parties are one
+ * level deep. Someone who already hosts guests IS a valid target — they're a
+ * household root, which is exactly what's wanted.
+ */
+export async function listPartyHostCandidates(
+  campId: string,
+  editionId: string,
+  membershipId: string,
+): Promise<{ membershipId: string; name: string }[]> {
+  const rows = await db
+    .select({
+      membershipId: membership.id,
+      name: user.name,
+      hostMembershipId: attendee.hostMembershipId,
+    })
+    .from(membership)
+    .innerJoin(user, eq(user.id, membership.userId))
+    .leftJoin(
+      attendee,
+      and(
+        eq(attendee.membershipId, membership.id),
+        eq(attendee.editionId, editionId),
+      ),
+    )
+    .where(eq(membership.organizationId, campId));
+
+  return rows
+    .filter((r) => r.membershipId !== membershipId && !r.hostMembershipId)
+    .map((r) => ({ membershipId: r.membershipId, name: r.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * Return the attendee id for a member in an edition, creating an `unknown`-status
  * row if they don't have one yet. Used when a member is added as a map occupant
  * before they've RSVP'd — occupancy references an attendee, not a membership.

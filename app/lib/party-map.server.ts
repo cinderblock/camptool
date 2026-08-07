@@ -59,22 +59,45 @@ export async function partyMapObjects(
       ),
     );
 
+  // Who anchors each member's household this year. A person attaches to an
+  // object as owner OR occupant, and BOTH have to follow the same anchor —
+  // routing only occupants through it strands the owned structures of someone
+  // who joined another member's party, so their tent belongs to nobody and the
+  // roster reads "not placed" for the whole household.
+  const hostRows = await db
+    .select({
+      membershipId: attendee.membershipId,
+      hostMembershipId: attendee.hostMembershipId,
+    })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        isNotNull(attendee.membershipId),
+        isNotNull(attendee.hostMembershipId),
+      ),
+    );
+  const hostOf = new Map<string, string>();
+  for (const r of hostRows) {
+    if (r.membershipId && r.hostMembershipId)
+      hostOf.set(r.membershipId, r.hostMembershipId);
+  }
+
   // Sets, not arrays: a member who both owns a tent and is listed as its
   // occupant must not have it counted twice.
   const byMember = new Map<string, Set<string>>();
   const add = (membershipId: string | null, objectId: string) => {
     if (!membershipId) return;
-    const set = byMember.get(membershipId) ?? new Set<string>();
+    // Parties are one level deep, so this resolves in a single hop.
+    const key = hostOf.get(membershipId) ?? membershipId;
+    const set = byMember.get(key) ?? new Set<string>();
     set.add(objectId);
-    byMember.set(membershipId, set);
+    byMember.set(key, set);
   };
 
   for (const r of ownerRows) add(r.membershipId, r.objectId);
-  // Host first: an attendee in someone's party rolls up to that party, whether
-  // they're a guest or a member with an account of their own. Preferring
-  // `membershipId` would key a linked member's tent under themselves, so the
-  // roster (which groups by host) and the map would disagree about whose
-  // household it is.
+  // Host first: a guest has no membership of their own, so their occupancy can
+  // only reach the party through the host column.
   for (const r of occupantRows)
     add(r.hostMembershipId ?? r.membershipId, r.objectId);
 

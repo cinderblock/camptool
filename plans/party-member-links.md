@@ -171,18 +171,36 @@ Behavior changes to be aware of:
 - `passes.tsx` gained a server-computed `isSelf` so the request form keys off a
   real self test instead of rebuilding `m:${id}` on the client.
 
-### Phase 3 — write paths *(next)*
+### Phase 3 — write paths *(done, bar the officer row control)*
 
-### Phase 3 — write paths
-
-- [ ] `setPartyHost(attendeeId, hostMembershipId | null)` in
-      `attendee.server.ts`, enforcing: same camp + edition; not self; target is
-      not itself hosted; the subject hosts nobody.
-- [ ] `MyParty` card: "Add someone" offers **an existing member** (picker) or a
-      **new guest** (current free-text form).
-- [ ] Grace's own RSVP surface: "I'm coming with…" member picker.
-- [ ] Officer control on any roster row to set/clear the host.
+- [x] `setPartyHost({campId, editionId, membershipId, hostMembershipId})` in
+      `attendee.server.ts`. Keyed by **membership**, not attendee id — the caller
+      is picking a person off the roster — and creates the attendee row via
+      `ensureMemberAttendee` if they haven't RSVP'd. Refuses, with a message
+      written for the person reading it, on: self-link, a host that is itself
+      hosted, a subject that already hosts people.
+- [x] `getPartyHostOf` and `listPartyHostCandidates` (excludes self and anyone
+      already in a party; someone who hosts *guests* is still a valid anchor).
+- [x] `setPartyHost` action intent on the roster.
+- [x] A `CampingWith` card, separate from `MyParty` (which is about accountless
+      guests). Shows only the applicable half, since the one-level rule makes the
+      two mutually exclusive.
+- [ ] Officer control to set/clear the host on **any** roster row. The action
+      already authorizes officers; only the per-row UI is missing, so an officer
+      currently has to ask one of the two people to do it.
 - [ ] `claimGuest` ("That's me") gains a **link instead of merge** option.
+
+The authorization rule here is deliberately NOT `canManageAttendee`. That answers
+"does this viewer already have authority over that person?", and before the link
+exists a prospective host has none — the authority is what's being created. So
+the rule is stated directly in the action: either of the two people involved, the
+current host (for clearing), or an officer.
+
+**Two pickers, not one with two buttons.** Which direction you pick decides who
+can manage whose tickets, so it has to be an explicit choice rather than a
+consequence of which button you happened to hit: "Add someone to your party" (you
+get their tickets) versus "Or join someone else's party" (they get yours). The
+second is hidden once you anchor a party.
 
 ### Phase 4 — make it visible *(mostly done)*
 
@@ -244,6 +262,18 @@ Behavior changes to be aware of:
 - [x] 2026-08-07 — Phases 2 and most of 4 built. Verified by driving the roster
       in a dev server against a seeded link, not just by unit test — which is how
       the orphaned-host filter bug surfaced.
+- [x] 2026-08-07 — Phase 3 built and driven end to end (link, unlink, both
+      directions, all three refusals). Driving it caught two more bugs that no
+      unit test would have:
+
+      1. Someone *added* to a party disappeared from the shown roster — they had
+         no RSVP yet, and the visibility filter only knew about `partyMembers`,
+         not `partyHost`. Both directions now keep a row visible.
+      2. **Owned** structures didn't follow the party anchor, only occupancy did.
+         When Bob (owner of six placed objects) joined Cameron's party, both rows
+         read "not placed" — Bob's objects were still keyed under Bob while the
+         roster asked under Cameron. `partyMapObjects` now resolves every
+         attachment, owner and occupant alike, through one `hostOf` map.
 
 ### How to drive the app locally (this cost an hour to work out)
 

@@ -8,6 +8,7 @@ import {
   Group,
   Modal,
   Paper,
+  Select,
   SimpleGrid,
   Stack,
   Table,
@@ -32,8 +33,11 @@ import {
   type AttendeeStatus,
   addGuest,
   getGuest,
+  getPartyHostOf,
+  listPartyHostCandidates,
   loadRoster,
   removeGuest,
+  setPartyHost,
   updateGuest,
 } from "~/lib/attendee.server";
 import { eventStartIso } from "~/lib/brc";
@@ -97,6 +101,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     active.camp.id,
     (me?.guests ?? []).map((g) => g.id),
   );
+  // Who I could name as anchoring my household. Officers get the same list per
+  // row, computed client-side off `members` rather than one query per member.
+  const partyHostCandidates = await listPartyHostCandidates(
+    active.camp.id,
+    activeEdition.id,
+    myMembershipId,
+  );
   return redact(privacy, {
     members: members.map((m) => {
       // `partyMapObjects` keys a whole household under its host, so someone
@@ -126,6 +137,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       };
     }),
     myStatus: me?.status ?? ("unknown" as AttendeeStatus),
+    myPartyHost: me?.partyHost ?? null,
+    myPartyMembers: me?.partyMembers ?? [],
+    partyHostCandidates,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
     locked: activeEdition.locked,
     year: activeEdition.year,
@@ -282,6 +296,37 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: "Updated." });
   }
 
+  // Link a member into another member's party, or take them out of one.
+  //
+  // `canManageAttendee` is deliberately NOT the gate here. It answers "does this
+  // viewer already have authority over that person?", and before the link exists
+  // a prospective host has none — that authority is what's being created. So the
+  // rule is stated directly: either of the two people involved, or an officer.
+  if (intent === "setPartyHost") {
+    const subject = String(form.get("membershipId") ?? "");
+    const rawHost = String(form.get("hostMembershipId") ?? "").trim();
+    const host = rawHost === "" ? null : rawHost;
+    if (!subject) {
+      return data({ error: "Who are we linking?" }, { status: 400 });
+    }
+    const involved = subject === myMid || host === myMid;
+    if (!involved && !isOfficer) {
+      // Clearing: the current host is also entitled, and they aren't named in
+      // the form, so look them up before refusing.
+      if ((await getPartyHostOf(editionId, subject)) !== myMid) {
+        return data({ error: "That isn't your party." }, { status: 403 });
+      }
+    }
+    const result = await setPartyHost({
+      campId,
+      editionId,
+      membershipId: subject,
+      hostMembershipId: host,
+    });
+    if (!result.ok) return data({ error: result.error }, { status: 400 });
+    return data({ ok: host ? "Party updated." : "No longer linked." });
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
@@ -303,6 +348,9 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
     mapVisible,
     mapLot,
     mapObjects,
+    myPartyHost,
+    myPartyMembers,
+    partyHostCandidates,
   } = loaderData;
 
   return (
@@ -336,6 +384,15 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
         </SimpleGrid>
 
         <Arrivals members={members} year={year} />
+
+        {!locked ? (
+          <CampingWith
+            partyHost={myPartyHost}
+            partyMembers={myPartyMembers}
+            candidates={partyHostCandidates}
+            myMembershipId={myMembershipId}
+          />
+        ) : null}
 
         {!locked ? <MyParty guests={myGuests} year={year} /> : null}
 
@@ -563,6 +620,160 @@ type PartyGuest = {
 };
 
 /** Self-service management of the viewer's own party (guests they bring). */
+type PartyPerson = { membershipId: string; name: string };
+
+/**
+ * "Who are you camping with?" — the member-to-member half of a party, as
+ * opposed to `MyParty` below, which is about people with no account.
+ *
+ * Both directions live in one card because they're the same fact seen from
+ * either end, and because they're mutually exclusive: parties are one level
+ * deep, so someone listed under another member can't also anchor a household.
+ * Showing only the applicable half keeps that rule from having to be explained.
+ */
+function CampingWith({
+  partyHost,
+  partyMembers,
+  candidates,
+  myMembershipId,
+}: {
+  partyHost: PartyPerson | null;
+  partyMembers: PartyPerson[];
+  candidates: PartyPerson[];
+  myMembershipId: string;
+}) {
+  const fetcher = useFetcher<FetcherData>();
+  // Two pickers, not one with two buttons: which direction you pick decides who
+  // can manage whose tickets, so it has to be an explicit choice rather than a
+  // property of which button you happened to hit.
+  const [addPick, setAddPick] = useState<string | null>(null);
+  const [joinPick, setJoinPick] = useState<string | null>(null);
+  useFetcherNotifications(fetcher.data, fetcher.state, () => {
+    setAddPick(null);
+    setJoinPick(null);
+  });
+  const busy = fetcher.state !== "idle";
+  const options = candidates.map((c) => ({
+    value: c.membershipId,
+    label: c.name,
+  }));
+
+  const link = (membershipId: string, hostMembershipId: string) =>
+    fetcher.submit(
+      { intent: "setPartyHost", membershipId, hostMembershipId },
+      { method: "post" },
+    );
+  const unlink = (membershipId: string) =>
+    fetcher.submit(
+      { intent: "setPartyHost", membershipId, hostMembershipId: "" },
+      { method: "post" },
+    );
+
+  return (
+    <Card withBorder padding="lg" radius="md">
+      <Text fw={600} mb={4}>
+        Who you're camping with
+      </Text>
+      <Text size="sm" c="dimmed" mb="md">
+        For someone in camp who has their own account but is here as part of
+        your household — sharing your tent or RV, arriving together. Whoever
+        anchors the party can sort out tickets and setup passes for everyone in
+        it, and each person can still manage their own.
+      </Text>
+
+      {partyHost ? (
+        <Group gap="sm" wrap="wrap">
+          <Text size="sm">
+            You're listed as part of <b>{partyHost.name}</b>'s party.
+          </Text>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="red"
+            loading={busy}
+            onClick={() => unlink(myMembershipId)}
+          >
+            We're not together
+          </Button>
+        </Group>
+      ) : (
+        <>
+          {partyMembers.length > 0 ? (
+            <Stack gap="xs" mb="md">
+              {partyMembers.map((p) => (
+                <Group key={p.membershipId} gap="sm" wrap="wrap">
+                  <Text size="sm">{p.name}</Text>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="red"
+                    loading={busy}
+                    onClick={() => unlink(p.membershipId)}
+                  >
+                    Remove from your party
+                  </Button>
+                </Group>
+              ))}
+            </Stack>
+          ) : null}
+
+          <Group gap="sm" align="flex-end" wrap="wrap">
+            <Select
+              label="Add someone to your party"
+              description="You'll be able to sort out their ticket and setup pass"
+              placeholder="Pick a member"
+              searchable
+              clearable
+              value={addPick}
+              onChange={setAddPick}
+              data={options}
+              nothingFoundMessage="Nobody available"
+              style={{ minWidth: 240 }}
+            />
+            <Button
+              disabled={!addPick}
+              loading={busy}
+              onClick={() => addPick && link(addPick, myMembershipId)}
+            >
+              Add to my party
+            </Button>
+          </Group>
+
+          {partyMembers.length === 0 ? (
+            <Group gap="sm" align="flex-end" wrap="wrap" mt="md">
+              <Select
+                label="Or join someone else's party"
+                description="They'll be able to sort out yours"
+                placeholder="Pick a member"
+                searchable
+                clearable
+                value={joinPick}
+                onChange={setJoinPick}
+                data={options}
+                nothingFoundMessage="Nobody available"
+                style={{ minWidth: 240 }}
+              />
+              <Button
+                variant="light"
+                disabled={!joinPick}
+                loading={busy}
+                onClick={() => joinPick && link(myMembershipId, joinPick)}
+              >
+                Join their party
+              </Button>
+            </Group>
+          ) : null}
+
+          <Text size="xs" c="dimmed" mt="md">
+            Only people who aren't already in someone else's party are listed —
+            a party is one level deep, so it always has a single anchor.
+          </Text>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
   const addFetcher = useFetcher<FetcherData>();
   const rowFetcher = useFetcher<FetcherData>();
@@ -1226,11 +1437,15 @@ function RosterTable({
     // of that household is coming, and hiding the host would hide (and orphan)
     // them. That holds for members attending as part of their party just as
     // much as for guests they brought.
+    // Belonging to a party counts too, in both directions: someone added to a
+    // household hasn't necessarily RSVP'd yet, and dropping them out of the
+    // shown roster hides the very link that was just made.
     const coming = (m: (typeof members)[number]) =>
       m.status === "coming" ||
       m.status === "maybe" ||
       m.guests.length > 0 ||
-      m.partyMembers.length > 0;
+      m.partyMembers.length > 0 ||
+      m.partyHost !== null;
     const sorted = [...members].sort((a, b) => {
       const rank = (m: typeof a) => (coming(m) ? 0 : 1);
       return (
