@@ -7,13 +7,25 @@
  * Per-year, so every row carries `camp_id` (the hard multi-camp invariant) AND
  * `edition_id` (the operative per-year scope). A locked edition is read-only.
  *
- *   - A **member's own** attendee row has `membership_id` set (and
- *     `host_membership_id` NULL). Unique per edition (partial index). Its
- *     `status`/`arrival_date`/`departure_date`/`note` ARE that member's RSVP —
- *     this is where the former `participation` fields now live.
- *   - A **guest** row has `membership_id` NULL and `host_membership_id` = the
- *     member who manages them. `name` is authoritative for a guest; a member row
- *     leaves `name` NULL and resolves its display name from the joined `user`.
+ * The two nullable membership columns are **orthogonal**, not a two-way split:
+ *
+ *   - `membership_id` — set means this attendee has an account of their own.
+ *     Unique per edition (partial index). Its `status`/`arrival_date`/
+ *     `departure_date`/`note` ARE that member's RSVP — this is where the former
+ *     `participation` fields now live. NULL means a **guest**, and then `name`
+ *     is authoritative (a member row leaves `name` NULL and resolves its display
+ *     name from the joined `user`).
+ *   - `host_membership_id` — "here as part of this member's **party**". Set on a
+ *     guest row, it's the member who manages them. Set on a *member* row, it
+ *     records that two account-holders are attending as one household (Grace
+ *     coming as part of Albert's party) — a fact in its own right, independent
+ *     of whether they end up sharing a domicile.
+ *
+ * So "has a host" ≠ "is a guest": only `membership_id IS NULL` makes a guest.
+ * Server code must go through `isGuestRow` in `app/lib/attendee.server.ts`
+ * rather than testing `host_membership_id IS NOT NULL` — see the comment there
+ * for what breaks otherwise. Party links are one level deep: a hosted member
+ * hosts nobody, and nobody hosts themselves.
  *
  * Headcount = attendees with `status` = 'coming' for the edition (members + their
  * guests). Because map occupancy, tickets, and Setup Access Passes reference the

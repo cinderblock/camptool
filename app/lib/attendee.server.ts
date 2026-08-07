@@ -8,11 +8,27 @@
  * they're coming; if plans change the host removes them), so the headcount is a
  * uniform count of `status = 'coming'` across members + guests.
  */
-import { and, count, eq, isNotNull } from "drizzle-orm";
+import { and, count, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import { attendee, membership, setupPass, ticket, user } from "../../db/schema";
 
 export type AttendeeStatus = "unknown" | "coming" | "maybe" | "not_coming";
+
+/**
+ * A **guest** row: someone with no account of their own, managed by a host.
+ *
+ * Having a host is NOT the same as being a guest. `host_membership_id` means
+ * "here as part of this member's party", which a member with their own account
+ * can also be (Grace attending as part of Albert's household). Only the absence
+ * of `membership_id` makes a row a guest. Every query that means "guests" must
+ * use this predicate — conflating the two double-renders linked members on the
+ * roster, subtracts them from the member headcount, and (via `getGuest`) lets
+ * `removeGuest` delete a real member's RSVP.
+ */
+const isGuestRow = and(
+  isNull(attendee.membershipId),
+  isNotNull(attendee.hostMembershipId),
+);
 
 export type RosterGuest = {
   id: string;
@@ -85,12 +101,7 @@ export async function loadRoster(
       note: attendee.note,
     })
     .from(attendee)
-    .where(
-      and(
-        eq(attendee.editionId, editionId),
-        isNotNull(attendee.hostMembershipId),
-      ),
-    );
+    .where(and(eq(attendee.editionId, editionId), isGuestRow));
 
   const guestsByHost = new Map<string, RosterGuest[]>();
   for (const g of guestRows) {
@@ -156,12 +167,7 @@ export async function headcountFor(editionId: string): Promise<Headcount> {
   const [guestRow] = await db
     .select({ n: count() })
     .from(attendee)
-    .where(
-      and(
-        eq(attendee.editionId, editionId),
-        isNotNull(attendee.hostMembershipId),
-      ),
-    );
+    .where(and(eq(attendee.editionId, editionId), isGuestRow));
   // All guests are status 'coming', so members-coming = total coming − guests.
   const totalComing = comingRow?.n ?? 0;
   const guests = guestRow?.n ?? 0;
@@ -173,7 +179,11 @@ export async function headcountFor(editionId: string): Promise<Headcount> {
   };
 }
 
-/** A host's own guests for the edition (their "party"). */
+/**
+ * A host's own guests for the edition — accountless people only. Members
+ * attending as part of this host's party are listed separately; they are not
+ * anybody's guest.
+ */
 export async function listGuests(
   editionId: string,
   hostMembershipId: string,
@@ -191,6 +201,7 @@ export async function listGuests(
       and(
         eq(attendee.editionId, editionId),
         eq(attendee.hostMembershipId, hostMembershipId),
+        isGuestRow,
       ),
     );
   return rows.map((r) => ({
@@ -227,7 +238,15 @@ export async function addGuest(opts: {
   });
 }
 
-/** Fetch a guest row scoped to camp+edition, for authorization + editing. */
+/**
+ * Fetch a guest row scoped to camp+edition, for authorization + editing.
+ *
+ * The `isGuestRow` filter is load-bearing, not tidiness: this is the gate in
+ * front of `updateGuest` and `removeGuest`, and `removeGuest` *deletes* the
+ * attendee row. Matching on "has a host" alone would let a member attending as
+ * part of someone's party be silently deleted through the guest endpoints —
+ * losing their RSVP, releasing their ticket and revoking their setup pass.
+ */
 export async function getGuest(
   campId: string,
   editionId: string,
@@ -249,7 +268,7 @@ export async function getGuest(
         eq(attendee.id, guestId),
         eq(attendee.campId, campId),
         eq(attendee.editionId, editionId),
-        isNotNull(attendee.hostMembershipId),
+        isGuestRow,
       ),
     )
     .limit(1);
