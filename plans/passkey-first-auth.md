@@ -318,12 +318,12 @@ gotcha. Verify on a `VACUUM INTO` copy of the live DB before restarting.
   index or the migration will fail on the live DB.
 - **RP ID binds passkeys to a hostname.** `rpID` is derived from
   `PUBLIC_BASE_URL`. Passkeys enrolled on `camptool.mathcamp.us` **will not
-  work** on localhost dev, and **changing the production domain invalidates
-  every enrolled passkey for every user**. Since `plans/camptool.md` still
-  contemplates moving to `tool.mathcamp.us`/`mathcamp.us`, *settle the final
-  domain before pushing adoption*, or the migration gets run twice. This is
-  the strongest argument for keeping the legacy-login grace period open a
-  while.
+  work** on localhost dev, and **changing the production domain would
+  invalidate every enrolled passkey for every user**.
+  **SETTLED 2026-08-08 (Cameron): the domain is `camptool.mathcamp.us`**, so
+  rpID = `camptool.mathcamp.us`. The `tool.mathcamp.us`/`mathcamp.us` musing in
+  `plans/camptool.md` is NOT happening; if it ever does, it is a full
+  re-enrollment event for every user and needs its own plan.
 - **A WebAuthn RP ID must be a DOMAIN — an IP address cannot host a passkey
   ceremony.** So `http://127.0.0.1:17923` and `http://[::1]:17923` are
   unusable for passkey testing even though they're valid secure contexts;
@@ -331,10 +331,17 @@ gotcha. Verify on a `VACUUM INTO` copy of the live DB before restarting.
   (verified: `127.0.0.1` gets connection-refused, `localhost` and `[::1]`
   get 200) — so the one address that works for both is `localhost`.
 - **The dev server's `PUBLIC_BASE_URL` must match the URL you test at**,
-  because `rpID` and `origin` derive from it. `.env` currently points at
-  `https://camptool.isozilla.com` (a tunnel, **down** as of 2026-08-07), so
-  local passkey testing needs an explicit override:
+  because `rpID` and `origin` derive from it. `.env` points at
+  `https://camptool.isozilla.com` — a scratch tunnel that is **down** (verified
+  2026-08-08: returns an empty body). Production `camptool.mathcamp.us` is
+  fine; only the scratch tunnel is dead. Local passkey testing therefore needs
+  an explicit override:
   `PUBLIC_BASE_URL=http://localhost:17923 bun run dev`.
+- **`curl -o /dev/null -w "%{http_code}"` gives FALSE NEGATIVES here** —
+  it reported `000` for `camptool.mathcamp.us` while the site was serving
+  normally, which briefly led this plan to claim production was unreachable.
+  Check reachability by fetching the body and measuring it
+  (`curl -s URL | wc -c`), or dump headers with `-D`.
 - **Playwright HANGS under Bun; run it under Node.** `chromium.launch()` never
   returns and never times out when the script is run with `bun`, but works
   instantly under `node --experimental-strip-types` (Node 24.18). Playwright
@@ -410,10 +417,8 @@ passkey push reduces the motivation, but the doc stays valid).
 
 ## Open questions for the user
 
-1. **Final production domain.** Passkeys are bound to it, and moving it
-   invalidates every one. Is `camptool.mathcamp.us` the permanent home, or is
-   `tool.mathcamp.us`/`mathcamp.us` still on the table? *Recommendation: settle
-   this before step 5, since it's nearly free now and expensive later.*
+1. ~~Final production domain.~~ **ANSWERED 2026-08-08: `camptool.mathcamp.us`.**
+   rpID is settled; see the RP-ID gotcha above.
 2. Should `authPasskey: 'required'` block **officers/admins** too, or only
    members? *Recommendation: everyone — an admin without a passkey is the
    account most worth protecting.*
@@ -439,10 +444,16 @@ passkey push reduces the motivation, but the doc stays valid).
       `e2e/` with a CDP virtual authenticator — the first real E2E harness in
       the repo, and the only way to regression-test passkey auth.
       `bun run typecheck`, `bun run test` (137 pass), and biome all green.
-      Caveat: verified only against `http://localhost:17923`; **not yet
-      exercised on a real HTTPS origin** (the isozilla tunnel was down).
-- [ ] Next: step 2 (schema + migration). **Blocked-ish on open question 1**
-      (final production domain) before adoption is pushed — see above.
+      Caveat: the WebAuthn ceremony is verified only against
+      `http://localhost:17923`; **not yet exercised on a real HTTPS origin**.
+- [x] 2026-08-08 — **DEPLOYED** (commit `08940c6`, "Deploy to firefly" green).
+      `/_version` on `camptool.mathcamp.us` matches HEAD exactly. The
+      `/spike/passkey` harness is **dev-only** — verified `HTTP 404` with no
+      spike markers on production, both against a local production build over
+      its unix socket and against the live site.
+      Nothing about existing login flows changed; this is additive.
+- [ ] Next: step 2 (schema + migration). No longer blocked — the domain
+      question is answered.
 
 ### How to run the passkey tests
 
