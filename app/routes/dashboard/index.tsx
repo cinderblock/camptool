@@ -21,9 +21,12 @@ import {
   useNavigate,
   useRevalidator,
 } from "react-router";
+import { type OutstandingAsk, outstandingAsks } from "~/lib/asks";
+import { loadAskSnapshots } from "~/lib/asks.server";
 import { type Headcount, headcountFor } from "~/lib/attendee.server";
 import { authClient } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
+import { weeksUntilEvent } from "~/lib/brc";
 import { featureVisibleTo } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
@@ -33,7 +36,6 @@ import { pendingApplicationWhere } from "~/lib/recruits.server";
 import { dateLabel, timeRangeLabel, todayIso } from "~/lib/schedule";
 import { loadAgenda } from "~/lib/schedule.server";
 import { resolveActiveCamp } from "~/lib/session.server";
-import { loadWizardState } from "~/lib/wizard.server";
 import { db } from "../../../db/client.server";
 import {
   account,
@@ -124,7 +126,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       roster: boolean;
     };
     announcements: { id: string; title: string; pinned: boolean }[];
-    setupPending: number;
+    asks: OutstandingAsk[];
     bringingCount: number;
     pendingApprovals: number;
     dues: { expected: number; paid: number; owed: number } | null;
@@ -190,17 +192,19 @@ export async function loader({ request }: Route.LoaderArgs) {
       pendingApprovals = p?.value ?? 0;
     }
 
-    let setupPending = 0;
-    if (!isOfficer) {
-      const state = await loadWizardState({
-        campId: active.camp.id,
-        editionId,
-        membershipId: mid,
-        role,
-        year: activeEdition.year,
-      });
-      setupPending = state.pending.length;
-    }
+    // Everything this camper still owes, derived from their actual data rather
+    // than from whether they clicked through the wizard — so bailing out of
+    // /start no longer hides the list. Officers get theirs too: an officer is
+    // also a camper who owes a ticket and a fuel declaration.
+    const snapshot = (
+      await loadAskSnapshots(active.camp.id, editionId, activeEdition.year)
+    ).get(mid);
+    const asks = snapshot
+      ? outstandingAsks(snapshot, {
+          weeksUntilEvent: weeksUntilEvent(activeEdition.year),
+          featureStates: Object.fromEntries(featureStates),
+        })
+      : [];
 
     // The viewer's own dues status (only if the camp uses the Dues feature).
     let dues: { expected: number; paid: number; owed: number } | null = null;
@@ -285,7 +289,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         roster: seeFeature("roster"),
       },
       announcements: anns,
-      setupPending,
+      asks,
       bringingCount,
       pendingApprovals,
       dues,
@@ -394,32 +398,30 @@ function CampOverview({
   const role = active.role as Role;
   const [busy, setBusy] = useState(false);
 
-  // The viewer's to-dos for the active year (action items first).
-  const todos: { key: string; label: string; to?: string }[] = [];
-  if (overview) {
-    if (overview.setupPending > 0)
-      todos.push({
-        key: "setup",
-        label: `Finish setup — ${overview.setupPending} ${overview.setupPending === 1 ? "item" : "items"} left`,
-        to: "/start",
-      });
-    if (overview.features.bringing && overview.bringingCount === 0)
-      todos.push({
-        key: "bringing",
-        label: "Tell us what you're bringing",
-        to: "/bringing",
-      });
-    if (overview.dues && overview.dues.owed > 0)
-      todos.push({
-        key: "dues",
-        label: `Dues: $${(overview.dues.owed / 100).toFixed(2)} of $${(overview.dues.expected / 100).toFixed(2)} still due`,
-      });
-    if (overview.pendingApprovals > 0)
-      todos.push({
-        key: "approvals",
-        label: `${overview.pendingApprovals} map change${overview.pendingApprovals === 1 ? "" : "s"} need your approval`,
-        to: "/map",
-      });
+  // The viewer's to-dos for the active year, most pressing first. Everything a
+  // camper personally owes comes from the ask registry (app/lib/asks.ts) —
+  // adding one there makes it appear here with no edit to this file. Only the
+  // officer duty below is computed locally, since it's a job rather than a
+  // thing the camp needs *from* them.
+  const todos: {
+    key: string;
+    label: string;
+    hint?: string;
+    to?: string;
+    importance?: string;
+  }[] = (overview?.asks ?? []).map((a) => ({
+    key: a.key,
+    label: a.label,
+    hint: a.hint,
+    to: a.route,
+    importance: a.importance,
+  }));
+  if (overview && overview.pendingApprovals > 0) {
+    todos.push({
+      key: "approvals",
+      label: `${overview.pendingApprovals} map change${overview.pendingApprovals === 1 ? "" : "s"} need your approval`,
+      to: "/map",
+    });
   }
 
   async function addPasskey() {
@@ -473,10 +475,27 @@ function CampOverview({
                   You're all caught up. 🎉
                 </Text>
               ) : (
-                <Stack gap="xs">
+                <Stack gap="sm">
                   {todos.map((t) => (
                     <Group key={t.key} justify="space-between" wrap="nowrap">
-                      <Text size="sm">{t.label}</Text>
+                      <Stack gap={0} style={{ minWidth: 0 }}>
+                        <Group gap={6} wrap="nowrap">
+                          {/* Only "required" is called out. Badging every row
+                              would make the list read as uniformly urgent,
+                              which is how people learn to ignore it. */}
+                          {t.importance === "required" ? (
+                            <Badge size="xs" color="red" variant="light">
+                              needed
+                            </Badge>
+                          ) : null}
+                          <Text size="sm">{t.label}</Text>
+                        </Group>
+                        {t.hint ? (
+                          <Text size="xs" c="dimmed">
+                            {t.hint}
+                          </Text>
+                        ) : null}
+                      </Stack>
                       {t.to ? (
                         <Button
                           component={Link}

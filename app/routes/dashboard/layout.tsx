@@ -23,7 +23,10 @@ import {
 } from "react-router";
 import { redirect } from "react-router";
 import { FeedbackButton } from "~/components/FeedbackButton";
+import { outstandingAsks } from "~/lib/asks";
+import { loadAskSnapshots } from "~/lib/asks.server";
 import { authClient, signOut } from "~/lib/auth-client";
+import { weeksUntilEvent } from "~/lib/brc";
 import {
   type FeatureKey,
   type FeatureState,
@@ -38,7 +41,6 @@ import type { PrivacyMode } from "~/lib/privacy";
 import { redact } from "~/lib/privacy.server";
 import { hasScheduledDays } from "~/lib/schedule.server";
 import { resolveActiveCamp } from "~/lib/session.server";
-import { loadWizardState } from "~/lib/wizard.server";
 import { db } from "../../../db/client.server";
 import { membership } from "../../../db/schema";
 import type { Route } from "./+types/layout";
@@ -56,11 +58,16 @@ export async function loader({ request }: Route.LoaderArgs) {
     canUsePrivacy,
   } = await resolveActiveCamp(request);
 
-  // Guide brand-new campers (non-officers) through the onboarding wizard. The
-  // forced redirect fires at most once (wizardStep flips to 1 the first time
-  // /start loads); after that, the "Finish setup" nav shows whenever the active
-  // edition still has season-relevant asks left to resolve. Officers are exempt.
-  let showFinishSetup = false;
+  // Guide brand-new campers through the wizard. The forced redirect fires at
+  // most once (wizardStep flips to 1 the first time /start loads) and stays
+  // non-officer, because a wizard is a poor first experience for someone who
+  // already runs the camp.
+  //
+  // The count that follows is a different thing and applies to everyone: what
+  // this camper still owes, derived from their data rather than from whether
+  // they walked the wizard. Officers were previously exempt, which meant the
+  // people most likely to be asked "what do I still need to do?" were the only
+  // ones the app never told.
   if (
     active &&
     activeEdition &&
@@ -74,14 +81,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (me && me.wizardStep === 0) {
       throw redirect("/start");
     }
-    const state = await loadWizardState({
-      campId: active.camp.id,
-      editionId: activeEdition.id,
-      membershipId: active.membership.id,
-      role: active.membership.role,
-      year: activeEdition.year,
-    });
-    showFinishSetup = state.pending.length > 0;
   }
 
   const superAdmin = await isSuperAdmin(user.id);
@@ -91,6 +90,27 @@ export async function loader({ request }: Route.LoaderArgs) {
   const features: Partial<Record<FeatureKey, FeatureState>> = active
     ? Object.fromEntries(await loadFeatureStates(active.camp.id))
     : {};
+
+  // What this camper still owes, derived from their data rather than from
+  // whether they walked the wizard — so bailing out of /start no longer hides
+  // it. Reuses `features` above: an ask for a feature they can't see is dropped,
+  // same rule the nav itself follows.
+  let outstandingCount = 0;
+  if (active && activeEdition) {
+    const snapshot = (
+      await loadAskSnapshots(
+        active.camp.id,
+        activeEdition.id,
+        activeEdition.year,
+      )
+    ).get(active.membership.id);
+    if (snapshot) {
+      outstandingCount = outstandingAsks(snapshot, {
+        weeksUntilEvent: weeksUntilEvent(activeEdition.year),
+        featureStates: features,
+      }).length;
+    }
+  }
 
   // A feature that's switched on but has nothing in it yet is worse than a
   // missing one — a camper clicked Schedule looking for the camp's programme
@@ -108,7 +128,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     features,
     superAdmin,
     scheduleEmpty,
-    showFinishSetup,
+    outstandingCount,
     privacyMode,
     canUsePrivacy,
     // Flattened to `…Name` so the redaction registry classifies it as a person;
@@ -139,7 +159,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     features,
     superAdmin,
     scheduleEmpty,
-    showFinishSetup,
+    outstandingCount,
     impersonatedByName,
     privacyMode,
     canUsePrivacy,
@@ -175,7 +195,15 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           : []),
       ]
     : [
-        { to: "/", label: "Overview", end: true },
+        // The count rides on Overview rather than becoming its own link: the
+        // to-do card lives there, and a second entry pointing at "/" would
+        // collide on the `key={item.to}` below.
+        {
+          to: "/",
+          label: "Overview",
+          end: true,
+          badge: outstandingCount > 0 ? String(outstandingCount) : null,
+        },
         { to: "/guide", label: "How it works", end: false },
         ...gated("announcements", "/announcements", "Announcements"),
         // An on-but-empty Schedule stays hidden from members (see the loader).
@@ -183,9 +211,6 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           ? []
           : gated("schedule", "/schedule", "Schedule")),
         ...gated("programming", "/programming", "Programming"),
-        ...(showFinishSetup
-          ? [{ to: "/start", label: "Finish setup", end: false }]
-          : []),
         { to: "/members", label: "Members · all years", end: false },
         ...gated(
           "roster",
@@ -382,6 +407,10 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               "preview" in item && item.preview ? (
                 <Badge size="xs" color="grape" variant="light">
                   preview
+                </Badge>
+              ) : "badge" in item && item.badge ? (
+                <Badge size="xs" color="red" variant="filled" circle>
+                  {item.badge}
                 </Badge>
               ) : undefined
             }
