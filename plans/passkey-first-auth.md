@@ -332,11 +332,50 @@ gotcha. Verify on a `VACUUM INTO` copy of the live DB before restarting.
   get 200) — so the one address that works for both is `localhost`.
 - **The dev server's `PUBLIC_BASE_URL` must match the URL you test at**,
   because `rpID` and `origin` derive from it. `.env` points at
-  `https://camptool.isozilla.com` — a scratch tunnel that is **down** (verified
-  2026-08-08: returns an empty body). Production `camptool.mathcamp.us` is
-  fine; only the scratch tunnel is dead. Local passkey testing therefore needs
-  an explicit override:
-  `PUBLIC_BASE_URL=http://localhost:17923 bun run dev`.
+  `https://camptool.isozilla.com`, which is **correct and working** — see the
+  local-HTTPS setup below. (An earlier revision of this plan wrongly called
+  `.env` stale and suggested pointing it at localhost. Don't; the isozilla
+  origin is the *better* test target because it's HTTPS with a real cert.)
+- **Test runs MUST override `DATABASE_PATH`, not just `PUBLIC_BASE_URL`.**
+  Overriding only the base URL leaves `DATABASE_PATH=./data/camptool.db` from
+  `.env`, so E2E signups land in the **shared dev DB**. This happened on
+  2026-08-08: four `spike-*@example.com` users were created in
+  `data/camptool.db` and had to be cleaned out (backup at
+  `data/camptool.pre-spike-cleanup.db`). Always:
+  `DATABASE_PATH=./data/verify/<something>.db bun run dev`.
+- **`PRAGMA foreign_keys` is per-CONNECTION.** An ad-hoc
+  `bun -e 'new Database(...)'` cleanup script does **not** inherit the app's
+  setting and will delete a `user` row while leaving its `passkey`/`session`
+  rows orphaned. The app itself is fine — `db/client.server.ts:41` turns FKs
+  on after migrating and `foreign_key_check`s on boot. Any throwaway script
+  that deletes rows must `PRAGMA foreign_keys = ON` first.
+
+### Local HTTPS testing: `camptool.isozilla.com` (restored 2026-08-08)
+
+Passkeys can't be meaningfully tested on plain localhost forever — rpID,
+`Secure` cookies and `isLocalDev` all behave differently. This box has a proper
+setup for it, and it is *not* a public deployment:
+
+- Public DNS `camptool.isozilla.com` → **`127.0.0.1`** (loopback), so the name
+  only ever reaches your own machine.
+- A machine-local **Caddy** service (admin API `localhost:2019`) terminates TLS
+  with a **real Let's Encrypt cert** (ACME DNS-01 via Cloudflare) and
+  reverse-proxies to the dev server on `:17923`.
+- **The route is runtime-only and is lost on every Caddy restart/reboot** —
+  that is by design (see the `caddy-local-proxy` skill), and is the only reason
+  the host ever appears "down". The cert stays cached, so restoring is instant:
+
+```bash
+curl -X POST http://localhost:2019/config/apps/http/servers/srv0/routes \
+  -H 'Content-Type: application/json' \
+  -d '{"@id":"camptool.isozilla.com","match":[{"host":["camptool.isozilla.com"]}],
+       "handle":[{"handler":"reverse_proxy","upstreams":[{"dial":"localhost:17923"}]}],
+       "terminal":true}'
+# list:   curl -s http://localhost:2019/config/apps/http/servers/srv0/routes
+# remove: curl -X DELETE http://localhost:2019/id/camptool.isozilla.com
+```
+
+With that route up, `.env` needs no changes at all.
 - **`curl -o /dev/null -w "%{http_code}"` gives FALSE NEGATIVES here** —
   it reported `000` for `camptool.mathcamp.us` while the site was serving
   normally, which briefly led this plan to claim production was unreachable.
@@ -444,16 +483,20 @@ passkey push reduces the motivation, but the doc stays valid).
       `e2e/` with a CDP virtual authenticator — the first real E2E harness in
       the repo, and the only way to regression-test passkey auth.
       `bun run typecheck`, `bun run test` (137 pass), and biome all green.
-      Caveat: the WebAuthn ceremony is verified only against
-      `http://localhost:17923`; **not yet exercised on a real HTTPS origin**.
 - [x] 2026-08-08 — **DEPLOYED** (commit `08940c6`, "Deploy to firefly" green).
       `/_version` on `camptool.mathcamp.us` matches HEAD exactly. The
       `/spike/passkey` harness is **dev-only** — verified `HTTP 404` with no
       spike markers on production, both against a local production build over
       its unix socket and against the live site.
       Nothing about existing login flows changed; this is additive.
+- [x] 2026-08-08 — **Verified on a REAL HTTPS ORIGIN.** Restored the local
+      Caddy route (Cameron authorized) and re-ran the full ceremony against
+      `https://camptool.isozilla.com` with `.env` untouched — so rpID was a
+      real domain, cookies were `Secure`, and `isLocalDev` was false, i.e.
+      production-shaped config rather than localhost. **9/9 pass.** This closes
+      the last verification gap on step 1.
 - [ ] Next: step 2 (schema + migration). No longer blocked — the domain
-      question is answered.
+      question is answered and the HTTPS test target works.
 
 ### How to run the passkey tests
 
@@ -463,6 +506,11 @@ PUBLIC_BASE_URL=http://localhost:17923 bun run dev
 
 # terminal 2
 bun run e2e:passkey        # full ceremony, runs under NODE (hangs under bun)
+
+# BETTER: against the real HTTPS origin (restore the Caddy route first, above).
+# Note the DATABASE_PATH override — without it the test writes to the shared dev DB.
+DATABASE_PATH=./data/verify/https-passkey.db bun run dev
+E2E_BASE_URL=https://camptool.isozilla.com bun run e2e:passkey
 
 # the gate test wants its own throwaway DB + port, so it can flip the
 # instance-wide invite-only switch without touching the shared dev DB:
