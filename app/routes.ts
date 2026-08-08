@@ -19,6 +19,12 @@ export default [
   // Super-admin DB backup download (resource route; self-gated).
   route("export-db", "routes/export-db.tsx"),
   route("api/auth/*", "routes/api.auth.$.tsx"),
+  // Begin a passkey-first (password-less) signup; returns the opaque handle
+  // that addPasskey({ context }) carries back to the server.
+  route("api/passkey-signup", "routes/api.passkey-signup.tsx"),
+  // TEMPORARY passkey-first spike harness. Remove with routes/spike.passkey.tsx
+  // once the flow lands in AuthInline (plans/passkey-first-auth.md step 5).
+  route("spike/passkey", "routes/spike.passkey.tsx"),
   // Browser error forwarding (telemetry.client.ts → client_error table).
   route("api/log-error", "routes/api.log-error.tsx"),
   // User feedback submissions (FeedbackButton → feedback table).

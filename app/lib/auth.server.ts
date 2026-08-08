@@ -11,6 +11,10 @@ import {
   hasSignupUnlock,
   isSuperAdmin,
 } from "./instance.server";
+import {
+  consumePendingSignup,
+  readPendingSignup,
+} from "./passkey-signup.server";
 import { ac, roles } from "./permissions";
 
 const baseURL = PUBLIC_BASE_URL;
@@ -56,8 +60,13 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
 
   // Instance-level lockdowns. New-user creation is gated here so it covers
-  // EVERY signup path (email/password, magic link, Discord) at the one point a
-  // user row is actually created — passkey never creates a user, so it's exempt.
+  // EVERY signup path (email/password, magic link, Discord, and now passkey) at
+  // the one point a user row is actually created. Passkey-first signup reaches
+  // this via internalAdapter.createUser in the plugin's afterVerification; the
+  // request context (and so the unlock cookie) arrives through better-auth's
+  // async-storage context, not the explicit argument. The passkey path ALSO
+  // checks the gate earlier, in resolveUser, to fail before the WebAuthn prompt
+  // rather than after it.
   databaseHooks: {
     user: {
       create: {
@@ -135,6 +144,89 @@ export const auth = betterAuth({
       rpID: new URL(baseURL).hostname,
       rpName: "CampTool",
       origin: baseURL,
+
+      // `signIn.passkey()` with no email is a DISCOVERABLE-credential ceremony
+      // — the authenticator has to be able to enumerate its own credentials for
+      // this site. Without residentKey the browser may create a non-discoverable
+      // credential that usernameless sign-in then can't find. We relied on
+      // platform defaults before; passkey-first makes that unacceptable.
+      // userVerification stays "preferred", not "required", so an authenticator
+      // with no biometric/PIN capability degrades instead of hard-failing.
+      authenticatorSelection: {
+        residentKey: "required",
+        requireResidentKey: true,
+        userVerification: "preferred",
+      },
+
+      // Passkey-first signup: create an account with no password at all.
+      // Contrary to the note on the user-create hook above, passkey CAN now
+      // create users — see the gate re-check in resolveUser.
+      registration: {
+        requireSession: false,
+
+        // Runs at generate-register-options time. The plugin calls this ONLY
+        // when there's no session (an existing user adding a passkey takes the
+        // session branch and never reaches here).
+        resolveUser: async ({ ctx, context }) => {
+          // The invite-only lockdown normally lives in databaseHooks.user.create
+          // .before. That hook does still fire for the user we create later
+          // (better-auth's createWithHooks picks the request context up from
+          // async storage), but failing there means failing AFTER the visitor
+          // has completed a WebAuthn ceremony. Check here too so an invite-only
+          // deployment refuses before the browser prompt, not after.
+          const { allowOpenSignups } = await getInstanceSettings();
+          if (!allowOpenSignups) {
+            const headers = ctx?.headers ?? ctx?.request?.headers ?? null;
+            if (!hasSignupUnlock(headers)) {
+              throw new APIError("FORBIDDEN", {
+                message:
+                  "New sign-ups are invite-only on this deployment. Ask your camp for an invite link.",
+              });
+            }
+          }
+
+          const pending = await readPendingSignup(context);
+          if (!pending) {
+            throw new APIError("BAD_REQUEST", {
+              message: "That signup link expired. Start again.",
+            });
+          }
+          // `name` is the WebAuthn account identifier shown in the passkey
+          // manager; displayName is the human label. Return the PRE-GENERATED
+          // id so the credential's user handle matches the row we create in
+          // afterVerification.
+          return {
+            id: pending.userId,
+            name: pending.email,
+            displayName: pending.name,
+          };
+        },
+
+        // Runs only after the credential is cryptographically verified, so an
+        // abandoned prompt leaves no orphan account behind.
+        afterVerification: async ({ ctx, context }) => {
+          const pending = await consumePendingSignup(context);
+          // No pending row = an already-signed-in user adding a passkey. Leave
+          // the plugin's own userId resolution alone.
+          if (!pending) return;
+
+          // internalAdapter (not the raw adapter) so the user create hooks fire
+          // — that's what promotes the first account to super admin and applies
+          // the invite-only gate. It honors our supplied id (forceAllowId).
+          const created = await ctx.context.internalAdapter.createUser({
+            id: pending.userId,
+            name: pending.name,
+            email: pending.email,
+            emailVerified: false,
+          });
+          if (!created) {
+            throw new APIError("UNPROCESSABLE_ENTITY", {
+              message: "Could not create your account.",
+            });
+          }
+          return { userId: created.id };
+        },
+      },
     }),
   ],
 });
