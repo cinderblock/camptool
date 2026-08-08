@@ -46,6 +46,7 @@ import {
   mapObject,
   memberRequirement,
   membership,
+  passkey,
   recruitApplication,
   user as userTable,
 } from "../../../db/schema";
@@ -89,6 +90,14 @@ export async function loader({ request }: Route.LoaderArgs) {
           .limit(1)
       ).length > 0
     : false;
+
+  // Account-level, so it is NOT gated on having an active camp.
+  const passkeyCount = (
+    await db
+      .select({ id: passkey.id })
+      .from(passkey)
+      .where(eq(passkey.userId, user.id))
+  ).length;
 
   let memberCount = 0;
   if (active) {
@@ -303,6 +312,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     userEmail: user.email,
     discordEnabled,
     hasDiscord,
+    passkeyCount,
     memberCount,
     canCreateCamp,
     pendingApplications,
@@ -393,7 +403,8 @@ function CampOverview({
 }: {
   loaderData: Route.ComponentProps["loaderData"];
 }) {
-  const { memberCount, discordEnabled, hasDiscord, overview } = loaderData;
+  const { memberCount, discordEnabled, hasDiscord, passkeyCount, overview } =
+    loaderData;
   const active = loaderData.active as NonNullable<typeof loaderData.active>;
   const role = active.role as Role;
   const [busy, setBusy] = useState(false);
@@ -422,21 +433,6 @@ function CampOverview({
       label: `${overview.pendingApprovals} map change${overview.pendingApprovals === 1 ? "" : "s"} need your approval`,
       to: "/map",
     });
-  }
-
-  async function addPasskey() {
-    setBusy(true);
-    const res = await authClient.passkey.addPasskey({ name: "My device" });
-    setBusy(false);
-    if (res?.error) {
-      notifications.show({
-        color: "red",
-        title: "Passkey",
-        message: res.error.message ?? "Could not register passkey",
-      });
-      return;
-    }
-    notifications.show({ title: "Passkey", message: "Passkey registered." });
   }
 
   async function linkDiscord() {
@@ -631,17 +627,38 @@ function CampOverview({
 
           <Card withBorder padding="lg" radius="md">
             <Text fw={600}>Passkey</Text>
-            <Text size="sm" c="dimmed" mb="sm">
-              Add a passkey for fast, passwordless sign-in.
-            </Text>
-            <Button
-              size="xs"
-              variant="light"
-              onClick={addPasskey}
-              loading={busy}
-            >
-              Register a passkey
-            </Button>
+            {passkeyCount > 0 ? (
+              <>
+                <Text size="sm" c="green" mb="sm">
+                  {passkeyCount === 1
+                    ? "1 passkey set up"
+                    : `${passkeyCount} passkeys set up`}
+                </Text>
+                <Button
+                  component={Link}
+                  to="/account"
+                  size="xs"
+                  variant="subtle"
+                >
+                  Manage
+                </Button>
+              </>
+            ) : (
+              <>
+                <Text size="sm" c="dimmed" mb="sm">
+                  Sign in with your face, fingerprint or device PIN instead of a
+                  password.
+                </Text>
+                <Button
+                  component={Link}
+                  to="/account"
+                  size="xs"
+                  variant="light"
+                >
+                  Set up a passkey
+                </Button>
+              </>
+            )}
           </Card>
 
           <Card withBorder padding="lg" radius="md">

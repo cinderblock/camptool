@@ -15,6 +15,8 @@ export default [
   route("impersonate", "routes/impersonate.tsx"),
   // Privacy-mode toggle (admin-only; sets the per-browser cookie).
   route("privacy", "routes/privacy.tsx"),
+  // Snooze the passkey banner for 24h (resource route; sets a cookie).
+  route("passkey-nag", "routes/passkey-nag.tsx"),
   route("start", "routes/start.tsx"),
   // Super-admin DB backup download (resource route; self-gated).
   route("export-db", "routes/export-db.tsx"),
@@ -69,6 +71,7 @@ export default [
     route("training", "routes/dashboard/training.tsx"),
     route("questions", "routes/dashboard/questions.tsx"),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
+    route("account", "routes/dashboard/account.tsx"),
     route("settings", "routes/dashboard/settings.tsx"),
     route("admin", "routes/dashboard/admin.tsx"),
   ]),

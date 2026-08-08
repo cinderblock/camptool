@@ -100,6 +100,9 @@ export type AskSnapshot = {
 
   // — account —
   discordLinked: boolean;
+  /** At least one passkey enrolled. Keyed by user, not membership — a passkey
+   * is an account credential, so it follows the human across every camp. */
+  hasPasskey: boolean;
 
   /**
    * Asks the camper has explicitly waved off. Ignored for `required` asks.
@@ -295,6 +298,23 @@ export const ASKS: AskDef[] = [
     opensWeeksBefore: null,
     feature: "dues",
     isSatisfied: (s) => !attending(s) || s.duesOwedCents <= 0,
+  },
+  {
+    key: "passkey",
+    label: "Set up a passkey",
+    hint: "Sign in with your face, fingerprint or PIN — no password",
+    route: "/account",
+    audience: "all",
+    // `required` so it cannot be waved off: this stays on the to-do list until
+    // a passkey actually exists. Passkeys are where sign-in is heading (see
+    // plans/passkey-first-auth.md), and an account with no passkey is the one
+    // that gets locked out when legacy login is eventually switched off.
+    importance: "required",
+    // Nothing seasonal about it — an account needs a credential year-round.
+    opensWeeksBefore: null,
+    // Core, not a camp feature: every account wants one regardless of which
+    // features the camp has turned on.
+    isSatisfied: (s) => s.hasPasskey,
   },
   {
     key: "discord",

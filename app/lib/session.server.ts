@@ -106,6 +106,30 @@ export function setEditionCookie(editionId: string) {
 
 const PRIVACY_COOKIE = "camptool_privacy";
 
+// --- Passkey nag: hide the "set up a passkey" banner for a day. ---
+//
+// Unsigned and un-validated on purpose, same reasoning as the privacy cookie:
+// it grants no authority. The worst a forged value can do is hide your own
+// reminder, and the persistent to-do row (the `passkey` ask, which is
+// `required` and therefore not dismissible) stays put regardless — so the nag
+// is snoozed, never silenced.
+//
+// Expiry is the browser's job via Max-Age rather than a signed timestamp we
+// parse: when the cookie evaporates after 24h the banner simply comes back.
+
+const PASSKEY_NAG_COOKIE = "camptool_pknag";
+const PASSKEY_NAG_TTL_S = 24 * 60 * 60;
+
+/** Snooze the passkey banner for 24 hours. */
+export function snoozePasskeyNagCookie(): string {
+  return `${PASSKEY_NAG_COOKIE}=1; ${cookieBase}; Max-Age=${PASSKEY_NAG_TTL_S}`;
+}
+
+/** True while the passkey banner is snoozed. */
+export function passkeyNagSnoozed(request: Request): boolean {
+  return readCookie(request, PASSKEY_NAG_COOKIE) === "1";
+}
+
 export function setPrivacyCookie(mode: PrivacyMode) {
   return `${PRIVACY_COOKIE}=${serializePrivacyMode(mode)}; ${cookieBase}`;
 }

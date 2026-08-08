@@ -26,6 +26,7 @@ import {
   membership,
   onboardingCompletion,
   onboardingTask,
+  passkey,
   questionAnswer,
   setupPass,
   ticket,
@@ -60,6 +61,7 @@ function emptySnapshot(role: string): AskSnapshot {
     fuelDeclared: false,
     duesOwedCents: 0,
     discordLinked: false,
+    hasPasskey: false,
     dismissed: {},
     acknowledged: {},
   };
@@ -342,6 +344,14 @@ export async function loadAskSnapshots(
     .from(account)
     .where(eq(account.providerId, "discord"))) {
     bump(snaps, userToMembership.get(a.userId) ?? null, "discordLinked", true);
+  }
+
+  // — Passkey enrolled — keyed by user, not membership (a credential belongs to
+  // the human, not to their place in this camp).
+  for (const p of await db
+    .selectDistinct({ userId: passkey.userId })
+    .from(passkey)) {
+    bump(snaps, userToMembership.get(p.userId) ?? null, "hasPasskey", true);
   }
 
   // — dismissals and acknowledgements —

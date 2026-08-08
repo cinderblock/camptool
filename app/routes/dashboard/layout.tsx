@@ -23,6 +23,7 @@ import {
 } from "react-router";
 import { redirect } from "react-router";
 import { FeedbackButton } from "~/components/FeedbackButton";
+import { ShellBanner } from "~/components/ShellBanner";
 import { outstandingAsks } from "~/lib/asks";
 import { loadAskSnapshots } from "~/lib/asks.server";
 import { authClient, signOut } from "~/lib/auth-client";
@@ -40,9 +41,9 @@ import { hasAtLeast } from "~/lib/permissions";
 import type { PrivacyMode } from "~/lib/privacy";
 import { redact } from "~/lib/privacy.server";
 import { hasScheduledDays } from "~/lib/schedule.server";
-import { resolveActiveCamp } from "~/lib/session.server";
+import { passkeyNagSnoozed, resolveActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { membership } from "../../../db/schema";
+import { membership, passkey } from "../../../db/schema";
 import type { Route } from "./+types/layout";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -84,6 +85,17 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const superAdmin = await isSuperAdmin(user.id);
+
+  // The passkey banner. Queried per USER rather than read off the ask snapshot
+  // below, because a credential belongs to the human: someone who hasn't joined
+  // a camp yet (so has no edition, and therefore no snapshot) still needs the
+  // prompt. The quiet, permanent half of this lives in the ask registry.
+  const [anyPasskey] = await db
+    .select({ id: passkey.id })
+    .from(passkey)
+    .where(eq(passkey.userId, user.id))
+    .limit(1);
+  const showPasskeyNag = !anyPasskey && !passkeyNagSnoozed(request);
 
   // Per-camp feature states (off / preview / on) drive which nav links exist
   // for this viewer; route loaders enforce the same via requireFeature.
@@ -129,6 +141,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     superAdmin,
     scheduleEmpty,
     outstandingCount,
+    showPasskeyNag,
     privacyMode,
     canUsePrivacy,
     // Flattened to `…Name` so the redaction registry classifies it as a person;
@@ -160,6 +173,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     superAdmin,
     scheduleEmpty,
     outstandingCount,
+    showPasskeyNag,
     impersonatedByName,
     privacyMode,
     canUsePrivacy,
@@ -190,6 +204,8 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const nav = !activeCampId
     ? [
         { to: "/", label: "Overview", end: true },
+        // Account-level, not camp-level, so it's here even with no camp.
+        { to: "/account", label: "Your account", end: false },
         ...(superAdmin
           ? [{ to: "/admin", label: "Site admin", end: false }]
           : []),
@@ -242,6 +258,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ...gated("training", "/training", "Training"),
         ...gated("questions", "/questions", "Questions"),
         ...gated("onboarding", "/onboarding", "Onboarding"),
+        { to: "/account", label: "Your account", end: false },
         ...(activeRole === "admin"
           ? [{ to: "/settings", label: "Camp settings", end: false }]
           : []),
@@ -421,88 +438,96 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
 
       <AppShell.Main id="main-content">
         {privacyMode.on ? (
-          <Group
-            justify="space-between"
-            wrap="nowrap"
-            mb="md"
-            px="md"
-            py="xs"
-            // biome-ignore lint/a11y/useSemanticElements: an <output> element is for form results; this is a session-status banner, and role="status" makes SRs announce it when privacy mode starts.
-            role="status"
-            style={{
-              background: "var(--mantine-color-orange-light)",
-              borderRadius: "var(--mantine-radius-sm)",
-            }}
+          <ShellBanner
+            color="orange"
+            announce
+            action={
+              <Button
+                size="xs"
+                variant="filled"
+                color="orange"
+                onClick={() => setPrivacy({ on: false, keepSelf: false })}
+              >
+                Turn off
+              </Button>
+            }
           >
-            <Text size="sm">
-              <b>Privacy mode</b> — every name, email and phone number on screen
-              is fake{privacyMode.keepSelf ? " except your own" : ""}. Editing
-              is disabled so a fake name can't be saved over a real one.
-            </Text>
-            <Button
-              size="xs"
-              variant="filled"
-              color="orange"
-              onClick={() => setPrivacy({ on: false, keepSelf: false })}
-            >
-              Turn off
-            </Button>
-          </Group>
+            <b>Privacy mode</b> — every name, email and phone number on screen
+            is fake{privacyMode.keepSelf ? " except your own" : ""}. Editing is
+            disabled so a fake name can't be saved over a real one.
+          </ShellBanner>
         ) : null}
         {impersonatedByName ? (
-          <Group
-            justify="space-between"
-            wrap="nowrap"
-            mb="md"
-            px="md"
-            py="xs"
-            // biome-ignore lint/a11y/useSemanticElements: an <output> element is for form results; this is a session-status banner, and role="status" makes SRs announce it when impersonation starts.
-            role="status"
-            style={{
-              background: "var(--mantine-color-grape-light)",
-              borderRadius: "var(--mantine-radius-sm)",
-            }}
+          <ShellBanner
+            color="grape"
+            announce
+            action={
+              <Form method="post" action="/impersonate">
+                <input type="hidden" name="intent" value="stop" />
+                <Button type="submit" size="xs" variant="filled" color="grape">
+                  Stop
+                </Button>
+              </Form>
+            }
           >
-            <Text size="sm">
-              Working as <b>{user.name}</b> — impersonated by{" "}
-              {impersonatedByName}.
-            </Text>
-            <Form method="post" action="/impersonate">
-              <input type="hidden" name="intent" value="stop" />
-              <Button type="submit" size="xs" variant="filled" color="grape">
-                Stop
-              </Button>
-            </Form>
-          </Group>
+            Working as <b>{user.name}</b> — impersonated by {impersonatedByName}
+            .
+          </ShellBanner>
         ) : null}
         {previewDef ? (
-          <Group
-            wrap="nowrap"
-            justify="space-between"
-            mb="md"
-            px="md"
-            py="xs"
-            style={{
-              background: "var(--mantine-color-grape-light)",
-              borderRadius: "var(--mantine-radius-sm)",
-            }}
+          <ShellBanner
+            color="grape"
+            action={
+              activeRole === "admin" ? (
+                <Button
+                  component={NavLink}
+                  to="/settings"
+                  size="xs"
+                  variant="light"
+                  color="grape"
+                >
+                  Camp settings
+                </Button>
+              ) : null
+            }
           >
-            <Text size="sm">
-              <b>Preview</b> — only officers can see {previewDef.label} right
-              now. The rest of the camp won't see it until it's turned on.
-            </Text>
-            {activeRole === "admin" ? (
-              <Button
-                component={NavLink}
-                to="/settings"
-                size="xs"
-                variant="light"
-                color="grape"
-              >
-                Camp settings
-              </Button>
-            ) : null}
-          </Group>
+            <b>Preview</b> — only officers can see {previewDef.label} right now.
+            The rest of the camp won't see it until it's turned on.
+          </ShellBanner>
+        ) : null}
+        {/* The loud half of the passkey reminder: dismissible, but back
+            tomorrow. The quiet half is the `passkey` ask, which is `required`
+            and so sits on the to-do list until a passkey actually exists. */}
+        {showPasskeyNag ? (
+          <ShellBanner
+            color="blue"
+            action={
+              <Group gap="xs" wrap="nowrap">
+                <Button
+                  component={NavLink}
+                  to="/account"
+                  size="xs"
+                  variant="filled"
+                  color="blue"
+                >
+                  Set one up
+                </Button>
+                <Form method="post" action="/passkey-nag">
+                  <input
+                    type="hidden"
+                    name="returnTo"
+                    value={location.pathname}
+                  />
+                  <Button type="submit" size="xs" variant="subtle" color="blue">
+                    Not now
+                  </Button>
+                </Form>
+              </Group>
+            }
+          >
+            <b>Set up a passkey</b> — sign in with your face, fingerprint or
+            device PIN instead of a password. Takes a few seconds.
+          </ShellBanner>
         ) : null}
         <Outlet />
       </AppShell.Main>

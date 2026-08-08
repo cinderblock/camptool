@@ -420,8 +420,28 @@ it retires the only assumption that could invalidate the rest of the design.
       it when open signups are on. 9/9 + 2/2 checks pass.
 - [ ] 2. Schema + migration (all six changes above), verified on a VACUUM copy.
 - [ ] 3. `authenticatorSelection` + the `credential_id` unique index.
-- [ ] 4. `/account` page — list / add / rename / delete, with the
-      last-passkey guard. Retire the hardcoded Overview card.
+- [x] **4. `/account` page — DONE (2026-08-08).** List / add / rename / delete
+      with a server-enforced ownership check and a last-passkey guard (add the
+      replacement first). Enrolment prompts for a device name instead of
+      hardcoding "My device". The Overview card now reads the real passkey
+      count instead of being shown unconditionally, and defers enrolment to
+      `/account`. Nav link in both the with-camp and camp-less branches.
+- [x] **4b. The nag — DONE (2026-08-08), Cameron's ask.** Two surfaces, on
+      purpose:
+      - **Persistent + quiet:** a `passkey` entry in the ask registry
+        (`app/lib/asks.ts`), `importance: "required"` so it CANNOT be
+        dismissed, ungated by any camp feature and open year-round. Rides the
+        existing to-do card + nav count badge for free. `hasPasskey` joins the
+        snapshot next to `discordLinked` — keyed by user, since a credential
+        belongs to the human, not the membership.
+      - **Daily + loud:** a shell banner with "Set one up" / "Not now".
+        "Not now" sets `camptool_pknag`, an unsigned 24h cookie (same
+        reasoning as the privacy cookie: it grants no authority, and the worst
+        a forged value does is hide your own reminder). Expiry is the
+        browser's job via `Max-Age` rather than a signed timestamp, so the
+        banner simply returns tomorrow.
+      Extracted `app/components/ShellBanner.tsx` while doing it — the shell had
+      three copy-pasted banner blocks and this would have been the fourth.
 - [ ] 5. Passkey-first signup in `AuthInline` (doors) and `/login`, passkey as
       the primary CTA everywhere.
 - [ ] 6. Camp `authPolicy` — settings UI + door filtering + the `required`
@@ -495,8 +515,30 @@ passkey push reduces the motivation, but the doc stays valid).
       real domain, cookies were `Secure`, and `isLocalDev` was false, i.e.
       production-shaped config rather than localhost. **9/9 pass.** This closes
       the last verification gap on step 1.
+- [x] 2026-08-08 — **Steps 4 + 4b landed: `/account` and the nag.** 15-check
+      browser test (`e2e/passkey-nag.ts`) drives the whole lifecycle as a
+      PASSWORD user (the only kind that can lack a passkey): banner appears →
+      to-do row appears → "Not now" hides the banner but **not** the to-do row
+      → cookie is ~24h → clearing it brings the banner back → enrolling retires
+      both for good → the only passkey can't be removed. Plus 4 unit tests
+      pinning the ask's non-dismissibility. typecheck, 141 unit tests, biome
+      green; the signup suite re-run for regressions.
 - [ ] Next: step 2 (schema + migration). No longer blocked — the domain
       question is answered and the HTTPS test target works.
+
+### A note on "daily"
+
+Cameron asked for a *daily* nag. What shipped is daily **in-app**: the banner
+returns on the next visit after 24h. It cannot reach someone who never logs in,
+because the app has **no scheduler and no delivery channel** — `server.ts` is a
+bare `Bun.serve` with no timers, the deploy workflow has no `schedule:`
+trigger, there is no mail transport, and there is no Discord message-send code
+at all (`DISCORD_BOT_TOKEN` is plumbed into env but read only by the dead
+`checkGuildMembership`). Outbound daily reminders are therefore a separate
+project: a cron hitting a token-gated resource route, plus a channel, plus
+per-user send tracking so it fires once a day rather than once a deploy. That
+was offered and deliberately deferred — see `plans/outstanding-asks.md`, which
+reaches the same conclusion for asks generally.
 
 ### How to run the passkey tests
 

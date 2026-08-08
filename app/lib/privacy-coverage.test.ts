@@ -34,6 +34,9 @@ const EXEMPT: Record<string, string> = {
   "routes/c.$slug.schedule.tsx":
     "Public programming lineup; presenter names are published deliberately.",
   "routes/i.$token.tsx": "Public invite landing, reached without a session.",
+  "routes/spike.passkey.tsx":
+    "Dev-only passkey harness (its loader 404s in production) and it returns " +
+    "no data at all — the loader exists purely to gate the route.",
 };
 
 function routeFiles(): string[] {

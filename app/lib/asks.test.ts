@@ -29,6 +29,7 @@ const settled: AskSnapshot = {
   fuelDeclared: true,
   duesOwedCents: 0,
   discordLinked: true,
+  hasPasskey: true,
   dismissed: {},
   acknowledged: { extras: true },
 };
@@ -265,6 +266,42 @@ describe("catalog integrity", () => {
   test("every ask has a distinct label and a hint", () => {
     expect(new Set(ASKS.map((a) => a.label)).size).toBe(ASKS.length);
     for (const a of ASKS) expect(a.hint.length).toBeGreaterThan(0);
+  });
+});
+
+describe("passkey ask", () => {
+  test("is outstanding until a passkey exists", () => {
+    expect(
+      outstandingAsks(snap({ hasPasskey: false }), ctx).map((a) => a.key),
+    ).toContain("passkey");
+    expect(
+      outstandingAsks(snap({ hasPasskey: true }), ctx).map((a) => a.key),
+    ).not.toContain("passkey");
+  });
+
+  test("cannot be dismissed — it stays until actually done", () => {
+    // The banner is snoozeable; the to-do row is not. Marking it skipped in
+    // wizard_ask must NOT silence it, or "persistent until they do" is a lie.
+    const s = snap({ hasPasskey: false, dismissed: { passkey: true } });
+    expect(outstandingAsks(s, ctx).map((a) => a.key)).toContain("passkey");
+  });
+
+  test("is not gated on a camp feature", () => {
+    // Every account wants a credential regardless of which features the camp
+    // has switched on, so it must survive everything being off.
+    const s = snap({ hasPasskey: false });
+    const keys = outstandingAsks(s, { ...ctx, featureStates: {} }).map(
+      (a) => a.key,
+    );
+    expect(keys).toContain("passkey");
+  });
+
+  test("applies year-round, not just close to the event", () => {
+    const s = snap({ hasPasskey: false });
+    const keys = outstandingAsks(s, { ...ctx, weeksUntilEvent: 52 }).map(
+      (a) => a.key,
+    );
+    expect(keys).toContain("passkey");
   });
 });
 
