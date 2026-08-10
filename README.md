@@ -44,12 +44,16 @@ It's also **inventory-driven**: campers declare what they're *bringing* on a
 **Unplaced** tray onto the lot to place them and add shared camp items; an
 **Inventory** view accounts for everything (owner, size, placed-or-not).
 
-For Burning Man specifically, the map can plan a **directional internet uplink**:
-BMorg's public Wi-Fi comes off sector antennas on the NOC tower in Center Camp,
-and a camp radio needs line of sight to it. Drop an **Uplink radio** on the
-corner of an RV, container or shade frame, set its antenna height, and the map
-draws the aim path to the NOC and flags anything of yours tall enough to block
-it — so "which corner does the dish go on" is answered before you're on playa.
+The map plans camp networking too — its own **Network** palette group. A **Wi-Fi
+access point** draws its usable coverage as a ring, so overlapping APs and dead
+spots are visible while you place them.
+
+For Burning Man specifically, BMorg's public internet comes off sector
+antennas on the NOC tower in Center Camp, which a camp radio needs line of sight
+to: drop an **Uplink radio** on the corner of an RV, container or shade frame,
+set its antenna height, and the map draws the aim path to the NOC and flags
+anything of yours tall enough to block it — so "which corner does the dish go
+on" is answered before you're on playa.
 
 The map carries a few more touches: recognizable top-down icons per kind, an
 owner's first name on each domicile, a highlight filter (mine / domiciles /

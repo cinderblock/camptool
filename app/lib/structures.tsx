@@ -192,6 +192,78 @@ function UplinkFootprint({ w, h, color, selected }: FootprintCtx): ReactNode {
   );
 }
 
+/** A Wi-Fi access point seen from above: a dot radiating rings. Omnidirectional,
+ * so concentric — the opposite of the uplink's one-sided dish. */
+function WifiApFootprint({ w, h, color, selected }: FootprintCtx): ReactNode {
+  const cx = w / 2;
+  const cy = h / 2;
+  const r = Math.min(w, h) / 2;
+  return (
+    <g>
+      {[1, 0.68].map((f) => (
+        <circle
+          key={f}
+          cx={cx}
+          cy={cy}
+          r={r * f}
+          // Faintly filled rather than `fill="none"`: an unfilled shape is only
+          // hit-testable on its stroke, which makes a 2ft marker almost
+          // impossible to grab on the map.
+          fill={color}
+          fillOpacity={f === 1 ? 0.12 : 0}
+          stroke={color}
+          strokeOpacity={0.55}
+          strokeWidth={r * 0.1}
+          strokeDasharray={`${r * 0.2} ${r * 0.14}`}
+        />
+      ))}
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r * 0.36}
+        fill={color}
+        fillOpacity={0.9}
+        stroke={selected ? "#1c1c1c" : color}
+        strokeWidth={r * (selected ? 0.14 : 0.06)}
+      />
+    </g>
+  );
+}
+
+/** Legend/tray icon for a Wi-Fi access point: the familiar rising fan. */
+function wifiApIcon(size: number): ReactNode {
+  const cx = size / 2;
+  const cy = size * 0.76;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      style={{ display: "block", flex: "0 0 auto" }}
+      aria-hidden="true"
+    >
+      {[0.22, 0.36, 0.5].map((f) => {
+        // Chord spans 2·size·f, so radius = size·f·√2 draws it as a 90° arc.
+        const r = size * f * Math.SQRT2;
+        return (
+          <path
+            key={f}
+            d={`M ${cx - size * f} ${cy - size * f} A ${r} ${r} 0 0 1 ${
+              cx + size * f
+            } ${cy - size * f}`}
+            fill="none"
+            stroke="#15aabf"
+            strokeOpacity={0.8}
+            strokeWidth={size * 0.07}
+            strokeLinecap="round"
+          />
+        );
+      })}
+      <circle cx={cx} cy={cy} r={size * 0.08} fill="#15aabf" />
+    </svg>
+  );
+}
+
 /** Legend/tray icon for the uplink radio: a dish throwing a signal arc. */
 function uplinkIcon(size: number): ReactNode {
   const c = size / 2;
@@ -1071,7 +1143,7 @@ const CORE_KINDS = [
     shape: "custom",
     vehicle: false,
     rigid: true,
-    group: "Services",
+    group: "Network",
     tags: ["structure"],
     personal: true,
     renderFootprint: UplinkFootprint,
@@ -1084,6 +1156,39 @@ const CORE_KINDS = [
         max: 1,
         default: 1,
         toggle: true,
+      },
+    ],
+  },
+  // Wi-Fi access point — the local end of camp networking, wherever the internet
+  // comes from. Omnidirectional, so what matters on the map is its COVERAGE: the
+  // `rangeFt` ring shows how far it usefully reaches, making dead spots and
+  // overlapping APs visible when you place them. Height matters for the same
+  // reason (up high on a shade frame beats down at knee level in a tent).
+  {
+    value: "wifi-ap",
+    label: "Wi-Fi access point",
+    color: "#15aabf",
+    w: 2,
+    h: 2,
+    shape: "custom",
+    vehicle: false,
+    rigid: true,
+    group: "Network",
+    tags: ["structure"],
+    personal: true,
+    renderFootprint: WifiApFootprint,
+    renderIcon: wifiApIcon,
+    controls: [
+      {
+        key: "rangeFt",
+        // 100ft, not a spec-sheet line-of-sight number: on playa the signal is
+        // fighting dust, bodies, and RV/container walls, and a ring that fits
+        // inside the lot is the one that actually shows you your dead spots.
+        label: "Usable range (ft)",
+        min: 25,
+        max: 400,
+        step: 25,
+        default: 100,
       },
     ],
   },
@@ -1196,6 +1301,8 @@ const KIND_HEIGHTS: Record<string, number> = {
   // see over, so it's meant to be edited. A modest pole, or a mast on a roof;
   // BMorg warns that a tall pole that sways in the wind breaks the link.
   uplink: 12,
+  // Mounted up on a shade frame or a container, where it covers the most ground.
+  "wifi-ap": 10,
   "toy-hauler": 10,
   airstream: 9.5,
   kitchen: 8,
@@ -1248,6 +1355,7 @@ export const KIND_GROUPS: ReadonlyArray<{
     "Structures",
     "Power",
     "Water",
+    "Network",
     "Services",
   ];
   const seen = new Set<string>();

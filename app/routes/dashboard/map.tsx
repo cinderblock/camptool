@@ -4275,7 +4275,14 @@ function Editor({
       if (
         t?.tagName === "INPUT" ||
         t?.tagName === "TEXTAREA" ||
-        t?.isContentEditable
+        t?.isContentEditable ||
+        // Mantine builds sliders, selects and segmented controls out of
+        // focusable DIVs with an ARIA role rather than real inputs, so the
+        // tagName check above misses them: arrowing a slider in the side panel
+        // was ALSO nudging the selected structure across the map.
+        t?.closest(
+          '[role="slider"],[role="combobox"],[role="listbox"],[role="radiogroup"],select',
+        )
       )
         return;
       // `g` cycles the active snap grid (no selection needed).
@@ -6585,11 +6592,13 @@ function Editor({
                 })}
               </g>
             ) : null}
-            {/* Fuel & battery safety zones. Burning Man requires separation rings
-            around fuel storage (10′ no ignition sources, 20′ liquid↔propane, 50′
-            to another fuel area) and a minimum safety zone around a ≥100 kWh
-            battery bank. Drawn under the object markers, in plot-local feet, so
-            they print + export with the map. */}
+            {/* Per-object radius rings. Safety separations: Burning Man requires
+            them around fuel storage (10′ no ignition sources, 20′ liquid↔propane,
+            50′ to another fuel area) and around a ≥100 kWh battery bank. Plus
+            Wi-Fi coverage, which is the same shape for a friendlier reason —
+            seeing the circles overlap is how you find the camp's dead spots.
+            Drawn under the object markers, in plot-local feet, so they print +
+            export with the map. */}
             {objects.flatMap((o) => {
               const ccx = originX + (o.x + o.width / 2) * ppf;
               const ccy = originY + (o.y + o.height / 2) * ppf;
@@ -6613,7 +6622,10 @@ function Editor({
                     />
                     <text
                       x={ccx}
-                      y={ccy - rFt * ppf + 11}
+                      // Sits at the top of the ring, but clamped into the view:
+                      // a Wi-Fi range can be bigger than the whole lot, which
+                      // would otherwise park its label far off-screen.
+                      y={Math.max(MARGIN + 11, ccy - rFt * ppf + 11)}
                       textAnchor="middle"
                       fontSize={10}
                       fontWeight={600}
@@ -6638,6 +6650,17 @@ function Editor({
                     "#2f9e44",
                     `${Math.round(o.config.safetyFt ?? 20)}′ battery safety zone`,
                     `${o.id}-bat`,
+                  ),
+                ];
+              }
+              if (o.kind === "wifi-ap") {
+                const rf = o.config.rangeFt ?? 100;
+                return [
+                  ring(
+                    rf,
+                    "#15aabf",
+                    `${Math.round(rf)}′ Wi-Fi`,
+                    `${o.id}-wifi`,
                   ),
                 ];
               }
@@ -8479,6 +8502,12 @@ function SidePanel({
                         )}
                         onChange={(v) => apply(v, false)}
                         onChangeEnd={(v) => apply(v, true)}
+                        // Mantine fires onChangeEnd on pointer-up but NOT on the
+                        // arrow keys, so a keyboard adjustment would look applied
+                        // and then silently revert on the next load. Commit on
+                        // key-up too; `val` is current because the optimistic
+                        // onChange already re-rendered this handler.
+                        onKeyUp={() => apply(val, true)}
                         mb="sm"
                       />
                     </div>

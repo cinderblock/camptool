@@ -314,13 +314,19 @@ is a layout decision. The map now draws a faint labelled bearing vector to the
 NOC (plus a matching compass ray), and a new generic **"Uplink radio"** structure
 kind draws its own aim cone and flags anything of yours tall enough to block it
 (height-aware: the sight line climbs from the mast to the tower's 40′ antennas).
-BMorg publishes no address for the tower, so the target is modelled as a **100′
-circle at 6:15 & Esplanade** — an area, not a false-precision point. `brc.ts`
+The NOC is at **6:15 & Esplanade**, modelled as a 100′ target circle the aim cone
+has to cover (at ~4,900′ that subtends ~1.2°, so the cone is a sliver). `brc.ts`
 gained a generic `Landmark` model + city-plane geometry (`bearingFromMan`,
 `cityPointFt`, `citySightLine`); `map-geometry.ts` gained `cityPhi`, which lets
 `wedgeFor(...).ptXY` place ANY city address in the lot's frame. No migration.
-Gated on `isBurningMan(event)`. Full detail + gotchas:
-**`plans/noc-uplink-radio.md`**; E2E at `e2e/noc-uplink.ts` (7/7).
+Gated on `isBurningMan(event)`. Shipped alongside a **generic `wifi-ap` kind**
+(event-agnostic) whose `rangeFt` control draws a coverage ring (default 100′), so
+dead spots and overlapping APs are visible while placing them. Both networking
+kinds sit in their own **Network** legend group. Driving this also shook out two
+pre-existing bugs in the shared SidePanel slider controls (keyboard changes never
+committed; arrow keys also nudged the selected structure) — both fixed, both
+affecting every slider control. Full detail + gotchas:
+**`plans/noc-uplink-radio.md`**; E2E at `e2e/noc-uplink.ts` (14/14).
 
 **Irregular / non-rectilinear plots (deferred sub-phase).** Camps near keyholes,
 plazas, Center Camp, and other odd spots aren't a frontage×depth rectangle — they

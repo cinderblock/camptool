@@ -31,35 +31,24 @@ The map editor now answers it:
 - The overlay is gated on `isBurningMan(event)`, so another event layer just
   supplies no landmark and the whole feature stays quiet.
 
-## Research findings — where the NOC actually is
+## Where the NOC is
 
-**The NOC tower is in Center Camp, next to the Café.** Burning Man IT's own
-participant guide (`internet.burningman.org`) says, verbatim:
+**6:15 & Esplanade, as a 100′-diameter target circle** (Cameron, who knows the
+site). That's what `NOC_LANDMARK` encodes; the aim cone the map draws is exactly
+the cone that covers that circle. Don't relitigate the position.
+
+Supporting facts from Burning Man IT's participant guide
+(`internet.burningman.org`), worth keeping because they drive the math:
 
 > "Aim the radio visually toward the tallest tower in Center Camp, near the Cafe.
 > The sector antennas are mounted at about 40 ft (2/3 up the 60 ft tower)."
 
-BMorg does **not** publish a clock/radius address or GPS fix for the tower, so
-the only anchors are the Café and the Center Camp portal. From the **2025 BRC
-Measurements** doc (`bm-innovate.s3.amazonaws.com/2025/2025 BRC Measurements.doc.pdf`):
-
-> "Man to the center of The Canopy = 2,999′"
->
-> "There are five plaza portals to the Esplanade: at 6:00 (Center Camp), 3:00,
-> 4:30, 7:30, and 9:00."
-
-**Locked by the user:** model the target as a **100′-diameter circle centred at
-6:15 & Esplanade** — an area big enough to contain the tower wherever in Center
-Camp it actually stands, rather than a false-precision point. That's what
-`NOC_LANDMARK` encodes, and the aim cone is exactly the cone that covers that
-circle.
-
-**Precision is adequate for the purpose.** From Math Camp's lot (E @ 3:14) the
-NOC is ~4,900 ft away, so the 100′ target subtends **~1.2°** — narrower than a
-NanoBeam AC's beamwidth. The value here is "which side of camp does the link
-leave from, and what's in the way", not survey-grade aiming; the fine alignment
-is done on the radio itself (the guide points people at `https://172.16.0.1` →
-Tools → Alignment).
+The **40 ft antenna height** is what makes the sight line climb from the camp's
+mast toward the tower, which is why a low structure well down the path doesn't
+block it. From Math Camp's lot (E @ 3:14) the NOC is ~4,900 ft away, so the 100′
+target subtends **~1.2°** — that's why the cone is a sliver near the radio.
+Fine alignment is done on the radio itself (the guide points people at
+`https://172.16.0.1` → Tools → Alignment).
 
 Other facts worth keeping:
 
@@ -80,8 +69,8 @@ https://bm-innovate.s3.amazonaws.com/2025/2025%20BRC%20Measurements.doc.pdf
 **`app/lib/brc.ts`**
 - `bearingFromMan(hours)` — the one place the "12:00 is NE, clock runs clockwise"
   constant lives; `mapUpBearingFor` now derives from it instead of repeating it.
-- `Landmark` type + `NOC_LANDMARK` (6:15, esplanade radius, 100′ diameter, 40′
-  antenna height, and a `note` that keeps the estimate's provenance visible).
+- `Landmark` type + `NOC_LANDMARK` (6:15, esplanade radius, 100′ target diameter,
+  40′ antenna height).
 - `landmarkRadiusFt`, `cityPointFt`, `citySightLine`, `landmarkSightLine` —
   city-plane (feet north/east of the Man) geometry.
 
@@ -92,8 +81,21 @@ https://bm-innovate.s3.amazonaws.com/2025/2025%20BRC%20Measurements.doc.pdf
 
 **`app/lib/structures.tsx`**
 - `uplink` / "Uplink radio": 2×2′ fixed footprint, `shape: "custom"` dish glyph +
-  legend icon, Services group, `KIND_HEIGHTS.uplink = 12` (the antenna height,
+  legend icon, `KIND_HEIGHTS.uplink = 12` (the antenna height,
   meant to be edited), one `aim` toggle control ("Show aim path").
+- `wifi-ap` / "Wi-Fi access point" — **generic, not Burning-Man-specific**: the
+  local end of camp networking wherever the internet comes from. Omnidirectional,
+  so what it contributes to the map is COVERAGE: a `rangeFt` control (25–400)
+  draws a dashed reach ring, and overlapping rings are how you spot dead spots.
+  `KIND_HEIGHTS["wifi-ap"] = 10` — up on a shade frame beats down in a tent, for
+  the same line-of-sight reason.
+- **Both live in a "Network" legend group** (Cameron's call), inserted between
+  Water and Services in `KIND_GROUPS`'s heading order — it's where a future
+  switch / router / cable-run kind belongs.
+- **Default range is 100′** (Cameron's call), not a spec-sheet line-of-sight
+  figure: on playa the signal fights dust, bodies and RV/container walls, and a
+  ring that fits inside the lot is the one that actually shows dead spots. A
+  150′ ring on a 100×200 lot just says "covered" and teaches you nothing.
 
 **`app/routes/dashboard/map.tsx`**
 - A `uplink` memo in `Editor` computing the target's pixel position, each radio's
@@ -149,12 +151,37 @@ shadows use) — the two agree to **0.002° and 0.3 ft** in both orientations.
   finish with `PRAGMA foreign_key_check`.
 - **Editing the map auto-creates `map_snapshot` rows.** Driving the editor in a
   test leaves a snapshot trail; clean it up along with the objects.
+- **An unfilled SVG shape is only hit-testable on its stroke.** The Wi-Fi AP's
+  rings started as `fill="none"`, which made a 2ft marker nearly impossible to
+  click or drag on the map — the hole in the middle isn't a target. Any custom
+  `renderFootprint` needs at least one faintly-filled shape covering its body.
+- **A coverage ring can dwarf the lot.** 150′ around an AP is bigger than a
+  100×200 lot, so the ring label (drawn at the ring's apex) parked ~1,000px above
+  the map. Ring labels are now clamped into the view.
+
+### Two pre-existing bugs this shook out (fixed here)
+
+Both live in the shared SidePanel `controls` renderer, so they affected every
+slider control — RV pop-outs, door offset, fire-pit clearance, battery safety
+zone — not just the new kinds:
+
+1. **Keyboard slider changes silently reverted.** Mantine fires `onChangeEnd` on
+   pointer-up but *not* on the arrow keys, and only `onChangeEnd` committed. The
+   value looked applied (optimistic local patch) and was gone on next load. Fixed
+   with an `onKeyUp` commit.
+2. **Arrowing a slider also walked the selected structure across the lot.** The
+   map's global arrow-key nudge handler bailed on `INPUT`/`TEXTAREA`/
+   `contentEditable`, but Mantine builds sliders, selects and segmented controls
+   from focusable DIVs with an ARIA role — so the guard missed them. Four
+   ArrowRights on a range slider moved the structure 4 ft. Fixed by also bailing
+   on `[role=slider|combobox|listbox|radiogroup]`. The E2E carries a regression
+   guard asserting nothing moves.
 
 ## Verification
 
 `e2e/noc-uplink.ts` — drives the real editor (a genuine HTML5 drag carrying the
 app's own `application/camptool-kind` payload) against Math Camp's real lot, then
-reads back what the map draws. 7/7 pass, stable across repeated runs:
+reads back what the map draws. 14/14 pass, stable across repeated runs:
 
 - the camp vector labels `NOC 4,872′ · 291°` (matches the hand-computed value);
 - the compass dial carries a NOC ray;
@@ -162,30 +189,33 @@ reads back what the map draws. 7/7 pass, stable across repeated runs:
 - a 12′ mast down-beam of the 9.5′ container → `Clear · 12′ mast`;
 - lowering it to 6′ → `Blocked by Container`, container outlined orange;
 - raising it to 14′ → clear again;
-- unchecking "Uplink aim (NOC)" removes every uplink annotation.
+- unchecking "Uplink aim (NOC)" removes every uplink annotation;
+- a Wi-Fi AP draws a `100′ Wi-Fi` ring and gets no aim path of its own;
+- arrowing its range slider moves the ring to 200′, does NOT move the structure,
+  and the new value survives a reload.
 
-Screenshots in `data/verify/noc-*.png`.
+Screenshots in `data/verify/noc-*.png`, `data/verify/wifi-*.png`.
 
-**Test gotcha:** the E2E must convert plot feet → client pixels through
-`svg.getScreenCTM()`, not a viewBox ratio. (The app's own `svgPoint` uses the
-ratio and is fine — the SVG's box and viewBox aspect match in practice — but the
-CTM is the robust thing for a test to lean on.)
+**Two test gotchas worth keeping:**
+- Convert plot feet → client pixels through `svg.getScreenCTM()`, not a viewBox
+  ratio. (The app's own `svgPoint` uses the ratio and is fine — the SVG's box and
+  viewBox aspect match in practice — but the CTM is what a test should lean on.)
+- **Legend chips are icon-only**; the kind's label lives in a hover tooltip. A
+  `text=Uplink radio` locator passes for the wrong reason — it matches the side
+  panel's Kind select. Hover the `[draggable="true"]` chips and read
+  `[role="tooltip"]` instead.
 
 ## Possible follow-ups (not built)
 
 - **Neighbours aren't modelled.** Only your own lot's structures are tested; the
   camp across the street is the most likely real blocker. Would need neighbour
   height data we don't have.
-- Officer-editable landmark override, if BMorg moves the tower (the guide's own
-  history notes the link moved from a 40′ tower at the Box Office to the NOC).
 - Warn when the mast is tall enough to sway (BMorg's own caution).
 - A second landmark or two (Temple, airport) would now cost almost nothing — the
   `Landmark` machinery is generic.
 
 ## Things not to do
 
-- Don't fabricate a clock/radius "address" for the NOC as if BMorg published one.
-  They didn't; the 100′ target circle is the honest model and its provenance
-  should stay visible in `NOC_LANDMARK.note`.
+- **Don't move the NOC.** It's at 6:15 & Esplanade; that's settled.
 - Don't bake the NOC into core structures — it's event-layer data.
 - Don't widen the aim cone to make it look better on screen.

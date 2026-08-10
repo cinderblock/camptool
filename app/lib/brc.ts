@@ -325,32 +325,27 @@ export type Landmark = {
   address: string;
   /** Street code giving the radius from the Man ("esplanade", "A"…). */
   streetCode: string;
-  /** Diameter (ft) of the target AREA — how much ground has to be covered to be
-   * sure of hitting it, not a claim about how precisely we know its location. */
+  /** Diameter (ft) of the target AREA the aim cone has to cover. */
   diameterFt: number;
   /** Height (ft above ground) of the thing being aimed at. */
   heightFt: number;
-  /** Shown in the UI so nobody mistakes an estimate for a published address. */
+  /** One-line description for the UI. */
   note: string;
 };
 
 /**
- * Burning Man's **Network Operations Center** — the tall tower in Center Camp,
- * beside the Café, that carries the sector antennas serving the city's public
- * internet. A camp gets online by mounting a directional radio (BMorg
- * recommends a Ubiquiti NanoBeam AC Gen2), aiming it at this tower, and keeping
- * it powered — so line of sight from wherever the radio is mounted is a real
+ * Burning Man's **Network Operations Center**, at **6:15 & Esplanade** — the
+ * tall tower in Center Camp carrying the sector antennas that serve the city's
+ * public internet. A camp gets online by mounting a directional radio (BMorg
+ * recommends a Ubiquiti NanoBeam AC Gen2), aiming it at this tower and keeping
+ * it powered, so line of sight from wherever the radio is mounted is a real
  * camp-layout constraint.
  *
- * BMorg publishes NO clock/radius address for the tower; their guidance is
- * literally "aim toward the tallest tower in Center Camp, near the Cafe"
- * (internet.burningman.org), with the sector antennas "about 40 ft (2/3 up the
- * 60 ft tower)". For reference the 2025 measurements put the Café canopy's
- * center 2,999′ from the Man and the Center Camp portal at 6:00. So this is a
- * **100′ target circle at 6:15 & Esplanade** — big enough to contain the tower
- * wherever in that area it actually stands. Aim tolerance for these radios is
- * degrees, and the fine alignment is done on the radio itself, so covering the
- * area beats pretending to a precision that doesn't exist.
+ * The target is a **100′ circle**: the cone the map draws is the one that covers
+ * that whole area, which is the span a radio has to keep clear. Sector antennas
+ * sit about 40 ft up the 60 ft tower (internet.burningman.org) — that height is
+ * what makes the sight line climb, so a low structure well down the path doesn't
+ * block it.
  */
 export const NOC_LANDMARK: Landmark = {
   key: "noc",
@@ -359,7 +354,7 @@ export const NOC_LANDMARK: Landmark = {
   streetCode: "esplanade",
   diameterFt: 100,
   heightFt: 40,
-  note: "Burning Man's Network Operations Center — the tall tower in Center Camp by the Café. BMorg publishes no exact address, so this is a 100′ target area at 6:15 & Esplanade.",
+  note: "Burning Man's Network Operations Center at 6:15 & Esplanade — the tower in Center Camp serving the city's public internet.",
 };
 
 /** Distance from the Man to a landmark for a given event year, or null when we
