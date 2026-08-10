@@ -199,6 +199,27 @@ export function wedgeFor(lot: MapLot, layout: MapLayout): MapWedge | null {
   };
 }
 
+/**
+ * The wedge-space angle (`phi`, as `ptXY`/`sector` take it) of another clock
+ * position in the city — letting you draw anything the city knows the address
+ * of, however far outside the lot, in the lot's own frame.
+ *
+ * `phi` is measured from the lot's frontage centerline. The map is drawn
+ * un-mirrored — clock numbers run clockwise around the Man on the real playa,
+ * and `wedgeFor` puts the Man ABOVE a Man-facing lot, so from that lot a later
+ * clock is to the LEFT (negative phi). A mountain-facing lot has the Man below
+ * it, which flips the sense. (Cross-check: this agrees with `bearingToPlotDelta`
+ * + `mapUpBearingFor`, which the compass and shadows use.)
+ */
+export function cityPhi(
+  lotHours: number,
+  frontsToMan: boolean,
+  hours: number,
+): number {
+  const sDir = frontsToMan ? 1 : -1;
+  return -sDir * (hours - lotHours) * (Math.PI / 6);
+}
+
 /** Straight-trapezoid lot outline — the fallback when `wedgeFor` returns null. */
 export function straightLotPoints(lot: MapLot, layout: MapLayout): string {
   const { ppf, originX, originY, rearCenterX, yBot, rear } = layout;

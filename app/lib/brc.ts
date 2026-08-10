@@ -285,14 +285,21 @@ export function parseClock(addr: string | null): number | null {
 }
 
 /**
- * Compass bearing (deg from true north) the map's "up" points to. Map-up faces
- * across the frontage; for a Man-facing camp that's toward the Man.
+ * Compass bearing (deg from true north) from the Man out to a clock position.
  *
  * BRC ground truth: the open playa / Temple (12:00) is to the NE and the gate
- * (6:00) is to the SW, so Man→12:00 ≈ 45°. Clock numbers increase clockwise, so
- * Man→clock(h) = 45 + 30·h, and the camp→Man "up" direction is the opposite:
- * (225 + 30·h). A 3:00 camp is SE of the Man, so its up points NW (315°). A
- * mountain-facing camp fronts the outward street, so its up flips +180°.
+ * (6:00) is to the SW, so Man→12:00 ≈ 45°, and clock numbers increase clockwise.
+ * Every other orientation in the app derives from this one line.
+ */
+export function bearingFromMan(hours: number): number {
+  return (((45 + 30 * hours) % 360) + 360) % 360;
+}
+
+/**
+ * Compass bearing (deg from true north) the map's "up" points to. Map-up faces
+ * across the frontage; for a Man-facing camp that's toward the Man — the
+ * opposite of `bearingFromMan`. A 3:00 camp is SE of the Man, so its up points
+ * NW (315°). A mountain-facing camp fronts the outward street, so it flips 180°.
  */
 export function mapUpBearingFor(
   addr: string | null,
@@ -300,6 +307,105 @@ export function mapUpBearingFor(
 ): number | null {
   const h = parseClock(addr);
   if (h == null) return null;
-  const base = (((225 + 30 * h) % 360) + 360) % 360;
+  const base = (bearingFromMan(h) + 180) % 360;
   return frontsToMan ? base : (base + 180) % 360;
+}
+
+/* ------------------------------------------------------------------------- *
+ * City landmarks — fixed points a camp may need to measure or aim at.
+ * ------------------------------------------------------------------------- */
+
+/** A fixed feature of the city, addressed the way the city itself is: a clock
+ * position plus the street whose radius it sits at (so it re-derives correctly
+ * if a year's measurements move that street). */
+export type Landmark = {
+  key: string;
+  label: string;
+  /** Clock address, e.g. "6:15". */
+  address: string;
+  /** Street code giving the radius from the Man ("esplanade", "A"…). */
+  streetCode: string;
+  /** Diameter (ft) of the target AREA — how much ground has to be covered to be
+   * sure of hitting it, not a claim about how precisely we know its location. */
+  diameterFt: number;
+  /** Height (ft above ground) of the thing being aimed at. */
+  heightFt: number;
+  /** Shown in the UI so nobody mistakes an estimate for a published address. */
+  note: string;
+};
+
+/**
+ * Burning Man's **Network Operations Center** — the tall tower in Center Camp,
+ * beside the Café, that carries the sector antennas serving the city's public
+ * internet. A camp gets online by mounting a directional radio (BMorg
+ * recommends a Ubiquiti NanoBeam AC Gen2), aiming it at this tower, and keeping
+ * it powered — so line of sight from wherever the radio is mounted is a real
+ * camp-layout constraint.
+ *
+ * BMorg publishes NO clock/radius address for the tower; their guidance is
+ * literally "aim toward the tallest tower in Center Camp, near the Cafe"
+ * (internet.burningman.org), with the sector antennas "about 40 ft (2/3 up the
+ * 60 ft tower)". For reference the 2025 measurements put the Café canopy's
+ * center 2,999′ from the Man and the Center Camp portal at 6:00. So this is a
+ * **100′ target circle at 6:15 & Esplanade** — big enough to contain the tower
+ * wherever in that area it actually stands. Aim tolerance for these radios is
+ * degrees, and the fine alignment is done on the radio itself, so covering the
+ * area beats pretending to a precision that doesn't exist.
+ */
+export const NOC_LANDMARK: Landmark = {
+  key: "noc",
+  label: "NOC",
+  address: "6:15",
+  streetCode: "esplanade",
+  diameterFt: 100,
+  heightFt: 40,
+  note: "Burning Man's Network Operations Center — the tall tower in Center Camp by the Café. BMorg publishes no exact address, so this is a 100′ target area at 6:15 & Esplanade.",
+};
+
+/** Distance from the Man to a landmark for a given event year, or null when we
+ * have no geometry to derive its street's radius from. */
+export function landmarkRadiusFt(
+  year: number | null | undefined,
+  lm: Landmark,
+): number | null {
+  return radiusForStreet(year, lm.streetCode);
+}
+
+/** A city position as feet north/east of the Man. */
+export function cityPointFt(
+  hours: number,
+  radiusFt: number,
+): { n: number; e: number } {
+  const b = (bearingFromMan(hours) * Math.PI) / 180;
+  return { n: radiusFt * Math.cos(b), e: radiusFt * Math.sin(b) };
+}
+
+/** Compass bearing (deg from true north) and distance (ft) between two city
+ * points — e.g. from a camp's lot to the NOC tower. */
+export function citySightLine(
+  from: { n: number; e: number },
+  to: { n: number; e: number },
+): { bearingDeg: number; distanceFt: number } {
+  const dn = to.n - from.n;
+  const de = to.e - from.e;
+  return {
+    bearingDeg: ((((Math.atan2(de, dn) * 180) / Math.PI) % 360) + 360) % 360,
+    distanceFt: Math.hypot(dn, de),
+  };
+}
+
+/** Bearing + distance from a camp's lot to a landmark, or null when either end
+ * can't be located (unparseable address, or no geometry for the year). */
+export function landmarkSightLine(
+  year: number | null | undefined,
+  lotAddress: string | null,
+  lotRadiusFt: number | null,
+  lm: Landmark,
+): { bearingDeg: number; distanceFt: number } | null {
+  const lotH = parseClock(lotAddress);
+  const lmH = parseClock(lm.address);
+  const lmR = landmarkRadiusFt(year, lm);
+  if (lotH == null || lmH == null || lmR == null || lotRadiusFt == null)
+    return null;
+  return citySightLine(cityPointFt(lotH, lotRadiusFt), cityPointFt(lmH, lmR));
 }

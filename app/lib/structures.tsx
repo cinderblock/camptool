@@ -155,6 +155,78 @@ function tankRenderIcon(base: string) {
   };
 }
 
+/** A directional uplink radio seen from above (in the 0,0→w,h feet box): the
+ * mast base with a dish on it. Drawn rotationally symmetric on purpose — the
+ * radio's aim is computed from the camp's address, not from the object's
+ * rotation, and the map draws the real aim path. */
+function UplinkFootprint({ w, h, color, selected }: FootprintCtx): ReactNode {
+  const cx = w / 2;
+  const cy = h / 2;
+  const r = Math.min(w, h) / 2;
+  return (
+    <g>
+      {/* Guy-wire triangle = the mast's real ground footprint. */}
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r}
+        fill={color}
+        fillOpacity={0.16}
+        stroke={color}
+        strokeOpacity={0.5}
+        strokeWidth={r * 0.08}
+        strokeDasharray={`${r * 0.22} ${r * 0.16}`}
+      />
+      {/* The dish itself, looking down on it. */}
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r * 0.52}
+        fill={color}
+        fillOpacity={0.9}
+        stroke={selected ? "#1c1c1c" : color}
+        strokeWidth={r * (selected ? 0.14 : 0.08)}
+      />
+      <circle cx={cx} cy={cy} r={r * 0.16} fill="#ffffff" fillOpacity={0.75} />
+    </g>
+  );
+}
+
+/** Legend/tray icon for the uplink radio: a dish throwing a signal arc. */
+function uplinkIcon(size: number): ReactNode {
+  const c = size / 2;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      style={{ display: "block", flex: "0 0 auto" }}
+      aria-hidden="true"
+    >
+      <circle
+        cx={c * 0.72}
+        cy={c}
+        r={size * 0.2}
+        fill="#7048e8"
+        fillOpacity={0.9}
+      />
+      {[0.3, 0.46, 0.62].map((f) => (
+        <path
+          key={f}
+          d={`M ${c * 0.72} ${c - size * f} A ${size * f} ${size * f} 0 0 1 ${
+            c * 0.72
+          } ${c + size * f}`}
+          fill="none"
+          stroke="#7048e8"
+          strokeOpacity={0.75}
+          strokeWidth={size * 0.06}
+          strokeLinecap="round"
+        />
+      ))}
+    </svg>
+  );
+}
+
 /** Toy-hauler footprint: the trailer body plus, when the rear ramp is folded
  * DOWN (`config.ramp`), an apron extending past the rear (+y) edge — so the
  * deployed ramp takes real space for spacing / shade / overlap. Centered, like
@@ -985,6 +1057,36 @@ const CORE_KINDS = [
     tags: ["structure"],
     personal: false,
   },
+  // Directional uplink radio — a dish/mast aimed at a distant tower for camp
+  // internet. Tiny fixed footprint because WHERE it goes is the whole point:
+  // park it on the corner of an RV, container or shade frame, set its Height to
+  // the antenna's height above ground, and the map draws the aim path so you can
+  // see what's in the way. Its rotation is ignored — the aim is computed.
+  {
+    value: "uplink",
+    label: "Uplink radio",
+    color: "#7048e8",
+    w: 2,
+    h: 2,
+    shape: "custom",
+    vehicle: false,
+    rigid: true,
+    group: "Services",
+    tags: ["structure"],
+    personal: true,
+    renderFootprint: UplinkFootprint,
+    renderIcon: uplinkIcon,
+    controls: [
+      {
+        key: "aim",
+        label: "Show aim path",
+        min: 0,
+        max: 1,
+        default: 1,
+        toggle: true,
+      },
+    ],
+  },
   // Toy hauler — a trailer with a fold-down rear ramp (config `ramp`). Fixed
   // width, length resizes; the deployed ramp extends the footprint (toyHaulerFootprint).
   {
@@ -1090,6 +1192,10 @@ const KIND_HEIGHTS: Record<string, number> = {
   trash: 4,
   // A point luminaire: no real volume, so it casts no shade (height 0).
   "path-light": 0,
+  // Antenna height above ground — the number that decides what the uplink can
+  // see over, so it's meant to be edited. A modest pole, or a mast on a roof;
+  // BMorg warns that a tall pole that sways in the wind breaks the link.
+  uplink: 12,
   "toy-hauler": 10,
   airstream: 9.5,
   kitchen: 8,

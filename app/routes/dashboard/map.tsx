@@ -43,10 +43,14 @@ import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { BLOCKS, blockById } from "~/lib/blocks";
 import {
   CURRENT_EVENT_YEAR,
+  NOC_LANDMARK,
   clockOptions,
   eventYearOptions,
   hasGeometry,
+  landmarkRadiusFt,
+  landmarkSightLine,
   mapUpBearingFor,
+  parseClock,
   radiusForStreet,
   streetLabel,
   streetOptions,
@@ -57,6 +61,7 @@ import {
   MARGIN,
   PAD_FT,
   VIEW_W,
+  cityPhi,
   frontageRadiusOf,
   layoutFor,
   lotHalfWidthAt,
@@ -2014,6 +2019,26 @@ function bearingToPlotDelta(
   return { dx: Math.sin(theta) * distFt, dy: -Math.cos(theta) * distFt };
 }
 
+/** How far a ray from (x,y) along unit (ux,uy) travels before leaving an
+ * axis-aligned rect. Used to park a label where a long ray leaves the map. */
+function rayExit(
+  x: number,
+  y: number,
+  ux: number,
+  uy: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): number {
+  let t = Number.POSITIVE_INFINITY;
+  if (ux > 1e-9) t = Math.min(t, (x1 - x) / ux);
+  if (ux < -1e-9) t = Math.min(t, (x0 - x) / ux);
+  if (uy > 1e-9) t = Math.min(t, (y1 - y) / uy);
+  if (uy < -1e-9) t = Math.min(t, (y0 - y) / uy);
+  return Number.isFinite(t) ? Math.max(0, t) : 0;
+}
+
 /** Convex hull (Andrew's monotone chain) of feet-space points → ordered polygon. */
 function convexHull(pts: ZonePt[]): ZonePt[] {
   if (pts.length < 3) return pts;
@@ -2995,6 +3020,9 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [showDoors, setShowDoors] = useState(true);
   // Fire-access overlay: shade the lot by 125′ hose reach from the street/alley.
   const [showFire, setShowFire] = useState(false);
+  // Uplink aiming: draw each uplink radio's path to the NOC tower and flag what
+  // blocks it. On by default — it draws nothing until someone places a radio.
+  const [showUplink, setShowUplink] = useState(true);
   // Lot config form: hidden by default, revealed by the toolbar gear (it's a
   // once-at-setup form). Lifted here so the gear (in the map toolbar) and the
   // form (in the side rail) share one flag.
@@ -3422,6 +3450,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             sun={sun}
             showDoors={showDoors}
             showFire={showFire}
+            showUplink={showUplink && isBurningMan(event)}
             showWind={showWind}
             windFromBearing={windFromBearing}
             windStrength={windStrength}
@@ -3489,10 +3518,39 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 reach (needs an internal fire lane). Assumes rear-alley access.
               </Text>
             ) : null}
+            {isBurningMan(event) ? (
+              <>
+                <Checkbox
+                  mt={6}
+                  size="xs"
+                  label="Uplink aim (NOC)"
+                  checked={showUplink}
+                  onChange={(e) => setShowUplink(e.currentTarget.checked)}
+                />
+                {showUplink ? (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    Draws each uplink radio's path to the NOC tower in Center
+                    Camp and flags anything of yours tall enough to block it.
+                    Set the radio's Height to the antenna's height above ground.
+                    Neighbours' structures aren't modelled.
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
           </Paper>
           <Compass
             mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
             frontsToMan={lot.frontsToMan}
+            nocBearing={
+              showUplink && isBurningMan(event)
+                ? (landmarkSightLine(
+                    lot.year,
+                    lot.address,
+                    frontageRadiusOf(lot),
+                    NOC_LANDMARK,
+                  )?.bearingDeg ?? null)
+                : null
+            }
             sun={sun}
             year={sunYear}
             arc={arc}
@@ -3896,6 +3954,7 @@ function Editor({
   sun,
   showDoors,
   showFire,
+  showUplink,
   showWind,
   windFromBearing,
   windStrength,
@@ -3939,6 +3998,9 @@ function Editor({
   sun: { altitude: number; azimuth: number };
   showDoors: boolean;
   showFire: boolean;
+  /** Draw uplink radios' aim paths to the NOC. Already gated on the event being
+   * Burning Man by the caller — the NOC is BM's tower, not a general concept. */
+  showUplink: boolean;
   showWind: boolean;
   windFromBearing: number;
   windStrength: number;
@@ -4557,6 +4619,118 @@ function Editor({
   const domeFx = 0.5 + toSun.dx * 0.32;
   const domeFy = 0.5 + toSun.dy * 0.32;
   const domeShadeOn = mapUpBearing != null && sun.altitude > 0.5;
+
+  // ---- Uplink aiming. Burning Man's public internet comes off sector antennas
+  // on the NOC tower in Center Camp; a camp radio has to SEE that tower, so
+  // which corner of which structure it goes on is a layout decision.
+  //
+  // `wedgeFor` maps city polar (radius from the Man, angle off our frontage) to
+  // view pixels by a rotation about the Man plus a uniform scale — so the tower
+  // is just another point in this SVG, thousands of feet off-screen, and a
+  // straight line in the city is still straight here. `ground-clip` trims it.
+  const uplink = useMemo(() => {
+    if (!showUplink || !wedge) return null;
+    const lotHours = parseClock(lot.address);
+    const nocHours = parseClock(NOC_LANDMARK.address);
+    const nocR = landmarkRadiusFt(lot.year, NOC_LANDMARK);
+    if (lotHours == null || nocHours == null || nocR == null) return null;
+    const phi = cityPhi(lotHours, lot.frontsToMan, nocHours);
+    const target = wedge.ptXY(nocR, phi);
+    // Half the target AREA on screen — the beam has to cover it, since BMorg
+    // publishes no exact spot for the tower inside Center Camp.
+    const targetR = (NOC_LANDMARK.diameterFt / 2) * ppf;
+    const sight = landmarkSightLine(
+      lot.year,
+      lot.address,
+      frontageRadiusOf(lot),
+      NOC_LANDMARK,
+    );
+
+    const aim = (fx: number, fy: number) => {
+      const px = originX + fx * ppf;
+      const py = originY + fy * ppf;
+      const dx = target.x - px;
+      const dy = target.y - py;
+      const distPx = Math.hypot(dx, dy) || 1;
+      // The plot-local foot grid and the view differ only by the `ppf` scale, so
+      // this unit vector is equally valid in feet — no second conversion.
+      const ux = dx / distPx;
+      const uy = dy / distPx;
+      return {
+        px,
+        py,
+        ux,
+        uy,
+        distFt: distPx / ppf,
+        half: Math.asin(Math.min(0.9, targetR / distPx)),
+        /** Where the ray leaves the visible ground — the tower itself is a few
+         * thousand feet off-screen, so this is what we actually draw to. */
+        exit: rayExit(px, py, ux, uy, viewL, MARGIN, viewR, viewH - MARGIN),
+      };
+    };
+
+    const radios = objects.filter(
+      (o) => o.kind === "uplink" && (o.config.aim ?? 1) > 0,
+    );
+    const aims = radios.map((o) => {
+      const fx = o.x + o.width / 2;
+      const fy = o.y + o.height / 2;
+      const a = aim(fx, fy);
+      const mastFt = o.tallFt || kindHeight(o.kind);
+      // The path CLIMBS from our antenna to the tower's, so something low well
+      // down the path clears even if it out-tops the mast at its own base.
+      const heightAt = (d: number) =>
+        mastFt + (NOC_LANDMARK.heightFt - mastFt) * (d / a.distFt);
+      const blockers = objects.filter((other) => {
+        if (other.id === o.id || other.kind === "uplink") return false;
+        const corners = objWorldCorners(
+          other,
+          other.x + other.width / 2,
+          other.y + other.height / 2,
+        );
+        let lo = Number.POSITIVE_INFINITY;
+        let hi = Number.NEGATIVE_INFINITY;
+        let near = Number.POSITIVE_INFINITY;
+        for (const c of corners) {
+          const vx = c.x - fx;
+          const vy = c.y - fy;
+          const along = vx * a.ux + vy * a.uy;
+          // Only corners in FRONT of the radio: behind-corners sit near ±π and
+          // would wrap the interval. A structure the radio is mounted on keeps
+          // its front corners, which is exactly what we want to test.
+          if (along <= 0) continue;
+          const ang = Math.atan2(vx * a.uy - vy * a.ux, along);
+          lo = Math.min(lo, ang);
+          hi = Math.max(hi, ang);
+          near = Math.min(near, along);
+        }
+        if (near === Number.POSITIVE_INFINITY) return false;
+        if (hi < -a.half || lo > a.half) return false;
+        return (other.tallFt || kindHeight(other.kind)) > heightAt(near);
+      });
+      return { o, mastFt, blockers, ...a };
+    });
+
+    return {
+      target,
+      // The faint camp-level vector: where the NOC lies from the lot as a whole,
+      // drawn whether or not anyone has placed a radio yet.
+      camp: aim(lot.frontageFt / 2, lot.depthFt / 2),
+      bearingDeg: sight?.bearingDeg ?? null,
+      aims,
+    };
+  }, [
+    showUplink,
+    wedge,
+    lot,
+    objects,
+    originX,
+    originY,
+    ppf,
+    viewL,
+    viewR,
+    viewH,
+  ]);
 
   // ---- Wind flow field (plot-local feet). Solved when the wind layer is on and
   // the lot is oriented; buildings become solid obstacles the flow goes around.
@@ -6337,6 +6511,80 @@ function Editor({
                 </g>
               );
             })}
+            {/* Uplink aiming at the NOC tower. A faint camp-wide vector shows
+            where the tower lies from the lot; each uplink radio then gets the
+            cone it needs kept clear — wide enough to cover the 100′ target area
+            around the tower — with anything of ours tall enough to block it
+            outlined in red. Drawn under the objects so it never hides them. */}
+            {uplink ? (
+              <g pointerEvents="none" clipPath="url(#ground-clip)">
+                <line
+                  x1={uplink.camp.px}
+                  y1={uplink.camp.py}
+                  x2={uplink.camp.px + uplink.camp.ux * uplink.camp.exit}
+                  y2={uplink.camp.py + uplink.camp.uy * uplink.camp.exit}
+                  stroke="#7048e8"
+                  strokeOpacity={0.3}
+                  strokeWidth={1.5}
+                  strokeDasharray="8 7"
+                />
+                {uplink.aims.map((a) => {
+                  const blocked = a.blockers.length > 0;
+                  const color = blocked ? "#e8590c" : "#7048e8";
+                  // Long enough to leave the view from any angle; the clip trims it.
+                  const len = VIEW_W + viewH;
+                  const edge = (s: number) => {
+                    const ang = Math.atan2(a.uy, a.ux) + s * a.half;
+                    return `${a.px + Math.cos(ang) * len},${
+                      a.py + Math.sin(ang) * len
+                    }`;
+                  };
+                  return (
+                    <g key={`aim-${a.o.id}`}>
+                      {/* A 100′ target four-odd thousand feet out subtends only
+                      ~1°, so near the radio this is a sliver and only fans out
+                      into a visible wedge toward the edge of the map. That IS
+                      the geometry — don't widen it to look better. */}
+                      <polygon
+                        points={`${a.px},${a.py} ${edge(-1)} ${edge(1)}`}
+                        fill={color}
+                        fillOpacity={blocked ? 0.3 : 0.22}
+                      />
+                      <line
+                        x1={a.px}
+                        y1={a.py}
+                        x2={a.px + a.ux * a.exit}
+                        y2={a.py + a.uy * a.exit}
+                        stroke={color}
+                        strokeOpacity={0.75}
+                        strokeWidth={1.5}
+                        strokeDasharray="4 3"
+                      />
+                      {a.blockers.map((b) => (
+                        <polygon
+                          key={`blk-${a.o.id}-${b.id}`}
+                          points={objWorldCorners(
+                            b,
+                            b.x + b.width / 2,
+                            b.y + b.height / 2,
+                          )
+                            .map(
+                              (p) =>
+                                `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                            )
+                            .join(" ")}
+                          fill="#e8590c"
+                          fillOpacity={0.16}
+                          stroke="#e8590c"
+                          strokeWidth={1.5}
+                          strokeDasharray="4 3"
+                        />
+                      ))}
+                    </g>
+                  );
+                })}
+              </g>
+            ) : null}
             {/* Fuel & battery safety zones. Burning Man requires separation rings
             around fuel storage (10′ no ignition sources, 20′ liquid↔propane, 50′
             to another fuel area) and a minimum safety zone around a ≥100 kWh
@@ -6442,6 +6690,63 @@ function Editor({
                   onRotateDown={(e) => startDrag(e, o, "rotate")}
                 />
               ))}
+            {/* Uplink labels ride ABOVE the objects — the aim path runs across
+            the camp by definition, so a label drawn under the structures ends up
+            hidden behind whichever one it's warning you about. Each radio's
+            verdict sits close to the radio, not out at the end of its beam. */}
+            {uplink ? (
+              <g pointerEvents="none" clipPath="url(#ground-clip)">
+                <text
+                  x={uplink.camp.px + uplink.camp.ux * uplink.camp.exit * 0.85}
+                  y={uplink.camp.py + uplink.camp.uy * uplink.camp.exit * 0.85}
+                  fontSize={10}
+                  fontWeight={600}
+                  fill="#7048e8"
+                  fillOpacity={0.6}
+                  textAnchor="middle"
+                  style={{ userSelect: "none" }}
+                >
+                  {`NOC ${Math.round(uplink.camp.distFt).toLocaleString()}′${
+                    uplink.bearingDeg == null
+                      ? ""
+                      : ` · ${Math.round(uplink.bearingDeg)}°`
+                  }`}
+                </text>
+                {uplink.aims.map((a) => {
+                  const blocked = a.blockers.length > 0;
+                  // Just up the beam from the radio, nudged off the line so the
+                  // text doesn't sit on top of the dashes.
+                  const d = Math.min(a.exit * 0.5, 74);
+                  return (
+                    <text
+                      key={`aimlabel-${a.o.id}`}
+                      x={a.px + a.ux * d - a.uy * 9}
+                      y={a.py + a.uy * d + a.ux * 9}
+                      fontSize={10}
+                      fontWeight={700}
+                      fill={blocked ? "#e8590c" : "#7048e8"}
+                      textAnchor="middle"
+                      stroke={MAP_GROUND}
+                      strokeWidth={3}
+                      strokeOpacity={0.85}
+                      paintOrder="stroke"
+                      style={{ userSelect: "none" }}
+                    >
+                      {blocked
+                        ? `Blocked by ${a.blockers
+                            .slice(0, 2)
+                            .map((b) => b.name || kindDef(b.kind).label)
+                            .join(", ")}${
+                            a.blockers.length > 2
+                              ? ` +${a.blockers.length - 2}`
+                              : ""
+                          }`
+                        : `Clear · ${Math.round(a.mastFt)}′ mast`}
+                    </text>
+                  );
+                })}
+              </g>
+            ) : null}
             {/* Suggested-edit "ghosts": each camper's proposed geometry for an
             object, drawn as a translucent footprint at the proposed spot + the
             suggester's first name. The official item stays where it is. */}
@@ -7094,6 +7399,7 @@ function Grid({
 function Compass({
   mapUpBearing,
   frontsToMan,
+  nocBearing,
   sun,
   year,
   arc,
@@ -7112,6 +7418,9 @@ function Compass({
 }: {
   mapUpBearing: number | null;
   frontsToMan: boolean;
+  /** Bearing from the lot to the NOC tower, or null when it doesn't apply
+   * (not Burning Man, overlay off, or no address to derive it from). */
+  nocBearing: number | null;
   sun: { altitude: number; azimuth: number };
   year: number;
   arc: { sunriseMin: number; sunsetMin: number; noonMin: number };
@@ -7319,6 +7628,11 @@ function Compass({
             {ray(270, "var(--mantine-color-dimmed)", "W", { lw: 0.6 })}
           </>
         ) : null}
+        {/* Which way the internet is: the same bearing the map draws the uplink
+        cone along, so the dial and the map can be checked against each other. */}
+        {oriented && nocBearing != null
+          ? ray(nocBearing, "#7048e8", "NOC", { lw: 1, len: r - 14 })
+          : null}
         {oriented ? (
           <g
             style={{ cursor: "grab" }}

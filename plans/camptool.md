@@ -307,6 +307,21 @@ drawn body AND the real footprint, so spacing / shade / wind account for them; R
 generator/cleanout markers via `toggle` config controls. Controls now support
 checkboxes, not just sliders.)
 
+**NOC uplink aiming (LANDED + browser-verified 2026-08-10).** Burning Man's
+public internet comes off sector antennas on the NOC tower in Center Camp, and a
+camp radio has to SEE that tower — so which corner of which structure it goes on
+is a layout decision. The map now draws a faint labelled bearing vector to the
+NOC (plus a matching compass ray), and a new generic **"Uplink radio"** structure
+kind draws its own aim cone and flags anything of yours tall enough to block it
+(height-aware: the sight line climbs from the mast to the tower's 40′ antennas).
+BMorg publishes no address for the tower, so the target is modelled as a **100′
+circle at 6:15 & Esplanade** — an area, not a false-precision point. `brc.ts`
+gained a generic `Landmark` model + city-plane geometry (`bearingFromMan`,
+`cityPointFt`, `citySightLine`); `map-geometry.ts` gained `cityPhi`, which lets
+`wedgeFor(...).ptXY` place ANY city address in the lot's frame. No migration.
+Gated on `isBurningMan(event)`. Full detail + gotchas:
+**`plans/noc-uplink-radio.md`**; E2E at `e2e/noc-uplink.ts` (7/7).
+
 **Irregular / non-rectilinear plots (deferred sub-phase).** Camps near keyholes,
 plazas, Center Camp, and other odd spots aren't a frontage×depth rectangle — they
 need a real **polygon** lot model (an editable vertex list) instead of (frontage,
