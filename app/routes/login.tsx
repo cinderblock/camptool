@@ -1,4 +1,5 @@
 import {
+  Alert,
   Anchor,
   Button,
   Container,
@@ -29,7 +30,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   const session = await getSession(request);
   if (session) throw redirect("/");
   const { allowOpenSignups } = await getInstanceSettings();
-  return { discordEnabled, allowOpenSignups };
+  // Set by /reset/:token after a successful password reset — the only way in
+  // when there's no mail transport (plans/password-recovery.md).
+  const justReset = new URL(request.url).searchParams.get("reset") === "1";
+  return { discordEnabled, allowOpenSignups, justReset };
 }
 
 export default function Login({ loaderData }: Route.ComponentProps) {
@@ -111,6 +115,13 @@ export default function Login({ loaderData }: Route.ComponentProps) {
       <Text c="dimmed" size="sm" ta="center" mt={4}>
         Sign in to manage your camp
       </Text>
+
+      {loaderData.justReset ? (
+        <Alert color="green" mt="lg">
+          Your password is set. Sign in with it below — and once you're in,
+          consider adding a passkey so you never need a password again.
+        </Alert>
+      ) : null}
 
       <Paper withBorder shadow="sm" p="lg" radius="md" mt="xl">
         <Tabs defaultValue="signin">

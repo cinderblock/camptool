@@ -13,6 +13,7 @@ export * from "./inventory";
 export * from "./map";
 export * from "./programming";
 export * from "./question";
+export * from "./recovery";
 export * from "./recruit";
 export * from "./schedule";
 export * from "./season";

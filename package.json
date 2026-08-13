@@ -15,6 +15,7 @@
     "e2e:passkey": "node --experimental-strip-types e2e/passkey-signup.ts",
     "e2e:passkey-gate": "bun e2e/passkey-invite-gate.ts",
     "e2e:passkey-nag": "node --experimental-strip-types e2e/passkey-nag.ts",
+    "e2e:password-reset": "bun e2e/password-reset.ts",
     "lint": "biome check .",
     "format": "biome format --write .",
     "db:generate": "drizzle-kit generate",

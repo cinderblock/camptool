@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Container,
+  CopyButton,
   Group,
   Modal,
   Select,
@@ -15,7 +16,7 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { Form, Link, data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
@@ -25,6 +26,7 @@ import {
   mergeMemberships,
   previewMembershipMerge,
 } from "~/lib/merge.server";
+import { issuePasswordReset } from "~/lib/password-reset.server";
 import {
   ROLES,
   type Role,
@@ -35,7 +37,13 @@ import {
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { memberFlag, membership, user } from "../../../db/schema";
+import {
+  account,
+  memberFlag,
+  membership,
+  passkey,
+  user,
+} from "../../../db/schema";
 import type { Route } from "./+types/members";
 
 export function meta(_: Route.MetaArgs) {
@@ -71,17 +79,46 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const discord = await syncDiscordLinksForCamp(campId);
 
+  const canManage = hasAtLeast(actorRole, "officer");
+
+  // Which credentials each member actually holds. Officers only — it's the
+  // thing you need in order to answer "why can't they sign in", and it doubles
+  // as the passkey adoption column (plans/passkey-first-auth.md step 8).
+  const userIds = rows.map((r) => r.userId);
+  const withPasskey = new Set<string>();
+  const withPassword = new Set<string>();
+  if (canManage && userIds.length) {
+    for (const r of await db
+      .select({ userId: passkey.userId })
+      .from(passkey)
+      .where(inArray(passkey.userId, userIds))) {
+      withPasskey.add(r.userId);
+    }
+    for (const r of await db
+      .select({ userId: account.userId })
+      .from(account)
+      .where(
+        and(
+          inArray(account.userId, userIds),
+          eq(account.providerId, "credential"),
+        ),
+      )) {
+      withPassword.add(r.userId);
+    }
+  }
+
   const members = rows
     .map((r) => ({
       ...r,
       joinedAt: r.joinedAt ? r.joinedAt.toISOString() : null,
       discord: discord.get(r.userId) ?? null,
+      hasPasskey: withPasskey.has(r.userId),
+      hasPassword: withPassword.has(r.userId),
     }))
     .sort(
       (a, b) => rankOf(b.role) - rankOf(a.role) || a.name.localeCompare(b.name),
     );
 
-  const canManage = hasAtLeast(actorRole, "officer");
   // Recruits can't flag; members and up can quietly raise a concern.
   const canFlag = hasAtLeast(actorRole, "member");
   const assignableRoles = ROLES.filter((r) => rankOf(r) <= rankOf(actorRole));
@@ -124,6 +161,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     members,
     officerFlags,
     myFlags,
+    // "N of M enrolled", the cheap-to-delete adoption summary.
+    passkeyEnrolled: canManage ? withPasskey.size : 0,
   });
 }
 
@@ -385,6 +424,39 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
+  if (intent === "issuePasswordReset") {
+    const memberId = String(form.get("memberId"));
+    const [target] = await db
+      .select()
+      .from(membership)
+      .where(
+        and(eq(membership.id, memberId), eq(membership.organizationId, campId)),
+      );
+    if (!target) return data({ error: "Member not found." }, { status: 404 });
+    // Same rank rule as removal and impersonation. An officer who could mint a
+    // reset link for an admin could take the camp over — see
+    // plans/password-recovery.md "Things not to do".
+    if (rankOf(actorRole) <= rankOf(target.role)) {
+      return data(
+        { error: "You can only issue reset links for members below you." },
+        { status: 403 },
+      );
+    }
+
+    const [u] = await db
+      .select({ name: user.name })
+      .from(user)
+      .where(eq(user.id, target.userId));
+    const { url, expires } = await issuePasswordReset({
+      campId,
+      userId: target.userId,
+      issuedByMembershipId: myMid,
+    });
+    return data({
+      resetLink: { url, expires, name: u?.name ?? "this member" },
+    });
+  }
+
   if (intent === "previewMerge") {
     const survivorId = String(form.get("survivorId"));
     const staleId = String(form.get("staleId"));
@@ -442,6 +514,16 @@ export default function Members({ loaderData }: Route.ComponentProps) {
   const [mergeInto, setMergeInto] = useState<string | null>(null);
   const mergePreview = previewFetcher.data?.preview ?? null;
 
+  // The issued link comes back in the response body rather than being stored:
+  // we keep only its SHA-256 hash server-side, so THIS is the one moment the
+  // officer can copy it. Reissuing is cheap if they lose it.
+  const resetFetcher = useFetcher<{
+    resetLink?: { url: string; expires: string; name: string };
+    error?: string;
+  }>();
+  const resetLink = resetFetcher.data?.resetLink ?? null;
+  const [dismissedLink, setDismissedLink] = useState<string | null>(null);
+
   // Show what a merge would actually move before anyone commits to it — the
   // operation deletes a record, so "6 records will move" beats a blind confirm.
   // Driven from the Select's onChange rather than an effect: the survivor
@@ -474,6 +556,11 @@ export default function Members({ loaderData }: Route.ComponentProps) {
     setFlagTarget(null);
     setFlagBody("");
   });
+  // Only surfaces failures (rank refusals); success opens the link modal.
+  useFetcherNotifications(
+    resetFetcher.data?.error ? { error: resetFetcher.data.error } : undefined,
+    resetFetcher.state,
+  );
 
   const roleOptions = assignableRoles.map((r) => ({ value: r, label: r }));
   const showActions = canManage || canFlag;
@@ -598,6 +685,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 <Table.Th>Playa name</Table.Th>
                 <Table.Th>Email</Table.Th>
                 <Table.Th>Discord</Table.Th>
+                {canManage ? <Table.Th>Sign-in</Table.Th> : null}
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Role</Table.Th>
                 {showActions ? <Table.Th>Actions</Table.Th> : null}
@@ -642,6 +730,22 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                         </Text>
                       )}
                     </Table.Td>
+                    {/* Plain Text, not Badge: Mantine's Badge label is
+                        overflow:hidden + ellipsis, so in a column this narrow
+                        both badges collapse to unreadable slivers ("N…", "PA…")
+                        no matter what nowrap you put on the cell. */}
+                    {canManage ? (
+                      <Table.Td style={{ whiteSpace: "nowrap" }}>
+                        <Text size="xs" c={m.hasPasskey ? "green" : "dimmed"}>
+                          {m.hasPasskey ? "passkey" : "no passkey"}
+                        </Text>
+                        {m.hasPassword ? (
+                          <Text size="xs" c="dimmed">
+                            password
+                          </Text>
+                        ) : null}
+                      </Table.Td>
+                    ) : null}
                     <Table.Td>
                       <Text size="sm" c="dimmed">
                         {m.status}
@@ -707,6 +811,27 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   Work as
                                 </Button>
                               </Form>
+                              <Button
+                                size="xs"
+                                variant="light"
+                                color="blue"
+                                loading={
+                                  resetFetcher.state !== "idle" &&
+                                  resetFetcher.formData?.get("memberId") ===
+                                    m.memberId
+                                }
+                                onClick={() =>
+                                  resetFetcher.submit(
+                                    {
+                                      intent: "issuePasswordReset",
+                                      memberId: m.memberId,
+                                    },
+                                    { method: "post" },
+                                  )
+                                }
+                              >
+                                Reset password
+                              </Button>
                               <Button
                                 size="xs"
                                 variant="subtle"
@@ -795,6 +920,50 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 Remove
               </Button>
             </Group>
+          </Stack>
+        </Modal>
+
+        <Modal
+          opened={resetLink !== null && dismissedLink !== resetLink?.url}
+          onClose={() => setDismissedLink(resetLink?.url ?? null)}
+          title={`Password reset link for ${resetLink?.name ?? "member"}`}
+          centered
+          size="lg"
+        >
+          <Stack gap="md">
+            <Text size="sm">
+              Send this to them yourself — over text, Signal, or a Discord DM.
+              CampTool can't email it. Their current password keeps working
+              until they finish the reset.
+            </Text>
+            <TextInput
+              readOnly
+              value={resetLink?.url ?? ""}
+              onFocus={(e) => e.currentTarget.select()}
+              aria-label="Password reset link"
+            />
+            <Group justify="space-between">
+              <Text size="xs" c="dimmed">
+                Valid until {resetLink?.expires}. Opening it yourself is safe —
+                it only shows the link's status. Finishing the reset also needs
+                their email address.
+              </Text>
+              <CopyButton value={resetLink?.url ?? ""}>
+                {({ copied, copy }) => (
+                  <Button
+                    onClick={copy}
+                    color={copied ? "green" : undefined}
+                    style={{ flexShrink: 0 }}
+                  >
+                    {copied ? "Copied" : "Copy link"}
+                  </Button>
+                )}
+              </CopyButton>
+            </Group>
+            <Text size="xs" c="dimmed">
+              This is the only time the link is shown — only its fingerprint is
+              stored. Issuing a new one retires this one.
+            </Text>
           </Stack>
         </Modal>
 

@@ -12,6 +12,10 @@ export default [
   // The camp's public programming lineup (no auth; 404s unless fully on).
   route("c/:slug/schedule", "routes/c.$slug.schedule.tsx"),
   route("i/:token", "routes/i.$token.tsx"),
+  // Redeem an officer-issued password reset link. Public: the whole point is
+  // that the person can't sign in. Opening it is read-only — it reports the
+  // link's status and nothing more (plans/password-recovery.md).
+  route("reset/:token", "routes/reset.$token.tsx"),
   route("impersonate", "routes/impersonate.tsx"),
   // Privacy-mode toggle (admin-only; sets the per-browser cookie).
   route("privacy", "routes/privacy.tsx"),

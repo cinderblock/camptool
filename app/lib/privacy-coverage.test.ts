@@ -34,6 +34,10 @@ const EXEMPT: Record<string, string> = {
   "routes/c.$slug.schedule.tsx":
     "Public programming lineup; presenter names are published deliberately.",
   "routes/i.$token.tsx": "Public invite landing, reached without a session.",
+  "routes/reset.$token.tsx":
+    "Public password-reset landing, reached without a session (the whole point " +
+    "is that they can't sign in), so there is no privacy cookie to honour. The " +
+    "one identifier it returns is already masked by maskEmail().",
   "routes/spike.passkey.tsx":
     "Dev-only passkey harness (its loader 404s in production) and it returns " +
     "no data at all — the loader exists purely to gate the route.",
