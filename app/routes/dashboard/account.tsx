@@ -430,15 +430,18 @@ function PasswordCard({
                     autoComplete="current-password"
                     required
                   />
+                  {/* Passphrases work as-is — never trimmed, 128 chars — but
+                      nobody tries one unless told. Same copy as /reset. */}
                   <PasswordInput
                     name="newPassword"
-                    label="New password"
+                    label="New password or passphrase"
+                    description="A few unrelated words — “rusty kettle dawn patrol” — beat one short mangled word. Spaces count."
                     autoComplete="new-password"
                     required
                   />
                   <PasswordInput
                     name="confirmPassword"
-                    label="New password again"
+                    label="Type it again"
                     autoComplete="new-password"
                     required
                   />

@@ -200,6 +200,64 @@ check(
 );
 check("11b. and offers no form", !bogusBody.includes("Set my password"));
 
+// --- Passphrases ---------------------------------------------------------
+//
+// Nothing in the flow is password-specific, and it must stay that way: the
+// value is never trimmed and the only bound is better-auth's 128 chars. The
+// trap this guards is someone adding a well-meaning `.trim()` — a passphrase
+// entered with a trailing space would then be STORED trimmed but TYPED
+// untrimmed at sign-in, locking the person out with no error to explain it.
+
+const phrases: Array<[string, string]> = [
+  ["four words", "correct horse battery staple"],
+  ["punctuation + caps", "Purple Dodecahedron, Marching Slowly!"],
+  ["outer spaces preserved", "  spaces at both ends  "],
+  ["unicode", "café brûlée dawn patrol"],
+];
+
+for (const [label, phrase] of phrases) {
+  const pEmail = `phrase-${STAMP}-${label.replace(/\W+/g, "")}@example.com`;
+  await fetch(`${BASE}/api/auth/sign-up/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "P", email: pEmail, password: "starter-1" }),
+  });
+  const [pu] = await db
+    .select()
+    .from(user)
+    .where(eq(user.email, pEmail))
+    .limit(1);
+  if (!pu) {
+    check(`18. ${label}`, false, "signup failed");
+    continue;
+  }
+  const link = await issuePasswordReset({
+    campId,
+    userId: pu.id,
+    issuedByMembershipId: null,
+  });
+  const set = await fetch(link.url, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      email: pEmail,
+      password: phrase,
+      confirm: phrase,
+    }),
+    redirect: "manual",
+  });
+  const back = await fetch(`${BASE}/api/auth/sign-in/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: pEmail, password: phrase }),
+  });
+  check(
+    `18. passphrase accepted and signs in — ${label}`,
+    set.status === 302 && back.status === 200,
+    `reset=${set.status} signin=${back.status}`,
+  );
+}
+
 // --- Self-serve password management on /account --------------------------
 //
 // The account page changes a password through better-auth with

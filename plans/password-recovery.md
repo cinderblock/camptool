@@ -197,7 +197,19 @@ These each cost real time; none are guessable from the docs.
    `{cond ? ( {/* … */} <Td/> ) : null}` is a syntax error (two expressions);
    the comment has to go outside the `?`.
 
-6. **React escapes apostrophes in SSR output** (`isn't` → `isn&#x27;t`), so
+6. **Passphrases already work; only the wording implied otherwise.** The value
+   is never trimmed anywhere in the flow and the only bound is better-auth's
+   128 characters, so spaces, punctuation and non-ASCII all round-trip intact —
+   verified for four-word phrases, emoji and a 110-char string. The fields are
+   labelled "New password or passphrase" with a nudge, because people assume
+   "password" means one short mangled word.
+
+   **Do not add `.trim()` to any password field.** A passphrase typed with a
+   trailing space would be *stored* trimmed but *typed* untrimmed at sign-in,
+   locking the person out with no error that explains why. Test 18 in
+   `e2e/password-reset.ts` pins this.
+
+7. **React escapes apostrophes in SSR output** (`isn't` → `isn&#x27;t`), so
    asserting on copy containing `'` silently never matches. Match on
    apostrophe-free substrings in E2E tests.
 

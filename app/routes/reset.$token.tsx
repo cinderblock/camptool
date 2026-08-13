@@ -154,15 +154,21 @@ export default function ResetPassword({
                   autoComplete="email"
                   required
                 />
+                {/* Nothing here is password-specific: the value is never
+                    trimmed and the only limit is better-auth's 128 characters,
+                    so a passphrase round-trips intact (spaces, punctuation and
+                    all). Say so, because people assume "password" means one
+                    short mangled word. */}
                 <PasswordInput
                   name="password"
-                  label="New password"
+                  label="New password or passphrase"
+                  description="A few unrelated words — “rusty kettle dawn patrol” — beat one short mangled word. Spaces count."
                   autoComplete="new-password"
                   required
                 />
                 <PasswordInput
                   name="confirm"
-                  label="New password again"
+                  label="Type it again"
                   autoComplete="new-password"
                   required
                 />
