@@ -26,6 +26,7 @@ import { db } from "../../db/client.server";
 import { camp, passwordReset, user } from "../../db/schema";
 import { auth } from "./auth.server";
 import { PUBLIC_BASE_URL } from "./env.server";
+import { startPasskeyRecovery } from "./passkey-recovery.server";
 import {
   MAX_RESET_ATTEMPTS,
   RESET_TTL_MS,
@@ -163,12 +164,23 @@ export type RedeemResult =
  * allowed to call that endpoint. Length bounds come from the auth context, so
  * they can't drift away from `emailAndPassword.minPasswordLength`.
  */
-export async function redeemPasswordReset(input: {
-  token: string;
-  email: string;
-  newPassword: string;
-}): Promise<RedeemResult> {
-  const row = await findByToken(input.token);
+/**
+ * The gate both redemption paths share: is this link live, and did the visitor
+ * type the address it was issued for?
+ *
+ * Factored out because a passkey enrolment and a password reset must be
+ * *equally* hard to reach — if the passkey path skipped the email check it
+ * would be a strictly weaker door onto the same account, and attackers use the
+ * weakest one.
+ */
+async function verifyResetEmail(
+  token: string,
+  email: string,
+): Promise<
+  | { ok: true; row: NonNullable<Awaited<ReturnType<typeof findByToken>>> }
+  | { ok: false; error: string; state: ResetLinkState }
+> {
+  const row = await findByToken(token);
   if (!row) {
     return { ok: false, error: "That link isn't valid.", state: "unknown" };
   }
@@ -178,7 +190,7 @@ export async function redeemPasswordReset(input: {
     return { ok: false, error: "That link can no longer be used.", state };
   }
 
-  const given = input.email.trim().toLowerCase();
+  const given = email.trim().toLowerCase();
   if (given !== row.email.trim().toLowerCase()) {
     // Burn an attempt, not the link — a typo shouldn't cost someone their one
     // recovery path, but grinding through candidate addresses should.
@@ -197,6 +209,42 @@ export async function redeemPasswordReset(input: {
       state: left > 0 ? "valid" : "locked",
     };
   }
+
+  return { ok: true, row };
+}
+
+/**
+ * Begin enrolling a passkey against the account this link belongs to — the
+ * preferred way to redeem it. Returns the opaque handle to pass to
+ * `authClient.passkey.addPasskey({ context })`; the link is not spent until the
+ * credential is cryptographically verified (see `completePasskeyRecovery`), so
+ * an abandoned browser prompt costs nothing.
+ */
+export async function startPasskeyRecoveryFor(
+  token: string,
+  email: string,
+): Promise<{ ok: true; context: string } | { ok: false; error: string }> {
+  const check = await verifyResetEmail(token, email);
+  if (!check.ok) return { ok: false, error: check.error };
+  const context = await startPasskeyRecovery({
+    userId: check.row.link.userId,
+    email: check.row.email,
+    name: check.row.name,
+    resetId: check.row.link.id,
+  });
+  return { ok: true, context };
+}
+
+export async function redeemPasswordReset(input: {
+  token: string;
+  email: string;
+  newPassword: string;
+}): Promise<RedeemResult> {
+  const check = await verifyResetEmail(input.token, input.email);
+  if (!check.ok) {
+    return { ok: false, error: check.error, state: check.state };
+  }
+  const row = check.row;
 
   const ctx = await auth.$context;
   const { minPasswordLength, maxPasswordLength } = ctx.password.config;

@@ -12,6 +12,10 @@ import {
   isSuperAdmin,
 } from "./instance.server";
 import {
+  completePasskeyRecovery,
+  readPendingRecovery,
+} from "./passkey-recovery.server";
+import {
   consumePendingSignup,
   readPendingSignup,
 } from "./passkey-signup.server";
@@ -168,6 +172,21 @@ export const auth = betterAuth({
         // when there's no session (an existing user adding a passkey takes the
         // session branch and never reaches here).
         resolveUser: async ({ ctx, context }) => {
+          // RECOVERY first, and deliberately BEFORE the invite-only gate: this
+          // branch attaches a credential to an account that already exists
+          // (an officer-issued link — see plans/password-recovery.md), so it
+          // creates nothing for the lockdown to guard. Gating it would lock a
+          // camp's own members out of an invite-only deployment, which is
+          // exactly backwards.
+          const recovery = await readPendingRecovery(context);
+          if (recovery) {
+            return {
+              id: recovery.userId,
+              name: recovery.email,
+              displayName: recovery.name,
+            };
+          }
+
           // The invite-only lockdown normally lives in databaseHooks.user.create
           // .before. That hook does still fire for the user we create later
           // (better-auth's createWithHooks picks the request context up from
@@ -205,6 +224,12 @@ export const auth = betterAuth({
         // Runs only after the credential is cryptographically verified, so an
         // abandoned prompt leaves no orphan account behind.
         afterVerification: async ({ ctx, context }) => {
+          // Recovery: the credential is verified, so spend the officer's link
+          // and drop the account's old sessions. No user row is created — it
+          // already exists — we just point the credential at it.
+          const recovered = await completePasskeyRecovery(context ?? "");
+          if (recovered) return { userId: recovered.userId };
+
           const pending = await consumePendingSignup(context);
           // No pending row = an already-signed-in user adding a passkey. Leave
           // the plugin's own userId resolution alone.

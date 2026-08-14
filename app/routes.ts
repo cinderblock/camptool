@@ -28,6 +28,10 @@ export default [
   // Begin a passkey-first (password-less) signup; returns the opaque handle
   // that addPasskey({ context }) carries back to the server.
   route("api/passkey-signup", "routes/api.passkey-signup.tsx"),
+  // Begin enrolling a passkey onto an EXISTING account from an officer-issued
+  // recovery link (plans/password-recovery.md). Same handle mechanism as
+  // passkey-signup, but it attaches to an account that already exists.
+  route("api/passkey-recovery", "routes/api.passkey-recovery.tsx"),
   // TEMPORARY passkey-first spike harness. Remove with routes/spike.passkey.tsx
   // once the flow lands in AuthInline (plans/passkey-first-auth.md step 5).
   route("spike/passkey", "routes/spike.passkey.tsx"),

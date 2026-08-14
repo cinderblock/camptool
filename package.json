@@ -22,7 +22,8 @@
     "db:verify": "bun scripts/verify-migrations.ts",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "e2e:passkey-recovery": "node --experimental-strip-types e2e/passkey-recovery.ts"
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.14",

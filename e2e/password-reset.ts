@@ -112,7 +112,7 @@ check(
 
 // 4. Opening it is read-only: status only, no side effects, no full address.
 const page1 = await (await fetch(url)).text();
-check("4. status page renders", page1.includes("Reset your password"));
+check("4. status page renders", page1.includes("Get back into your account"));
 check(
   "4b. the full email is NOT on the page",
   !page1.includes(EMAIL),
@@ -122,8 +122,11 @@ check("4c. a masked hint IS shown", page1.includes("•"));
 
 const page2 = await (await fetch(url)).text();
 check(
+  // The live-link marker is the PASSKEY button now — the password form is
+  // hidden behind the "my device can't do passkeys" escape hatch, so it is
+  // not in the initial HTML at all.
   "5. opening it again leaves it usable (an officer can click it safely)",
-  page2.includes("Set my password"),
+  page2.includes("Set up a passkey"),
 );
 check("5b. the original password still works", (await signIn(OLD_PW)) === 200);
 
@@ -160,7 +163,7 @@ check("8b. the OLD password no longer works", (await signIn(OLD_PW)) !== 200);
 // 9. Spent links report themselves as spent.
 const page3 = await (await fetch(url)).text();
 check("9. the link now reads as used", page3.includes("already been used"));
-check("9b. and offers no form", !page3.includes("Set my password"));
+check("9b. and offers no way in", !page3.includes("Set up a passkey"));
 const reuse = await postReset(url, EMAIL, "yet-another-pw-3");
 check(
   "9c. and refuses to be redeemed twice",
@@ -185,7 +188,7 @@ check(
 );
 check(
   "10b. the newest link is live",
-  (await (await fetch(second.url)).text()).includes("Set my password"),
+  (await (await fetch(second.url)).text()).includes("Set up a passkey"),
 );
 
 // 11. A garbage token is a status page, not a crash.
@@ -198,7 +201,7 @@ check(
   bogus.status === 200 && bogusBody.includes("may have been mistyped"),
   `HTTP ${bogus.status}`,
 );
-check("11b. and offers no form", !bogusBody.includes("Set my password"));
+check("11b. and offers no way in", !bogusBody.includes("Set up a passkey"));
 
 // --- Passphrases ---------------------------------------------------------
 //

@@ -830,7 +830,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   )
                                 }
                               >
-                                Reset password
+                                Recovery link
                               </Button>
                               <Button
                                 size="xs"
@@ -926,21 +926,22 @@ export default function Members({ loaderData }: Route.ComponentProps) {
         <Modal
           opened={resetLink !== null && dismissedLink !== resetLink?.url}
           onClose={() => setDismissedLink(resetLink?.url ?? null)}
-          title={`Password reset link for ${resetLink?.name ?? "member"}`}
+          title={`Recovery link for ${resetLink?.name ?? "member"}`}
           centered
           size="lg"
         >
           <Stack gap="md">
             <Text size="sm">
               Send this to them yourself — over text, Signal, or a Discord DM.
-              CampTool can't email it. Their current password keeps working
-              until they finish the reset.
+              CampTool can't email it. It walks them through setting up a
+              passkey; if their device can't do that, they can set a password
+              instead. Nothing about their account changes until they finish.
             </Text>
             <TextInput
               readOnly
               value={resetLink?.url ?? ""}
               onFocus={(e) => e.currentTarget.select()}
-              aria-label="Password reset link"
+              aria-label="Recovery link"
             />
             <Group justify="space-between">
               <Text size="xs" c="dimmed">

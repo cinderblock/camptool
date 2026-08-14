@@ -107,6 +107,42 @@ answer "why can't they log in", and it doubles as
 
 ### Redeeming — `/reset/:token` (public, no auth)
 
+**A passkey is the primary path.** The link's main button enrols a passkey;
+the password form is collapsed behind "my device can't do passkeys". This is
+the point of the whole feature — the one moment a locked-out member is
+guaranteed to be paying attention is the moment to hand them the credential we
+want them on, not another password to forget.
+
+How it works without a session (they can't sign in — that's the premise):
+
+1. They type the email; `POST /api/passkey-recovery` checks link + email and
+   returns an opaque handle.
+2. `addPasskey({ context: handle })` runs the WebAuthn ceremony. The plugin's
+   `registration.resolveUser` fires **only when there is no session** and may
+   point the ceremony at any user id — so it attaches to the existing account.
+   Same mechanism as password-free signup (`passkey-signup.server.ts`); this is
+   the second consumer of it.
+3. `afterVerification` spends the link and drops the account's old sessions.
+4. `signIn.passkey()` turns the fresh credential into a session; land on
+   `/account`.
+
+**The recovery branch is checked BEFORE the invite-only gate** in `resolveUser`,
+deliberately: it creates no account, so there is nothing for the lockdown to
+guard, and gating it would lock a camp's own members out of an invite-only
+deployment — exactly backwards.
+
+**Existing passkeys are NOT revoked** on recovery, deviating from
+`plans/passkey-first-auth.md` Layer 5. That plan assumed a reset implies the old
+authenticator is compromised; neither we nor the officer can know that, and
+someone recovering onto a second device would be unpleasantly surprised to find
+their first one wiped. Sessions still go. They can remove old credentials on
+`/account`, where they can see what they're removing.
+
+Both paths run through the same `verifyResetEmail`, so the passkey route is
+exactly as hard to reach as the password route — a weaker door onto the same
+account is the one attackers would use.
+
+
 **Loader always shows status, never consumes.** States:
 
 - `valid` — with the ISO expiry, the issuing camp's name, and a **masked**
@@ -266,4 +302,15 @@ These each cost real time; none are guessable from the docs.
       (correct copy, ISO expiry, the URL) and the `/account` password card
       (Remove disabled with its inline reason). typecheck, 154 unit tests and
       biome all green.
+- [x] 2026-08-14 — **Passkey enrolment is now the recovery link's primary
+      action** (Cameron's actual ask; an earlier turn misread "passkey" as
+      "passphrase"). New `app/lib/passkey-recovery.server.ts` +
+      `POST /api/passkey-recovery`, wired into the passkey plugin's
+      `resolveUser` / `afterVerification` ahead of the invite-only gate. The
+      password form is demoted to an escape hatch, not removed. Verified with a
+      CDP virtual authenticator in `e2e/passkey-recovery.ts` — **11/11**,
+      including that a wrong email is refused *before* any ceremony, that the
+      link is spent afterwards, and that the new passkey signs in on its own
+      from a cleared browser session. `e2e/password-reset.ts` 36/36 and
+      `e2e:passkey` (signup) still green after the `auth.server.ts` change.
 - [ ] Next: deploy, then tell the campmate to expect a link.
