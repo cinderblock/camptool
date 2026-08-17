@@ -512,6 +512,13 @@
       "when": 1786948086618,
       "tag": "0072_flaky_thanos",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1786995967189,
+      "tag": "0073_yielding_doorman",
+      "breakpoints": true
     }
   ]
 }

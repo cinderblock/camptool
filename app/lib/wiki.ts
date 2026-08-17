@@ -185,9 +185,16 @@ export type WikiInline =
       target: "wiki" | "internal" | "external";
       href: string;
       label: string;
-    };
+    }
+  // `src` is the RAW authored string. It is validated by resolveImageSrc() at
+  // RENDER time rather than here, so a body parsed by any other caller can
+  // never hand an unchecked src to an <img>.
+  | { type: "image"; src: string; alt: string };
 
 const LINK_RE = /\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/;
+// Standard markdown image syntax — the one spelling everybody already knows.
+// Checked before links so the leading `!` can't be orphaned as text.
+const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/;
 const BARE_URL_RE = /https?:\/\/[^\s<>()[\]]+[^\s<>()[\].,;:!?'"]/;
 const CODE_RE = /`([^`]+)`/;
 const STRONG_RE = /\*\*([^*]+)\*\*/;
@@ -219,14 +226,18 @@ export function parseInline(src: string): WikiInline[] {
   if (!src) return [];
 
   const code = CODE_RE.exec(src);
+  const image = IMAGE_RE.exec(src);
   const link = LINK_RE.exec(src);
   const url = BARE_URL_RE.exec(src);
   const strong = STRONG_RE.exec(src);
   const em = EM_RE.exec(src);
 
-  // Pick whichever construct starts earliest; ties break by this order.
+  // Pick whichever construct starts earliest; ties break by this order. Image
+  // outranks the bare-URL autolinker, which would otherwise eat the `(https…)`
+  // out of `![alt](https://…)` and leave the syntax in ruins.
   const candidates = [
     { m: code, kind: "code" as const },
+    { m: image, kind: "image" as const },
     { m: link, kind: "link" as const },
     { m: url, kind: "url" as const },
     { m: strong, kind: "strong" as const },
@@ -246,6 +257,9 @@ export function parseInline(src: string): WikiInline[] {
   switch (kind) {
     case "code":
       node = { type: "code", text: m[1] ?? "" };
+      break;
+    case "image":
+      node = { type: "image", alt: (m[1] ?? "").trim(), src: m[2] ?? "" };
       break;
     case "link":
       node = resolveWikiTarget(m[1] ?? "", m[2]);
@@ -405,7 +419,32 @@ function inlineText(nodes: WikiInline[]): string {
       if (n.type === "text") return n.text;
       if (n.type === "code") return n.text;
       if (n.type === "link") return n.label;
+      // A picture reads as its alt text — and this branch must exist before the
+      // fall-through, because an image node has no `children` to recurse into.
+      if (n.type === "image") return n.alt;
       return inlineText(n.children);
     })
     .join("");
+}
+
+/**
+ * Is this paragraph nothing but a picture (plus whitespace)? Such a paragraph
+ * renders as a block figure rather than an inline image — "a photo on its own
+ * line looks like a photo", without inventing a second syntax for it.
+ */
+export function loneImage(
+  nodes: WikiInline[],
+): Extract<WikiInline, { type: "image" }> | null {
+  let found: Extract<WikiInline, { type: "image" }> | null = null;
+  for (const n of nodes) {
+    if (n.type === "image") {
+      if (found) return null;
+      found = n;
+    } else if (n.type === "text") {
+      if (n.text.trim()) return null;
+    } else {
+      return null;
+    }
+  }
+  return found;
 }

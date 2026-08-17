@@ -46,12 +46,26 @@ with these keys:
 | `PUBLIC_BASE_URL` | yes | `https://camptool.mathcamp.us` — auth callbacks + links |
 | `BETTER_AUTH_SECRET` | yes | 32+ random chars (`openssl rand -base64 32`) |
 | `DATABASE_PATH` | yes | `/srv/camptool/data/camptool.db` (persistent, outside releases) |
+| `UPLOADS_PATH` | no | picture files; defaults to `uploads/` beside `DATABASE_PATH` → `/srv/camptool/data/uploads` |
 | `DISCORD_CLIENT_ID` / `_SECRET` | no | enables Discord login/link |
 | `DISCORD_BOT_TOKEN` / `_GUILD_ID` | no | enables DM/guild features |
 | `NODE_ENV` | no | `production` (conventional) |
 | `CAMP_THEME` | no | **build-time** — camp-theme package to bake in (default = built-in). See below. |
 
 `SOCKET_PATH` defaults to `/run/camptool/camptool.sock` — leave it unset.
+
+## Backing it up: two things, not one
+
+**`/export-db` covers the database only.** Uploaded pictures (wiki pages and
+FAQ answers) are files under `/srv/camptool/data/uploads/<camp-id>/`, kept at
+full resolution — the database has their filenames and sizes, not their bytes.
+A backup that grabs the `.db` and skips that directory restores to a wiki full
+of broken images.
+
+Both live under `/srv/camptool/data`, so backing up that whole directory (the
+app tolerates a live copy of the SQLite file) is the simple answer. The
+`uploads` tree is append-mostly and grows with the camp's photos; nothing
+prunes it automatically.
 
 **`CAMP_THEME` is build-time — the one env-file key consumed at build, not
 runtime.** It selects the camp-theme package Vite compiles into the bundle

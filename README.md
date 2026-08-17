@@ -156,6 +156,17 @@ picker; the wiki's editor can link back at an individual answer the same way.
 Every answer keeps a permanent address of its own (`/faq/how-do-i-get-a-ticket`)
 that survives re-wording the question.
 
+**Both take pictures.** Wiki pages and FAQ answers share one body format, so
+adding a photo works the same in either — pick a file, paste it, or drag it onto
+the box. The **original is kept at full resolution** (the page shows a smaller
+copy and links to the original), so the wiki doubles as somewhere the camp's
+build photos actually survive. Pictures are camp data like everything else: they
+are served only to signed-in members of the camp that uploaded them, never from
+a public URL. You can also point at an image hosted elsewhere with
+`![caption](https://…)`. Files live in the data directory next to the database —
+which means **`/export-db` alone is no longer a full backup**; see
+`docs/firefly-deploy.md`.
+
 If your camp runs a [bins](https://github.com/cinderblock/bins) instance — the
 QR-sticker inventory tracker for what's in which box — a **Bins** shortcut in
 the top bar opens it already signed in. The camp admin sets the address and

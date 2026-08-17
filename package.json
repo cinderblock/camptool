@@ -18,6 +18,7 @@
     "e2e:password-reset": "bun e2e/password-reset.ts",
     "e2e:wiki": "bun e2e/wiki.ts",
     "e2e:faq": "bun e2e/faq.ts",
+    "e2e:pictures": "bun e2e/pictures.ts",
     "e2e:bins": "bun e2e/bins.ts",
     "lint": "biome check .",
     "format": "biome format --write .",

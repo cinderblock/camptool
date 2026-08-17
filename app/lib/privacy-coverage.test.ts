@@ -29,6 +29,13 @@ const EXEMPT: Record<string, string> = {
     "only a redirect. There is nothing to redact, and the one string it emits " +
     "(the bins access code, in the Location fragment) is camp config rather " +
     "than anyone's personal data.",
+  "routes/media.$id.tsx":
+    "Streams image bytes, not a payload — there is no object for redact() to " +
+    "walk. Privacy mode pseudonymizes names in text; it has no opinion about " +
+    "the contents of a photo, and re-encoding one in flight is not a thing " +
+    "this app does.",
+  "routes/media.$id.full.tsx":
+    "Same as media.$id: raw bytes off disk, nothing to transform.",
   "routes/api.dev.errors.tsx":
     "Token-gated ops API (DEV_API_TOKEN), not a UI surface. Reads real " +
     "telemetry on purpose — that is the whole point of the endpoint.",

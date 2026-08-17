@@ -27,6 +27,12 @@ export default [
   // Hand-off into the camp's bins inventory app, signed in (resource route;
   // self-gated). Outside the shell because it only ever redirects.
   route("bins", "routes/bins.tsx"),
+  // Uploaded pictures (plans/pictures-in-bodies.md). Resource routes, outside
+  // the shell: they stream bytes, not markup. Auth-gated and camp-scoped —
+  // pictures are camp data, so there is no public/static image path.
+  route("media/:id", "routes/media.$id.tsx"),
+  route("media/:id/full", "routes/media.$id.full.tsx"),
+  route("api/media", "routes/api.media.tsx"),
   route("api/auth/*", "routes/api.auth.$.tsx"),
   // Begin a passkey-first (password-less) signup; returns the opaque handle
   // that addPasskey({ context }) carries back to the server.

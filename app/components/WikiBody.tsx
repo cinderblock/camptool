@@ -5,7 +5,8 @@
  */
 import { Anchor, Blockquote, Code, List, Text, Title } from "@mantine/core";
 import { Link } from "react-router";
-import type { WikiBlock, WikiInline } from "~/lib/wiki";
+import { fullSizeHref, resolveImageSrc } from "~/lib/images";
+import { type WikiBlock, type WikiInline, loneImage } from "~/lib/wiki";
 
 /**
  * `knownSlugs` — pages that exist, so `[[links]]` to unwritten ones render as
@@ -14,6 +15,67 @@ import type { WikiBlock, WikiInline } from "~/lib/wiki";
  * wiki-page link degrades to plain text rather than pointing at a gated route.
  */
 type Ctx = { knownSlugs: Set<string>; wikiEnabled: boolean };
+
+/**
+ * A picture. `src` is validated HERE, at render — the parser keeps the raw
+ * authored string, so an unchecked `javascript:`/`data:` src can never reach an
+ * <img> no matter who parses a body. An unusable src degrades to its alt text.
+ *
+ * Uploads render the display-size copy and link to the full-resolution
+ * original; the originals are kept precisely so they're reachable.
+ */
+function Picture({
+  node,
+  block,
+}: {
+  node: Extract<WikiInline, { type: "image" }>;
+  block: boolean;
+}) {
+  const resolved = resolveImageSrc(node.src);
+  if (!resolved) {
+    return (
+      <Text component="span" c="dimmed" fs="italic">
+        {node.alt || "picture"}
+      </Text>
+    );
+  }
+  const img = (
+    <img
+      src={resolved.src}
+      alt={node.alt}
+      loading="lazy"
+      // Applies to externally-hosted pictures: don't tell that host which page
+      // of the camp's wiki a member is reading.
+      referrerPolicy="no-referrer"
+      style={{
+        maxWidth: "100%",
+        height: "auto",
+        borderRadius: 8,
+        display: block ? "block" : "inline-block",
+        verticalAlign: "middle",
+      }}
+    />
+  );
+  const linked =
+    resolved.kind === "upload" ? (
+      <a href={fullSizeHref(resolved.id)} target="_blank" rel="noreferrer">
+        {img}
+      </a>
+    ) : (
+      img
+    );
+  if (!block) return linked;
+  return (
+    <figure style={{ margin: "0 0 var(--mantine-spacing-sm)" }}>
+      {linked}
+      {node.alt ? (
+        <Text component="figcaption" size="xs" c="dimmed" mt={4}>
+          {node.alt}
+        </Text>
+      ) : null}
+    </figure>
+  );
+}
 
 function InlineNodes({
   nodes,
@@ -45,6 +107,8 @@ function InlineNodes({
             );
           case "code":
             return <Code key={key}>{node.text}</Code>;
+          case "image":
+            return <Picture key={key} node={node} block={false} />;
           default: {
             if (node.target === "external") {
               return (
@@ -120,12 +184,17 @@ export function WikiBody({
                 <InlineNodes nodes={block.children} ctx={ctx} />
               </Title>
             );
-          case "paragraph":
+          case "paragraph": {
+            // A paragraph that is nothing but a picture becomes a figure — and
+            // must not stay wrapped in a <p>, which can't legally contain one.
+            const only = loneImage(block.children);
+            if (only) return <Picture key={key} node={only} block={true} />;
             return (
               <Text key={key} mb="sm">
                 <InlineNodes nodes={block.children} ctx={ctx} />
               </Text>
             );
+          }
           case "list":
             return (
               <List

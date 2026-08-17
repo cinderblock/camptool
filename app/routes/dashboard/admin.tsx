@@ -223,9 +223,15 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>Database backup</Title>
             <Text size="sm" c="dimmed">
-              Download a complete snapshot of the database (every camp's data)
-              as a SQLite <code>.db</code> file. Safe to take while the app is
+              Download a snapshot of the database (every camp's data) as a
+              SQLite <code>.db</code> file. Safe to take while the app is
               running; keep backups somewhere private.
+            </Text>
+            <Text size="sm" c="dimmed">
+              <strong>This is not the whole backup.</strong> Uploaded pictures
+              are files on disk, not rows — this download has their names and
+              sizes but none of the actual images. Back up the{" "}
+              <code>uploads</code> directory beside the database file too.
             </Text>
             <div>
               <Button component="a" href="/export-db" variant="light">

@@ -691,6 +691,25 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   Not to be confused with the `questions` feature, which is the per-year
   **questionnaire** (officers ask, campers answer). This is the inverse.
 
+- [x] **Pictures in wiki pages and FAQ answers (LANDED).** One implementation
+  for both, because they already share a body format and an editor.
+  **Migration 0073** adds `camp_image` — **metadata only**; the files live in
+  the data dir beside the SQLite DB (`UPLOADS_PATH`, default
+  `/srv/camptool/data/uploads/<camp-id>/`), which already existed, so no ops
+  change was needed. **Originals are kept at full resolution**; the browser
+  also makes a max-1600px WebP for display, which is what keeps `sharp` (a
+  native dep) out of the repo. Markdown `![alt](src)`; a paragraph that is only
+  a picture becomes a figure. Upload by picking, pasting, or dropping.
+  Serving is auth-gated and camp-scoped at `/media/:id` (+ `/full`) — no public
+  image path, and a cross-camp id 404s. The stored type is **sniffed from magic
+  bytes**, SVG is refused outright, and every `src` is validated at render so a
+  `javascript:` URL can't reach an `<img>`. Details:
+  **`plans/pictures-in-bodies.md`**.
+
+  **Backup consequence, stated where it matters:** `/export-db` is no longer a
+  complete backup — it has every picture's metadata and none of its bytes. The
+  Site admin card, `docs/firefly-deploy.md` and `.env.example` all say so.
+
 **Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
 the active year — finish setup (members), declare what you're bringing, dues owed
 (their own, if the camp tracks dues), and pending map-change approvals (officers) —
