@@ -175,6 +175,26 @@ question the test publishes ("Where do I park if I arrive after dark?"), so a
 substring assertion on that wording passes on every page whether or not the
 entry rendered. Assert on the entry's permalink (`/faq/<slug>`) instead.
 
+**Bug found AFTER the first deploy, fixed in a follow-up — read this before
+adding anything to a picker.** `appLinkTargets()` listed `/wiki` in its hardcoded
+core set *and* generated it again from the feature registry, so the picker got
+two options with the same value. Mantine's `Select` **throws** on duplicate
+option values; React caught it during SSR, fell back to client rendering, and
+the page still returned **HTTP 200** with the picker silently missing. Every
+route-level assertion passed. It only surfaced as
+`error: [@mantine/core] Duplicate options are not supported. Option with value
+"route:/wiki"` in the dev server's **stdout**, which no check was reading.
+
+Three lessons, all now enforced:
+
+- **Read the server log, not just the status code.** An SSR throw degrades to a
+  200. A green e2e run over a log full of errors is a false negative.
+- `appLinkTargets()` now dedupes by path and no longer hardcodes `/wiki` —
+  the wiki is a gated feature like any other, so it also stopped being offered
+  to camps with the wiki turned off (a second, quieter bug).
+- Covered by unit tests in `app/lib/wiki.test.ts` (it had none) and by
+  e2e check 13b, which asserts the picker's own markup is in the SSR HTML.
+
 ## Follow-ups worth considering (not built)
 
 - A wiki `WIKI_SUBJECTS` entry for `faq`, so a wiki page could be *tied* to an

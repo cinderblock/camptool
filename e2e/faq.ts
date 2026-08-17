@@ -367,6 +367,13 @@ check(
   "13. the wiki editor can link straight at an FAQ answer",
   editor.includes("/faq/do-i-need-my-own-shade"),
 );
+// Regression guard: a duplicate option value makes Mantine's Select THROW
+// during SSR, and React silently falls back to client rendering — the page
+// still 200s, so only the absence of the picker's own markup catches it.
+check(
+  "13b. the link picker survives SSR (no duplicate option values)",
+  editor.includes("Insert a link to"),
+);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

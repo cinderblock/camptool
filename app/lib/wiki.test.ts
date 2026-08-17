@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appLinkTargets,
   parseInline,
   parseWikiBody,
   resolveWikiTarget,
@@ -7,6 +8,40 @@ import {
   wikiLinkSlugs,
   wikiSlug,
 } from "./wiki";
+
+describe("appLinkTargets", () => {
+  test("core surfaces are always offered", () => {
+    const paths = appLinkTargets([]).map((t) => t.path);
+    expect(paths).toEqual(["/", "/guide", "/members", "/editions"]);
+  });
+
+  test("never offers the same path twice", () => {
+    // Regression: /wiki was in the core list AND generated from the registry,
+    // which made Mantine's Select throw on duplicate option values.
+    const paths = appLinkTargets([
+      "wiki",
+      "faq",
+      "map",
+      "bringing",
+      "tickets",
+    ]).map((t) => t.path);
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  test("a gated feature only appears when the camp can see it", () => {
+    expect(appLinkTargets([]).map((t) => t.path)).not.toContain("/wiki");
+    expect(appLinkTargets(["wiki"]).map((t) => t.path)).toContain("/wiki");
+  });
+
+  test("features whose route differs from their key use the route", () => {
+    const paths = appLinkTargets(["bringing", "recruiting", "roster"]).map(
+      (t) => t.path,
+    );
+    expect(paths).toContain("/bringing");
+    expect(paths).toContain("/recruits");
+    expect(paths).toContain("/roster");
+  });
+});
 
 describe("wikiSlug", () => {
   test("titles become addresses", () => {

@@ -105,9 +105,15 @@ export function isWikiSubjectType(v: string): v is WikiSubjectType {
 
 /* ------------------------------------------------- in-app link suggestions */
 
-/** Destinations offered by the editor's "Insert link" picker, so linking to
- * another CampTool feature is a click rather than a memorized path. Core
- * surfaces first, then whichever features this camp can actually see. */
+/**
+ * Destinations offered by the editor's "Insert link" picker, so linking to
+ * another CampTool feature is a click rather than a memorized path.
+ *
+ * Core surfaces first — only the ones that can't be turned off. `/wiki` is
+ * deliberately NOT among them even though this file is the wiki's: it is a
+ * gated feature like any other and arrives below, which keeps it out of the
+ * picker for a camp that has the wiki off, and keeps it from appearing twice.
+ */
 export function appLinkTargets(
   visibleFeatures: Iterable<FeatureKey>,
 ): Array<{ path: string; label: string }> {
@@ -117,7 +123,6 @@ export function appLinkTargets(
     { path: "/guide", label: "How it works" },
     { path: "/members", label: "Members" },
     { path: "/editions", label: "Years" },
-    { path: "/wiki", label: "Wiki" },
   ];
   // One entry per enabled feature, using the registry's own label + the route
   // the feature owns (its key is the path for all but these three).
@@ -130,7 +135,15 @@ export function appLinkTargets(
     path: pathFor[f.key] ?? `/${f.key}`,
     label: f.label,
   }));
-  return [...core, ...feature];
+  // First spelling of a path wins. Two features can legitimately share a route
+  // (`bringing` owns both /bringing and /inventory today), and a picker built
+  // from duplicate values throws in Mantine rather than degrading.
+  const seen = new Set<string>();
+  return [...core, ...feature].filter((t) => {
+    if (seen.has(t.path)) return false;
+    seen.add(t.path);
+    return true;
+  });
 }
 
 /**
