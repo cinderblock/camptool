@@ -706,9 +706,10 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   `javascript:` URL can't reach an `<img>`. Details:
   **`plans/pictures-in-bodies.md`**.
 
-  **Backup consequence, stated where it matters:** `/export-db` is no longer a
-  complete backup — it has every picture's metadata and none of its bytes. The
-  Site admin card, `docs/firefly-deploy.md` and `.env.example` all say so.
+  **Backup consequence — since RESOLVED:** moving picture bytes to disk briefly
+  made `/export-db` a backup that lied (metadata, no images). Cameron's call:
+  *"it's not very useful if it convinces me it's a complete backup when it's
+  not."* The export now bundles both halves. See below.
 
 **Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
 the active year — finish setup (members), declare what you're bringing, dues owed
@@ -716,11 +717,20 @@ the active year — finish setup (members), declare what you're bringing, dues o
 plus the latest 3 announcements. Ties the app together on the landing page.
 
 **Phase 5 — Data lifecycle**
-- [x] **Database backup download (LANDED).** `/export-db` resource route streams a
-  consistent whole-DB SQLite snapshot (`sqlite.serialize()`, WAL-safe) as a
-  `.db` download. **Super-admin only** (the file holds every camp's data), gated
-  in the route + offered via a "Download backup" button on the Site admin page.
-  Next: restore/import a backup (admin-only, riskier — file swap + restart).
+- [x] **Complete backup download (LANDED; upgraded from DB-only 2026-08-17).**
+  `/export-db` streams a **`.tar.gz` holding both halves of the state**: a
+  consistent whole-DB SQLite snapshot (`sqlite.serialize()`, WAL-safe) as
+  `camptool.db`, plus `uploads/…` — every picture at full resolution — plus a
+  `MANIFEST.txt`. **Super-admin only** (it holds every camp's data), gated in
+  the route + offered from the Site admin page.
+
+  Entries are named with no wrapping directory so restore is one command:
+  `tar -xzf <file> -C /srv/camptool/data`. Written with a ~90-line USTAR writer
+  (`app/lib/tar.ts`) rather than a zip: tar streams with one file resident at a
+  time and has no 4 GB archive ceiling, where a zip's central directory needs
+  every CRC and compressed size up front. The manifest also reports integrity —
+  picture rows whose file was already lost, and files with no row (backed up
+  anyway). Next: restore/import in-app (riskier — file swap + restart).
 - [x] **Import last year — re-commit model, NOT a wholesale copy (LANDED).**
   Locked decision (Cameron): copying a year must not bulk-duplicate. (a) The
   officer "copy a year" on /editions now copies ONLY the lot setup (placement),

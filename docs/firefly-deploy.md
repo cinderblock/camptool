@@ -54,18 +54,35 @@ with these keys:
 
 `SOCKET_PATH` defaults to `/run/camptool/camptool.sock` — leave it unset.
 
-## Backing it up: two things, not one
+## Backing it up
 
-**`/export-db` covers the database only.** Uploaded pictures (wiki pages and
-FAQ answers) are files under `/srv/camptool/data/uploads/<camp-id>/`, kept at
-full resolution — the database has their filenames and sizes, not their bytes.
-A backup that grabs the `.db` and skips that directory restores to a wiki full
-of broken images.
+**`/export-db` is the complete backup.** One `.tar.gz` holding both halves of
+the state: the database (a `serialize()` snapshot, WAL included, safe to take
+while the app runs) and every uploaded picture at full resolution.
 
-Both live under `/srv/camptool/data`, so backing up that whole directory (the
-app tolerates a live copy of the SQLite file) is the simple answer. The
-`uploads` tree is append-mostly and grows with the camp's photos; nothing
-prunes it automatically.
+```
+camptool-backup-YYYY-MM-DD.tar.gz
+├── MANIFEST.txt     what's inside, plus anything already missing
+├── camptool.db      the whole database, every camp
+└── uploads/<camp-id>/…   every picture, full resolution
+```
+
+Restore — stop the app first, since it opens the database and migrates on boot:
+
+```sh
+tar -xzf camptool-backup-YYYY-MM-DD.tar.gz -C /srv/camptool/data
+```
+
+The entries are deliberately named `camptool.db` and `uploads/…`, with no
+wrapping directory, so extracting into `/srv/camptool/data` puts everything
+back exactly where it came from.
+
+`MANIFEST.txt` also reports integrity: picture rows whose file had already been
+lost (a backup can't recover those, and you should know), and files with no row
+(included regardless — a backup preserves what exists).
+
+The `uploads` tree is append-mostly and grows with the camp's photos; nothing
+prunes it automatically, so the archive grows too.
 
 **`CAMP_THEME` is build-time — the one env-file key consumed at build, not
 runtime.** It selects the camp-theme package Vite compiles into the bundle

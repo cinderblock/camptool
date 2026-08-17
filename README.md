@@ -163,9 +163,9 @@ copy and links to the original), so the wiki doubles as somewhere the camp's
 build photos actually survive. Pictures are camp data like everything else: they
 are served only to signed-in members of the camp that uploaded them, never from
 a public URL. You can also point at an image hosted elsewhere with
-`![caption](https://…)`. Files live in the data directory next to the database —
-which means **`/export-db` alone is no longer a full backup**; see
-`docs/firefly-deploy.md`.
+`![caption](https://…)`. Files live in the data directory next to the database,
+and the super-admin backup download bundles both, so one file is still a
+complete backup.
 
 If your camp runs a [bins](https://github.com/cinderblock/bins) instance — the
 QR-sticker inventory tracker for what's in which box — a **Bins** shortcut in
