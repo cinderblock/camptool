@@ -131,6 +131,31 @@ export function isAnswered(
   return true;
 }
 
+/**
+ * One stored answer as a human reads it. Values are all text on the way out of
+ * the database (see the schema header), so this is the single place that knows
+ * how each type decodes — shared by the officer responses view and the recruit
+ * application review, which used to carry its own partial copy.
+ */
+export function displayAnswer(
+  type: string,
+  value: string | null | undefined,
+): string {
+  if (value == null || value === "") return "";
+  if (type === "boolean" || type === "consent") {
+    return value === "true" ? "Yes" : "No";
+  }
+  if (type === "multi_select") return parseMultiValue(value).join(", ");
+  if (type === "event_range") {
+    const { arrival, departure } = parseEventRange(value);
+    if (arrival && departure) return `${arrival} → ${departure}`;
+    if (arrival) return `arrives ${arrival}`;
+    if (departure) return `leaves ${departure}`;
+    return "";
+  }
+  return value;
+}
+
 export type EventRange = { arrival: string | null; departure: string | null };
 
 /** An `event_range` answer is stored as JSON `{arrival,departure}` (each a

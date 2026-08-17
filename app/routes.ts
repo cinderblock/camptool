@@ -93,6 +93,12 @@ export default [
     route("recruits", "routes/dashboard/recruits.tsx"),
     route("training", "routes/dashboard/training.tsx"),
     route("questions", "routes/dashboard/questions.tsx"),
+    // Officer-only: what everyone answered, and its spreadsheet export.
+    route("questions/responses", "routes/dashboard/questions.responses.tsx"),
+    route(
+      "questions/responses.csv",
+      "routes/dashboard/questions.responses.csv.tsx",
+    ),
     route("onboarding", "routes/dashboard/onboarding.tsx"),
     route("account", "routes/dashboard/account.tsx"),
     route("settings", "routes/dashboard/settings.tsx"),

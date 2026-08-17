@@ -22,7 +22,7 @@ import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
-import { parseMultiValue } from "~/lib/questions";
+import { displayAnswer } from "~/lib/questions";
 import { isMemberOf } from "~/lib/recruits.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -87,12 +87,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     .where(eq(campQuestion.campId, campId));
   const qById = new Map(questionRows.map((q) => [q.id, q]));
 
-  const displayValue = (type: string, value: string): string => {
-    if (type === "boolean" || type === "consent")
-      return value === "true" ? "Yes" : "No";
-    if (type === "multi_select") return parseMultiValue(value).join(", ");
-    return value;
-  };
   const answerList = (
     raw: string | null,
   ): { prompt: string; display: string }[] => {
@@ -106,7 +100,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         const q = qById.get(qid);
         out.push({
           prompt: q?.prompt ?? "(deleted question)",
-          display: q ? displayValue(q.type, value) : value,
+          display: q ? displayAnswer(q.type, value) : value,
         });
       }
       return out;

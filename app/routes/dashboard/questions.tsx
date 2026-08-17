@@ -36,7 +36,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
 import { memo, useEffect, useRef, useState } from "react";
-import { data, useFetcher } from "react-router";
+import { Link, data, useFetcher } from "react-router";
 import { QuestionField } from "~/components/QuestionField";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
@@ -337,12 +337,21 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
   return (
     <Container size="md">
       <Stack gap="lg">
-        <div>
-          <Title order={2}>Questions</Title>
-          <Text c="dimmed" size="sm">
-            Your camp's questionnaire for {year}.
-          </Text>
-        </div>
+        <Group justify="space-between" align="flex-end" wrap="wrap">
+          <div>
+            <Title order={2}>Questions</Title>
+            <Text c="dimmed" size="sm">
+              Your camp's questionnaire for {year}.
+            </Text>
+          </div>
+          {/* The answers used to be write-only — nothing in the app read them
+              back. This is the way in. */}
+          {canManage ? (
+            <Button component={Link} to="/questions/responses" variant="light">
+              View responses
+            </Button>
+          ) : null}
+        </Group>
 
         {locked ? (
           <Text size="sm" c="dimmed">

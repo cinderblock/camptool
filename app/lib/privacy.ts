@@ -114,6 +114,9 @@ const FREE_TEXT = new Set([
   "description",
   "details",
   "helpText",
+  // The label of the invite link someone came through — an officer-typed note
+  // like "For Alex", so it leaks names as readily as any other free text.
+  "invitedVia",
   "message",
   "metadata",
   "note",

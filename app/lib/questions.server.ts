@@ -4,7 +4,7 @@
  * `once`-scoped questions, whose lifetime answer is stored edition-less.
  * Pairs with the pure helpers in questions.ts.
  */
-import { and, asc, eq, isNotNull, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import {
   campQuestion,
@@ -13,7 +13,8 @@ import {
   recruitApplication,
   user,
 } from "../../db/schema";
-import { surfacedOnApplication } from "./questions";
+import { rankOf } from "./permissions";
+import { parseOptions, surfacedOnApplication } from "./questions";
 import { audienceForRole } from "./wizard";
 
 export type QuestionRow = typeof campQuestion.$inferSelect;
@@ -63,14 +64,136 @@ export async function loadInviterOptions(campId: string): Promise<string[]> {
 /** Active (non-archived) questions for a camp, in display order. */
 export async function loadCampQuestions(
   campId: string,
+  opts: { includeArchived?: boolean } = {},
 ): Promise<QuestionRow[]> {
+  // Archived questions are hidden from anyone being *asked*, but the officer
+  // responses view needs them: their answers still exist and are unreadable
+  // without the prompt.
+  const where = opts.includeArchived
+    ? eq(campQuestion.campId, campId)
+    : and(eq(campQuestion.campId, campId), isNull(campQuestion.archivedAt));
   return db
     .select()
     .from(campQuestion)
-    .where(
-      and(eq(campQuestion.campId, campId), isNull(campQuestion.archivedAt)),
-    )
+    .where(where)
     .orderBy(asc(campQuestion.sortOrder), asc(campQuestion.createdAt));
+}
+
+export type ResponseAnswer = {
+  value: string;
+  /** Stored edition-less — a `once`-scoped answer that holds in every year. */
+  lifetime: boolean;
+  updatedAt: string;
+};
+
+export type ResponseMatrix = Awaited<ReturnType<typeof loadResponseMatrix>>;
+
+/**
+ * Every member's answers for one edition — the officer "what did the camp
+ * say?" view, shared by the responses page and its CSV export so the two can
+ * never disagree about precedence or audience.
+ *
+ * Includes archived questions (their answers survive the archive) and merges
+ * lifetime answers in, with an edition-specific answer winning over a lifetime
+ * one for the same question — the same precedence `loadAnswers` gives the
+ * camper, so an officer reads exactly what that person sees.
+ */
+export async function loadResponseMatrix(opts: {
+  campId: string;
+  editionId: string;
+}) {
+  const questionRows = await loadCampQuestions(opts.campId, {
+    includeArchived: true,
+  });
+
+  const people = await db
+    .select({
+      membershipId: membership.id,
+      role: membership.role,
+      status: membership.status,
+      playaName: membership.playaName,
+      name: user.name,
+      email: user.email,
+    })
+    .from(membership)
+    .innerJoin(user, eq(user.id, membership.userId))
+    .where(eq(membership.organizationId, opts.campId));
+
+  const answerRows = people.length
+    ? await db
+        .select({
+          membershipId: questionAnswer.membershipId,
+          questionId: questionAnswer.questionId,
+          editionId: questionAnswer.editionId,
+          value: questionAnswer.value,
+          updatedAt: questionAnswer.updatedAt,
+        })
+        .from(questionAnswer)
+        .where(
+          and(
+            eq(questionAnswer.campId, opts.campId),
+            or(
+              eq(questionAnswer.editionId, opts.editionId),
+              isNull(questionAnswer.editionId),
+            ),
+            inArray(
+              questionAnswer.membershipId,
+              people.map((p) => p.membershipId),
+            ),
+          ),
+        )
+    : [];
+
+  const byMemberQuestion = new Map<string, ResponseAnswer>();
+  for (const a of answerRows) {
+    const key = `${a.membershipId}:${a.questionId}`;
+    const existing = byMemberQuestion.get(key);
+    // A lifetime row must not overwrite an edition-specific one already seen.
+    if (existing && !existing.lifetime && a.editionId === null) continue;
+    byMemberQuestion.set(key, {
+      value: a.value ?? "",
+      lifetime: a.editionId === null,
+      updatedAt: a.updatedAt.toISOString().slice(0, 10),
+    });
+  }
+
+  const questions = questionRows.map((q) => ({
+    id: q.id,
+    prompt: q.prompt,
+    type: q.type,
+    audience: q.audience,
+    scope: q.scope,
+    surface: q.surface,
+    options: parseOptions(q.options),
+    archived: q.archivedAt != null,
+  }));
+
+  const members = people
+    .map((p) => ({
+      ...p,
+      // Which questions this person is even asked, so an unanswered
+      // recruit-only question isn't counted against a returning member.
+      audience: audienceForRole(p.role),
+      answers: Object.fromEntries(
+        questions.flatMap((q) => {
+          const hit = byMemberQuestion.get(`${p.membershipId}:${q.id}`);
+          return hit ? [[q.id, hit] as const] : [];
+        }),
+      ) as Record<string, ResponseAnswer>,
+    }))
+    .sort(
+      (a, b) => rankOf(b.role) - rankOf(a.role) || a.name.localeCompare(b.name),
+    );
+
+  return { questions, members };
+}
+
+/** Does an audience-tagged question apply to a person of this audience? */
+export function questionApplies(
+  q: { audience: string },
+  m: { audience: string },
+): boolean {
+  return q.audience === "all" || q.audience === m.audience;
 }
 
 /** Narrow a question list to those relevant to a member's audience. */

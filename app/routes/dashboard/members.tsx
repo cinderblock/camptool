@@ -39,6 +39,7 @@ import { requireActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
 import {
   account,
+  campInvite,
   memberFlag,
   membership,
   passkey,
@@ -70,6 +71,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       status: membership.status,
       playaName: membership.playaName,
       joinedAt: membership.joinedAt,
+      invitedByMembershipId: membership.invitedByMembershipId,
+      viaInviteId: membership.viaInviteId,
       name: user.name,
       email: user.email,
     })
@@ -107,13 +110,50 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
+  // Who invited whom. The edge has been recorded on every redemption since
+  // invites shipped but was never shown anywhere. A member with no *named*
+  // inviter may still have come through an open camp link, which records the
+  // door but no person — so fall back to naming the door rather than "—".
+  const nameOf = new Map(rows.map((r) => [r.memberId, r.name]));
+  const inviteIds = [
+    ...new Set(rows.flatMap((r) => (r.viaInviteId ? [r.viaInviteId] : []))),
+  ];
+  const inviteLabel = new Map<string, string>();
+  if (inviteIds.length) {
+    for (const inv of await db
+      .select({
+        id: campInvite.id,
+        kind: campInvite.kind,
+        note: campInvite.note,
+      })
+      .from(campInvite)
+      .where(
+        and(eq(campInvite.campId, campId), inArray(campInvite.id, inviteIds)),
+      )) {
+      inviteLabel.set(
+        inv.id,
+        inv.note?.trim() ||
+          (inv.kind === "open" ? "an open camp link" : "an invite link"),
+      );
+    }
+  }
+
   const members = rows
-    .map((r) => ({
+    .map(({ invitedByMembershipId, viaInviteId, ...r }) => ({
       ...r,
       joinedAt: r.joinedAt ? r.joinedAt.toISOString() : null,
       discord: discord.get(r.userId) ?? null,
       hasPasskey: withPasskey.has(r.userId),
       hasPassword: withPassword.has(r.userId),
+      // The inviter's name when there is one; otherwise the link they came
+      // through. Both null = founder, officer-added, or a public application.
+      invitedByName: invitedByMembershipId
+        ? (nameOf.get(invitedByMembershipId) ?? "Former member")
+        : null,
+      invitedVia:
+        !invitedByMembershipId && viaInviteId
+          ? (inviteLabel.get(viaInviteId) ?? null)
+          : null,
     }))
     .sort(
       (a, b) => rankOf(b.role) - rankOf(a.role) || a.name.localeCompare(b.name),
@@ -126,7 +166,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Open flags. Names resolve via the roster already loaded above; a null
   // reporter means they've since left the camp.
   const myMid = active.membership.id;
-  const nameOf = new Map(rows.map((r) => [r.memberId, r.name]));
   const flagRows = await db
     .select()
     .from(memberFlag)
@@ -677,7 +716,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
           </Card>
         ) : null}
 
-        <Table.ScrollContainer minWidth={720}>
+        <Table.ScrollContainer minWidth={820}>
           <Table verticalSpacing="sm" highlightOnHover>
             <Table.Thead>
               <Table.Tr>
@@ -685,6 +724,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 <Table.Th>Playa name</Table.Th>
                 <Table.Th>Email</Table.Th>
                 <Table.Th>Discord</Table.Th>
+                <Table.Th>Invited by</Table.Th>
                 {canManage ? <Table.Th>Sign-in</Table.Th> : null}
                 <Table.Th>Status</Table.Th>
                 <Table.Th>Role</Table.Th>
@@ -727,6 +767,20 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                       ) : (
                         <Text size="sm" c="dimmed">
                           Not linked
+                        </Text>
+                      )}
+                    </Table.Td>
+                    <Table.Td>
+                      {m.invitedByName ? (
+                        <Text size="sm">{m.invitedByName}</Text>
+                      ) : m.invitedVia ? (
+                        // An open camp link records the door but nobody's name.
+                        <Text size="sm" c="dimmed">
+                          via {m.invitedVia}
+                        </Text>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          —
                         </Text>
                       )}
                     </Table.Td>
