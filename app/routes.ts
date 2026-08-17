@@ -75,6 +75,9 @@ export default [
     route("wiki", "routes/dashboard/wiki.tsx"),
     route("wiki/:slug", "routes/dashboard/wiki.$slug.tsx"),
     route("wiki/:slug/edit", "routes/dashboard/wiki.$slug.edit.tsx"),
+    route("faq", "routes/dashboard/faq.tsx"),
+    // A single answer, standalone — what a `[[/faq/…]]` deep link resolves to.
+    route("faq/:slug", "routes/dashboard/faq.$slug.tsx"),
     route("tickets", "routes/dashboard/tickets.tsx"),
     route("passes", "routes/dashboard/passes.tsx"),
     route("swaps", "routes/dashboard/swaps.tsx"),

@@ -143,6 +143,19 @@ with `[[Another page]]`, and to any other part of CampTool with
 `[[/map|the camp map]]`, offered from a picker of the features that camp has
 turned on.
 
+An **FAQ** answers the questions people actually ask, once. Most of the camp
+sees a searchable Q&A list, grouped into categories an officer defines and
+collapsed until you open one; searching filters across questions *and* answers
+and expands every hit. Officers write the answers — but anyone who can see the
+page, recruits included, can **ask a question that isn't there**, which lands in
+an officer queue (badged in the nav until it's cleared) and publishes as a
+normal entry once answered. Answers are written in the same format as wiki
+pages, so an answer can point deep into CampTool — `[[/tickets|request one
+here]]` — or straight at a wiki page with `[[Fire safety]]`, both offered from a
+picker; the wiki's editor can link back at an individual answer the same way.
+Every answer keeps a permanent address of its own (`/faq/how-do-i-get-a-ticket`)
+that survives re-wording the question.
+
 If your camp runs a [bins](https://github.com/cinderblock/bins) instance — the
 QR-sticker inventory tracker for what's in which box — a **Bins** shortcut in
 the top bar opens it already signed in. The camp admin sets the address and

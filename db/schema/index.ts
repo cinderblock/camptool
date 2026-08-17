@@ -5,6 +5,7 @@ export * from "./bins";
 export * from "./camp";
 export * from "./discord";
 export * from "./document";
+export * from "./faq";
 export * from "./feature";
 export * from "./finance";
 export * from "./fuel";

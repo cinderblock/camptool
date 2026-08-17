@@ -4,23 +4,28 @@ import {
   Card,
   Container,
   Group,
-  Select,
   Stack,
   Text,
   TextInput,
-  Textarea,
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, data, redirect, useFetcher } from "react-router";
+import { MarkupTextarea } from "~/components/MarkupTextarea";
 import { WikiBody } from "~/components/WikiBody";
+import { faqLinkTargets } from "~/lib/faq.server";
 import { featureVisibleTo } from "~/lib/features";
 import { loadFeatureStates, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
-import { appLinkTargets, parseWikiBody, wikiSlug } from "~/lib/wiki";
+import {
+  type LinkTarget,
+  appLinkTargets,
+  parseWikiBody,
+  wikiSlug,
+} from "~/lib/wiki";
 import { existingSlugs, getPageBySlug, savePage } from "~/lib/wiki.server";
 import type { Route } from "./+types/wiki.$slug.edit";
 
@@ -44,13 +49,30 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     .map(([key]) => key);
 
   const slugs = await existingSlugs(active.camp.id);
+  // Two groups in the picker: everywhere in CampTool this camp can reach, and
+  // the camp's own published FAQ answers. Wiki pages aren't offered — inside
+  // the wiki, `[[Another page]]` is already the natural thing to type.
+  const linkTargets: LinkTarget[] = [
+    ...appLinkTargets(visible).map((t) => ({
+      group: "CampTool",
+      path: t.path,
+      label: t.label,
+      kind: "route" as const,
+    })),
+    ...(await faqLinkTargets(active)).map((t) => ({
+      group: "FAQ answers",
+      path: t.path,
+      label: t.label,
+      kind: "route" as const,
+    })),
+  ];
   return redact(privacy, {
     id: page.id,
     slug: page.slug,
     title: page.title,
     body: page.body,
     knownSlugs: [...slugs],
-    linkTargets: appLinkTargets(visible),
+    linkTargets,
   });
 }
 
@@ -93,7 +115,6 @@ export default function WikiPageEdit({ loaderData }: Route.ComponentProps) {
   const [title, setTitle] = useState(initialTitle);
   const [body, setBody] = useState(initialBody);
   const [summary, setSummary] = useState("");
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (fetcher.data?.error) {
@@ -102,29 +123,6 @@ export default function WikiPageEdit({ loaderData }: Route.ComponentProps) {
   }, [fetcher.data]);
 
   const blocks = useMemo(() => parseWikiBody(body), [body]);
-
-  /** Drop `[[/path|Label]]` in at the cursor — linking to another part of
-   * CampTool shouldn't require remembering the URL. */
-  function insertLink(path: string, label: string) {
-    const el = bodyRef.current;
-    const snippet = `[[${path}|${label}]]`;
-    if (!el) {
-      setBody((b) => (b ? `${b}\n${snippet}` : snippet));
-      return;
-    }
-    const start = el.selectionStart ?? body.length;
-    const end = el.selectionEnd ?? start;
-    // A selection becomes the link text; otherwise use the feature's own name.
-    const selected = body.slice(start, end);
-    const text = selected ? `[[${path}|${selected}]]` : snippet;
-    const next = body.slice(0, start) + text + body.slice(end);
-    setBody(next);
-    requestAnimationFrame(() => {
-      el.focus();
-      const caret = start + text.length;
-      el.setSelectionRange(caret, caret);
-    });
-  }
 
   return (
     <Container size="md">
@@ -150,43 +148,13 @@ export default function WikiPageEdit({ loaderData }: Route.ComponentProps) {
           </Text>
         ) : null}
 
-        <div>
-          <Group justify="space-between" align="flex-end" mb={4}>
-            <Text size="sm" fw={500}>
-              Body
-            </Text>
-            <Select
-              size="xs"
-              placeholder="Insert a link to…"
-              searchable
-              w={220}
-              value={null}
-              data={linkTargets.map((t) => ({
-                value: t.path,
-                label: t.label,
-              }))}
-              onChange={(value) => {
-                const target = linkTargets.find((t) => t.path === value);
-                if (target) insertLink(target.path, target.label);
-              }}
-            />
-          </Group>
-          <Textarea
-            ref={bodyRef}
-            value={body}
-            onChange={(e) => setBody(e.currentTarget.value)}
-            autosize
-            minRows={14}
-            maxRows={40}
-            styles={{ input: { fontFamily: "monospace", fontSize: "0.85rem" } }}
-          />
-          <Text size="xs" c="dimmed" mt={4}>
-            <strong>#</strong> heading · <strong>-</strong> bullet ·{" "}
-            <strong>**bold**</strong> · <strong>`code`</strong> ·{" "}
-            <strong>[[Another page]]</strong> to link a wiki page ·{" "}
-            <strong>[[/map|the map]]</strong> to link anywhere in CampTool.
-          </Text>
-        </div>
+        <MarkupTextarea
+          label="Body"
+          value={body}
+          onChange={setBody}
+          targets={linkTargets}
+          minRows={14}
+        />
 
         <TextInput
           label="What changed? (optional)"

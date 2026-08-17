@@ -29,6 +29,7 @@ import { loadAskSnapshots } from "~/lib/asks.server";
 import { authClient, signOut } from "~/lib/auth-client";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
+import { countPendingEntries } from "~/lib/faq.server";
 import {
   type FeatureKey,
   type FeatureState,
@@ -134,6 +135,17 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? !(await hasScheduledDays(activeEdition.id))
       : false;
 
+  // Questions the camp has asked that nobody has answered yet. Officers are the
+  // only ones who can act on them, so only they pay for the query — and the
+  // badge is the whole reason the queue doesn't rot (plans/camp-faq.md).
+  const faqPending =
+    active &&
+    features.faq &&
+    featureVisibleTo(features.faq, active.membership.role) &&
+    hasAtLeast(active.membership.role, "officer")
+      ? await countPendingEntries(active.camp.id)
+      : 0;
+
   // The top-bar shortcut into the camp's bins app. Only the LABEL crosses the
   // wire — the access code stays server-side until /bins issues the redirect.
   const binsMenu =
@@ -153,6 +165,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     superAdmin,
     scheduleEmpty,
     outstandingCount,
+    faqPending,
     showPasskeyNag,
     privacyMode,
     canUsePrivacy,
@@ -186,6 +199,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     superAdmin,
     scheduleEmpty,
     outstandingCount,
+    faqPending,
     showPasskeyNag,
     impersonatedByName,
     privacyMode,
@@ -258,6 +272,12 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ...gated("fuel", "/fuel", "Fuel"),
         ...gated("documents", "/documents", "Documents"),
         ...gated("wiki", "/wiki", "Wiki"),
+        // Badged for officers only — the count is the queue of unanswered
+        // questions, which nobody else can clear.
+        ...gated("faq", "/faq", "FAQ").map((item) => ({
+          ...item,
+          badge: faqPending > 0 ? String(faqPending) : null,
+        })),
         ...gated("tickets", "/tickets", "Tickets"),
         ...gated("passes", "/passes", "Passes"),
         ...gated("swaps", "/swaps", "Spares board"),

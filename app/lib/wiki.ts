@@ -133,6 +133,32 @@ export function appLinkTargets(
   return [...core, ...feature];
 }
 
+/**
+ * One entry in an editor's "Insert a link to…" picker. `group` is the heading
+ * it appears under ("CampTool", "Wiki pages", "FAQ answers"); `kind` decides
+ * which spelling of `[[…]]` gets typed for it.
+ */
+export type LinkTarget = {
+  group: string;
+  /** Route path, or — for a wiki page — the page title. */
+  path: string;
+  label: string;
+  kind: "route" | "wiki";
+};
+
+/**
+ * The `[[…]]` text to drop at the cursor. A wiki page is linked by TITLE
+ * (`[[Fire safety]]`) rather than by path, because that spelling reads as prose
+ * and survives the reader not knowing the wiki exists as a URL space.
+ */
+export function linkSnippet(target: LinkTarget, selected?: string): string {
+  const text = (selected ?? "").trim();
+  if (target.kind === "wiki") {
+    return text ? `[[${target.path}|${text}]]` : `[[${target.path}]]`;
+  }
+  return `[[${target.path}|${text || target.label}]]`;
+}
+
 /* ----------------------------------------------------------- body: inline */
 
 export type WikiInline =

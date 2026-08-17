@@ -672,6 +672,25 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   we control") and a possible in-app bins page. Details:
   **`plans/bins-integration.md`**.
 
+- [x] **FAQ — a searchable Q&A list with an ask queue (LANDED).** Feature key
+  `faq` (default off, camp-scoped). **Migration 0072** adds `faq_category` /
+  `faq_entry`. Officers write answers; **anyone who can see the page — recruits
+  included — can ask a question that isn't there**, which lands as a `pending`
+  entry in an officer queue (badged in the nav) and publishes in place once
+  answered. A pending question IS the entry, so there is no submissions table
+  and the deep link never changes hands. Statuses are `pending` / `published` /
+  `archived`; the slug is frozen at creation so re-wording a question can't
+  break `[[/faq/…]]`. Answers reuse the **wiki body format**, which is what
+  delivers the "link deeply, especially wiki" ask: `[[Fire safety]]`,
+  `[[/tickets|request one here]]`, offered from a two-group picker that is now
+  a shared component (`MarkupTextarea`) used by both editors — the wiki editor
+  gained an "FAQ answers" group in return. With the wiki off, wiki-page links
+  degrade to plain text rather than pointing at a gated route. Details:
+  **`plans/camp-faq.md`**.
+
+  Not to be confused with the `questions` feature, which is the per-year
+  **questionnaire** (officers ask, campers answer). This is the inverse.
+
 **Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
 the active year — finish setup (members), declare what you're bringing, dues owed
 (their own, if the camp tracks dues), and pending map-change approvals (officers) —

@@ -7,8 +7,13 @@ import { Anchor, Blockquote, Code, List, Text, Title } from "@mantine/core";
 import { Link } from "react-router";
 import type { WikiBlock, WikiInline } from "~/lib/wiki";
 
-/** Slugs that exist, so `[[links]]` to unwritten pages render as red-links. */
-type Ctx = { knownSlugs: Set<string> };
+/**
+ * `knownSlugs` — pages that exist, so `[[links]]` to unwritten ones render as
+ * red-links. `wikiEnabled` — false when the reader's camp has the wiki turned
+ * off (a FAQ answer can still be written in this format), in which case a
+ * wiki-page link degrades to plain text rather than pointing at a gated route.
+ */
+type Ctx = { knownSlugs: Set<string>; wikiEnabled: boolean };
 
 function InlineNodes({
   nodes,
@@ -60,6 +65,13 @@ function InlineNodes({
                 </Anchor>
               );
             }
+            if (!ctx.wikiEnabled) {
+              return (
+                <Text key={key} component="span" c="dimmed">
+                  {node.label}
+                </Text>
+              );
+            }
             const exists = ctx.knownSlugs.has(node.href);
             return (
               <Anchor
@@ -83,11 +95,13 @@ function InlineNodes({
 export function WikiBody({
   blocks,
   knownSlugs,
+  wikiEnabled = true,
 }: {
   blocks: WikiBlock[];
   knownSlugs: string[];
+  wikiEnabled?: boolean;
 }) {
-  const ctx: Ctx = { knownSlugs: new Set(knownSlugs) };
+  const ctx: Ctx = { knownSlugs: new Set(knownSlugs), wikiEnabled };
   return (
     <>
       {blocks.map((block, i) => {
