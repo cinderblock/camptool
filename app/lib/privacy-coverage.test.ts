@@ -24,6 +24,11 @@ const EXEMPT: Record<string, string> = {
   "routes/export-db.tsx":
     "Raw SQLite bytes can't be transformed in flight — privacy mode refuses " +
     "this route outright instead (409).",
+  "routes/bins.tsx":
+    "Hand-off to the camp's bins app: the loader returns no payload at all, " +
+    "only a redirect. There is nothing to redact, and the one string it emits " +
+    "(the bins access code, in the Location fragment) is camp config rather " +
+    "than anyone's personal data.",
   "routes/api.dev.errors.tsx":
     "Token-gated ops API (DEV_API_TOKEN), not a UI surface. Reads real " +
     "telemetry on purpose — that is the whole point of the endpoint.",

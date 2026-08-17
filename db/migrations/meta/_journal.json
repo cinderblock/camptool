@@ -498,6 +498,13 @@
       "when": 1786942653176,
       "tag": "0070_hard_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1786946823154,
+      "tag": "0071_acoustic_slapstick",
+      "breakpoints": true
     }
   ]
 }

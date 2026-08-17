@@ -659,6 +659,19 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   offers to start one when there is none. Details + the duplicate-thread
   provenance: **`plans/camp-wiki.md`**.
 
+- [x] **bins integration — top-bar hand-off (LANDED, phase 1 of 3).** The camp's
+  sibling inventory app (`../bins`, Math Camp's at `i.mathcamp.us`) gets an
+  optional **Bins** item in the top bar that opens it already signed in. Feature
+  key `bins` (default off) + `camp_bins` config per camp (**migration 0071**:
+  base URL, access code, label), set by an admin at `/settings`. The href is
+  `/bins`, a redirect route that attaches bins' `/join#<code>` at click time —
+  the menu renders on every page, so the shared secret must never be in the
+  HTML. Members+ only. **Still to come:** the supplies data pull (July 30
+  decision 4, whose "does bins expose an API?" blocker is now RESOLVED — bins
+  ships `/api/v1` as a "public, versioned read/embed surface for external apps
+  we control") and a possible in-app bins page. Details:
+  **`plans/bins-integration.md`**.
+
 **Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
 the active year — finish setup (members), declare what you're bringing, dues owed
 (their own, if the camp tracks dues), and pending map-change approvals (officers) —

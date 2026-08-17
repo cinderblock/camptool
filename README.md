@@ -143,6 +143,12 @@ with `[[Another page]]`, and to any other part of CampTool with
 `[[/map|the camp map]]`, offered from a picker of the features that camp has
 turned on.
 
+If your camp runs a [bins](https://github.com/cinderblock/bins) instance — the
+QR-sticker inventory tracker for what's in which box — a **Bins** shortcut in
+the top bar opens it already signed in. The camp admin sets the address and
+access code once; the code is handed out only when a member clicks, never
+rendered into the page. Members and up get the shortcut; recruits don't.
+
 The deployment owner is a **super admin** (the first account to register; more
 can be granted in-app) with a **Site admin** page that controls two
 instance-wide lockdowns: turning off **new camp creation** (only super admins can

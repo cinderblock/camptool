@@ -16,6 +16,7 @@ export type FeatureKey =
   | "announcements"
   | "documents"
   | "wiki"
+  | "bins"
   | "questions"
   | "onboarding"
   | "map"
@@ -63,6 +64,12 @@ export const FEATURES: CampFeatureDef[] = [
     label: "Wiki",
     description:
       "A camp-wide knowledge base — any member can create and edit pages.",
+  },
+  {
+    key: "bins",
+    label: "Bins",
+    description:
+      "A top-bar shortcut into the camp's bins inventory tracker — the QR-sticker app for what's in which box — opened already signed in. Set the address and access code below once it's on.",
   },
   {
     key: "questions",
@@ -169,6 +176,7 @@ const ROUTE_FEATURES: Record<string, FeatureKey> = {
   announcements: "announcements",
   documents: "documents",
   wiki: "wiki",
+  bins: "bins",
   questions: "questions",
   onboarding: "onboarding",
   map: "map",

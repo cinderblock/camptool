@@ -24,6 +24,9 @@ export default [
   route("start", "routes/start.tsx"),
   // Super-admin DB backup download (resource route; self-gated).
   route("export-db", "routes/export-db.tsx"),
+  // Hand-off into the camp's bins inventory app, signed in (resource route;
+  // self-gated). Outside the shell because it only ever redirects.
+  route("bins", "routes/bins.tsx"),
   route("api/auth/*", "routes/api.auth.$.tsx"),
   // Begin a passkey-first (password-less) signup; returns the opaque handle
   // that addPasskey({ context }) carries back to the server.

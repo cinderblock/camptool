@@ -27,6 +27,7 @@ import { ShellBanner } from "~/components/ShellBanner";
 import { outstandingAsks } from "~/lib/asks";
 import { loadAskSnapshots } from "~/lib/asks.server";
 import { authClient, signOut } from "~/lib/auth-client";
+import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
 import {
   type FeatureKey,
@@ -133,11 +134,22 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? !(await hasScheduledDays(activeEdition.id))
       : false;
 
+  // The top-bar shortcut into the camp's bins app. Only the LABEL crosses the
+  // wire — the access code stays server-side until /bins issues the redirect.
+  const binsMenu =
+    active &&
+    features.bins &&
+    featureVisibleTo(features.bins, active.membership.role) &&
+    hasAtLeast(active.membership.role, "member")
+      ? await getBinsMenu(active.camp.id)
+      : null;
+
   return redact(privacy, {
     user,
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
     features,
+    binsMenu,
     superAdmin,
     scheduleEmpty,
     outstandingCount,
@@ -170,6 +182,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     activeCampId,
     activeRole,
     features,
+    binsMenu,
     superAdmin,
     scheduleEmpty,
     outstandingCount,
@@ -394,6 +407,20 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                   </Menu.Item>
                 </Menu.Dropdown>
               </Menu>
+            ) : null}
+            {binsMenu ? (
+              // A hand-off to a separate app, so it opens in its own tab and
+              // goes through /bins, which attaches the sign-in at click time.
+              <Button
+                size="xs"
+                variant="subtle"
+                component="a"
+                href="/bins"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {binsMenu.label} ↗
+              </Button>
             ) : null}
             <FeedbackButton />
             <Menu position="bottom-end" withinPortal>
