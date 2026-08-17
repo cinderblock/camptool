@@ -166,9 +166,19 @@ the dashboard layout loader redirects everything to `/start` — and because tha
 redirect happens *after* the action runs, a POST still takes effect while
 returning 302, which reads like a failure that isn't one.
 
+## Locked: the wiki is never public
+
+Asked and answered (Cameron, 2026-08-16): **"CampTool is private first. No
+publishing directly from CampTool."** So a wiki page is camp-internal, full
+stop — there is no public wiki surface, and no "publish this page" affordance
+is to be added later. As built: all three routes live inside the auth-required
+dashboard layout and every loader/action runs `requireActiveCamp` +
+`requireFeature`; an anonymous `/wiki` 302s to login on the live deploy.
+
+If a camp wants something public, the answer is to put it somewhere that is
+already deliberately public, not to expose a wiki page.
+
 ## Open questions for the user
 
-1. Should a wiki page ever be **publicly visible** (on `/c/:slug`)? Assumed
-   **no** — camp-internal only, like documents.
-2. Attachments/images — out of scope for now (no storage infra, same reason
+1. Attachments/images — out of scope for now (no storage infra, same reason
    `camp_document` is links-only). Links to Drive work today.

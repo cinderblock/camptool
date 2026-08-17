@@ -49,6 +49,21 @@ gated on the active *event* being Burning Man, once an event-type seam exists.
 
 ## Decisions already made (don't re-ask)
 
+0. **CampTool is PRIVATE FIRST. Nothing publishes directly from CampTool.**
+   (Cameron, 2026-08-16.) Camp data is for the camp. A new feature gets **no**
+   public surface, no "share this publicly" toggle, no unauthenticated read
+   path — the default and the answer is camp-internal. Don't design one and ask;
+   don't add one "just in case". The camp wiki was built this way from the start
+   (`plans/camp-wiki.md`).
+
+   The two existing public surfaces are deliberate, scoped exceptions that
+   predate this rule being stated — the recruiting page `/c/:slug` (the whole
+   point is that strangers can apply) and the programming lineup
+   `/c/:slug/schedule` (what the camp offers the *event*, and only for offerings
+   explicitly scheduled and not marked camp-only). Both are gated on their
+   feature being fully **on**, never `preview`. Treat these as the complete
+   list: extending either, or adding a third, needs Cameron to say so.
+
 1. **Tenancy = multi-camp aware, single deploy.** Every tenant-scoped table
    carries `camp_id` from day one. We run ONE instance for our camp now, but the
    schema must never assume a single camp. Reason: the cross-camp neighborhood/
