@@ -9,15 +9,19 @@ import {
   Badge,
   Button,
   Card,
+  Collapse,
   Container,
+  Divider,
   Group,
+  PasswordInput,
   SegmentedControl,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
   Title,
 } from "@mantine/core";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { data, redirect, useFetcher } from "react-router";
 import {
   clearBinsLink,
@@ -121,6 +125,7 @@ const STATE_OPTIONS: { label: string; value: FeatureState }[] = [
 function FeatureCard({
   feature,
   stateOf,
+  children,
 }: {
   feature: {
     key: FeatureKey;
@@ -130,6 +135,10 @@ function FeatureCard({
     state: FeatureState;
   };
   stateOf: (key: FeatureKey) => FeatureState;
+  /** Extra setup a feature needs once it's on — revealed in place, and driven
+   * by the SAME optimistic state as the control, so it slides open on the
+   * click rather than a server round-trip later. */
+  children?: ReactNode;
 }) {
   const fetcher = useFetcher();
   // Optimistic: show the submitted state while the save is in flight.
@@ -140,8 +149,13 @@ function FeatureCard({
   const unmet = feature.requires.filter((dep) => stateOf(dep) === "off");
   return (
     <Card withBorder padding="md">
-      <Group justify="space-between" wrap="nowrap" align="flex-start">
-        <div>
+      {/* Wraps on purpose: with `nowrap`, the description's flex item refuses
+          to shrink past its content (min-width: auto) and shoves the control
+          off the right edge on a phone — worse the longer the description.
+          Given a basis, the control drops below the text instead, and on a
+          normal-width screen the two still share one line. */}
+      <Group justify="space-between" align="flex-start" gap="sm">
+        <div style={{ flex: "1 1 240px", minWidth: 0 }}>
           <Group gap="xs">
             <Text fw={600}>{feature.label}</Text>
             {state === "preview" ? (
@@ -163,6 +177,8 @@ function FeatureCard({
         </div>
         <SegmentedControl
           size="xs"
+          // Never squeezed: the three labels are the whole control.
+          style={{ flexShrink: 0 }}
           value={state}
           onChange={(value) =>
             fetcher.submit(
@@ -173,6 +189,12 @@ function FeatureCard({
           data={STATE_OPTIONS}
         />
       </Group>
+      {children ? (
+        <Collapse in={state !== "off"} transitionDuration={220}>
+          <Divider my="md" />
+          {children}
+        </Collapse>
+      ) : null}
     </Card>
   );
 }
@@ -190,12 +212,13 @@ function BinsConfig({
   const [accessCode, setAccessCode] = useState("");
   const saving = fetcher.state !== "idle";
 
+  const saved = fetcher.data?.ok && !saving;
+
   return (
-    <Card withBorder padding="md" ml="md">
-      <Stack gap="xs">
-        <Text size="sm" fw={500}>
-          Where your bins site lives
-        </Text>
+    <Stack gap="sm">
+      {/* Address and label pair up on anything but a phone; the code sits on
+          its own row because it's the one field with a caveat attached. */}
+      <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm" verticalSpacing="sm">
         <TextInput
           size="xs"
           label="Address"
@@ -205,62 +228,62 @@ function BinsConfig({
         />
         <TextInput
           size="xs"
-          label="Access code"
-          placeholder={
-            bins.hasCode ? "Saved — type a new one to replace it" : "Optional"
-          }
-          value={accessCode}
-          onChange={(e) => setAccessCode(e.currentTarget.value)}
-        />
-        <Text size="xs" c="dimmed">
-          The code from your bins site's Settings page — the one its invite link
-          carries. With it, the menu item signs people straight in. It's stored
-          for the camp and handed out only when a member clicks, never printed
-          on the page. Members and up get the shortcut; recruits don't.
-        </Text>
-        <TextInput
-          size="xs"
           label="Menu label"
           placeholder="Bins"
           value={label}
           onChange={(e) => setLabel(e.currentTarget.value)}
         />
-        {fetcher.data?.error ? (
-          <Text size="xs" c="red">
-            {fetcher.data.error}
+      </SimpleGrid>
+      <PasswordInput
+        size="xs"
+        label="Access code"
+        description={
+          bins.hasCode
+            ? "Saved. Type a new one to replace it, or leave blank to keep it."
+            : "From your bins site's Settings page — the code its invite link carries. Members get signed straight in; it's never printed on the page."
+        }
+        placeholder={bins.hasCode ? "••••••••" : "Optional"}
+        value={accessCode}
+        onChange={(e) => setAccessCode(e.currentTarget.value)}
+      />
+      {fetcher.data?.error ? (
+        <Text size="xs" c="red">
+          {fetcher.data.error}
+        </Text>
+      ) : null}
+      <Group justify="flex-end" gap="xs">
+        {saved ? (
+          <Text size="xs" c="dimmed" mr="auto">
+            Saved
           </Text>
         ) : null}
-        <Group justify="space-between">
-          {bins.baseUrl ? (
-            <Button
-              size="xs"
-              variant="subtle"
-              color="red"
-              loading={saving}
-              onClick={() =>
-                fetcher.submit({ intent: "binsClear" }, { method: "post" })
-              }
-            >
-              Remove
-            </Button>
-          ) : (
-            <span />
-          )}
+        {bins.baseUrl ? (
           <Button
             size="xs"
+            variant="subtle"
+            color="red"
             loading={saving}
             onClick={() =>
-              fetcher.submit(
-                { intent: "bins", baseUrl, accessCode, label },
-                { method: "post" },
-              )
+              fetcher.submit({ intent: "binsClear" }, { method: "post" })
             }
           >
-            Save
+            Remove
           </Button>
-        </Group>
-      </Stack>
-    </Card>
+        ) : null}
+        <Button
+          size="xs"
+          loading={saving}
+          onClick={() =>
+            fetcher.submit(
+              { intent: "bins", baseUrl, accessCode, label },
+              { method: "post" },
+            )
+          }
+        >
+          Save
+        </Button>
+      </Group>
+    </Stack>
   );
 }
 
@@ -280,12 +303,9 @@ export default function CampSettings({ loaderData }: Route.ComponentProps) {
           </Text>
         </div>
         {features.map((f) => (
-          <div key={f.key}>
-            <FeatureCard feature={f} stateOf={stateOf} />
-            {f.key === "bins" && f.state !== "off" ? (
-              <BinsConfig bins={bins} />
-            ) : null}
-          </div>
+          <FeatureCard key={f.key} feature={f} stateOf={stateOf}>
+            {f.key === "bins" ? <BinsConfig bins={bins} /> : null}
+          </FeatureCard>
         ))}
       </Stack>
     </Container>
