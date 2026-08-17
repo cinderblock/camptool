@@ -131,6 +131,18 @@ resulting lineup is served at `/c/<camp-slug>/schedule` as a public,
 no-login page — the thing to put on a flyer or a QR code — while offerings
 marked *camp only* stay internal.
 
+A **Wiki** gives the camp somewhere to write things down that outlive any one
+year — how the swamp cooler is plumbed, how the big shade structure goes up,
+what went wrong last time. Pages are free-form and **any member can edit any
+page**; every save keeps the previous version, so open editing costs nothing and
+officers can restore. A page can be **tied to a thing elsewhere in the app** —
+most usefully a structure kind, so a camp's signature build shows its page in
+the map's side panel for every one placed, this year and every year after (or a
+single placed object, when only that one is special). Pages link to each other
+with `[[Another page]]`, and to any other part of CampTool with
+`[[/map|the camp map]]`, offered from a picker of the features that camp has
+turned on.
+
 The deployment owner is a **super admin** (the first account to register; more
 can be granted in-app) with a **Site admin** page that controls two
 instance-wide lockdowns: turning off **new camp creation** (only super admins can

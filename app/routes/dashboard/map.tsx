@@ -115,6 +115,7 @@ import {
 } from "~/lib/structures";
 import type { StructureConfig } from "~/lib/structures";
 import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
+import { wikiTiesFor } from "~/lib/wiki.server";
 import {
   BRC_WIND_FROM_BEARING,
   type FlowField,
@@ -744,6 +745,12 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
       : null,
     objects: objectRows.map(toObjRow) satisfies ObjRow[],
+    // Wiki pages tied to what's on the map (see plans/camp-wiki.md). Empty when
+    // the camp hasn't enabled the wiki — the panel then shows nothing.
+    wiki: await wikiTiesFor(
+      active,
+      objectRows.map((o) => ({ id: o.id, kind: o.kind })),
+    ),
     zones: zoneRows.map((z) => ({
       id: z.id,
       name: z.name,
@@ -3706,6 +3713,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             suggestions={suggestions}
             lotOpen={lotOpen}
             fetcher={fetcher}
+            wiki={loaderData.wiki}
           />
         </Stack>
       </Flex>
@@ -8020,6 +8028,7 @@ function SidePanel({
   suggestions,
   lotOpen,
   fetcher,
+  wiki,
 }: {
   lot: Lot;
   objects: ObjRow[];
@@ -8034,6 +8043,12 @@ function SidePanel({
   // Lot config visibility — toggled by the map toolbar gear (lifted to CampMap).
   lotOpen: boolean;
   fetcher: ReturnType<typeof useFetcher>;
+  // Wiki pages tied to a structure kind / a specific placed object.
+  wiki: {
+    enabled: boolean;
+    byKind: Record<string, { slug: string; title: string }>;
+    byObject: Record<string, { slug: string; title: string }>;
+  };
 }) {
   const selected = objects.find((o) => o.id === selectedId) ?? null;
   // Officers edit the official geometry + name/kind/notes + delete. Members
@@ -8221,6 +8236,36 @@ function SidePanel({
                     ))}
                   </Stack>
                 </Paper>
+              );
+            })()}
+
+            {/* Wiki page for this thing — the specific object's page wins over
+                the kind's, since it was written about this one. */}
+            {(() => {
+              if (!wiki.enabled) return null;
+              const tie =
+                wiki.byObject[selected.id] ?? wiki.byKind[selected.kind];
+              if (tie) {
+                return (
+                  <Anchor
+                    component={Link}
+                    to={`/wiki/${tie.slug}`}
+                    size="xs"
+                    prefetch="intent"
+                  >
+                    📖 {tie.title}
+                  </Anchor>
+                );
+              }
+              return (
+                <Anchor
+                  component={Link}
+                  to={`/wiki?subject=structure_kind:${encodeURIComponent(selected.kind)}`}
+                  size="xs"
+                  c="dimmed"
+                >
+                  Start a wiki page for {kindDef(selected.kind).label}
+                </Anchor>
               );
             })()}
 

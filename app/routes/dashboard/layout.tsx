@@ -244,6 +244,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ...gated("supplies", "/supplies", "Supplies"),
         ...gated("fuel", "/fuel", "Fuel"),
         ...gated("documents", "/documents", "Documents"),
+        ...gated("wiki", "/wiki", "Wiki"),
         ...gated("tickets", "/tickets", "Tickets"),
         ...gated("passes", "/passes", "Passes"),
         ...gated("swaps", "/swaps", "Spares board"),

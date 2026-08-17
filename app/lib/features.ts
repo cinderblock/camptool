@@ -15,6 +15,7 @@ export type FeatureState = "off" | "preview" | "on";
 export type FeatureKey =
   | "announcements"
   | "documents"
+  | "wiki"
   | "questions"
   | "onboarding"
   | "map"
@@ -56,6 +57,12 @@ export const FEATURES: CampFeatureDef[] = [
     description:
       "A shared library of links — Google Docs, schedules, packing lists.",
     starter: true,
+  },
+  {
+    key: "wiki",
+    label: "Wiki",
+    description:
+      "A camp-wide knowledge base — any member can create and edit pages.",
   },
   {
     key: "questions",
@@ -161,6 +168,7 @@ const BY_KEY = new Map(FEATURES.map((f) => [f.key, f]));
 const ROUTE_FEATURES: Record<string, FeatureKey> = {
   announcements: "announcements",
   documents: "documents",
+  wiki: "wiki",
   questions: "questions",
   onboarding: "onboarding",
   map: "map",

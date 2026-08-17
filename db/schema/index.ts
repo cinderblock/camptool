@@ -21,3 +21,4 @@ export * from "./swap";
 export * from "./training";
 export * from "./telemetry";
 export * from "./ticket";
+export * from "./wiki";

@@ -626,6 +626,24 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   keys are reserved for the Schedule feature. Details + deviations:
   **`plans/camp-features.md`**.
 
+- [x] **Camp wiki — member-editable pages, linkable to anything (LANDED,
+  E2E-tested on a scratch server; NOT yet deployed-verified).** User ask
+  (2026-08-16): an optional section any member can edit, for arbitrary things,
+  **tied to specific things on the map** (Math Camp's Sierpinski pyramid
+  "deserves a linked wiki page"), with easy links to other CampTool features.
+  Ships as feature key `wiki` (default off; camp-scoped like documents, since
+  wiki knowledge outlives a year). **Migration 0070** adds `wiki_page` /
+  `wiki_revision` / `wiki_link`. Every save snapshots the PREVIOUS body, which
+  is what makes open editing safe (officers restore). Bodies are a small
+  markdown subset parsed to a React tree — never `dangerouslySetInnerHTML` —
+  with one link syntax for everything: `[[Page]]` for wiki pages (unwritten
+  ones render as red-links that offer to create), `[[/map|label]]` for anywhere
+  in the app, offered from a picker of that camp's enabled features. The map
+  tie is keyed on the structure **kind**, not a placed object, so it survives
+  the yearly re-declare; the side panel shows the page on every instance, and
+  offers to start one when there is none. Details + the duplicate-thread
+  provenance: **`plans/camp-wiki.md`**.
+
 **Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
 the active year — finish setup (members), declare what you're bringing, dues owed
 (their own, if the camp tracks dues), and pending map-change approvals (officers) —
