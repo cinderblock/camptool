@@ -91,6 +91,13 @@ export const mapObject = sqliteTable(
     // Declared-but-unplaced items sit in the officer queue (placed = false);
     // placed items have a position on the map.
     placed: integer("placed", { mode: "boolean" }).notNull().default(false),
+    // Parked in the STAGING APRON — the margin outside the lot border, where a
+    // thing can sit at true scale next to where it might go before anyone
+    // commits to siting it. Deliberately orthogonal to `placed`: a staged item
+    // is still NOT placed, so it stays on the officer's to-site queue and on the
+    // camper's Bringing page. It just has meaningful x/y now, outside the lot.
+    // An object is never half-in: the editor snaps a drag fully in or fully out.
+    staged: integer("staged", { mode: "boolean" }).notNull().default(false),
     // "Put my tent next to my car." A placement PREFERENCE the camper sets on
     // their domicile, surfaced to whoever arranges the map — not a constraint
     // the app enforces. Some campers cluster vehicles tightly and pitch tents
@@ -100,6 +107,20 @@ export const mapObject = sqliteTable(
     placeNearVehicle: integer("place_near_vehicle", { mode: "boolean" })
       .notNull()
       .default(false),
+    // "Put me next to THIS PERSON." The other half of the same wish, for the
+    // case the app can't infer: a camper wants to be near a friend, not near
+    // their own car. Like `placeNearVehicle` it is a PREFERENCE surfaced to
+    // whoever arranges the map, never a constraint the app enforces — the map
+    // draws a faint line between the two and leaves the judgement to a human.
+    // NULL = no preference. Points at a membership rather than one of their
+    // objects because the camper is expressing "near Bob", not "near Bob's
+    // 2019 tent"; the map resolves it to whichever of Bob's things is on the map.
+    nearMembershipId: text("near_membership_id").references(
+      () => membership.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     // "This RV needs pump-out / cleanout access." A placement REQUIREMENT: a
     // truck has to physically reach it, so it belongs near the service road or
     // main street rather than buried mid-block. Set by the camper on their RV.

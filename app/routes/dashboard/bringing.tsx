@@ -7,6 +7,7 @@ import {
   Group,
   NumberInput,
   Paper,
+  Select,
   Stack,
   Text,
   TextInput,
@@ -22,7 +23,7 @@ import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
 import { db } from "../../../db/client.server";
-import { campEdition, mapObject } from "../../../db/schema";
+import { campEdition, mapObject, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/bringing";
 
 export function meta(_: Route.MetaArgs) {
@@ -37,8 +38,13 @@ type Item = {
   height: number;
   placed: boolean;
   placeNearVehicle: boolean;
+  /** "Put me near this person" — a membership in this camp, or null. */
+  nearMembershipId: string | null;
   needsPumpout: boolean;
 };
+
+/** Someone this camper could ask to be placed near. */
+type Neighbour = { id: string; name: string };
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition, privacy } =
@@ -91,6 +97,20 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
       : null;
 
+  // Everyone else in the camp, for the "put me near…" picker. Camp-wide rather
+  // than this year's roster: memberships aren't per-year, and a camper setting
+  // this up in March shouldn't be limited to whoever has already committed.
+  // A wish naming someone with nothing on the map simply draws no line.
+  const neighbourRows = await db
+    .select({ id: membership.id, name: user.name })
+    .from(membership)
+    .innerJoin(user, eq(membership.userId, user.id))
+    .where(eq(membership.organizationId, active.camp.id));
+  const neighbours = neighbourRows
+    .filter((m) => m.id !== active.membership.id && m.name)
+    .map((m) => ({ id: m.id, name: m.name as string }))
+    .sort((a, b) => a.name.localeCompare(b.name)) satisfies Neighbour[];
+
   return redact(privacy, {
     locked: activeEdition.locked,
     bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
@@ -102,8 +122,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       height: r.height,
       placed: r.placed,
       placeNearVehicle: r.placeNearVehicle,
+      nearMembershipId: r.nearMembershipId,
       needsPumpout: r.needsPumpout,
     })) satisfies Item[],
+    neighbours,
     lastYear,
   });
 }
@@ -182,6 +204,24 @@ export async function action({ request }: Route.ActionArgs) {
     if (form.has("placeNearVehicle")) {
       set.placeNearVehicle = form.get("placeNearVehicle") === "true";
     }
+    if (form.has("nearMembershipId")) {
+      const v = String(form.get("nearMembershipId") ?? "");
+      // Must be a real membership in THIS camp, and not the caller themselves —
+      // "place me near me" is not a wish, and an id from another camp would leak
+      // a person across the tenant boundary the moment the map drew their name.
+      if (v === "" || v === mid) {
+        set.nearMembershipId = null;
+      } else {
+        const [m] = await db
+          .select({ id: membership.id })
+          .from(membership)
+          .where(
+            and(eq(membership.id, v), eq(membership.organizationId, campId)),
+          )
+          .limit(1);
+        set.nearMembershipId = m ? m.id : null;
+      }
+    }
     if (form.has("needsPumpout")) {
       set.needsPumpout = form.get("needsPumpout") === "true";
     }
@@ -250,7 +290,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Bringing({ loaderData }: Route.ComponentProps) {
-  const { items, locked, lastYear, bannedKinds } = loaderData;
+  const { items, locked, lastYear, bannedKinds, neighbours } = loaderData;
   const fetcher = useFetcher();
 
   function add(kind: string, size?: AddSize) {
@@ -347,6 +387,7 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
               <ItemRow
                 key={item.id}
                 item={item}
+                neighbours={neighbours}
                 fetcher={fetcher}
                 locked={locked}
               />
@@ -360,10 +401,12 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
 
 function ItemRow({
   item,
+  neighbours,
   fetcher,
   locked,
 }: {
   item: Item;
+  neighbours: Neighbour[];
   fetcher: ReturnType<typeof useFetcher>;
   locked: boolean;
 }) {
@@ -427,6 +470,33 @@ function ItemRow({
                     </Text>
                   </Text>
                 }
+              />
+            ) : null}
+            {/* The wish the app can't infer. "Near my car" is derivable from
+                what you brought; "near Sam" is only knowable if you say so.
+                Same standing as the checkbox above — advisory, drawn as a faint
+                line on the map for whoever is arranging it. Domiciles only, for
+                the same reason: where your generator sleeps isn't a friendship. */}
+            {def.group === "Domiciles" && neighbours.length > 0 ? (
+              <Select
+                mt={6}
+                size="xs"
+                w={260}
+                clearable
+                searchable
+                disabled={locked}
+                label={
+                  <Text size="xs">
+                    …and near this person{" "}
+                    <Text span c="dimmed">
+                      — optional
+                    </Text>
+                  </Text>
+                }
+                placeholder="Nobody in particular"
+                value={item.nearMembershipId}
+                data={neighbours.map((n) => ({ value: n.id, label: n.name }))}
+                onChange={(v) => commit({ nearMembershipId: v ?? "" })}
               />
             ) : null}
             {/* A pump-out truck has to physically reach the RV, so this is a

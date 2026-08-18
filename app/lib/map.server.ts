@@ -52,8 +52,11 @@ export const objSelect = {
   color: mapObject.color,
   notes: mapObject.notes,
   groupId: mapObject.groupId,
+  staged: mapObject.staged,
   ownerMembershipId: mapObject.ownerMembershipId,
   ownerName: user.name,
+  placeNearVehicle: mapObject.placeNearVehicle,
+  nearMembershipId: mapObject.nearMembershipId,
   pendingAt: mapObject.pendingAt,
   pendingPrev: mapObject.pendingPrev,
   pendingBy: mapObject.pendingByMembershipId,
@@ -75,8 +78,11 @@ export type ObjSelectRow = {
   color: string | null;
   notes: string | null;
   groupId: string | null;
+  staged: boolean;
   ownerMembershipId: string | null;
   ownerName: string | null;
+  placeNearVehicle: boolean;
+  nearMembershipId: string | null;
   pendingAt: Date | null;
   pendingPrev: string | null;
   pendingBy: string | null;
@@ -116,15 +122,20 @@ export function toObjRow(r: ObjSelectRow): ObjRow {
     color: r.color,
     notes: r.notes,
     groupId: r.groupId,
+    staged: r.staged,
     ownerMembershipId: r.ownerMembershipId,
     ownerName: r.ownerName,
+    placeNearVehicle: r.placeNearVehicle,
+    nearMembershipId: r.nearMembershipId,
     pending: parsePending(r.pendingAt, r.pendingPrev, r.pendingBy),
   };
 }
 /**
  * The lot and every PLACED object for an edition — exactly what it takes to
  * draw a read-only map. Unplaced objects are the officer's staging queue, not
- * a location, so they're excluded (same rule as `partyMapObjects`).
+ * a location, so they're excluded (same rule as `partyMapObjects`) — and that
+ * includes ones parked in the editor's staging apron, which are still unplaced.
+ * Scratch space is a working state, not something to publish.
  */
 export async function loadMapView(
   editionId: string,

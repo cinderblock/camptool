@@ -27,8 +27,8 @@ import {
   Tooltip,
   useComputedColorScheme,
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
-import { and, desc, eq, gt, isNotNull, lt } from "drizzle-orm";
+import { useLocalStorage, useMediaQuery } from "@mantine/hooks";
+import { and, desc, eq, gt, isNotNull, lt, or } from "drizzle-orm";
 import {
   memo,
   useEffect,
@@ -62,9 +62,13 @@ import {
   PAD_FT,
   VIEW_W,
   cityPhi,
+  fitCenterInsideLot,
+  fitCenterToLot,
   frontageRadiusOf,
   layoutFor,
   lotHalfWidthAt,
+  pointInLot,
+  polygonOutsideLot,
   rearWidthOf,
   straightLotPoints,
   wedgeFor,
@@ -527,6 +531,13 @@ async function listSnapshots(editionId: string) {
   }));
 }
 
+/** Everything the EDITOR draws on the map surface: objects sited in the lot, plus
+ * ones parked in the staging apron outside it. Staged objects are deliberately
+ * still `placed = false` (they stay on the officer's to-site queue), so "is it on
+ * the map?" can't just be `placed`. Read-only views use `placed` alone — scratch
+ * space isn't something to publish. */
+const onMap = or(eq(mapObject.placed, true), eq(mapObject.staged, true));
+
 /** The client-shaped map state (objects/zones/cables/roads/lot) for a bulk
  * refresh after undo/redo/restore — mirrors the loader's mapping. */
 async function loadClientMap(editionId: string) {
@@ -537,9 +548,7 @@ async function loadClientMap(editionId: string) {
         .from(mapObject)
         .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
         .leftJoin(user, eq(membership.userId, user.id))
-        .where(
-          and(eq(mapObject.editionId, editionId), eq(mapObject.placed, true)),
-        ),
+        .where(and(eq(mapObject.editionId, editionId), onMap)),
       db.select().from(mapZone).where(eq(mapZone.editionId, editionId)),
       db.select().from(mapCable).where(eq(mapCable.editionId, editionId)),
       db.select().from(mapRoad).where(eq(mapRoad.editionId, editionId)),
@@ -637,7 +646,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from(mapObject)
     .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
     .leftJoin(user, eq(membership.userId, user.id))
-    .where(and(eq(mapObject.editionId, editionId), eq(mapObject.placed, true)));
+    .where(and(eq(mapObject.editionId, editionId), onMap));
 
   const zoneRows = await db
     .select()
@@ -656,6 +665,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const canManage = hasAtLeast(active.membership.role, "officer");
   // Declared-but-unplaced items (the officer placement queue), with owner names.
+  // Includes items parked in the staging apron: staging is a way to LOOK at
+  // something's real size, not a decision about where it goes, so it must not
+  // quietly clear the queue. The tray badges those so the difference is visible.
   const unplacedRows = canManage
     ? await db
         .select({
@@ -663,6 +675,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           kind: mapObject.kind,
           width: mapObject.width,
           height: mapObject.height,
+          staged: mapObject.staged,
           placeNearVehicle: mapObject.placeNearVehicle,
           needsPumpout: mapObject.needsPumpout,
           ownerName: user.name,
@@ -717,6 +730,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       kind: u.kind,
       width: u.width,
       height: u.height,
+      staged: u.staged,
       ownerName: u.ownerName,
       placeNearVehicle: u.placeNearVehicle,
       needsPumpout: u.needsPumpout,
@@ -1060,14 +1074,18 @@ export async function action({ request }: Route.ActionArgs) {
         );
       }
       const def = kindDef(kind);
+      const staged = form.get("staged") === "true";
       const row = {
         id: crypto.randomUUID(),
         campId,
         editionId,
         name: str("name"),
         kind,
-        // Dropping from the legend = an officer placing a camp/shared item.
-        placed: true,
+        // Dropping from the legend = an officer placing a camp/shared item —
+        // unless they dropped it in the staging apron, in which case it's a
+        // sketch of something the camp might bring and isn't sited yet.
+        placed: !staged,
+        staged,
         x: num("x", 0),
         y: num("y", 0),
         width: Math.max(1, num("width", def.w)),
@@ -1098,8 +1116,11 @@ export async function action({ request }: Route.ActionArgs) {
           color: row.color,
           notes: row.notes,
           groupId: null,
+          staged: row.staged,
           ownerMembershipId: null,
           ownerName: null,
+          placeNearVehicle: false,
+          nearMembershipId: null,
           pending: null,
         } satisfies ObjRow,
       });
@@ -1174,8 +1195,13 @@ export async function action({ request }: Route.ActionArgs) {
               color: row.color,
               notes: row.notes,
               groupId: null,
+              // Premade blocks always land in the lot — a cluster is a layout
+              // idea, and there's nothing to learn from parking one in scratch.
+              staged: false,
               ownerMembershipId: null,
               ownerName: null,
+              placeNearVehicle: false,
+              nearMembershipId: null,
               pending: null,
             }) satisfies ObjRow,
         ),
@@ -1207,6 +1233,7 @@ export async function action({ request }: Route.ActionArgs) {
             width: Math.max(1, Number(o.width) || 1),
             height: Math.max(1, Number(o.height) || 1),
             rotation: Number(o.rotation) || 0,
+            staged: o.staged === true,
             updatedAt: new Date(),
           })
           .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
@@ -1298,7 +1325,10 @@ export async function action({ request }: Route.ActionArgs) {
         if (!id) continue;
         await db
           .update(mapObject)
-          .set({ placed: false, updatedAt: new Date() })
+          // Clearing `staged` too: "send it back to the tray" has to take it off
+          // the map surface entirely, and a row that's unplaced AND unstaged is
+          // the only state that draws nothing.
+          .set({ placed: false, staged: false, updatedAt: new Date() })
           .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)));
       }
       return data({ ok: true });
@@ -1326,6 +1356,10 @@ export async function action({ request }: Route.ActionArgs) {
         if (form.get(key) != null) set[key] = num(key);
       }
       if (form.has("tallFt")) set.tallFt = Math.max(0, num("tallFt"));
+      // Which side of the border the drag settled on. The client decides it (it
+      // owns the footprint math that snapped the object in or out) and sends it
+      // with the geometry, so the flag can never disagree with the coordinates.
+      if (form.has("staged")) set.staged = form.get("staged") === "true";
 
       if (canManage) {
         // Officers edit anything directly; an officer edit accepts (clears) any
@@ -1563,10 +1597,20 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     if (intent === "placeObject") {
+      // Dragged out of the Unplaced tray. Dropping it in the LOT sites it
+      // (placed); dropping it in the staging apron only parks it there, so it
+      // stays unplaced and the officer still owes it a spot.
       const id = String(form.get("id"));
+      const staged = form.get("staged") === "true";
       const [row] = await db
         .update(mapObject)
-        .set({ placed: true, x: num("x"), y: num("y"), updatedAt: new Date() })
+        .set({
+          placed: !staged,
+          staged,
+          x: num("x"),
+          y: num("y"),
+          updatedAt: new Date(),
+        })
         .where(and(eq(mapObject.id, id), eq(mapObject.editionId, editionId)))
         .returning();
       if (!row) return data({ error: "Item not found." }, { status: 404 });
@@ -1583,6 +1627,7 @@ export async function action({ request }: Route.ActionArgs) {
         .update(mapObject)
         .set({
           placed: false,
+          staged: false,
           pendingByMembershipId: null,
           pendingAt: null,
           pendingPrev: null,
@@ -1617,9 +1662,17 @@ export async function action({ request }: Route.ActionArgs) {
       await db.insert(mapObject).values({
         ...rest,
         id: newId,
-        placed: true,
+        // Duplicating something parked in the staging apron gives you another
+        // one parked there — it lands next to the original either way, so the
+        // copy has to inherit which side of the border that is.
+        placed: !src.staged,
+        staged: src.staged,
         // A duplicate is an officer-placed camp/shared item.
         ownerMembershipId: null,
+        // …so the original owner's placement WISHES don't come with it. "Next to
+        // my vehicle" on a camp-owned copy would point at nobody's vehicle.
+        placeNearVehicle: false,
+        nearMembershipId: null,
         x: src.x + 10,
         y: src.y + 10,
         createdById: user.id,
@@ -2378,72 +2431,137 @@ function footprintOffsets(
   );
 }
 
-/** Fit an object's CENTER so its whole ROTATED footprint polygon stays inside the
- * lot trapezoid (not a bounding circle/box). `offs` = the footprint vertices as
- * offsets from the center. Clamps the vertical span into [0, depthFt], then clamps
- * x using each vertex's own half-width at its depth (so the taper is respected).
- * If the shape is bigger than the lot in a dimension, it's centered there. */
-function fitCenterInsideLot(
+/**
+ * How far outside the lot border something may be parked, feet. Generous — the
+ * staging apron grows to keep whatever is out there on screen — but finite, so a
+ * fumbled drag can't fling an item somewhere you'd have to hunt for it, and the
+ * map can't be scaled into nothing by one stray coordinate.
+ */
+const STAGE_MAX_FT = 250;
+
+/**
+ * Snap a dragged or dropped object's CENTRE to one side of the lot border: fully
+ * sited inside, or fully parked in the staging apron. Every path that positions
+ * an object goes through here, which is what makes "never straddling" a property
+ * of the editor rather than a thing each handler remembers to do.
+ */
+function snapToLot(
+  lot: { frontageFt: number; depthFt: number },
+  rear: number,
+  offs: Array<{ x: number; y: number }>,
   cx: number,
   cy: number,
-  offs: Array<{ x: number; y: number }>,
-  frontageFt: number,
-  depthFt: number,
-  rear: number,
-): { x: number; y: number } {
-  if (!offs.length) return { x: cx, y: clamp(cy, 0, depthFt) };
-  let minVy = Number.POSITIVE_INFINITY;
-  let maxVy = Number.NEGATIVE_INFINITY;
-  for (const o of offs) {
-    minVy = Math.min(minVy, o.y);
-    maxVy = Math.max(maxVy, o.y);
-  }
-  const yLo = -minVy;
-  const yHi = depthFt - maxVy;
-  const y = yLo <= yHi ? clamp(cy, yLo, yHi) : (yLo + yHi) / 2;
-  const mid = frontageFt / 2;
-  let xLo = Number.NEGATIVE_INFINITY;
-  let xHi = Number.POSITIVE_INFINITY;
-  for (const o of offs) {
-    const ay = clamp(y + o.y, 0, depthFt);
-    const hw = lotHalfWidthAt(ay, frontageFt, depthFt, rear);
-    xLo = Math.max(xLo, mid - hw - o.x);
-    xHi = Math.min(xHi, mid + hw - o.x);
-  }
-  const x = xLo <= xHi ? clamp(cx, xLo, xHi) : (xLo + xHi) / 2;
-  return { x, y };
+): { x: number; y: number; staged: boolean } {
+  return fitCenterToLot(
+    clamp(cx, -STAGE_MAX_FT, lot.frontageFt + STAGE_MAX_FT),
+    clamp(cy, -STAGE_MAX_FT, lot.depthFt + STAGE_MAX_FT),
+    offs,
+    lot.frontageFt,
+    lot.depthFt,
+    rear,
+  );
 }
 
-/** Is a point (plot-local feet) inside the lot trapezoid? */
-function pointInLot(
-  px: number,
-  py: number,
+/**
+ * Is this object's footprint, at the given centre and rotation, entirely clear of
+ * the lot? Used where an object moves as part of a rigid LINKED BLOCK, which
+ * (unlike a lone drag) can't be snapped to one side of the border without tearing
+ * the block's relative layout apart. There the flag follows the geometry instead
+ * of the geometry following the flag, and a member left straddling gets picked up
+ * by the overflow highlight — which is what that highlight is for.
+ */
+function stagedByGeometry(
+  o: Pick<ObjRow, "kind" | "width" | "height" | "config" | "mirrored">,
+  cx: number,
+  cy: number,
+  rotation: number,
   frontageFt: number,
   depthFt: number,
   rear: number,
 ): boolean {
-  if (py < -1e-6 || py > depthFt + 1e-6) return false;
-  const half = lotHalfWidthAt(py, frontageFt, depthFt, rear);
-  return Math.abs(px - frontageFt / 2) <= half + 1e-6;
+  const pts = footprintOffsets(
+    o.kind,
+    o.width,
+    o.height,
+    rotation,
+    o.config,
+    o.mirrored,
+  ).map((v) => ({ x: cx + v.x, y: cy + v.y }));
+  return polygonOutsideLot(pts, frontageFt, depthFt, rear);
 }
 
-/** Does an object's (rotated) footprint cross the lot border? True if any of its
- * box corners lies outside the lot trapezoid — drives the overflow highlight. */
+/**
+ * The apron (feet) this set of objects needs to stay on screen — the default
+ * `PAD_FT`, widened to cover anything staged beyond it. Quantised to 25′ steps so
+ * the map doesn't rescale by a hair on every pixel of drag; a bounding circle is
+ * used rather than the real outline because it's rotation-independent, and an
+ * apron that flickered as you spun a staged object would be worse than a
+ * slightly generous one.
+ */
+function stagingPadFt(
+  objects: ObjRow[],
+  frontageFt: number,
+  depthFt: number,
+): number {
+  let need = 0;
+  for (const o of objects) {
+    if (!o.staged) continue;
+    const r = Math.hypot(o.width, o.height) / 2;
+    const cx = o.x + o.width / 2;
+    const cy = o.y + o.height / 2;
+    need = Math.max(
+      need,
+      r - cx,
+      cx + r - frontageFt,
+      r - cy,
+      cy + r - depthFt,
+    );
+  }
+  if (need <= PAD_FT) return PAD_FT;
+  return Math.min(STAGE_MAX_FT + 50, Math.ceil((need + 10) / 25) * 25);
+}
+
+/** An object's real (rotated) footprint outline as absolute plot-local feet. */
+function footprintPoints(o: ObjRow): Array<{ x: number; y: number }> {
+  const cx = o.x + o.width / 2;
+  const cy = o.y + o.height / 2;
+  // The object's REAL outline (triangle, hexagon, RV pop-outs, …), rotated — not
+  // a bounding box, so a rotated non-rect shape isn't falsely flagged.
+  return footprintLocal(o).map(([lx, ly]) => {
+    const v = rotateVec(lx, ly, o.rotation);
+    return { x: cx + v.x, y: cy + v.y };
+  });
+}
+
+/** Does an object's (rotated) footprint STRADDLE the lot border? Fully inside is
+ * a sited object and fully outside is a staged one — both fine. Only a shape with
+ * a foot on each side is the problem this highlight exists to show. Dragging can
+ * no longer produce one (see `fitCenterToLot`), but pre-staging data and lot
+ * resizes still can. */
 function objectOverflowsLot(
   o: ObjRow,
   frontageFt: number,
   depthFt: number,
   rear: number,
 ): boolean {
-  const cx = o.x + o.width / 2;
-  const cy = o.y + o.height / 2;
-  // Test the object's REAL footprint outline (triangle, hexagon, …), rotated —
-  // not a bounding box, so a rotated non-rect shape isn't falsely flagged.
-  for (const [lx, ly] of footprintLocal(o)) {
-    const v = rotateVec(lx, ly, o.rotation);
-    if (!pointInLot(cx + v.x, cy + v.y, frontageFt, depthFt, rear)) return true;
-  }
-  return false;
+  const pts = footprintPoints(o);
+  if (pts.every((p) => pointInLot(p.x, p.y, frontageFt, depthFt, rear)))
+    return false;
+  return !polygonOutsideLot(pts, frontageFt, depthFt, rear);
+}
+
+/** Is this object parked in the staging apron rather than sited in the lot? The
+ * stored `staged` flag is authoritative (it's what the queue and the badge read),
+ * but geometry is the fallback for rows written before staging existed. */
+function isStaged(
+  o: ObjRow,
+  frontageFt: number,
+  depthFt: number,
+  rear: number,
+): boolean {
+  return (
+    o.staged || polygonOutsideLot(footprintPoints(o), frontageFt, depthFt, rear)
+  );
 }
 
 /** Format feet as feet-and-inches, e.g. 104.93 → 104′11″. */
@@ -3031,10 +3149,26 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   // Uplink aiming: draw each uplink radio's path to the NOC tower and flag what
   // blocks it. On by default — it draws nothing until someone places a radio.
   const [showUplink, setShowUplink] = useState(true);
+  // Placement wishes: a faint line from a camper's domicile to the thing they
+  // asked to be near (their own vehicle, or a friend). On by default — like the
+  // uplink overlay it draws nothing until someone actually expresses one, and
+  // the whole reason to collect these is that the person arranging the map sees
+  // them at the moment they're arranging.
+  const [showWishes, setShowWishes] = useState(true);
   // Lot config form: hidden by default, revealed by the toolbar gear (it's a
   // once-at-setup form). Lifted here so the gear (in the map toolbar) and the
   // form (in the side rail) share one flag.
   const [lotOpen, setLotOpen] = useState(false);
+  // The right rail is 320px of tools sitting next to a drawing that wants every
+  // pixel it can get. On a skinny window that trade is simply wrong, so the rail
+  // folds away at ANY width rather than only below a breakpoint — and the choice
+  // is remembered, because someone who works in a narrow window wants it folded
+  // every time, not once per page load.
+  const [railOpen, setRailOpen] = useLocalStorage({
+    key: "camptool:map-rail-open",
+    defaultValue: true,
+    getInitialValueInEffect: true,
+  });
 
   // ---- Shade simulation: time of day drives the sun, which casts shadows. The
   // sim is always on (drag the sun to the day's ends to clear the shadows). ----
@@ -3360,6 +3494,19 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               fetcher={fetcher}
             />
           ) : null}
+          <Button
+            variant="default"
+            size="xs"
+            aria-expanded={railOpen}
+            // Explicit value, not a functional updater: Mantine's
+            // useLocalStorage setter takes a `prev => next` callback but the
+            // `prev` it hands you is its INTERNAL state, which is undefined
+            // until the read-from-storage effect has run — so `v => !v` flips
+            // `undefined` to `true` and the button appears dead on first click.
+            onClick={() => setRailOpen(!railOpen)}
+          >
+            {railOpen ? "Hide panels" : "Show panels"}
+          </Button>
         </Group>
       </Group>
 
@@ -3410,7 +3557,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           style={{
             flex: "1 1 auto",
             minWidth: 0,
-            height: isNarrow ? "70vh" : "100%",
+            // Stacked on a phone the map gets a fixed slice of the viewport and
+            // the rail scrolls below it; with the rail folded away there's
+            // nothing below, so the map may as well have the room.
+            height: isNarrow ? (railOpen ? "70vh" : "82vh") : "100%",
             display: "flex",
             flexDirection: "column",
             minHeight: 0,
@@ -3459,6 +3609,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             showDoors={showDoors}
             showFire={showFire}
             showUplink={showUplink && isBurningMan(event)}
+            showWishes={showWishes}
             showWind={showWind}
             windFromBearing={windFromBearing}
             windStrength={windStrength}
@@ -3467,227 +3618,206 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           />
           <GridScaleNote lot={lot} />
         </div>
-        <Stack
-          gap="md"
-          w={{ base: "100%", md: 320 }}
-          style={{
-            flex: isNarrow ? "0 0 auto" : "0 0 320px",
-            height: isNarrow ? "auto" : "100%",
-            overflowY: isNarrow ? "visible" : "auto",
-            paddingRight: 4,
-          }}
-        >
-          {canManage ? (
-            <MapStatusControl
-              status={loaderData.mapStatus ?? ""}
-              fetcher={fetcher}
-            />
-          ) : null}
-          {canManage ? (
-            <SnapshotsPanel snapshots={snapshots} fetcher={fetcher} />
-          ) : null}
-          <Paper withBorder p="sm" radius="md">
-            <Text size="xs" fw={600} mb={6}>
-              Highlight
-            </Text>
-            <SegmentedControl
-              size="xs"
-              fullWidth
-              value={highlight}
-              onChange={setHighlight}
-              data={[
-                { label: "All", value: "none" },
-                { label: "Mine", value: "mine" },
-                // Only offered while a ?party= link is in play — there is no
-                // party to filter to otherwise.
-                ...(party ? [{ label: "Party", value: "party" }] : []),
-                { label: "Homes", value: "domicile" },
-                { label: "Vehicles", value: "vehicle" },
-                { label: "Builds", value: "structure" },
-              ]}
-            />
-            <Checkbox
-              mt="sm"
-              size="xs"
-              label="Show doors"
-              checked={showDoors}
-              onChange={(e) => setShowDoors(e.currentTarget.checked)}
-            />
-            <Checkbox
-              mt={6}
-              size="xs"
-              label="Fire access (125′)"
-              checked={showFire}
-              onChange={(e) => setShowFire(e.currentTarget.checked)}
-            />
-            {showFire ? (
-              <Text size="xs" c="dimmed" mt={4}>
-                Green = within 125′ hose reach of the street/alley. Red = beyond
-                reach (needs an internal fire lane). Assumes rear-alley access.
-              </Text>
-            ) : null}
-            {isBurningMan(event) ? (
-              <>
-                <Checkbox
-                  mt={6}
-                  size="xs"
-                  label="Uplink aim (NOC)"
-                  checked={showUplink}
-                  onChange={(e) => setShowUplink(e.currentTarget.checked)}
-                />
-                {showUplink ? (
-                  <Text size="xs" c="dimmed" mt={4}>
-                    Draws each uplink radio's path to the NOC tower in Center
-                    Camp and flags anything of yours tall enough to block it.
-                    Set the radio's Height to the antenna's height above ground.
-                    Neighbours' structures aren't modelled.
-                  </Text>
-                ) : null}
-              </>
-            ) : null}
-          </Paper>
-          <Compass
-            mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
-            frontsToMan={lot.frontsToMan}
-            nocBearing={
-              showUplink && isBurningMan(event)
-                ? (landmarkSightLine(
-                    lot.year,
-                    lot.address,
-                    frontageRadiusOf(lot),
-                    NOC_LANDMARK,
-                  )?.bearingDeg ?? null)
-                : null
-            }
-            sun={sun}
-            year={sunYear}
-            arc={arc}
-            timeMin={timeMin}
-            setTimeMin={setTimeMin}
-            setSunDragging={setSunDragging}
-            animateShade={animateShade}
-            setAnimateShade={setAnimateShade}
-            windFromBearing={windFromBearing}
-            setWindFromBearing={setWindFromBearing}
-            windStrength={windStrength}
-            setWindStrength={setWindStrength}
-            windParticles={windParticles}
-            setWindParticles={setWindParticles}
-            resetWind={() => {
-              setWindFromBearing(BRC_WIND_FROM_BEARING);
-              setWindStrength(1);
+        {railOpen ? (
+          <Stack
+            gap="md"
+            w={{ base: "100%", md: 320 }}
+            style={{
+              flex: isNarrow ? "0 0 auto" : "0 0 320px",
+              height: isNarrow ? "auto" : "100%",
+              overflowY: isNarrow ? "visible" : "auto",
+              paddingRight: 4,
             }}
-          />
-          {canManage ? (
-            <SuggestionsPanel
-              suggestions={suggestions}
-              objects={objects}
-              setSelectedId={setSelectedId}
-              fetcher={fetcher}
-            />
-          ) : null}
-          {canManage ? (
-            <UnplacedTray unplaced={unplaced} fetcher={fetcher} />
-          ) : null}
-          {canManage ? <BlockPalette /> : null}
-          {canManage ? <Legend bannedKinds={bannedKinds} /> : null}
-          {selectedZoneId ? (
-            <ZonePanel
-              zones={zones}
-              selectedZoneId={selectedZoneId}
-              setZones={setZones}
-              canManage={canManage}
-              fetcher={fetcher}
-            />
-          ) : null}
-          {selectedCableId ? (
-            <CablePanel
-              cables={cables}
-              selectedCableId={selectedCableId}
-              setCables={setCables}
-              canManage={canManage}
-              fetcher={fetcher}
-            />
-          ) : null}
-          {selectedRoadId ? (
-            <RoadPanel
-              roads={roads}
-              selectedRoadId={selectedRoadId}
-              setRoads={setRoads}
-              canManage={canManage}
-              fetcher={fetcher}
-            />
-          ) : null}
-          {selectedIds.length + selectedZoneIds.length > 1 ? (
-            <Paper withBorder p="sm" radius="md" bg="blue.0">
-              <Text size="sm" fw={600}>
-                {selectedIds.length + selectedZoneIds.length} items selected
+          >
+            {canManage ? (
+              <MapStatusControl
+                status={loaderData.mapStatus ?? ""}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {canManage ? (
+              <SnapshotsPanel snapshots={snapshots} fetcher={fetcher} />
+            ) : null}
+            <Paper withBorder p="sm" radius="md">
+              <Text size="xs" fw={600} mb={6}>
+                Highlight
               </Text>
-              <Text size="xs" c="dimmed">
-                Drag any one to move them together; use the round handle above
-                the box to rotate the group. Arrows nudge · Space/R rotate · Del
-                unplaces. Shift-click or box-drag to change the selection.
-              </Text>
-              {canManage ? (
-                <Group gap="xs" mt="xs">
-                  <Button
-                    size="compact-xs"
-                    variant="light"
-                    onClick={() => {
-                      const groupId = crypto.randomUUID();
-                      setObjects((prev) =>
-                        prev.map((o) =>
-                          selectedIds.includes(o.id) ? { ...o, groupId } : o,
-                        ),
-                      );
-                      setZones((prev) =>
-                        prev.map((z) =>
-                          selectedZoneIds.includes(z.id)
-                            ? { ...z, groupId }
-                            : z,
-                        ),
-                      );
-                      fetcher.submit(
-                        {
-                          intent: "linkObjects",
-                          groupId,
-                          ids: JSON.stringify(selectedIds),
-                          zoneIds: JSON.stringify(selectedZoneIds),
-                        },
-                        { method: "post" },
-                      );
-                    }}
-                  >
-                    🔗 Link as block
-                  </Button>
-                  {objects.some(
-                    (o) => selectedIds.includes(o.id) && o.groupId,
-                  ) ||
-                  zones.some(
-                    (z) => selectedZoneIds.includes(z.id) && z.groupId,
-                  ) ? (
+              <SegmentedControl
+                size="xs"
+                fullWidth
+                value={highlight}
+                onChange={setHighlight}
+                data={[
+                  { label: "All", value: "none" },
+                  { label: "Mine", value: "mine" },
+                  // Only offered while a ?party= link is in play — there is no
+                  // party to filter to otherwise.
+                  ...(party ? [{ label: "Party", value: "party" }] : []),
+                  { label: "Homes", value: "domicile" },
+                  { label: "Vehicles", value: "vehicle" },
+                  { label: "Builds", value: "structure" },
+                ]}
+              />
+              <Checkbox
+                mt="sm"
+                size="xs"
+                label="Show doors"
+                checked={showDoors}
+                onChange={(e) => setShowDoors(e.currentTarget.checked)}
+              />
+              <Checkbox
+                mt={6}
+                size="xs"
+                label="Fire access (125′)"
+                checked={showFire}
+                onChange={(e) => setShowFire(e.currentTarget.checked)}
+              />
+              {showFire ? (
+                <Text size="xs" c="dimmed" mt={4}>
+                  Green = within 125′ hose reach of the street/alley. Red =
+                  beyond reach (needs an internal fire lane). Assumes rear-alley
+                  access.
+                </Text>
+              ) : null}
+              <Checkbox
+                mt={6}
+                size="xs"
+                label="Placement wishes"
+                checked={showWishes}
+                onChange={(e) => setShowWishes(e.currentTarget.checked)}
+              />
+              {showWishes ? (
+                <Text size="xs" c="dimmed" mt={4}>
+                  A faint line to whoever or whatever a camper asked to be near
+                  — their own vehicle, or a friend. Wishes, not rules: nothing
+                  stops you placing them apart. Set on the Bringing page.
+                </Text>
+              ) : null}
+              {isBurningMan(event) ? (
+                <>
+                  <Checkbox
+                    mt={6}
+                    size="xs"
+                    label="Uplink aim (NOC)"
+                    checked={showUplink}
+                    onChange={(e) => setShowUplink(e.currentTarget.checked)}
+                  />
+                  {showUplink ? (
+                    <Text size="xs" c="dimmed" mt={4}>
+                      Draws each uplink radio's path to the NOC tower in Center
+                      Camp and flags anything of yours tall enough to block it.
+                      Set the radio's Height to the antenna's height above
+                      ground. Neighbours' structures aren't modelled.
+                    </Text>
+                  ) : null}
+                </>
+              ) : null}
+            </Paper>
+            <Compass
+              mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
+              frontsToMan={lot.frontsToMan}
+              nocBearing={
+                showUplink && isBurningMan(event)
+                  ? (landmarkSightLine(
+                      lot.year,
+                      lot.address,
+                      frontageRadiusOf(lot),
+                      NOC_LANDMARK,
+                    )?.bearingDeg ?? null)
+                  : null
+              }
+              sun={sun}
+              year={sunYear}
+              arc={arc}
+              timeMin={timeMin}
+              setTimeMin={setTimeMin}
+              setSunDragging={setSunDragging}
+              animateShade={animateShade}
+              setAnimateShade={setAnimateShade}
+              windFromBearing={windFromBearing}
+              setWindFromBearing={setWindFromBearing}
+              windStrength={windStrength}
+              setWindStrength={setWindStrength}
+              windParticles={windParticles}
+              setWindParticles={setWindParticles}
+              resetWind={() => {
+                setWindFromBearing(BRC_WIND_FROM_BEARING);
+                setWindStrength(1);
+              }}
+            />
+            {canManage ? (
+              <SuggestionsPanel
+                suggestions={suggestions}
+                objects={objects}
+                setSelectedId={setSelectedId}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {canManage ? (
+              <UnplacedTray unplaced={unplaced} fetcher={fetcher} />
+            ) : null}
+            {canManage ? <BlockPalette /> : null}
+            {canManage ? <Legend bannedKinds={bannedKinds} /> : null}
+            {selectedZoneId ? (
+              <ZonePanel
+                zones={zones}
+                selectedZoneId={selectedZoneId}
+                setZones={setZones}
+                canManage={canManage}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {selectedCableId ? (
+              <CablePanel
+                cables={cables}
+                selectedCableId={selectedCableId}
+                setCables={setCables}
+                canManage={canManage}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {selectedRoadId ? (
+              <RoadPanel
+                roads={roads}
+                selectedRoadId={selectedRoadId}
+                setRoads={setRoads}
+                canManage={canManage}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {selectedIds.length + selectedZoneIds.length > 1 ? (
+              <Paper withBorder p="sm" radius="md" bg="blue.0">
+                <Text size="sm" fw={600}>
+                  {selectedIds.length + selectedZoneIds.length} items selected
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Drag any one to move them together; use the round handle above
+                  the box to rotate the group. Arrows nudge · Space/R rotate ·
+                  Del unplaces. Shift-click or box-drag to change the selection.
+                </Text>
+                {canManage ? (
+                  <Group gap="xs" mt="xs">
                     <Button
                       size="compact-xs"
-                      variant="subtle"
-                      color="gray"
+                      variant="light"
                       onClick={() => {
+                        const groupId = crypto.randomUUID();
                         setObjects((prev) =>
                           prev.map((o) =>
-                            selectedIds.includes(o.id)
-                              ? { ...o, groupId: null }
-                              : o,
+                            selectedIds.includes(o.id) ? { ...o, groupId } : o,
                           ),
                         );
                         setZones((prev) =>
                           prev.map((z) =>
                             selectedZoneIds.includes(z.id)
-                              ? { ...z, groupId: null }
+                              ? { ...z, groupId }
                               : z,
                           ),
                         );
                         fetcher.submit(
                           {
-                            intent: "unlinkObjects",
+                            intent: "linkObjects",
+                            groupId,
                             ids: JSON.stringify(selectedIds),
                             zoneIds: JSON.stringify(selectedZoneIds),
                           },
@@ -3695,28 +3825,66 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                         );
                       }}
                     >
-                      Unlink
+                      🔗 Link as block
                     </Button>
-                  ) : null}
-                </Group>
-              ) : null}
-            </Paper>
-          ) : null}
-          <SidePanel
-            lot={lot}
-            objects={objects}
-            setObjects={setObjects}
-            selectedId={selectedId}
-            canEdit={canEdit}
-            canManage={canManage}
-            myMembershipId={myMembershipId}
-            bannedKinds={bannedKinds}
-            suggestions={suggestions}
-            lotOpen={lotOpen}
-            fetcher={fetcher}
-            wiki={loaderData.wiki}
-          />
-        </Stack>
+                    {objects.some(
+                      (o) => selectedIds.includes(o.id) && o.groupId,
+                    ) ||
+                    zones.some(
+                      (z) => selectedZoneIds.includes(z.id) && z.groupId,
+                    ) ? (
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        color="gray"
+                        onClick={() => {
+                          setObjects((prev) =>
+                            prev.map((o) =>
+                              selectedIds.includes(o.id)
+                                ? { ...o, groupId: null }
+                                : o,
+                            ),
+                          );
+                          setZones((prev) =>
+                            prev.map((z) =>
+                              selectedZoneIds.includes(z.id)
+                                ? { ...z, groupId: null }
+                                : z,
+                            ),
+                          );
+                          fetcher.submit(
+                            {
+                              intent: "unlinkObjects",
+                              ids: JSON.stringify(selectedIds),
+                              zoneIds: JSON.stringify(selectedZoneIds),
+                            },
+                            { method: "post" },
+                          );
+                        }}
+                      >
+                        Unlink
+                      </Button>
+                    ) : null}
+                  </Group>
+                ) : null}
+              </Paper>
+            ) : null}
+            <SidePanel
+              lot={lot}
+              objects={objects}
+              setObjects={setObjects}
+              selectedId={selectedId}
+              canEdit={canEdit}
+              canManage={canManage}
+              myMembershipId={myMembershipId}
+              bannedKinds={bannedKinds}
+              suggestions={suggestions}
+              lotOpen={lotOpen}
+              fetcher={fetcher}
+              wiki={loaderData.wiki}
+            />
+          </Stack>
+        ) : null}
       </Flex>
     </div>
   );
@@ -3792,6 +3960,14 @@ function UnplacedTray({
                 {u.placeNearVehicle ? (
                   <Badge size="xs" color="blue" variant="light">
                     near car
+                  </Badge>
+                ) : null}
+                {/* Already parked in the staging apron. It's out there at true
+                    size so you can look at it — which is not the same as having
+                    somewhere to go, so it stays in this queue until it does. */}
+                {u.staged ? (
+                  <Badge size="xs" color="gray" variant="light">
+                    staged
                   </Badge>
                 ) : null}
                 {/* Harder than a preference: a truck has to physically reach
@@ -3964,6 +4140,7 @@ function Editor({
   showDoors,
   showFire,
   showUplink,
+  showWishes,
   showWind,
   windFromBearing,
   windStrength,
@@ -4010,6 +4187,8 @@ function Editor({
   /** Draw uplink radios' aim paths to the NOC. Already gated on the event being
    * Burning Man by the caller — the NOC is BM's tower, not a general concept. */
   showUplink: boolean;
+  /** Draw the "put me near X" wishes campers have set on their own items. */
+  showWishes: boolean;
   showWind: boolean;
   windFromBearing: number;
   windStrength: number;
@@ -4154,6 +4333,7 @@ function Editor({
         width: number;
         height: number;
         rotation: number;
+        staged: boolean;
       }[]
     | null
   >(null);
@@ -4349,10 +4529,10 @@ function Editor({
       if (rotate === null && dx === 0 && dy === 0) return;
       e.preventDefault();
 
-      const fitInside = (o: ObjRow, nx: number, ny: number): ZonePt =>
-        fitCenterInsideLot(
-          nx,
-          ny,
+      const snap = (o: ObjRow, nx: number, ny: number) =>
+        snapToLot(
+          lot,
+          rearW,
           footprintOffsets(
             o.kind,
             o.width,
@@ -4361,9 +4541,8 @@ function Editor({
             o.config,
             o.mirrored,
           ),
-          lot.frontageFt,
-          lot.depthFt,
-          rearW,
+          nx,
+          ny,
         );
 
       if (rotate !== null && isGroup) {
@@ -4394,13 +4573,15 @@ function Editor({
         return;
       }
 
-      // Move/rotate each selected object (single or group), clamped to the lot.
+      // Move/rotate each selected object (single or group), snapped to one side
+      // of the lot border — arrow-key nudging can walk a thing out into the
+      // staging apron and back in again, same as dragging it.
       const next = sel.map((o) => {
         const rotation =
           rotate !== null && !kindDef(o.kind).fixedRotation
             ? Math.round(o.rotation + rotate)
             : o.rotation;
-        const c = fitInside(
+        const c = snap(
           { ...o, rotation },
           o.x + dx + o.width / 2,
           o.y + dy + o.height / 2,
@@ -4408,6 +4589,7 @@ function Editor({
         return {
           ...o,
           rotation,
+          staged: c.staged,
           x: c.x - o.width / 2,
           y: c.y - o.height / 2,
         };
@@ -4448,13 +4630,26 @@ function Editor({
     return () => window.removeEventListener("keydown", onKey);
   }, [drawMode, draftPoints]);
 
+  // Room outside the lot border for staged items. Held in state and refreshed
+  // only when nothing is being dragged: widening the apron shrinks `ppf`, and
+  // `ppf` is what turns pointer pixels into feet — rescaling mid-drag would slide
+  // the object out from under the cursor. So a drag runs at a fixed scale and the
+  // apron catches up the moment it ends.
+  const [stagePadFt, setStagePadFt] = useState(PAD_FT);
+  const wantPadFt = stagingPadFt(objects, lot.frontageFt, lot.depthFt);
+  useEffect(() => {
+    if (!dragging) setStagePadFt(wantPadFt);
+  }, [dragging, wantPadFt]);
+
   // Shared with the read-only view (roster mini-map) so the two can't disagree
-  // about where the lot is — see lib/map-geometry.ts.
-  const layout = layoutFor(lot);
+  // about where the lot is — see lib/map-geometry.ts. Only the editor passes a
+  // widened apron; read-only views get the default.
+  const layout = layoutFor(lot, stagePadFt);
   const {
     rear,
     maxWidthFt,
     ppf,
+    padFt,
     padPx,
     viewH,
     originX,
@@ -4539,8 +4734,11 @@ function Editor({
     { id: "R", x0: lotRightPx + gapPx, x1: viewR },
   ];
   // Padded bounds (feet) for annotations that may sit outside the lot border.
-  const clampPadX = (v: number) => clamp(v, -PAD_FT, lot.frontageFt + PAD_FT);
-  const clampPadY = (v: number) => clamp(v, -PAD_FT, lot.depthFt + PAD_FT);
+  // Annotations (zone/cable/road vertices) may sit anywhere in the drawn apron —
+  // `layout.padFt`, not the PAD_FT default, so they reach the whole of a widened
+  // staging area rather than stopping at an invisible line inside it.
+  const clampPadX = (v: number) => clamp(v, -padFt, lot.frontageFt + padFt);
+  const clampPadY = (v: number) => clamp(v, -padFt, lot.depthFt + padFt);
   // Lot outline. When we know the frontage radius, draw the TRUE wedge: the
   // frontage and rear are circular arcs centered on the Man (radius R and R±depth),
   // with straight radial sides — i.e., the actual curve of the BRC street. The
@@ -4641,6 +4839,92 @@ function Editor({
   const domeFx = 0.5 + toSun.dx * 0.32;
   const domeFy = 0.5 + toSun.dy * 0.32;
   const domeShadeOn = mapUpBearing != null && sun.altitude > 0.5;
+
+  // ---- Placement wishes. Campers say what they want to be near — their own
+  // vehicle, or a friend — and whoever arranges the map needs to see those while
+  // arranging, not read them off a list afterwards. Each wish becomes a faint
+  // line between the two things.
+  //
+  // A wish names a PERSON, not an object, so it has to be resolved against
+  // whatever of theirs is currently on the map. Both ends must be on the map:
+  // a line to something nobody has placed yet points at nothing, and a dangling
+  // line is worse than no line. Staged items count — they're on the surface, and
+  // "put me near that trailer that isn't sited yet" is exactly the case where
+  // seeing the wish helps.
+  const wishes = useMemo(() => {
+    if (!showWishes) return [];
+    const centre = (o: ObjRow) => ({
+      x: o.x + o.width / 2,
+      y: o.y + o.height / 2,
+    });
+    const dist2 = (a: ObjRow, b: ObjRow) => {
+      const p = centre(a);
+      const q = centre(b);
+      return (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
+    };
+    // Of a member's things on the map, the nearest one matching `pick` — nearest
+    // because a camper with two vehicles means the wish is already satisfied by
+    // whichever is closer, and drawing to the far one would invent a complaint.
+    const nearestOf = (
+      from: ObjRow,
+      membershipId: string,
+      pick: (o: ObjRow) => boolean,
+    ): ObjRow | null => {
+      let best: ObjRow | null = null;
+      for (const o of objects) {
+        if (o.id === from.id) continue;
+        if (o.ownerMembershipId !== membershipId) continue;
+        if (!pick(o)) continue;
+        if (!best || dist2(from, o) < dist2(from, best)) best = o;
+      }
+      return best;
+    };
+    const out: Array<{
+      id: string;
+      fromId: string;
+      toId: string;
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+      label: string;
+    }> = [];
+    for (const o of objects) {
+      if (o.placeNearVehicle && o.ownerMembershipId) {
+        const v = nearestOf(o, o.ownerMembershipId, (c) =>
+          Boolean(kindDef(c.kind).vehicle),
+        );
+        if (v) {
+          out.push({
+            id: `${o.id}-vehicle`,
+            fromId: o.id,
+            toId: v.id,
+            from: centre(o),
+            to: centre(v),
+            label: "near their vehicle",
+          });
+        }
+      }
+      if (o.nearMembershipId) {
+        // Their domicile is the meaningful anchor — "near Bob" means near where
+        // Bob sleeps, not near Bob's generator. Fall back to anything of theirs
+        // so a wish still shows for someone who's only brought a vehicle.
+        const target =
+          nearestOf(o, o.nearMembershipId, (c) => hasTag(c.kind, "domicile")) ??
+          nearestOf(o, o.nearMembershipId, () => true);
+        if (target) {
+          const who = target.ownerName?.split(" ")[0];
+          out.push({
+            id: `${o.id}-person`,
+            fromId: o.id,
+            toId: target.id,
+            from: centre(o),
+            to: centre(target),
+            label: who ? `near ${who}` : "near a friend",
+          });
+        }
+      }
+    }
+    return out;
+  }, [showWishes, objects]);
 
   // ---- Uplink aiming. Burning Man's public internet comes off sector antennas
   // on the NOC tower in Center Camp; a camp radio has to SEE that tower, so
@@ -4814,12 +5098,13 @@ function Editor({
   function applyDrag(d: DragState, curFx: number, curFy: number): ObjRow {
     const s = d.start;
     if (d.mode === "move") {
-      // Force the whole footprint inside the lot trapezoid.
+      // Snap the whole footprint to one side of the lot border: drag the centre
+      // past the line and the object hops out into the staging apron (or back).
       const nx = s.x + (curFx - d.startFx);
       const ny = s.y + (curFy - d.startFy);
-      const c = fitCenterInsideLot(
-        nx + s.width / 2,
-        ny + s.height / 2,
+      const c = snapToLot(
+        lot,
+        rear,
         footprintOffsets(
           s.kind,
           s.width,
@@ -4828,11 +5113,15 @@ function Editor({
           s.config,
           s.mirrored,
         ),
-        lot.frontageFt,
-        lot.depthFt,
-        rear,
+        nx + s.width / 2,
+        ny + s.height / 2,
       );
-      return { ...s, x: c.x - s.width / 2, y: c.y - s.height / 2 };
+      return {
+        ...s,
+        staged: c.staged,
+        x: c.x - s.width / 2,
+        y: c.y - s.height / 2,
+      };
     }
     const cxFt = s.x + s.width / 2;
     const cyFt = s.y + s.height / 2;
@@ -4864,6 +5153,8 @@ function Editor({
         width: round(o.width),
         height: round(o.height),
         rotation: Math.round(o.rotation),
+        // Which side of the border it landed on, decided by `snapToLot` above.
+        staged: String(o.staged),
       },
       { method: "post" },
     );
@@ -4879,6 +5170,7 @@ function Editor({
       width: number;
       height: number;
       rotation: number;
+      staged: boolean;
     }[],
     zoneItems: { id: string; points: ZonePt[] }[] = [],
   ) {
@@ -4893,6 +5185,7 @@ function Editor({
             width: round(o.width),
             height: round(o.height),
             rotation: Math.round(o.rotation),
+            staged: o.staged,
           })),
         ),
         zones: JSON.stringify(
@@ -5567,13 +5860,23 @@ function Editor({
         const o = byId.get(it.id);
         if (!o) continue;
         const c = xform(it.x + o.width / 2, it.y + o.height / 2);
+        const rotation = isMove ? it.rotation : it.rotation + deg;
         next.push({
           id: it.id,
           x: c.x - o.width / 2,
           y: c.y - o.height / 2,
           width: o.width,
           height: o.height,
-          rotation: isMove ? it.rotation : it.rotation + deg,
+          rotation,
+          staged: stagedByGeometry(
+            o,
+            c.x,
+            c.y,
+            rotation,
+            lot.frontageFt,
+            lot.depthFt,
+            rear,
+          ),
         });
       }
       liveGroup.current = next;
@@ -5581,7 +5884,9 @@ function Editor({
       setObjects((prev) =>
         prev.map((o) => {
           const n = m.get(o.id);
-          return n ? { ...o, x: n.x, y: n.y, rotation: n.rotation } : o;
+          return n
+            ? { ...o, x: n.x, y: n.y, rotation: n.rotation, staged: n.staged }
+            : o;
         }),
       );
       if (g.zoneItems.length > 0) {
@@ -5680,14 +5985,15 @@ function Editor({
 
   function addObjectAt(kind: string, fxFeet: number, fyFeet: number) {
     const def = kindDef(kind);
-    // Drop point = the object's center; force the whole footprint inside the lot.
-    const c = fitCenterInsideLot(
+    // Drop point = the object's center; snap the whole footprint to one side of
+    // the border, so dropping out past it stages the new item instead of
+    // dragging it back into a lot you didn't want it in yet.
+    const c = snapToLot(
+      lot,
+      rear,
+      footprintOffsets(kind, def.w, def.h, 0),
       fxFeet,
       fyFeet,
-      footprintOffsets(kind, def.w, def.h, 0),
-      lot.frontageFt,
-      lot.depthFt,
-      rear,
     );
     fetcher.submit(
       {
@@ -5697,6 +6003,7 @@ function Editor({
         y: round(c.y - def.h / 2),
         width: def.w,
         height: def.h,
+        staged: String(c.staged),
       },
       { method: "post" },
     );
@@ -5771,18 +6078,17 @@ function Editor({
     if (placeId) {
       const iw = Number(e.dataTransfer.getData("application/camptool-w")) || 10;
       const ih = Number(e.dataTransfer.getData("application/camptool-h")) || 10;
-      const c = fitCenterInsideLot(
-        fx(p.x),
-        fy(p.y),
+      const c = snapToLot(
+        lot,
+        rear,
         [
           { x: -iw / 2, y: -ih / 2 },
           { x: iw / 2, y: -ih / 2 },
           { x: iw / 2, y: ih / 2 },
           { x: -iw / 2, y: ih / 2 },
         ],
-        lot.frontageFt,
-        lot.depthFt,
-        rear,
+        fx(p.x),
+        fy(p.y),
       );
       fetcher.submit(
         {
@@ -5790,6 +6096,9 @@ function Editor({
           id: placeId,
           x: round(c.x - iw / 2),
           y: round(c.y - ih / 2),
+          // Dropped outside the border = parked to look at, not sited: it stays
+          // on the officer's queue.
+          staged: String(c.staged),
         },
         { method: "post" },
       );
@@ -6680,6 +6989,53 @@ function Editor({
               }
               return [];
             })}
+            {/* Placement wishes, drawn UNDER the objects so they read as a hint
+            about the layout rather than as another thing on it. The label is
+            held back until one end is selected: a dozen faint lines is a useful
+            picture, a dozen labels is a mess. */}
+            {wishes.length > 0 ? (
+              <g pointerEvents="none">
+                {wishes.map((w) => {
+                  const x1 = originX + w.from.x * ppf;
+                  const y1 = originY + w.from.y * ppf;
+                  const x2 = originX + w.to.x * ppf;
+                  const y2 = originY + w.to.y * ppf;
+                  const on =
+                    selectedIds.includes(w.fromId) ||
+                    selectedIds.includes(w.toId);
+                  return (
+                    <g key={w.id}>
+                      <line
+                        x1={x1}
+                        y1={y1}
+                        x2={x2}
+                        y2={y2}
+                        stroke="#e64980"
+                        strokeWidth={on ? 1.75 : 1.25}
+                        strokeOpacity={on ? 0.75 : 0.35}
+                        strokeDasharray="3 5"
+                      />
+                      {on ? (
+                        <text
+                          x={(x1 + x2) / 2}
+                          y={(y1 + y2) / 2 - 4}
+                          fontSize={9}
+                          fontWeight={600}
+                          fill="#e64980"
+                          textAnchor="middle"
+                          stroke={groundFill}
+                          strokeWidth={2.5}
+                          paintOrder="stroke"
+                          style={{ userSelect: "none" }}
+                        >
+                          {w.label}
+                        </text>
+                      ) : null}
+                    </g>
+                  );
+                })}
+              </g>
+            ) : null}
             {/* Canopies (shade/carport/popup/…) render last so they sit over the
             items beneath them. */}
             {[...objects]
@@ -6710,12 +7066,36 @@ function Editor({
                     lot.depthFt,
                     rear,
                   )}
+                  staged={isStaged(o, lot.frontageFt, lot.depthFt, rear)}
                   night={isNight}
                   onBodyDown={(e) => startDrag(e, o, "move")}
                   onResizeDown={(e) => startDrag(e, o, "resize")}
                   onRotateDown={(e) => startDrag(e, o, "rotate")}
                 />
               ))}
+            {/* Staged items get a dashed ring around their real outline. Fading
+            them alone reads as "far away" more than "not decided", and the whole
+            point of parking something out here is to judge its true size — so the
+            marker goes AROUND the footprint rather than shrinking or hiding it. */}
+            <g pointerEvents="none">
+              {objects
+                .filter((o) => isStaged(o, lot.frontageFt, lot.depthFt, rear))
+                .map((o) => (
+                  <polygon
+                    key={`${o.id}-staged`}
+                    points={footprintPoints(o)
+                      .map(
+                        (p) => `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                      )
+                      .join(" ")}
+                    fill="none"
+                    stroke="var(--mantine-color-dimmed)"
+                    strokeWidth={1.25}
+                    strokeDasharray="5 4"
+                    strokeOpacity={0.85}
+                  />
+                ))}
+            </g>
             {/* Uplink labels ride ABOVE the objects — the aim path runs across
             the camp by definition, so a label drawn under the structures ends up
             hidden behind whichever one it's warning you about. Each radio's

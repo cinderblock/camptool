@@ -58,9 +58,17 @@ export type ObjRow = {
   // Linked-block id: objects sharing this are moved/rotated together. NULL = not
   // linked.
   groupId: string | null;
+  // Parked in the staging apron outside the lot border rather than sited in it.
+  // Still "not placed" as far as the officer queue is concerned — see the column
+  // comment in db/schema/map.ts.
+  staged: boolean;
   // The camper who brought this (NULL = shared/communal camp item).
   ownerMembershipId: string | null;
   ownerName: string | null;
+  // Placement WISHES, surfaced as faint lines on the map and never enforced:
+  // "next to my vehicle", and "next to this person's stuff".
+  placeNearVehicle: boolean;
+  nearMembershipId: string | null;
   // Set when there's an unapproved move/resize/rotate suggestion (the live
   // geometry is the proposed state; `prev` is what Reject restores). `by` is the
   // membership that proposed it — ANY camper may suggest an edit to ANY item, so
@@ -584,6 +592,7 @@ export const MapObjectShape = memo(
     dim,
     showDoors,
     overflow,
+    staged,
     night,
     onBodyDown,
     onResizeDown,
@@ -606,8 +615,13 @@ export const MapObjectShape = memo(
     rotateArmed: boolean;
     dim: boolean;
     showDoors: boolean;
-    /** The object's footprint crosses the lot border (center is still inside). */
+    /** The object's footprint crosses the lot border — half in, half out. */
     overflow: boolean;
+    /** Parked in the staging apron outside the lot rather than sited in it. Drawn
+     * at full size (seeing the real size is the point) but slightly faded, so a
+     * glance at the map separates "this is where it goes" from "this is what it
+     * is". Defaults to false for read-only views, which never show staged items. */
+    staged?: boolean;
     /** The night-lighting sim is active (sun below the horizon). */
     night: boolean;
     onBodyDown: (e: React.PointerEvent) => void;
@@ -646,7 +660,7 @@ export const MapObjectShape = memo(
     let labelAngle = (((o.rotation + (h > w ? 90 : 0)) % 360) + 360) % 360;
     if (labelAngle > 90 && labelAngle <= 270) labelAngle -= 180;
     return (
-      <g opacity={dim ? 0.28 : undefined}>
+      <g opacity={dim ? 0.28 : staged ? 0.72 : undefined}>
         <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
           {isShade ? (
             <rect

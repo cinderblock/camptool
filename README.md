@@ -45,6 +45,18 @@ It's also **inventory-driven**: campers declare what they're *bringing* on a
 **Unplaced** tray onto the lot to place them and add shared camp items; an
 **Inventory** view accounts for everything (owner, size, placed-or-not).
 
+There's **scratch space** around the lot for the things you haven't sited yet.
+Drop something outside the border and it parks there at true scale, so a 30-foot
+trailer looks like thirty feet next to your hundred-foot frontage instead of a
+line in a list. Nothing ever ends up half in: drag across the border and the
+whole footprint snaps to one side or the other. Staged items stay on the Unplaced
+queue — parking one is a look, not a decision.
+
+Campers can also say what they want to be **near** — their own vehicle, or a
+particular person — and the map draws a faint line between the two so whoever is
+arranging it can see the wishes while arranging. They're wishes, not rules;
+nothing stops you placing people apart.
+
 The map plans camp networking too — its own **Network** palette group. A **Wi-Fi
 access point** draws its usable coverage as a ring, so overlapping APs and dead
 spots are visible while you place them.
