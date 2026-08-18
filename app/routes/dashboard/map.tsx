@@ -115,6 +115,7 @@ import {
 } from "~/lib/structures";
 import type { StructureConfig } from "~/lib/structures";
 import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
+import { type SightLine, blocksSightLine } from "~/lib/uplink-los";
 import { wikiTiesFor } from "~/lib/wiki.server";
 import {
   BRC_WIND_FROM_BEARING,
@@ -4380,7 +4381,11 @@ function Editor({
             ...o,
             x: ncx - o.width / 2,
             y: ncy - o.height / 2,
-            rotation: Math.round(o.rotation + rotate),
+            // A thing with no facing (Wi-Fi AP, uplink mast) rides along to its
+            // new position but doesn't spin — see `fixedRotation`.
+            rotation: kindDef(o.kind).fixedRotation
+              ? o.rotation
+              : Math.round(o.rotation + rotate),
           };
         });
         const m = new Map(next.map((n) => [n.id, n]));
@@ -4392,7 +4397,9 @@ function Editor({
       // Move/rotate each selected object (single or group), clamped to the lot.
       const next = sel.map((o) => {
         const rotation =
-          rotate !== null ? Math.round(o.rotation + rotate) : o.rotation;
+          rotate !== null && !kindDef(o.kind).fixedRotation
+            ? Math.round(o.rotation + rotate)
+            : o.rotation;
         const c = fitInside(
           { ...o, rotation },
           o.x + dx + o.width / 2,
@@ -4692,37 +4699,25 @@ function Editor({
       const fy = o.y + o.height / 2;
       const a = aim(fx, fy);
       const mastFt = o.tallFt || kindHeight(o.kind);
-      // The path CLIMBS from our antenna to the tower's, so something low well
-      // down the path clears even if it out-tops the mast at its own base.
-      const heightAt = (d: number) =>
-        mastFt + (NOC_LANDMARK.heightFt - mastFt) * (d / a.distFt);
-      const blockers = objects.filter((other) => {
-        if (other.id === o.id || other.kind === "uplink") return false;
-        const corners = objWorldCorners(
-          other,
-          other.x + other.width / 2,
-          other.y + other.height / 2,
-        );
-        let lo = Number.POSITIVE_INFINITY;
-        let hi = Number.NEGATIVE_INFINITY;
-        let near = Number.POSITIVE_INFINITY;
-        for (const c of corners) {
-          const vx = c.x - fx;
-          const vy = c.y - fy;
-          const along = vx * a.ux + vy * a.uy;
-          // Only corners in FRONT of the radio: behind-corners sit near ±π and
-          // would wrap the interval. A structure the radio is mounted on keeps
-          // its front corners, which is exactly what we want to test.
-          if (along <= 0) continue;
-          const ang = Math.atan2(vx * a.uy - vy * a.ux, along);
-          lo = Math.min(lo, ang);
-          hi = Math.max(hi, ang);
-          near = Math.min(near, along);
-        }
-        if (near === Number.POSITIVE_INFINITY) return false;
-        if (hi < -a.half || lo > a.half) return false;
-        return (other.tallFt || kindHeight(other.kind)) > heightAt(near);
-      });
+      // The beam, handed to the (unit-tested, pure) line-of-sight test: it
+      // climbs toward the tower's 40′ antennas, compares tapering solids level
+      // by level, and sees through shade cloth. See `app/lib/uplink-los.ts`.
+      const beam: SightLine = {
+        fx,
+        fy,
+        ux: a.ux,
+        uy: a.uy,
+        half: a.half,
+        mastFt,
+        distFt: a.distFt,
+        targetHeightFt: NOC_LANDMARK.heightFt,
+      };
+      const blockers = objects.filter(
+        (other) =>
+          other.id !== o.id &&
+          other.kind !== "uplink" &&
+          blocksSightLine(other, beam),
+      );
       return { o, mastFt, blockers, ...a };
     });
 
