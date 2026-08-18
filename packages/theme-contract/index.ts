@@ -46,9 +46,15 @@ export type Kind = {
   personal: boolean;
   /** An open overhead canopy (shade cloth on legs) rather than a solid volume:
    * it blocks sun but not wind. The shade sim casts only its top layer projected
-   * to the ground (a floating shadow, not a solid extrusion), and the wind sim
-   * treats it as porous (not an obstacle). */
+   * to the ground (a floating shadow, not a solid extrusion), the wind sim
+   * treats it as porous (not an obstacle), and a radio link sees straight
+   * through it (cloth is not an obstruction to a microwave path). */
   canopyShade?: boolean;
+  /** This kind has no meaningful facing — an omnidirectional Wi-Fi AP, a mast
+   * whose dish the map aims for you — so the editor offers no rotate handle and
+   * the rotate keys skip it. Its `rotation` stays whatever it was (0 for
+   * anything placed since); nothing about it is drawn from the angle. */
+  fixedRotation?: boolean;
 };
 
 /** Context handed to a custom structure's footprint renderer. Everything is in
@@ -154,6 +160,19 @@ export type CampStructure = Kind & {
     h: number,
     config: StructureConfig,
   ) => ReadonlyArray<{ x: number; y: number }>;
+  /** Optional horizontal CROSS-SECTION at `z` feet above the ground (object-local
+   * **centered** feet, same frame as `footprint`), for a solid that TAPERS.
+   * Return `null` above the top of the solid. Line-of-sight tests (the uplink
+   * radio's path to the NOC) walk this ladder instead of extruding the ground
+   * footprint, so a tetrahedron isn't treated as a 40′ box — it's 40′ wide at
+   * your feet and a point at its apex, and the sight line usually passes above
+   * the part that's actually there. Omit it for a prism (the default). */
+  crossSectionAt?: (
+    z: number,
+    w: number,
+    h: number,
+    config: StructureConfig,
+  ) => ReadonlyArray<{ x: number; y: number }> | null;
   /** Optional 3D silhouette for the shade sim (object-local centered feet +
    * height fraction). Returns one or more PARTS; the core casts each part's convex
    * hull (projected away from the sun) as a SEPARATE shadow, then unions them — so

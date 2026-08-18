@@ -425,6 +425,39 @@ function footprint(
 }
 
 /**
+ * Horizontal cross-section at height `z` (object-local centered feet) — what a
+ * sight line passing through at that height actually has to get around.
+ *
+ * The pyramid is a solid tetrahedron resting on one face, so its cross-section
+ * is the base triangle **scaled about the base centroid** by `1 − z/height`:
+ * 40′ across at the ground, a point at 32.7′. That's the whole reason this
+ * exists — extruding the ground footprint would have the pyramid blocking a
+ * radio path that in reality passes well over the sloping face, or beside the
+ * shrinking triangle.
+ *
+ * The flying-buttress canopy is deliberately NOT here: it's shade cloth on
+ * sticks, which stops sun but not a microwave link. Nor is the Pi sign — a thin
+ * billboard on a stick above the apex is not an obstruction worth modelling.
+ */
+function crossSectionAt(
+  z: number,
+  w: number,
+  h: number,
+): Array<{ x: number; y: number }> | null {
+  const tall = w * Math.sqrt(2 / 3); // regular tetra: height = edge·√(2/3)
+  if (z >= tall) return null;
+  const s = Math.max(0, 1 - z / tall);
+  // Base corners and their centroid, in the centered frame `footprint` uses.
+  const gy = h / 6; // (−h/2 + h/2 + h/2)/3
+  const base = [
+    { x: 0, y: -h / 2 },
+    { x: -w / 2, y: h / 2 },
+    { x: w / 2, y: h / 2 },
+  ];
+  return base.map((p) => ({ x: p.x * s, y: gy + (p.y - gy) * s }));
+}
+
+/**
  * Solid-tetrahedron silhouette for the shade sim (centered local feet; z = a
  * fraction of tallFt). It's covered in shade cloth → a SOLID, so the cast shadow
  * is the convex hull of the four tetra vertices: the three ground corners (the
@@ -623,6 +656,7 @@ export const sierpinskiPyramid: CampStructure = {
     },
   ],
   footprint,
+  crossSectionAt,
   renderFootprint,
   renderIcon,
   shadowVolume,

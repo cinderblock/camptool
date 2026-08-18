@@ -493,6 +493,59 @@ export function footprintOutline(
   ];
 }
 
+/**
+ * The outline of a kind's **horizontal slice at height `z`** (object-local feet,
+ * centered), or `null` if there's nothing there — the solid has ended.
+ *
+ * Most structures are prisms: the same outline all the way up to `tallFt`, then
+ * nothing. Two aren't, and for a line-of-sight test the difference is the whole
+ * answer: a dome is a shrinking circle, and a structure that declares
+ * `crossSectionAt` (the Sierpinski pyramid: a tetrahedron, 40′ across at the
+ * ground and a point at 32.7′) tapers to whatever shape it likes. Treating
+ * either as a box makes it block paths it doesn't really block.
+ */
+export function crossSectionOutline(
+  kind: string,
+  w: number,
+  h: number,
+  config: StructureConfig,
+  mirror: boolean,
+  z: number,
+  tallFt: number,
+): Array<[number, number]> | null {
+  const def = kindDef(kind);
+  if (z <= 0) return footprintOutline(kind, w, h, config, mirror);
+  if (def.crossSectionAt) {
+    const pts = def.crossSectionAt(z, w, h, config);
+    if (!pts || pts.length < 3) return null;
+    return pts.map((p) => [mirror ? -p.x : p.x, p.y] as [number, number]);
+  }
+  if (z > tallFt) return null;
+  if (def.shape === "dome") {
+    // Half-ellipsoid: the radius at height z falls off as √(1 − (z/tall)²), so
+    // the slice near the top is a small circle rather than the full base.
+    const s = Math.sqrt(Math.max(0, 1 - (z / (tallFt || 1)) ** 2));
+    if (s < 0.02) return null;
+    return footprintOutline(kind, w * s, h * s, config, mirror);
+  }
+  return footprintOutline(kind, w, h, config, mirror);
+}
+
+/**
+ * The heights (feet) a line-of-sight test has to compare a solid against. A
+ * prism is decided entirely by its top edge — one rung. Anything that tapers
+ * has to be checked level by level, because both the solid and the sight line
+ * are moving: the solid narrows as it rises, and the sight line climbs toward
+ * the far antenna, so neither the ground slice nor the top slice alone settles
+ * it.
+ */
+export function crossSectionLevels(kind: string, tallFt: number): number[] {
+  const def = kindDef(kind);
+  if (!def.crossSectionAt && def.shape !== "dome") return [tallFt];
+  const n = 16;
+  return Array.from({ length: n }, (_, i) => (tallFt * (i + 1)) / n);
+}
+
 /** Gradient defs the shapes above reference by id. Render inside an <svg>'s
  * <defs> alongside any MapObjectShape — see the module header. */
 export function MapShapeDefs() {
@@ -1082,8 +1135,10 @@ export const MapObjectShape = memo(
           {soleSelected && editable ? (
             <>
               {/* Rotate handle: only after a second click on the selected item
-              (rotateArmed). */}
-              {rotateArmed ? (
+              (rotateArmed), and never for a kind with no facing — a Wi-Fi AP
+              radiates in every direction and the uplink dish is aimed by the
+              map, so an angle on either is a control that does nothing. */}
+              {rotateArmed && !def.fixedRotation ? (
                 <>
                   <line
                     x1={cx}

@@ -205,11 +205,60 @@ Screenshots in `data/verify/noc-*.png`, `data/verify/wifi-*.png`.
   panel's Kind select. Hover the `[draggable="true"]` chips and read
   `[role="tooltip"]` instead.
 
+## 2026-08-18 — what the obstruction test actually models
+
+Three corrections from Cameron, all landed:
+
+1. **The radios have no facing.** A Wi-Fi AP is omnidirectional and the uplink's
+   dish heading is *computed*, never stored — so a rotation control on either is
+   a knob that changes nothing (or worse, disagrees with the aim path drawn
+   through it). New `Kind.fixedRotation` flag on `uplink` + `wifi-ap`: no rotate
+   handle, and the R/Space keys skip them (in a group rotate they still travel to
+   their new position, they just don't spin).
+2. **A tapering solid has to be compared level by level.** The Sierpinski pyramid
+   is a *solid tetrahedron projecting vertically* — 40′ across at the ground, a
+   point at 32.7′ — so extruding its ground triangle to 32.7′ blocks paths that
+   in reality pass over the sloping face. New optional
+   `CampStructure.crossSectionAt(z, …)` returns the horizontal slice at height
+   `z`; the pyramid's is its base triangle scaled about the base **centroid** by
+   `1 − z/height`. `crossSectionOutline` / `crossSectionLevels` (in
+   `app/lib/map-shapes.tsx`) wrap that: a prism has one rung (its top, = the old
+   test), a taper gets 16. The core `dome` taper (a half-ellipsoid,
+   `√(1 − (z/tall)²)`) came free with the same machinery.
+3. **Shade doesn't obscure the radio.** `canopyShade` kinds (Shade, Carport,
+   Pop-up, the hypar shade) are skipped outright — cloth on legs stops sun, not
+   a 5GHz link. The pyramid is NOT one of these: it's a solid, and its flying
+   buttress (which *is* cloth) is deliberately left out of `crossSectionAt`.
+
+**Where the test lives now.** It moved out of the map route into
+`app/lib/uplink-los.ts` (`blocksSightLine`, `sightHeightAt`) so it can be
+unit-tested without a browser: `app/lib/uplink-los.test.ts`, 16 cases including
+the 6′/12′ container regression from above, shade passing the link through, and
+the pyramid pair — **a 12′ mast now sees over the pyramid's sloping edge where a
+6′ mast is still blocked**, and dead-centre the pyramid still blocks either way.
+Testing the pyramid means mocking `~/theme` (the camp theme is a Vite build-time
+alias, so `bun test` otherwise sees the empty default theme).
+
+**One refinement while in there:** the height comparison now uses where the beam
+*centre line crosses* the slice, not the slice's nearest corner. A corner well
+off to the side is closer than the crossing, which reads the climbing sight line
+lower than it is at the place that matters and over-reports blockage. The corner
+remains the fallback for a slice the centre line misses but the beam's width
+still clips.
+
 ## Possible follow-ups (not built)
 
 - **Neighbours aren't modelled.** Only your own lot's structures are tested; the
   camp across the street is the most likely real blocker. Would need neighbour
   height data we don't have.
+- **Browser check of the pyramid case.** The level-by-level test is covered by
+  unit tests; nobody has yet watched the pyramid's blocker outline appear and
+  disappear in the real editor as the mast height changes. Worth a case in
+  `e2e/noc-uplink.ts` (drag the pyramid, drop a radio beside its edge, sweep the
+  height slider).
+- **Other tapers are still boxes.** Tipis, bell tents and the hypar roof all
+  narrow with height; they'd each just need a `crossSectionAt`. Only the pyramid
+  and the dome taper today.
 - Warn when the mast is tall enough to sway (BMorg's own caution).
 - A second landmark or two (Temple, airport) would now cost almost nothing — the
   `Landmark` machinery is generic.
