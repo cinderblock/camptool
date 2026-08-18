@@ -1143,6 +1143,10 @@ const CORE_KINDS = [
     shape: "custom",
     vehicle: false,
     rigid: true,
+    // The dish's heading is computed from where it sits, not stored — so the
+    // editor offers no rotation. Turning the glyph would only ever disagree
+    // with the aim path drawn through it.
+    fixedRotation: true,
     group: "Network",
     tags: ["structure"],
     personal: true,
@@ -1173,6 +1177,8 @@ const CORE_KINDS = [
     shape: "custom",
     vehicle: false,
     rigid: true,
+    // Omnidirectional: it has a coverage radius, not a facing.
+    fixedRotation: true,
     group: "Network",
     tags: ["structure"],
     personal: true,
@@ -1341,6 +1347,45 @@ export const CONTAINER_HALF = 20;
  * Excludes communal infrastructure (kitchen, generator, shipping container,
  * spider box, camp art) that only officers place. */
 export const CAMPER_KINDS: readonly Kind[] = KINDS.filter((k) => k.personal);
+
+/** `CAMPER_KINDS` split into camper-facing categories, in display order. Derived
+ * from each kind's `group` — so a new kind (including a camp-theme one) files
+ * itself — with one departure from the map legend: "Domiciles" is more than half
+ * the palette, so it splits on the `vehicle` tag into what you pitch and what you
+ * drive or tow. Someone adding their trailer shouldn't scan past a dozen tents. */
+export const CAMPER_KIND_GROUPS: ReadonlyArray<{
+  group: string;
+  kinds: readonly Kind[];
+}> = (() => {
+  const order = [
+    "Tents & shelters",
+    "Campers & RVs",
+    "Vehicles",
+    "Shade",
+    "Water",
+    "Network",
+    "Structures",
+  ];
+  const camperGroup = (k: Kind) => {
+    if (k.group !== "Domiciles") return k.group;
+    const towed = (k.tags as readonly string[]).includes("vehicle");
+    return towed ? "Campers & RVs" : "Tents & shelters";
+  };
+  const groups: Array<{ group: string; kinds: Kind[] }> = order.map(
+    (group) => ({ group, kinds: [] }),
+  );
+  for (const k of CAMPER_KINDS) {
+    const g = camperGroup(k);
+    let entry = groups.find((x) => x.group === g);
+    if (!entry) {
+      // A camp-theme kind in a group core doesn't know — append, don't drop.
+      entry = { group: g, kinds: [] };
+      groups.push(entry);
+    }
+    entry.kinds.push(k);
+  }
+  return groups.filter((g) => g.kinds.length > 0);
+})();
 
 /** Legend groups in display order, each with its kinds. Derived from KINDS so
  * adding a kind only requires setting its `group`. */

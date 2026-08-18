@@ -7,15 +7,17 @@ import {
   Text,
 } from "@mantine/core";
 import { useState } from "react";
-import { CAMPER_KINDS, type Kind, ShapeSwatch } from "~/lib/structures";
+import { CAMPER_KIND_GROUPS, type Kind, ShapeSwatch } from "~/lib/structures";
 
 export type AddSize = { width?: number; height?: number };
 
 /**
  * The camper-facing "add an item" palette (Bringing page + onboarding wizard).
- * Shows only `CAMPER_KINDS` (no communal infrastructure). For a sizable kind it
- * pops a small size prompt so a camper picks real dimensions instead of silently
- * accepting the default footprint; rigid kinds (fixed size) add immediately.
+ * Shows only personal kinds (no communal infrastructure), under the same
+ * category headings the map legend uses, because ~30 buttons in one row is a
+ * wall nobody reads. For a sizable kind it pops a small size prompt so a camper
+ * picks real dimensions instead of silently accepting the default footprint;
+ * rigid kinds (fixed size) add immediately.
  */
 export function AddStructures({
   onAdd,
@@ -28,12 +30,30 @@ export function AddStructures({
   bannedKinds?: string[];
 }) {
   const banned = new Set(bannedKinds);
+  const groups = CAMPER_KIND_GROUPS.map((grp) => ({
+    ...grp,
+    kinds: grp.kinds.filter((k) => !banned.has(k.value)),
+  })).filter((grp) => grp.kinds.length > 0);
   return (
-    <Group gap="xs">
-      {CAMPER_KINDS.filter((k) => !banned.has(k.value)).map((k) => (
-        <AddButton key={k.value} kind={k} onAdd={onAdd} disabled={disabled} />
+    <Stack gap={10}>
+      {groups.map((grp) => (
+        <div key={grp.group}>
+          <Text size="xs" c="dimmed" fw={600} tt="uppercase" mb={6}>
+            {grp.group}
+          </Text>
+          <Group gap="xs">
+            {grp.kinds.map((k) => (
+              <AddButton
+                key={k.value}
+                kind={k}
+                onAdd={onAdd}
+                disabled={disabled}
+              />
+            ))}
+          </Group>
+        </div>
       ))}
-    </Group>
+    </Stack>
   );
 }
 

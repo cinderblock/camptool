@@ -104,6 +104,16 @@ wizard cleaner and less confusing for a brand-new recruit.
       rigid kinds add immediately; sizable ones pop a "How big is your X?" size
       prompt before adding. `addItem` action (`bringing.tsx`) now honors an
       optional camper-picked width/height. Used by both the wizard and `/bringing`.
+- [x] **W5. Categorize the palette (Cameron, 2026-08-18).** The palette had grown
+      back to ~30 buttons in one undifferentiated row — a wall nobody reads. New
+      `CAMPER_KIND_GROUPS` in `structures.tsx` groups the personal kinds by their
+      existing `group` field, so a new kind (core or camp-theme) files itself;
+      unknown groups append rather than drop. One departure from the map legend:
+      "Domiciles" was over half the palette, so it splits on the `vehicle` tag →
+      **Tents & shelters** (10) / **Campers & RVs** (7). Full order: Tents &
+      shelters, Campers & RVs, Vehicles, Shade, Water, Network, Structures.
+      `AddStructures.tsx` renders one dimmed uppercase header per group — the same
+      pattern the map `Legend` uses — so the wizard step and `/bringing` match it.
 
 ### Code — date picker
 - **D1 (REVISED by Cameron 2026-06-16).** Not a per-question button row — a single
@@ -206,6 +216,12 @@ here). NOT yet browser-tested or committed.
       on the event, event days highlighted, tap-to-select, out-of-window dimmed) and
       wired it into `event_date`, replacing the interim day-button row. Removed the
       dead `enumerateDays` helper. typecheck + build green; biome clean.
+- [x] 2026-08-18 W5: categorized the camper palette (`CAMPER_KIND_GROUPS`).
+      Verified by SSR-rendering `/bringing` against the dev DB — all seven headers
+      present, in order — and by evaluating the derived list. No screenshot: a
+      concurrent thread's in-flight `db/schema/map.ts` work was throwing
+      `SQLiteError: near "="` from the `mapObject` select at the time, which breaks
+      `/bringing` and the wizard's Bringing step in the browser. Unrelated to W5.
 - [ ] **Next:** browser-verify the wizard (vertical stepper, no tickets step,
       trimmed palette + tent size prompt, EventCalendar date picker) and the
       exclusive option on /questions. Then commit. Future: D3 camp-events overlay
