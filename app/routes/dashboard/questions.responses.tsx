@@ -34,8 +34,9 @@ import {
   isAnswered,
   isSelectType,
   parseMultiValue,
+  questionApplies,
 } from "~/lib/questions";
-import { loadResponseMatrix, questionApplies } from "~/lib/questions.server";
+import { loadResponseMatrix } from "~/lib/questions.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/questions.responses";
 

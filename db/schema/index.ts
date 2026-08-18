@@ -15,6 +15,7 @@ export * from "./instance";
 export * from "./inventory";
 export * from "./map";
 export * from "./programming";
+export * from "./prospect";
 export * from "./question";
 export * from "./recovery";
 export * from "./recruit";

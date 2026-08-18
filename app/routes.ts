@@ -91,6 +91,12 @@ export default [
     route("finances", "routes/dashboard/finances.tsx"),
     route("dues", "routes/dashboard/dues.tsx"),
     route("recruits", "routes/dashboard/recruits.tsx"),
+    // Officer-only CRM. The list, then one person's whole conversation.
+    route("prospects", "routes/dashboard/prospects.tsx"),
+    route(
+      "prospects/:prospectId",
+      "routes/dashboard/prospects.$prospectId.tsx",
+    ),
     route("training", "routes/dashboard/training.tsx"),
     route("questions", "routes/dashboard/questions.tsx"),
     // Officer-only: what everyone answered, and its spreadsheet export.

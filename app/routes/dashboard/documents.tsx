@@ -20,27 +20,13 @@ import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
+import { normalizeUrl } from "~/lib/url";
 import { db } from "../../../db/client.server";
 import { campDocument } from "../../../db/schema";
 import type { Route } from "./+types/documents";
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Documents · CampTool" }];
-}
-
-/** Make a user-typed link safe to use as an href: require http(s); default to
- * https:// when no scheme is given. Returns null if it doesn't look like a link. */
-function normalizeUrl(raw: string): string | null {
-  const s = raw.trim();
-  if (!s) return null;
-  const withScheme = /^https?:\/\//i.test(s) ? s : `https://${s}`;
-  try {
-    const u = new URL(withScheme);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-    return u.toString();
-  } catch {
-    return null;
-  }
 }
 
 export async function loader({ request }: Route.LoaderArgs) {

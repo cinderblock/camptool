@@ -188,14 +188,6 @@ export async function loadResponseMatrix(opts: {
   return { questions, members };
 }
 
-/** Does an audience-tagged question apply to a person of this audience? */
-export function questionApplies(
-  q: { audience: string },
-  m: { audience: string },
-): boolean {
-  return q.audience === "all" || q.audience === m.audience;
-}
-
 /** Narrow a question list to those relevant to a member's audience. */
 export function filterByAudience<T extends { audience: string }>(
   questions: T[],

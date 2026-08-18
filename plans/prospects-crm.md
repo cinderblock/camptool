@@ -131,6 +131,32 @@ nav. Nav badge = prospects whose `nextFollowUpAt` is due.
 
 ## Findings / gotchas
 
+- **Every ALTER-added FK column in this repo lost its `ON DELETE` rule.**
+  SQLite's `ALTER TABLE … ADD COLUMN … REFERENCES x(id)` takes no `ON DELETE`
+  clause, so drizzle-kit emits a bare reference that defaults to NO ACTION —
+  `attendee_id` on three tables and `promote_attendee_id` on `camp_invite` all
+  went in that way, and migration 0065 is the hand-written repair. Migration
+  0074's generated `ALTER TABLE camp_invite ADD prospect_id` was replaced with a
+  full 12-step table rebuild for the same reason. Verified on a throwaway DB:
+  `PRAGMA foreign_key_list(camp_invite)` now reports
+  `prospect_id->prospect ON DELETE SET NULL`, and `foreign_key_check` is clean.
+- **Module-scope use of a `.server` import breaks the client build, not the
+  typecheck.** `const applies = questionApplies` at module scope in
+  questions.responses.tsx typechecked fine and failed `bun run build` with
+  "Server-only module referenced by client" — React Router strips server code
+  from `loader`/`action` only. `questionApplies` moved to the pure
+  `questions.ts`. Any pure helper a component calls while *rendering* must not
+  live in a `.server` file.
+- **`privacy-coverage.test.ts` matches the literal text `redact(privacy`.** A
+  `redact(\n  privacy,\n  …)` that biome reformatted onto separate lines fails
+  the guard even though the route genuinely redacts. Bind the payload to a
+  variable first so the call fits on one line.
+- **The generate was safe despite a dirty tree.** The other threads' changes to
+  `db/schema/{auth,schedule,training}.ts` turned out to be line-ending churn
+  with a zero-content diff, so the usual "comment out their `export *`" dance
+  (see the drizzle-generate memory) wasn't needed. Worth re-checking with
+  `git diff --stat` rather than assuming either way.
+
 - **`questions.tsx` really has no officer answer view.** Verified: the loader
   calls `loadAnswers({ membershipId: active.membership.id })` and nothing else
   reads `question_answer` outside `asks.server.ts` (the to-do count) and
@@ -150,12 +176,39 @@ nav. Nav badge = prospects whose `nextFollowUpAt` is due.
 
 - [x] Read the codebase; confirmed what exists vs. what's missing.
 - [x] Locked the three design questions with Cameron.
-- [x] Step 1 — invited-by column.
-- [x] Step 2 — officer responses view.
-- [ ] Step 3 — prospect schema + migration 0074.
-- [ ] Step 3 — `/prospects` route, list + detail + log.
-- [ ] Step 3 — merge, application matching, invite promotion.
-- [ ] typecheck / lint / build green, commit.
+- [x] Step 1 — invited-by column. (commit e429185)
+- [x] Step 2 — officer responses view + CSV. (commit e429185)
+- [x] Step 3 — prospect schema + migration 0074, verified on a throwaway DB
+      (chain applies, 0 FK violations, `camp_invite` rebuilt so `prospect_id`
+      carries `ON DELETE SET NULL`).
+- [x] Step 3 — `/prospects` list + `/prospects/:id` thread, feature key
+      `prospects` (default off, officer-only), nav link with a needs-a-nudge
+      badge.
+- [x] Step 3 — merge, application matching, invite promotion.
+- [x] `mergeProspects` exercised against a real migrated DB: both logs survive
+      and re-sort chronologically, a duplicate handle collapses instead of
+      erroring, blank contact fields fill from the loser, the further-along
+      status wins, `created_at` takes the earlier date, the follow-up takes the
+      sooner one, notes are joined, `camp_invite.prospect_id` re-points, 0 FK
+      violations.
+- [x] typecheck / lint / build / 235 unit tests green; committed.
+
+## Still to do (not built)
+
+- **Browser E2E.** Nothing here has been driven in a real browser yet, and the
+  repo's convention is an `e2e/*.ts` run under `node --experimental-strip-types`
+  (never `bun` — see the Playwright memory). The list/detail/log/merge golden
+  path deserves one.
+- **Not deployed.** Migration 0074 has not been applied to the live database;
+  it will run on the next dev-server or deploy start via the startup migrator
+  (`db:migrate` does not work in this repo).
+- **A prospect can't be logged against from the member side.** The decision was
+  "the log follows them", and it does — `prospect.membership_id` links them and
+  the thread stays readable — but there's no entry point from `/members` yet.
+  A link from a member's row to their prospect thread is the obvious follow-up.
+- **No Discord/email ingestion.** Every interaction is hand-pasted, which is
+  the ask. Auto-capturing Discord DMs would need the gateway process the parent
+  plan deliberately avoids.
 
 ## Things not to do
 

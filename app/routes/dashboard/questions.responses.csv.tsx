@@ -10,8 +10,8 @@ import { data } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
-import { displayAnswer } from "~/lib/questions";
-import { loadResponseMatrix, questionApplies } from "~/lib/questions.server";
+import { displayAnswer, questionApplies } from "~/lib/questions";
+import { loadResponseMatrix } from "~/lib/questions.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/questions.responses.csv";
 
@@ -29,16 +29,15 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw data("Not authorized", { status: 403 });
   }
 
+  const matrix = await loadResponseMatrix({
+    campId: active.camp.id,
+    editionId: activeEdition.id,
+  });
   // Redacted like any loader payload rather than refused outright (the way
   // export-db refuses): a pseudonymized spreadsheet is still a useful demo,
-  // where raw database bytes are not.
-  const { questions, members } = redact(
-    privacy,
-    await loadResponseMatrix({
-      campId: active.camp.id,
-      editionId: activeEdition.id,
-    }),
-  );
+  // where raw database bytes are not. Kept on one line so the textual guard in
+  // privacy-coverage.test.ts can see it.
+  const { questions, members } = redact(privacy, matrix);
 
   const header = [
     "Name",

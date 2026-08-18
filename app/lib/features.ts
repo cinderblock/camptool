@@ -30,6 +30,7 @@ export type FeatureKey =
   | "finances"
   | "dues"
   | "recruiting"
+  | "prospects"
   | "roster"
   | "schedule"
   | "training"
@@ -150,6 +151,15 @@ export const FEATURES: CampFeatureDef[] = [
       "The public application page and the officer review queue for applicants.",
   },
   {
+    key: "prospects",
+    label: "Prospects",
+    description:
+      "An officer-only record of everyone the camp is talking to but who hasn't joined — every message, on whichever platform it arrived, in one shared thread per person. Not visible to members.",
+    // Deliberately no `requires`: a camp can track the people it's courting
+    // without ever opening a public application page. When Recruiting is also
+    // on, incoming applications match onto their prospect automatically.
+  },
+  {
     key: "roster",
     label: "Who's coming",
     description:
@@ -198,6 +208,7 @@ const ROUTE_FEATURES: Record<string, FeatureKey> = {
   finances: "finances",
   dues: "dues",
   recruits: "recruiting",
+  prospects: "prospects",
   roster: "roster",
   schedule: "schedule",
   training: "training",

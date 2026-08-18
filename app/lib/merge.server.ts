@@ -31,7 +31,8 @@
  */
 import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { db, sqlite } from "../../db/client.server";
-import { attendee, membership } from "../../db/schema";
+import { attendee, membership, prospect } from "../../db/schema";
+import { statusProgress } from "./prospects";
 
 type Ref = { table: string; column: string };
 
@@ -301,4 +302,124 @@ export async function claimGuestAsMember(
     }
   });
   run();
+}
+
+/** What a prospect merge would move. Read-only. */
+export async function previewProspectMerge(
+  campId: string,
+  survivorId: string,
+  staleId: string,
+): Promise<MergePreview> {
+  await assertProspectsMergeable(campId, survivorId, staleId);
+  const moves = countRefs("prospect", staleId);
+  return { moves, total: moves.reduce((n, m) => n + m.rows, 0) };
+}
+
+async function assertProspectsMergeable(
+  campId: string,
+  survivorId: string,
+  staleId: string,
+) {
+  if (survivorId === staleId) {
+    throw new Error("Pick two different prospects to merge.");
+  }
+  const rows = await db
+    .select()
+    .from(prospect)
+    .where(
+      and(
+        eq(prospect.campId, campId),
+        inArray(prospect.id, [survivorId, staleId]),
+      ),
+    );
+  if (rows.length !== 2) throw new Error("Prospect not found.");
+  return {
+    survivor: rows.find((r) => r.id === survivorId) as (typeof rows)[number],
+    stale: rows.find((r) => r.id === staleId) as (typeof rows)[number],
+  };
+}
+
+/**
+ * Fold one prospect into another — the "three officers each started a thread
+ * with the same person" case, which is the normal outcome of a camp with more
+ * than one recruiter and no shared record.
+ *
+ * The conversation log is the point, so nothing is dropped: both sides'
+ * interactions and handles move onto the survivor and the whole history sorts
+ * back together by when it actually happened. Scalar fields fill only where
+ * the survivor is blank — never overwrite a live value — and the further-along
+ * status wins, so merging a `lead` into a `talking` doesn't lose the fact that
+ * someone is mid-conversation.
+ */
+export async function mergeProspects(
+  campId: string,
+  survivorId: string,
+  staleId: string,
+): Promise<MergePreview> {
+  const { survivor, stale } = await assertProspectsMergeable(
+    campId,
+    survivorId,
+    staleId,
+  );
+  const preview = await previewProspectMerge(campId, survivorId, staleId);
+
+  // Only where the survivor has nothing.
+  const fill: Record<string, unknown> = {};
+  const fillIfBlank = (col: string, mine: unknown, theirs: unknown) => {
+    if (!mine && theirs) fill[col] = theirs;
+  };
+  fillIfBlank("playa_name", survivor.playaName, stale.playaName);
+  fillIfBlank("email", survivor.email, stale.email);
+  fillIfBlank("phone", survivor.phone, stale.phone);
+  fillIfBlank("membership_id", survivor.membershipId, stale.membershipId);
+  fillIfBlank(
+    "recruit_application_id",
+    survivor.recruitApplicationId,
+    stale.recruitApplicationId,
+  );
+  fillIfBlank(
+    "owner_membership_id",
+    survivor.ownerMembershipId,
+    stale.ownerMembershipId,
+  );
+  // The sooner reminder wins: a merge must not push a follow-up further out.
+  const survivorDue = survivor.nextFollowUpAt?.getTime();
+  const staleDue = stale.nextFollowUpAt?.getTime();
+  if (staleDue != null && (survivorDue == null || staleDue < survivorDue)) {
+    fill.next_follow_up_at = staleDue;
+  }
+  // Notes are two people's writing about one person; keep both, attributed to
+  // nothing in particular, rather than silently picking a winner.
+  if (stale.notes?.trim()) {
+    fill.notes = survivor.notes?.trim()
+      ? `${survivor.notes.trim()}\n\n---\n\n${stale.notes.trim()}`
+      : stale.notes;
+  }
+  if (statusProgress(stale.status) > statusProgress(survivor.status)) {
+    fill.status = stale.status;
+  }
+  // The relationship started when the earlier of the two records started.
+  if (stale.createdAt.getTime() < survivor.createdAt.getTime()) {
+    fill.created_at = stale.createdAt.getTime();
+  }
+
+  const run = sqlite.transaction(() => {
+    // Handles carry a unique (prospect, kind, value), so UPDATE OR IGNORE
+    // collapses ones both records held instead of failing the merge; the
+    // leftovers cascade away with the stale row below.
+    repoint("prospect", survivorId, staleId);
+
+    const cols = Object.keys(fill);
+    if (cols.length) {
+      sqlite.run(
+        `UPDATE prospect SET ${cols.map((c) => `"${c}" = ?`).join(", ")}, updated_at = ? WHERE id = ?`,
+        [...cols.map((c) => fill[c] as string), Date.now(), survivorId],
+      );
+    }
+
+    sqlite.run("DELETE FROM prospect WHERE id = ?", [staleId]);
+  });
+  run();
+
+  return preview;
 }

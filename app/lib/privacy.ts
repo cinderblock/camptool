@@ -125,6 +125,9 @@ const FREE_TEXT = new Set([
   "previousCampNotes",
   "reviewNote",
   "reviewNotes",
+  // An email subject / "gist" line on a logged prospect conversation — as
+  // full of real names as the body under it.
+  "subject",
   "summary",
   "title",
   "value",

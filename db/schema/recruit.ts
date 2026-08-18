@@ -17,6 +17,7 @@ import {
 import { attendee } from "./attendee";
 import { user } from "./auth";
 import { camp, membership } from "./camp";
+import { prospect } from "./prospect";
 
 const now = sql`(unixepoch() * 1000)`;
 
@@ -83,6 +84,15 @@ export const campInvite = sqliteTable("camp_invite", {
   // tickets, and passes follow them into the account. If the guest row is
   // deleted first this nulls out and the link redeems as a plain invite.
   promoteAttendeeId: text("promote_attendee_id").references(() => attendee.id, {
+    onDelete: "set null",
+  }),
+  // Prospect promotion (see plans/prospects-crm.md): an invite generated from a
+  // prospect's card. Redeeming it stamps that prospect with the new membership
+  // and flips it to `joined`, so the officers' conversation history follows the
+  // person into the camp instead of being orphaned. Same shape as
+  // promoteAttendeeId above; nulls out if the prospect is deleted first, and
+  // the link then redeems as a plain invite.
+  prospectId: text("prospect_id").references(() => prospect.id, {
     onDelete: "set null",
   }),
   // null = unlimited uses; otherwise redemption stops once useCount hits it.

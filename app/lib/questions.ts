@@ -114,6 +114,19 @@ export function parseMultiValue(raw: string | null | undefined): string[] {
   return parseOptions(raw);
 }
 
+/**
+ * Does an audience-tagged question apply to a person of this audience? Lives
+ * here rather than beside the server query that uses it because the responses
+ * page calls it while rendering — importing it from a `.server` module would
+ * drag the whole Drizzle graph into the client bundle.
+ */
+export function questionApplies(
+  q: { audience: string },
+  m: { audience: string },
+): boolean {
+  return q.audience === "all" || q.audience === m.audience;
+}
+
 /** Whether a stored value counts as an answer for `required` enforcement —
  * type-aware, since some types store "empty" as non-empty text ("[]", "false"). */
 export function isAnswered(

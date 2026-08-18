@@ -22,6 +22,7 @@ import {
   type InviteState,
   inviteState,
 } from "~/lib/invite";
+import { markProspectJoined } from "~/lib/prospects.server";
 import { isMemberOf } from "~/lib/recruits.server";
 import { getSession } from "~/lib/session.server";
 import { db } from "../../db/client.server";
@@ -42,6 +43,7 @@ async function findInvite(token: string) {
       role: campInvite.role,
       kind: campInvite.kind,
       promoteAttendeeId: campInvite.promoteAttendeeId,
+      prospectId: campInvite.prospectId,
       maxUses: campInvite.maxUses,
       useCount: campInvite.useCount,
       expiresAt: campInvite.expiresAt,
@@ -155,6 +157,17 @@ export async function action({ request, params }: Route.ActionArgs) {
           isNull(attendee.membershipId),
         ),
       );
+  }
+
+  // An invite minted from a prospect's card closes the loop the other way:
+  // the officers' conversation history stops being about a stranger and
+  // becomes this member's history. See plans/prospects-crm.md.
+  if (invite.prospectId) {
+    await markProspectJoined({
+      campId: invite.campId,
+      prospectId: invite.prospectId,
+      membershipId,
+    });
   }
 
   await db

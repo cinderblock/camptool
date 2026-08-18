@@ -42,6 +42,7 @@ import { isSuperAdmin } from "~/lib/instance.server";
 import { hasAtLeast } from "~/lib/permissions";
 import type { PrivacyMode } from "~/lib/privacy";
 import { redact } from "~/lib/privacy.server";
+import { countProspectsNeedingAttention } from "~/lib/prospects.server";
 import { hasScheduledDays } from "~/lib/schedule.server";
 import { passkeyNagSnoozed, resolveActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -146,6 +147,17 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? await countPendingEntries(active.camp.id)
       : 0;
 
+  // Prospects nobody has claimed, or whose follow-up date has passed. Same
+  // reasoning as the FAQ badge: the queue only stays alive if being behind on
+  // it is visible. Officer-only, so only officers pay for the query.
+  const prospectsPending =
+    active &&
+    features.prospects &&
+    featureVisibleTo(features.prospects, active.membership.role) &&
+    hasAtLeast(active.membership.role, "officer")
+      ? await countProspectsNeedingAttention(active.camp.id)
+      : 0;
+
   // The top-bar shortcut into the camp's bins app. Only the LABEL crosses the
   // wire — the access code stays server-side until /bins issues the redirect.
   const binsMenu =
@@ -166,6 +178,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     scheduleEmpty,
     outstandingCount,
     faqPending,
+    prospectsPending,
     showPasskeyNag,
     privacyMode,
     canUsePrivacy,
@@ -200,6 +213,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     scheduleEmpty,
     outstandingCount,
     faqPending,
+    prospectsPending,
     showPasskeyNag,
     impersonatedByName,
     privacyMode,
@@ -284,6 +298,10 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ...(activeRole && hasAtLeast(activeRole, "officer")
           ? [
               ...gated("recruiting", "/recruits", "Recruits"),
+              ...gated("prospects", "/prospects", "Prospects").map((item) => ({
+                ...item,
+                badge: prospectsPending > 0 ? String(prospectsPending) : null,
+              })),
               ...gated("bringing", "/inventory", "Inventory"),
               ...gated("finances", "/finances", "Finances"),
               ...gated("dues", "/dues", "Dues"),

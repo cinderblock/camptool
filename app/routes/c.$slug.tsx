@@ -21,6 +21,7 @@ import {
   getInstanceSettings,
   setSignupUnlockCookie,
 } from "~/lib/instance.server";
+import { linkApplicationToProspect } from "~/lib/prospects.server";
 import { type QuestionType, isAnswered, parseOptions } from "~/lib/questions";
 import { loadApplicationQuestions } from "~/lib/questions.server";
 import { isMemberOf, pendingApplicationWhere } from "~/lib/recruits.server";
@@ -173,8 +174,9 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
 
+  const applicationId = crypto.randomUUID();
   await db.insert(recruitApplication).values({
-    id: crypto.randomUUID(),
+    id: applicationId,
     campId: found.id,
     name: session.user.name,
     email: session.user.email,
@@ -184,6 +186,21 @@ export async function action({ request, params }: Route.ActionArgs) {
     status: "pending",
     userId: session.user.id,
   });
+
+  // One pipeline: if an officer has been talking to this person for months on
+  // Facebook, the application lands on that same thread rather than starting a
+  // second, contextless record. No-ops when the Prospects feature is off, and
+  // never throws — losing the application would be far worse than losing the
+  // CRM link. See plans/prospects-crm.md.
+  if ((await getFeatureState(found.id, "prospects")) !== "off") {
+    await linkApplicationToProspect({
+      campId: found.id,
+      applicationId,
+      name: session.user.name,
+      email: session.user.email,
+      playaName,
+    });
+  }
 
   return data({ ok: `Thanks, ${session.user.name}! Your application is in.` });
 }
