@@ -199,9 +199,13 @@ nav. Nav badge = prospects whose `nextFollowUpAt` is due.
   repo's convention is an `e2e/*.ts` run under `node --experimental-strip-types`
   (never `bun` — see the Playwright memory). The list/detail/log/merge golden
   path deserves one.
-- **Not deployed.** Migration 0074 has not been applied to the live database;
-  it will run on the next dev-server or deploy start via the startup migrator
-  (`db:migrate` does not work in this repo).
+- ~~Not deployed.~~ **DEPLOYED** — commit `cd3db57`, "Deploy to firefly" green
+  (its "Verify the migration chain" step included), `/_version` confirms
+  `cd3db57` is serving. Before pushing, migration 0074 was applied to a
+  `VACUUM INTO` copy of the live DB: no row loss in any table, `camp_invite`'s
+  one row byte-identical through the rebuild, `camp_invite_token_unique`
+  preserved, `integrity_check` ok, `foreign_key_check` clean. Nothing changes
+  for the camp until an admin switches the feature on at `/settings`.
 - **A prospect can't be logged against from the member side.** The decision was
   "the log follows them", and it does — `prospect.membership_id` links them and
   the thread stays readable — but there's no entry point from `/members` yet.
