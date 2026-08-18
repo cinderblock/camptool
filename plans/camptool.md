@@ -711,6 +711,36 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   *"it's not very useful if it convinces me it's a complete backup when it's
   not."* The export now bundles both halves. See below.
 
+- [x] **Prospects — an officer CRM for people we're courting (LANDED, not yet
+  browser-tested or deployed).** Cameron's ask (2026-08-17): when an officer
+  gets a message on Facebook about joining, paste it — plus a link back to the
+  original — somewhere every officer can see, so the next one to talk to that
+  person isn't starting cold. Feature key `prospects` (default off,
+  **officer-only** in loader AND action; camp-scoped, not edition-scoped).
+  **Migration 0074** adds `prospect` / `prospect_handle` /
+  `prospect_interaction` + `camp_invite.prospect_id`. A prospect is neither a
+  `recruit_application` (the artifact of a form) nor a `membership` (needs an
+  account) — `name` is the only required field, because often "Jenny from the
+  art thread" is all anyone has. Interactions record the channel, direction,
+  when it *happened*, a source permalink, and an email Message-ID; bodies reuse
+  the wiki/FAQ markup so screenshots paste in. **Merging** folds the "three
+  officers each started a thread with one human" case together over the
+  existing FK-introspection primitive in `merge.server.ts`. Locked decisions:
+  the log **follows the person** past joining, **one pipeline** with `/recruits`
+  (an application matches onto its prospect by email; an invite minted from the
+  card stamps the membership on redemption), and the name **Prospects**.
+  Details + gotchas: **`plans/prospects-crm.md`**.
+
+- [x] **Two long-standing blind spots closed (LANDED).** (a) The invite tree
+  (`membership.invited_by_membership_id` / `via_invite_id`) has been written on
+  every redemption since invites shipped and displayed nowhere — Members now has
+  an **"Invited by"** column, falling back to naming the *door* when an open
+  camp link recorded no personal inviter. (b) Officers could author questions
+  and campers could answer them, but **nothing in the app ever read an answer
+  back**; `/questions/responses` (officer-only) shows them by question — with a
+  tally for select/yes-no types and who still hasn't answered — or by person,
+  plus a CSV export. Both in commit e429185.
+
 **Home dashboard (LANDED).** The Overview (`/`) now shows the viewer's to-dos for
 the active year — finish setup (members), declare what you're bringing, dues owed
 (their own, if the camp tracks dues), and pending map-change approvals (officers) —

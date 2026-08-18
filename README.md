@@ -167,6 +167,27 @@ a public URL. You can also point at an image hosted elsewhere with
 and the super-admin backup download bundles both, so one file is still a
 complete backup.
 
+**Prospects** is where officers keep track of everyone the camp is talking to
+but who hasn't joined. Recruiting happens across half a dozen platforms and ends
+up scattered across half a dozen inboxes, so this is one shared thread per
+person: paste what they said — a screenshot works — along with a link back to
+the original post or message, and the next officer to talk to them can read the
+whole history first. A prospect needs nothing but a name, since often "Jenny
+from the art thread" is genuinely all anyone has; email, phone, and handles on
+each platform are added as you learn them. One officer usually shepherds each
+conversation, and when several officers turn out to have been talking to the
+same person separately, **merging** folds the records into one — both logs
+survive and re-sort into a single timeline. Public applications land on the
+prospect they already match, and an invite generated from someone's card carries
+their history with them when they join. It is **officer-only**, and off until an
+admin turns it on.
+
+Officers can also read what the camp actually said: the questionnaire's
+**Responses** view breaks answers down by question — with a tally for
+multiple-choice and yes/no, and who still hasn't answered — or by person, and
+exports to CSV. And the members list shows **who invited who**, which the app
+has been recording since invites shipped.
+
 If your camp runs a [bins](https://github.com/cinderblock/bins) instance — the
 QR-sticker inventory tracker for what's in which box — a **Bins** shortcut in
 the top bar opens it already signed in. The camp admin sets the address and
