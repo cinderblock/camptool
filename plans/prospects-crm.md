@@ -147,6 +147,11 @@ nav. Nav badge = prospects whose `nextFollowUpAt` is due.
   from `loader`/`action` only. `questionApplies` moved to the pure
   `questions.ts`. Any pure helper a component calls while *rendering* must not
   live in a `.server` file.
+- **React SSR breaks naive substring assertions.** `{a} of {b}` in JSX arrives
+  as `1<!-- --> of <!-- -->1`, because React inserts a comment between adjacent
+  text expressions — so `html.includes("1 of 1")` fails against perfectly
+  correct markup. `e2e/question-responses.ts` strips `<!-- -->` before matching;
+  do the same in any new suite that asserts on rendered text.
 - **`privacy-coverage.test.ts` matches the literal text `redact(privacy`.** A
   `redact(\n  privacy,\n  …)` that biome reformatted onto separate lines fails
   the guard even though the route genuinely redacts. Bind the payload to a
@@ -195,10 +200,26 @@ nav. Nav badge = prospects whose `nextFollowUpAt` is due.
 
 ## Still to do (not built)
 
-- **Browser E2E.** Nothing here has been driven in a real browser yet, and the
-  repo's convention is an `e2e/*.ts` run under `node --experimental-strip-types`
-  (never `bun` — see the Playwright memory). The list/detail/log/merge golden
-  path deserves one.
+- ~~Browser E2E.~~ **DONE, over real HTTP** — no browser needed, so both run
+  under bun like `e2e/faq.ts`:
+  - **`e2e/prospects.ts` 36/36** (`bun run e2e:prospects`). Covers the opt-in
+    bounce; officer-only *even when the feature is fully ON*, and in the action
+    as well as the loader; create-from-a-name-alone; log-advances-a-lead;
+    scheme-less source link normalised to https; duplicate handle refused;
+    **merge** keeping both conversations and collapsing the duplicate handle;
+    **invite promotion** stamping the record on redemption; **one pipeline**
+    (an application matching the existing prospect, with no second record);
+    and cross-camp isolation on both read and write.
+  - **`e2e/question-responses.ts` 18/18** (`bun run e2e:responses`). Covers
+    officer-only; answers appearing; lifetime (`once`-scoped) answers surfacing
+    in the year; archived questions still readable with their prompt; audience
+    gating (`1 of 1` on a recruit-only question, `2 of 3` on an open one);
+    the yes/no tally; the CSV quoting an embedded comma **and** newline, and
+    saying `n/a` rather than blank for a question someone was never asked; and
+    the Members invite tree, including naming the *link* for an open invite.
+  - Both greps of the dev-server log were clean, which is the check that
+    matters — an SSR throw still returns HTTP 200 (see the memory), so each
+    suite also asserts a marker only server-rendering produces.
 - ~~Not deployed.~~ **DEPLOYED** — commit `cd3db57`, "Deploy to firefly" green
   (its "Verify the migration chain" step included), `/_version` confirms
   `cd3db57` is serving. Before pushing, migration 0074 was applied to a
