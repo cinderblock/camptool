@@ -251,9 +251,11 @@ These each cost real time; none are guessable from the docs.
 
 ## Things not to do
 
-- **Don't add a "forgot password?" link to `/login`.** It has nowhere to go
+- **Don't add a "forgot password?" *button* to `/login`.** It has nowhere to go
   until a mail transport exists. The officer-issued link *is* the recovery path,
-  and it's delivered by a human on purpose.
+  and it's delivered by a human on purpose. Saying so in words is different from
+  offering a control — see the `mailEnabled` note below; the pages now *explain*
+  the situation, they still offer nothing that mails anything.
 - **Don't let the reset link change the email address.** It proves you know the
   email; it does not grant you authority over it.
 - **Don't store the token in plaintext**, and don't log the full URL
@@ -313,4 +315,24 @@ These each cost real time; none are guessable from the docs.
       link is spent afterwards, and that the new passkey signs in on its own
       from a cleared browser session. `e2e/password-reset.ts` 36/36 and
       `e2e:passkey` (signup) still green after the `auth.server.ts` change.
+- [x] 2026-08-18 — **The public pages now say there is no email.** The one
+      email-delivered affordance still on a logged-out page was "Email me a
+      magic link instead", on `/login` and (via `AuthInline`) on the public
+      apply page `/c/:slug` and the invite page `/i/:token`. With no transport
+      it produced a "Magic link sent — check your email" toast for a message
+      that never arrives, which is strictly worse than no button: the person
+      waits instead of asking a human. Added `mailEnabled` (a plain constant in
+      `app/lib/auth.server.ts`, deliberately **not** env-driven — an env var
+      would let a self-hoster switch the buttons on without wiring delivery,
+      which is the exact failure being guarded). While it's false, all three
+      pages render `NoMailRecoveryNote` in that slot instead: *"Forgot your
+      password? This site doesn't send email, so there's no automatic reset. Ask
+      an officer of your camp to generate a recovery link for you — that's how
+      you get back in."* Flip the constant in the same change that implements
+      real sending and the magic-link affordance comes back everywhere at once.
+      Verified rendered on `/login` and `/c/:slug`; typecheck, biome, 235 unit
+      tests and `e2e:passkey-nag` (which drives the `/login` tabs) all green.
+      Unrelated pre-existing breakage fixed in passing: `e2e:passkey-nag`'s
+      `getByRole("button", {name: "Remove"})` had become a strict-mode violation
+      when `/account` grew a "Remove password" button; it needs `exact: true`.
 - [ ] Next: deploy, then tell the campmate to expect a link.

@@ -171,7 +171,11 @@ async function main() {
 
     check(
       "the only passkey cannot be removed",
-      await page.getByRole("button", { name: "Remove" }).isDisabled(),
+      // `exact` matters: /account also has a "Remove password" button, added
+      // after this test was written, and a substring match hits both.
+      await page
+        .getByRole("button", { name: "Remove", exact: true })
+        .isDisabled(),
       "deleting your last passkey must be refused",
     );
 

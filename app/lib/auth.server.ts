@@ -257,3 +257,21 @@ export const auth = betterAuth({
 });
 
 export const discordEnabled = discordConfigured;
+
+/**
+ * Whether this deployment can actually deliver email.
+ *
+ * There is no mail transport yet — `sendMagicLink` above only `console.log`s
+ * the URL — so every email-delivered credential path (magic link, better-auth's
+ * own forget-password flow) is a dead end in production: the visitor gets a
+ * "check your email" confirmation for a message that will never arrive. Public
+ * sign-in surfaces read this flag and point people at an officer-issued
+ * recovery link instead (`plans/password-recovery.md`).
+ *
+ * Deliberately not env-driven: an env var would let a self-hoster switch these
+ * buttons back on without wiring any delivery, which is the exact failure this
+ * guards. Flip it to `true` in the same change that implements real sending.
+ */
+// Annotated `boolean` rather than inferred `false`, so consumers type-check as
+// a real toggle and nothing downstream gets narrowed away as dead code.
+export const mailEnabled: boolean = false;

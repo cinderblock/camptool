@@ -15,7 +15,7 @@ import { AuthInline } from "~/components/AuthInline";
 import { CampHero } from "~/components/CampHero";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
-import { discordEnabled } from "~/lib/auth.server";
+import { discordEnabled, mailEnabled } from "~/lib/auth.server";
 import { getFeatureState } from "~/lib/features.server";
 import {
   getInstanceSettings,
@@ -77,6 +77,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       alreadyMember: false,
       alreadyApplied: false,
       discordEnabled,
+      mailEnabled,
       questions,
     };
     // The public apply page is a sanctioned signup entry point. Only when the
@@ -105,6 +106,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     alreadyMember: await isMemberOf(session.user.id, found.id),
     alreadyApplied: Boolean(pending),
     discordEnabled,
+    mailEnabled,
     questions,
   };
 }
@@ -227,6 +229,7 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
             <AuthInline
               intro="Create an account to apply — so you can sign back in later and check on your application."
               discordEnabled={loaderData.discordEnabled}
+              mailEnabled={loaderData.mailEnabled}
             />
           )}
         </Paper>

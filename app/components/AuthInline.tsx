@@ -13,6 +13,7 @@ import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 import { useRevalidator } from "react-router";
 import { signIn, signUp } from "~/lib/auth-client";
+import { NoMailRecoveryNote } from "./NoMailRecoveryNote";
 
 /**
  * Inline account gate shared by the public apply page and the invite-redeem
@@ -23,9 +24,12 @@ import { signIn, signUp } from "~/lib/auth-client";
 export function AuthInline({
   intro,
   discordEnabled,
+  mailEnabled,
 }: {
   intro: string;
   discordEnabled: boolean;
+  /** False when this deployment has no mail transport — see auth.server.ts. */
+  mailEnabled: boolean;
 }) {
   const { revalidate } = useRevalidator();
   const [busy, setBusy] = useState(false);
@@ -146,15 +150,19 @@ export function AuthInline({
               <Button type="submit" loading={busy} fullWidth>
                 Sign in &amp; continue
               </Button>
-              <Anchor
-                component="button"
-                type="button"
-                size="sm"
-                ta="center"
-                onClick={handleMagicLink}
-              >
-                Email me a magic link instead
-              </Anchor>
+              {mailEnabled ? (
+                <Anchor
+                  component="button"
+                  type="button"
+                  size="sm"
+                  ta="center"
+                  onClick={handleMagicLink}
+                >
+                  Email me a magic link instead
+                </Anchor>
+              ) : (
+                <NoMailRecoveryNote />
+              )}
             </Stack>
           </form>
         </Tabs.Panel>

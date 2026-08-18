@@ -20,7 +20,8 @@ events (see the four-layer architecture in the plan).
 - **Framework:** React Router v7 (framework mode, SSR) + React 19
 - **UI:** Mantine
 - **Database:** SQLite via `bun:sqlite` + Drizzle ORM
-- **Auth:** better-auth (Discord, email/password, magic link, passkeys)
+- **Auth:** better-auth (Discord, email/password, passkeys; magic link is wired
+  but hidden — see "No mail transport" below)
 - **Format/lint:** Biome
 
 ## Status
@@ -281,3 +282,15 @@ server into a container. Both are documented in
   cookie that the hook accepts. Note: because better-auth only runs its origin
   check on cookie-bearing requests, production must set `NODE_ENV=production` and
   a `PUBLIC_BASE_URL` matching the browser origin (the deploy env-file does).
+- **No mail transport — recovery is a human, not an inbox.** Nothing in this
+  deployment can send email yet (`mailEnabled` in `app/lib/auth.server.ts`), so
+  no public page offers an email-delivered credential: the magic-link link is
+  hidden on `/login`, `/c/:slug` and `/i/:token`, and there is no "forgot
+  password?" button anywhere. A reset button that silently mails nothing is
+  worse than none — the person waits for a message that never arrives instead of
+  asking a human. In its place those pages say plainly that the site sends no
+  email and to ask an officer for a recovery link. Officers issue one from the
+  members page; it hands the person a **passkey** (password is the fallback) and
+  is delivered out-of-band on purpose. See
+  [`plans/password-recovery.md`](plans/password-recovery.md). When real delivery
+  is wired, flip `mailEnabled` in the same change and the affordances come back.

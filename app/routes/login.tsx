@@ -16,8 +16,9 @@ import { useForm } from "@mantine/form";
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 import { redirect, useNavigate } from "react-router";
+import { NoMailRecoveryNote } from "~/components/NoMailRecoveryNote";
 import { signIn, signUp } from "~/lib/auth-client";
-import { discordEnabled } from "~/lib/auth.server";
+import { discordEnabled, mailEnabled } from "~/lib/auth.server";
 import { getInstanceSettings } from "~/lib/instance.server";
 import { getSession } from "~/lib/session.server";
 import type { Route } from "./+types/login";
@@ -33,7 +34,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Set by /reset/:token after a successful password reset — the only way in
   // when there's no mail transport (plans/password-recovery.md).
   const justReset = new URL(request.url).searchParams.get("reset") === "1";
-  return { discordEnabled, allowOpenSignups, justReset };
+  return { discordEnabled, mailEnabled, allowOpenSignups, justReset };
 }
 
 export default function Login({ loaderData }: Route.ComponentProps) {
@@ -149,15 +150,19 @@ export default function Login({ loaderData }: Route.ComponentProps) {
                 <Button type="submit" loading={busy} fullWidth>
                   Sign in
                 </Button>
-                <Anchor
-                  component="button"
-                  type="button"
-                  size="sm"
-                  ta="center"
-                  onClick={handleMagicLink}
-                >
-                  Email me a magic link instead
-                </Anchor>
+                {loaderData.mailEnabled ? (
+                  <Anchor
+                    component="button"
+                    type="button"
+                    size="sm"
+                    ta="center"
+                    onClick={handleMagicLink}
+                  >
+                    Email me a magic link instead
+                  </Anchor>
+                ) : (
+                  <NoMailRecoveryNote />
+                )}
               </Stack>
             </form>
           </Tabs.Panel>

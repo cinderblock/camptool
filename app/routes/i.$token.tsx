@@ -12,7 +12,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { Form, data, redirect } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { CampHero } from "~/components/CampHero";
-import { discordEnabled } from "~/lib/auth.server";
+import { discordEnabled, mailEnabled } from "~/lib/auth.server";
 import {
   getInstanceSettings,
   setSignupUnlockCookie,
@@ -84,6 +84,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     viewer: session ? { name: session.user.name } : null,
     alreadyMember,
     discordEnabled,
+    mailEnabled,
   };
 
   // A valid invite is a sanctioned signup entry point. Only in invite-only mode
@@ -214,6 +215,7 @@ export default function RedeemInvite({ loaderData }: Route.ComponentProps) {
             viewer={viewer}
             alreadyMember={alreadyMember}
             discordEnabled={loaderData.discordEnabled}
+            mailEnabled={loaderData.mailEnabled}
           />
         </Paper>
       </Stack>
@@ -227,12 +229,14 @@ function InviteBody({
   viewer,
   alreadyMember,
   discordEnabled,
+  mailEnabled,
 }: {
   campName: string;
   state: InviteState;
   viewer: { name: string } | null;
   alreadyMember: boolean;
   discordEnabled: boolean;
+  mailEnabled: boolean;
 }) {
   if (state !== "ok") {
     return (
@@ -256,6 +260,7 @@ function InviteBody({
       <AuthInline
         intro={`Create an account to accept your invite to ${campName} — so you can sign back in later.`}
         discordEnabled={discordEnabled}
+        mailEnabled={mailEnabled}
       />
     );
   }
