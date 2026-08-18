@@ -361,6 +361,18 @@ check(
   "9f. and the follow-up reminder is cleared",
   joined?.nextFollowUpAt === null,
 );
+// "The log follows the person" is only true if there's a way back to it once
+// they're a member, so Members links an officer at the thread.
+const membersHtml = await (await get("/members", officer.cookie)).text();
+check(
+  "9g. Members links the new member back to their recruiting history",
+  membersHtml.includes(`/prospects/${jenny?.id}`),
+);
+const membersAsMember = await (await get("/members", member.cookie)).text();
+check(
+  "9h. and a plain member is not shown that link",
+  !membersAsMember.includes(`/prospects/${jenny?.id}`),
+);
 
 // ------------------------------------------------------------- one pipeline
 // 10. A public application lands on the prospect we already have for that

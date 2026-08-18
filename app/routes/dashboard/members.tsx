@@ -16,11 +16,13 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { Form, Link, data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
+import { featureVisibleTo } from "~/lib/features";
+import { getFeatureState } from "~/lib/features.server";
 import {
   type MergePreview,
   mergeMemberships,
@@ -43,6 +45,7 @@ import {
   memberFlag,
   membership,
   passkey,
+  prospect,
   user,
 } from "../../../db/schema";
 import type { Route } from "./+types/members";
@@ -138,9 +141,29 @@ export async function loader({ request }: Route.LoaderArgs) {
     }
   }
 
+  // Whose Prospects thread points at them. The locked decision is that the
+  // conversation log FOLLOWS the person past joining (plans/prospects-crm.md),
+  // which is only true if there's a way back to it once they're a member —
+  // this is that way. Officers only, and only when the feature is on for them.
+  const prospectOf = new Map<string, string>();
+  if (canManage) {
+    const state = await getFeatureState(campId, "prospects");
+    if (featureVisibleTo(state, actorRole)) {
+      for (const p of await db
+        .select({ id: prospect.id, membershipId: prospect.membershipId })
+        .from(prospect)
+        .where(
+          and(eq(prospect.campId, campId), isNotNull(prospect.membershipId)),
+        )) {
+        if (p.membershipId) prospectOf.set(p.membershipId, p.id);
+      }
+    }
+  }
+
   const members = rows
     .map(({ invitedByMembershipId, viaInviteId, ...r }) => ({
       ...r,
+      prospectId: prospectOf.get(r.memberId) ?? null,
       joinedAt: r.joinedAt ? r.joinedAt.toISOString() : null,
       discord: discord.get(r.userId) ?? null,
       hasPasskey: withPasskey.has(r.userId),
@@ -778,11 +801,24 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                         <Text size="sm" c="dimmed">
                           via {m.invitedVia}
                         </Text>
-                      ) : (
+                      ) : m.prospectId ? null : (
                         <Text size="sm" c="dimmed">
                           —
                         </Text>
                       )}
+                      {/* The conversation that produced them, when the camp was
+                          tracking it before they joined. This is what makes the
+                          "log follows the person" decision actually true. */}
+                      {m.prospectId ? (
+                        <Anchor
+                          component={Link}
+                          to={`/prospects/${m.prospectId}`}
+                          size="xs"
+                          display="block"
+                        >
+                          Recruiting history
+                        </Anchor>
+                      ) : null}
                     </Table.Td>
                     {/* Plain Text, not Badge: Mantine's Badge label is
                         overflow:hidden + ellipsis, so in a column this narrow

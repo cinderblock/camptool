@@ -202,14 +202,15 @@ nav. Nav badge = prospects whose `nextFollowUpAt` is due.
 
 - ~~Browser E2E.~~ **DONE, over real HTTP** — no browser needed, so both run
   under bun like `e2e/faq.ts`:
-  - **`e2e/prospects.ts` 36/36** (`bun run e2e:prospects`). Covers the opt-in
+  - **`e2e/prospects.ts` 38/38** (`bun run e2e:prospects`). Covers the opt-in
     bounce; officer-only *even when the feature is fully ON*, and in the action
     as well as the loader; create-from-a-name-alone; log-advances-a-lead;
     scheme-less source link normalised to https; duplicate handle refused;
     **merge** keeping both conversations and collapsing the duplicate handle;
     **invite promotion** stamping the record on redemption; **one pipeline**
     (an application matching the existing prospect, with no second record);
-    and cross-camp isolation on both read and write.
+    cross-camp isolation on both read and write; and the Members link back into
+    a joined prospect's thread (present for officers, absent for members).
   - **`e2e/question-responses.ts` 18/18** (`bun run e2e:responses`). Covers
     officer-only; answers appearing; lifetime (`once`-scoped) answers surfacing
     in the year; archived questions still readable with their prompt; audience
@@ -227,10 +228,12 @@ nav. Nav badge = prospects whose `nextFollowUpAt` is due.
   one row byte-identical through the rebuild, `camp_invite_token_unique`
   preserved, `integrity_check` ok, `foreign_key_check` clean. Nothing changes
   for the camp until an admin switches the feature on at `/settings`.
-- **A prospect can't be logged against from the member side.** The decision was
-  "the log follows them", and it does — `prospect.membership_id` links them and
-  the thread stays readable — but there's no entry point from `/members` yet.
-  A link from a member's row to their prospect thread is the obvious follow-up.
+- ~~A prospect can't be reached from the member side.~~ **DONE** — the Members
+  "Invited by" cell now carries a **Recruiting history** link for anyone whose
+  prospect record points at their membership, which is what makes the "log
+  follows the person" decision true rather than merely stored. Officer-only and
+  gated on the feature being visible to them, so a plain member never sees that
+  such a record exists (asserted both ways in `e2e/prospects.ts` 9g/9h).
 - **No Discord/email ingestion.** Every interaction is hand-pasted, which is
   the ask. Auto-capturing Discord DMs would need the gateway process the parent
   plan deliberately avoids.
