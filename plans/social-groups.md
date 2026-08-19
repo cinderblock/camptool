@@ -45,10 +45,16 @@ From Cameron, 2026-08-19:
 
 Implied, and worth writing down:
 
-4. **Groups are flat and overlapping, not a hierarchy.** A member belongs to
-   any number. The "nesting" Cameron asked for is delivered by (a) collapsible
-   group sections on the two lists and (b) the genuinely n-deep invite tree.
-   A `parent_group_id` is not being added until something actually needs it.
+4. ~~**Groups are flat and overlapping, not a hierarchy.**~~ **Superseded
+   2026-08-19** — Cameron: *"I want to get a clear tree of groups in the camp."*
+   Groups now nest: `camp_group.parent_group_id`, arbitrary depth. A member
+   still belongs to any number of groups, so the overlap half of the original
+   decision stands; only "flat" is gone.
+
+   The nesting is **structural, not membership**. Being in "Kitchen crew" does
+   not put you in its parent "Infrastructure" — a parent's own list is its own
+   list. Rolled-up counts are shown alongside direct ones so the hierarchy is
+   readable without inventing membership nobody declared.
 5. **No permissions attach to a group.** See above.
 
 ## Design
@@ -113,9 +119,11 @@ several groups gets the first by name order; the legend says so.
 - [x] 4. Roster: a **Group by social group** toggle with sections and headcounts.
 - [x] 5. Map: `/map?group=<id>`, reusing the party highlight.
 - [x] 6. `invite-tree.test.ts` — 10 tests, including both cycle shapes.
-- [ ] Remaining UI: rename / merge groups. Both actions and server functions
-      exist and are authorization-checked (officer-only); only the buttons are
-      missing, so an officer currently deletes and recreates instead.
+- [x] 7. **Groups nest.** `camp_group.parent_group_id` (migration
+      `0078_group_parent.sql`), the tree rendered on the members directory, the
+      roster and the manage panel, and officer controls for rename / move /
+      fold-in. The traversal moved to `app/lib/forest.ts`, now shared with the
+      invite tree, so one cycle guard covers both.
 
 ## Feature gating
 
@@ -160,3 +168,32 @@ groups.
          mapping the group's stored ids, so every section keeps the page's
          rank-then-name order instead of showing people in the order somebody
          happened to add them.
+- [x] 2026-08-19 — **Nesting shipped** (Cameron: *"I want to get a clear tree of
+      groups in the camp"*), superseding decision 4. Built a four-level
+      hierarchy through the UI and read it back: Infrastructure → Kitchen crew /
+      Power → Generators, each section indented with its own count. Rename,
+      move-into, and fold-in all verified in a browser, and the cycle guard was
+      checked from both ends — the parent picker withholds a group's own
+      descendants, and a hand-crafted POST trying to put a grandparent under its
+      grandchild is refused server-side with the tree left untouched.
+
+      Notes for later:
+
+      1. **Rolled-up counts must be distinct, not summed.** The same person can
+         sit in a parent and a child, or in two sibling subgroups; adding
+         per-group counts reports more people than the camp has. `countUnder`
+         unions membership ids over the branch and counts the set. The header
+         shows it only when it differs from the direct count, so a leaf group
+         isn't cluttered with a number that repeats the one beside it.
+      2. **Folding a group in has to carry its children.** `camp_group`'s FK is
+         `ON DELETE SET NULL`, so deleting the folded-away group would silently
+         promote its subgroups to roots — members intact, hierarchy quietly
+         gone. `mergeGroups` re-points them at the survivor first, and then
+         nulls a survivor that ended up pointing at itself.
+      3. **Migration numbering collided with a peer thread.** They held `0078`
+         uncommitted; `scripts/verify-migrations.ts` demands contiguous `idx`,
+         so skipping to `0079` was not an option. Mine was hand-authored as
+         `0078_group_parent.sql` with a snapshot derived from `0077`'s, and the
+         journal + snapshot were written **into the index only** (`git
+         hash-object -w` + `git update-index --cacheinfo`) so their working-copy
+         files were never touched. Their thread renumbers when it lands.

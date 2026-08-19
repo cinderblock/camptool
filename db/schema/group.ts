@@ -22,6 +22,7 @@
  */
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   integer,
   sqliteTable,
   text,
@@ -40,6 +41,17 @@ export const campGroup = sqliteTable(
       .references(() => camp.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description"),
+    // Groups nest: "Kitchen crew" under "Infrastructure". Structural only —
+    // being in a child does NOT make you a member of its parent; a parent's
+    // own list is its own list, and the UI shows rolled-up counts beside
+    // direct ones rather than inventing membership nobody declared.
+    //
+    // SET NULL, not cascade: deleting a parent must never take its children's
+    // members with it. Orphaned children resurface as roots.
+    parentGroupId: text("parent_group_id").references(
+      (): AnySQLiteColumn => campGroup.id,
+      { onDelete: "set null" },
+    ),
     // Mantine palette name (e.g. "grape"), used for the section chip and the
     // map tint. Null = the fallback tint derived from the name.
     color: text("color"),

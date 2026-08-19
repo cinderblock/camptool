@@ -27,6 +27,12 @@ import { syncDiscordLinksForCamp } from "~/lib/discord.server";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState } from "~/lib/features.server";
 import {
+  type TreeNode,
+  buildForest,
+  flattenForest,
+  subtreeOf,
+} from "~/lib/forest";
+import {
   addToGroup,
   createGroup,
   deleteGroup,
@@ -35,13 +41,9 @@ import {
   mergeGroups,
   removeFromGroup,
   renameGroup,
+  setGroupParent,
 } from "~/lib/groups.server";
-import {
-  type InviteNode,
-  buildInviteTree,
-  flattenTree,
-  subtreeIds,
-} from "~/lib/invite-tree";
+import { buildInviteTree, subtreeIds } from "~/lib/invite-tree";
 import type { MergePicks } from "~/lib/merge-plan";
 import {
   type MergeOutcome,
@@ -648,10 +650,25 @@ export async function action({ request }: Route.ActionArgs) {
             name: String(form.get("name") ?? ""),
             description: String(form.get("description") ?? ""),
             color: String(form.get("color") ?? "") || null,
+            parentGroupId: String(form.get("parentGroupId") ?? "") || null,
             createdByMembershipId: myMid,
             memberIds: ids,
           });
           return data({ ok: "Group created." });
+        }
+        case "groupReparent": {
+          if (!isOfficer) {
+            return data(
+              { error: "Only officers can move a group." },
+              { status: 403 },
+            );
+          }
+          await setGroupParent({
+            campId,
+            groupId,
+            parentGroupId: String(form.get("parentGroupId") ?? "") || null,
+          });
+          return data({ ok: "Moved." });
         }
         case "groupRename": {
           if (!isOfficer) {
@@ -742,6 +759,30 @@ type FetcherData = { ok?: string; error?: string };
 
 type LoadedMember = Awaited<ReturnType<typeof loader>>["members"][number];
 
+type LoadedGroup = Awaited<ReturnType<typeof loader>>["groups"][number];
+
+/**
+ * Distinct people in a group and everything nested under it.
+ *
+ * Distinct matters: the same person can be in a parent and a child, or in two
+ * sibling subgroups, and summing per-group counts would report more people than
+ * the camp has. Only members still present in the list are counted, so a group
+ * holding someone who has since left doesn't inflate the branch.
+ */
+function countUnder(
+  node: TreeNode<LoadedGroup>,
+  members: LoadedMember[],
+): { total: number } {
+  const present = new Set(members.map((m) => m.memberId));
+  const seen = new Set<string>();
+  const walk = (n: TreeNode<LoadedGroup>) => {
+    for (const id of n.item.memberIds) if (present.has(id)) seen.add(id);
+    for (const c of n.children) walk(c);
+  };
+  walk(node);
+  return { total: seen.size };
+}
+
 /** How the directory is nested: flat, by social group, or by who invited whom. */
 type GroupBy = "none" | "group" | "inviter";
 
@@ -755,8 +796,15 @@ type MemberRow =
       kind: "section";
       key: string;
       title: string;
+      /** People filed directly in this group. */
       count: number;
       note: string | null;
+      /** Depth in the group hierarchy. */
+      depth: number;
+      /** Distinct people in this group and everything under it. */
+      subCount?: number;
+      /** How many groups sit below this one. */
+      subGroups?: number;
     }
   | {
       kind: "member";
@@ -891,7 +939,15 @@ export default function Members({ loaderData }: Route.ComponentProps) {
     if (groupBy === "group") {
       const rows: MemberRow[] = [];
       const grouped = new Set<string>();
-      for (const g of groups) {
+      // Groups nest, so walk them as a tree: a section's depth is its depth in
+      // the group hierarchy, and its people sit one level below it.
+      const forest = buildForest(groups, {
+        idOf: (g) => g.id,
+        parentOf: (g) => g.parentGroupId,
+        compare: (a, b) => a.name.localeCompare(b.name),
+      });
+      for (const node of flattenForest(forest)) {
+        const g = node.item;
         // Filter the already-sorted member list rather than mapping the group's
         // ids, so every section is in the same rank-then-name order as the flat
         // view instead of in whatever order people were added.
@@ -904,6 +960,14 @@ export default function Members({ loaderData }: Route.ComponentProps) {
           title: g.name,
           count: people.length,
           note: g.description,
+          depth: node.depth,
+          // Nesting is structural, not membership: being in a subgroup does not
+          // put you in its parent. So a parent shows its own count and, only
+          // when it has children, what the whole branch adds up to.
+          subCount: node.descendants
+            ? countUnder(node, members).total
+            : undefined,
+          subGroups: node.descendants,
         });
         // Someone in two groups appears under both — that IS the shape of the
         // camp. The headcount above the table stays the honest total.
@@ -912,7 +976,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
             kind: "member",
             key: `g:${g.id}:${p.memberId}`,
             member: p,
-            depth: 1,
+            depth: node.depth + 1,
           });
         }
       }
@@ -924,6 +988,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
           title: "Not in a group",
           count: rest.length,
           note: null,
+          depth: 0,
         });
         for (const p of rest) {
           rows.push({
@@ -942,13 +1007,11 @@ export default function Members({ loaderData }: Route.ComponentProps) {
         members.map((m) => ({ ...m, membershipId: m.memberId })),
         (a, b) => a.name.localeCompare(b.name),
       );
-      return flattenTree(forest).map(
-        (
-          n: InviteNode<(typeof members)[number] & { membershipId: string }>,
-        ) => ({
+      return flattenForest(forest).map(
+        (n: TreeNode<(typeof members)[number] & { membershipId: string }>) => ({
           kind: "member" as const,
-          key: `t:${n.member.memberId}`,
-          member: n.member,
+          key: `t:${n.item.memberId}`,
+          member: n.item,
           depth: n.depth,
           // Only the tree earns the arrow: there it means "invited by the row
           // above". In a group section it would read the same way and be wrong,
@@ -1123,14 +1186,30 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                       key={row.key}
                       bg="var(--mantine-color-default-hover)"
                     >
-                      <Table.Td colSpan={columnCount}>
+                      <Table.Td
+                        colSpan={columnCount}
+                        style={{ paddingLeft: 12 + row.depth * 22 }}
+                      >
                         <Group gap="xs">
+                          {row.depth > 0 ? (
+                            <Text span c="dimmed" size="xs">
+                              └
+                            </Text>
+                          ) : null}
                           <Text fw={600} size="sm">
                             {row.title}
                           </Text>
                           <Text size="xs" c="dimmed">
                             {row.count} {row.count === 1 ? "person" : "people"}
                           </Text>
+                          {/* Only when it has subgroups, and only when the
+                              branch total differs — otherwise it's noise that
+                              restates the number beside it. */}
+                          {row.subGroups && row.subCount !== row.count ? (
+                            <Text size="xs" c="dimmed">
+                              · {row.subCount} with subgroups
+                            </Text>
+                          ) : null}
                           {row.note ? (
                             <Text size="xs" c="dimmed">
                               · {row.note}
@@ -1694,12 +1773,7 @@ function GroupsBar({
   canManage,
   onManage,
 }: {
-  groups: {
-    id: string;
-    name: string;
-    color: string | null;
-    memberIds: string[];
-  }[];
+  groups: LoadedGroup[];
   groupBy: GroupBy;
   onGroupBy: (v: GroupBy) => void;
   canManage: boolean;
@@ -1740,7 +1814,16 @@ function GroupsBar({
             </Text>
           ) : (
             <Group gap={6}>
-              {groups.map((g) => (
+              {/* Tree order, not alphabetical, and children carry a marker —
+                  the chip row is a summary of the same hierarchy the table
+                  shows, so it shouldn't contradict it. */}
+              {flattenForest(
+                buildForest(groups, {
+                  idOf: (g) => g.id,
+                  parentOf: (g) => g.parentGroupId,
+                  compare: (a, b) => a.name.localeCompare(b.name),
+                }),
+              ).map(({ item: g, depth }) => (
                 // Links to the map with the whole group lit up — the same
                 // highlight the roster's "N on map" link uses, widened from one
                 // household to a set of them.
@@ -1750,7 +1833,12 @@ function GroupsBar({
                   to={`/map?group=${g.id}`}
                   underline="never"
                 >
-                  <Badge variant="light" color={g.color ?? "gray"} size="sm">
+                  <Badge
+                    variant={depth === 0 ? "light" : "outline"}
+                    color={g.color ?? "gray"}
+                    size="sm"
+                  >
+                    {depth > 0 ? "└ " : ""}
                     {g.name} · {g.memberIds.length}
                   </Badge>
                 </Anchor>
@@ -1781,13 +1869,7 @@ function GroupsPanel({
 }: {
   opened: boolean;
   onClose: () => void;
-  groups: {
-    id: string;
-    name: string;
-    description: string | null;
-    color: string | null;
-    memberIds: string[];
-  }[];
+  groups: LoadedGroup[];
   members: { memberId: string; name: string; playaName: string | null }[];
   canManage: boolean;
   myMembershipId: string;
@@ -1795,7 +1877,11 @@ function GroupsPanel({
 }) {
   const [newName, setNewName] = useState("");
   const [newMembers, setNewMembers] = useState<string[]>([]);
+  const [newParent, setNewParent] = useState<string | null>(null);
   const [addTo, setAddTo] = useState<Record<string, string[]>>({});
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [mergeInto, setMergeInto] = useState<Record<string, string | null>>({});
   const busy = fetcher.state !== "idle";
 
   const options = members.map((m) => ({
@@ -1803,6 +1889,19 @@ function GroupsPanel({
     label: m.playaName ? `${m.name} "${m.playaName}"` : m.name,
   }));
   const nameOf = new Map(options.map((o) => [o.value, o.label]));
+
+  // Shown as the tree it is, so "inside what?" is answerable at a glance.
+  const tree = flattenForest(
+    buildForest(groups, {
+      idOf: (g) => g.id,
+      parentOf: (g) => g.parentGroupId,
+      compare: (a, b) => a.name.localeCompare(b.name),
+    }),
+  );
+  const groupOptions = tree.map((n) => ({
+    value: n.item.id,
+    label: `${"— ".repeat(n.depth)}${n.item.name}`,
+  }));
 
   const submit = (fields: Record<string, string | string[]>) => {
     const body = new FormData();
@@ -1845,6 +1944,16 @@ function GroupsPanel({
               value={newMembers}
               onChange={setNewMembers}
             />
+            <Select
+              label="Inside another group"
+              description="Optional — leave empty for a top-level group."
+              placeholder="Top level"
+              clearable
+              searchable
+              data={groupOptions}
+              value={newParent}
+              onChange={setNewParent}
+            />
             <Group justify="flex-end">
               <Button
                 size="xs"
@@ -1855,9 +1964,11 @@ function GroupsPanel({
                     intent: "groupCreate",
                     name: newName,
                     membershipId: newMembers,
+                    parentGroupId: newParent ?? "",
                   });
                   setNewName("");
                   setNewMembers([]);
+                  setNewParent(null);
                 }}
               >
                 Create group
@@ -1866,12 +1977,32 @@ function GroupsPanel({
           </Stack>
         </Card>
 
-        {groups.map((g) => (
-          <Card key={g.id} withBorder padding="sm" radius="sm">
+        {tree.map(({ item: g, depth }) => (
+          <Card key={g.id} withBorder padding="sm" radius="sm" ml={depth * 20}>
             <Stack gap="xs">
               <Group justify="space-between">
-                <Text fw={600}>{g.name}</Text>
+                <Group gap={6}>
+                  {depth > 0 ? (
+                    <Text span c="dimmed" size="xs">
+                      └
+                    </Text>
+                  ) : null}
+                  <Text fw={600}>{g.name}</Text>
+                </Group>
                 <Group gap={4}>
+                  {canManage ? (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="gray"
+                      onClick={() => {
+                        setEditing(editing === g.id ? null : g.id);
+                        setEditName(g.name);
+                      }}
+                    >
+                      {editing === g.id ? "Close" : "Edit"}
+                    </Button>
+                  ) : null}
                   {g.memberIds.includes(myMembershipId) ? (
                     <Button
                       size="compact-xs"
@@ -1916,6 +2047,99 @@ function GroupsPanel({
                   ) : null}
                 </Group>
               </Group>
+
+              {canManage && editing === g.id ? (
+                <Card
+                  withBorder
+                  padding="xs"
+                  radius="sm"
+                  bg="var(--mantine-color-default-hover)"
+                >
+                  <Stack gap="xs">
+                    <Group align="flex-end" gap="xs">
+                      <TextInput
+                        size="xs"
+                        label="Name"
+                        style={{ flex: 1 }}
+                        value={editName}
+                        onChange={(e) => setEditName(e.currentTarget.value)}
+                      />
+                      <Button
+                        size="xs"
+                        disabled={!editName.trim() || editName === g.name}
+                        loading={busy}
+                        onClick={() =>
+                          submit({
+                            intent: "groupRename",
+                            groupId: g.id,
+                            name: editName,
+                            description: g.description ?? "",
+                            color: g.color ?? "",
+                          })
+                        }
+                      >
+                        Rename
+                      </Button>
+                    </Group>
+                    <Select
+                      size="xs"
+                      label="Inside"
+                      placeholder="Top level"
+                      clearable
+                      searchable
+                      // A group can't go inside itself or anything below it;
+                      // the server refuses too, this just doesn't offer it.
+                      data={groupOptions.filter(
+                        (o) =>
+                          !subtreeOf(groups, g.id, {
+                            idOf: (x) => x.id,
+                            parentOf: (x) => x.parentGroupId,
+                          }).includes(o.value),
+                      )}
+                      value={g.parentGroupId}
+                      onChange={(v) =>
+                        submit({
+                          intent: "groupReparent",
+                          groupId: g.id,
+                          parentGroupId: v ?? "",
+                        })
+                      }
+                    />
+                    <Group align="flex-end" gap="xs">
+                      <Select
+                        size="xs"
+                        label="Fold another group into this one"
+                        description="Its people and subgroups move here, then it's gone."
+                        placeholder="Pick a group"
+                        clearable
+                        searchable
+                        style={{ flex: 1 }}
+                        data={groupOptions.filter((o) => o.value !== g.id)}
+                        value={mergeInto[g.id] ?? null}
+                        onChange={(v) =>
+                          setMergeInto({ ...mergeInto, [g.id]: v })
+                        }
+                      />
+                      <Button
+                        size="xs"
+                        color="orange"
+                        disabled={!mergeInto[g.id]}
+                        loading={busy}
+                        onClick={() => {
+                          submit({
+                            intent: "groupMerge",
+                            groupId: g.id,
+                            staleGroupId: mergeInto[g.id] ?? "",
+                          });
+                          setMergeInto({ ...mergeInto, [g.id]: null });
+                        }}
+                      >
+                        Fold in
+                      </Button>
+                    </Group>
+                  </Stack>
+                </Card>
+              ) : null}
 
               {g.memberIds.length === 0 ? (
                 <Text size="xs" c="dimmed">

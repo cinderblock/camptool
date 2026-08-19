@@ -44,6 +44,7 @@ import { eventStartIso } from "~/lib/brc";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState, requireFeature } from "~/lib/features.server";
+import { buildForest, flattenForest } from "~/lib/forest";
 import { listGroups } from "~/lib/groups.server";
 import {
   getOrCreatePromotionInvite,
@@ -1206,7 +1207,10 @@ function RosterTableInner({
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
   /** Group heading to emit before a given membership's row. Null = flat. */
-  sectionBefore: Map<string, { title: string; count: number }> | null;
+  sectionBefore: Map<
+    string,
+    { title: string; count: number; depth: number }
+  > | null;
   /** Every group each member belongs to, so nothing is hidden by the nesting. */
   chipsFor: Map<string, string[]>;
   myMembershipId: string | null;
@@ -1256,8 +1260,16 @@ function RosterTableInner({
               <Fragment key={m.membershipId}>
                 {head ? (
                   <Table.Tr bg="var(--mantine-color-default-hover)">
-                    <Table.Td colSpan={mapVisible ? 6 : 5}>
+                    <Table.Td
+                      colSpan={mapVisible ? 6 : 5}
+                      style={{ paddingLeft: 12 + head.depth * 22 }}
+                    >
                       <Group gap="xs">
+                        {head.depth > 0 ? (
+                          <Text span c="dimmed" size="xs">
+                            └
+                          </Text>
+                        ) : null}
                         <Text fw={600} size="sm">
                           {head.title}
                         </Text>
@@ -1533,18 +1545,37 @@ function RosterTable({
       return { ordered: shown, sectionBefore: null, chipsFor: chips };
     }
 
+    // Groups nest, so walk the hierarchy: sections come out in tree order and
+    // carry their depth, and a person's "home" is the first group they appear
+    // in on that walk rather than the first alphabetically.
+    const ordered_groups = flattenForest(
+      buildForest(groups, {
+        idOf: (g) => g.id,
+        parentOf: (g) => g.parentGroupId,
+        compare: (a, b) => a.name.localeCompare(b.name),
+      }),
+    );
+
     const homeOf = new Map<string, string>();
-    for (const g of groups) {
+    for (const { item: g } of ordered_groups) {
       for (const id of g.memberIds) if (!homeOf.has(id)) homeOf.set(id, g.id);
     }
     const rows: typeof shown = [];
-    const heads = new Map<string, { title: string; count: number }>();
-    for (const g of groups) {
+    const heads = new Map<
+      string,
+      { title: string; count: number; depth: number }
+    >();
+    for (const { item: g, depth } of ordered_groups) {
       const mine = shown.filter((m) => homeOf.get(m.membershipId) === g.id);
       if (mine.length === 0) continue;
       const [first] = mine;
-      if (first)
-        heads.set(first.membershipId, { title: g.name, count: mine.length });
+      if (first) {
+        heads.set(first.membershipId, {
+          title: g.name,
+          count: mine.length,
+          depth,
+        });
+      }
       rows.push(...mine);
     }
     const rest = shown.filter((m) => !homeOf.has(m.membershipId));
@@ -1554,6 +1585,7 @@ function RosterTable({
         heads.set(first.membershipId, {
           title: "Not in a group",
           count: rest.length,
+          depth: 0,
         });
       }
       rows.push(...rest);

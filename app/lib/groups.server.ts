@@ -12,13 +12,21 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import { campGroup, campGroupMember, membership, user } from "../../db/schema";
+import { wouldCycle } from "./forest";
 
 export type GroupSummary = {
   id: string;
   name: string;
   description: string | null;
   color: string | null;
+  parentGroupId: string | null;
   memberIds: string[];
+};
+
+/** Read a group tree with `buildForest`/`wouldCycle` without restating this. */
+export const GROUP_TREE = {
+  idOf: (g: { id: string }) => g.id,
+  parentOf: (g: { parentGroupId: string | null }) => g.parentGroupId,
 };
 
 /** Every group in the camp with its roster of membership ids. */
@@ -50,8 +58,44 @@ export async function listGroups(campId: string): Promise<GroupSummary[]> {
     name: g.name,
     description: g.description,
     color: g.color,
+    parentGroupId: g.parentGroupId,
     memberIds: byGroup.get(g.id) ?? [],
   }));
+}
+
+/**
+ * Re-parent a group, or make it a root with `parentGroupId: null`.
+ *
+ * Refuses to build a loop. `wouldCycle` is the door; `buildForest`'s own guard
+ * is the safety net for loops that already exist in the data — both are needed,
+ * because a row can become its own ancestor without ever going through here.
+ */
+export async function setGroupParent(opts: {
+  campId: string;
+  groupId: string;
+  parentGroupId: string | null;
+}): Promise<void> {
+  const groups = await db
+    .select({ id: campGroup.id, parentGroupId: campGroup.parentGroupId })
+    .from(campGroup)
+    .where(eq(campGroup.campId, opts.campId));
+  if (!groups.some((g) => g.id === opts.groupId)) {
+    throw new Error("Group not found.");
+  }
+  if (opts.parentGroupId && !groups.some((g) => g.id === opts.parentGroupId)) {
+    throw new Error("That parent group is not in this camp.");
+  }
+  if (wouldCycle(groups, opts.groupId, opts.parentGroupId, GROUP_TREE)) {
+    throw new Error(
+      "That would put a group inside itself. Pick a group that isn't already below this one.",
+    );
+  }
+  await db
+    .update(campGroup)
+    .set({ parentGroupId: opts.parentGroupId })
+    .where(
+      and(eq(campGroup.id, opts.groupId), eq(campGroup.campId, opts.campId)),
+    );
 }
 
 /** The invite-tree edges for a camp, in the shape `buildInviteTree` wants. */
@@ -82,6 +126,7 @@ export async function createGroup(opts: {
   description?: string | null;
   color?: string | null;
   createdByMembershipId: string;
+  parentGroupId?: string | null;
   /** Seed the group with these memberships (ignored if not in the camp). */
   memberIds?: string[];
 }): Promise<string> {
@@ -94,6 +139,9 @@ export async function createGroup(opts: {
       name,
       description: opts.description?.trim() || null,
       color: opts.color || null,
+      // A brand-new group can't be its own ancestor, so no cycle check is
+      // needed here — only `setGroupParent` can create that risk.
+      parentGroupId: opts.parentGroupId || null,
       createdByMembershipId: opts.createdByMembershipId,
     });
   } catch (e) {
@@ -238,5 +286,33 @@ export async function mergeGroups(opts: {
     membershipIds: members.map((m) => m.membershipId),
     addedByMembershipId: null,
   });
+
+  // Anything nested under the group being folded away moves under the survivor.
+  // Without this the FK's SET NULL would quietly promote those subgroups to
+  // roots — the members would survive but the shape of the tree would not.
+  // Guarded so folding a parent INTO its own child can't make the child its own
+  // parent.
+  await db
+    .update(campGroup)
+    .set({
+      parentGroupId: opts.survivorId,
+    })
+    .where(
+      and(
+        eq(campGroup.campId, opts.campId),
+        eq(campGroup.parentGroupId, opts.staleId),
+      ),
+    );
+  await db
+    .update(campGroup)
+    .set({ parentGroupId: null })
+    .where(
+      and(
+        eq(campGroup.campId, opts.campId),
+        eq(campGroup.id, opts.survivorId),
+        eq(campGroup.parentGroupId, opts.survivorId),
+      ),
+    );
+
   await deleteGroup(opts.campId, opts.staleId);
 }

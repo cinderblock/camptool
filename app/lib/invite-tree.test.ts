@@ -12,7 +12,7 @@ const m = (id: string, by: string | null, name = id): M => ({
   name,
 });
 const byName = (a: M, b: M) => a.name.localeCompare(b.name);
-const ids = (list: { member: M }[]) => list.map((n) => n.member.membershipId);
+const ids = (list: { item: M }[]) => list.map((n) => n.item.membershipId);
 
 describe("buildInviteTree", () => {
   test("nests invitees under whoever invited them", () => {
@@ -57,7 +57,7 @@ describe("buildInviteTree", () => {
   test("a cycle does not hang, and nobody is dropped", () => {
     const forest = buildInviteTree([m("a", "b"), m("b", "a"), m("c", null)]);
     const all = flattenTree(forest)
-      .map((n) => n.member.membershipId)
+      .map((n) => n.item.membershipId)
       .sort();
     expect(all).toEqual(["a", "b", "c"]);
   });
@@ -71,7 +71,7 @@ describe("buildInviteTree", () => {
     const members = [m("a", null), m("b", "a"), m("c", "a"), m("d", "c")];
     const flat = flattenTree(buildInviteTree(members, byName));
     expect(flat).toHaveLength(members.length);
-    expect(new Set(flat.map((n) => n.member.membershipId)).size).toBe(4);
+    expect(new Set(flat.map((n) => n.item.membershipId)).size).toBe(4);
   });
 });
 
