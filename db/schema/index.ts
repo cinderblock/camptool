@@ -10,6 +10,7 @@ export * from "./feature";
 export * from "./finance";
 export * from "./fuel";
 export * from "./flag";
+export * from "./identity";
 export * from "./image";
 export * from "./instance";
 export * from "./inventory";

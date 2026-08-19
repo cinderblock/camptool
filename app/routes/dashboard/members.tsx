@@ -7,6 +7,7 @@ import {
   CopyButton,
   Group,
   Modal,
+  Radio,
   Select,
   Stack,
   Table,
@@ -23,10 +24,11 @@ import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState } from "~/lib/features.server";
+import type { MergePicks } from "~/lib/merge-plan";
 import {
-  type MergePreview,
-  mergeMemberships,
-  previewMembershipMerge,
+  type MergeOutcome,
+  mergeMembers,
+  planMemberMerge,
 } from "~/lib/merge.server";
 import { issuePasswordReset } from "~/lib/password-reset.server";
 import {
@@ -226,6 +228,75 @@ export async function loader({ request }: Route.LoaderArgs) {
     // "N of M enrolled", the cheap-to-delete adoption summary.
     passkeyEnrolled: canManage ? withPasskey.size : 0,
   });
+}
+
+/** Conflict answers come back as `pick.<field>`, holding the chosen value. */
+function readMergePicks(form: FormData): MergePicks {
+  const picks: MergePicks = {};
+  for (const field of ["playaName", "userName"] as const) {
+    const v = form.get(`pick.${field}`);
+    if (typeof v === "string" && v) picks[field] = v;
+  }
+  return picks;
+}
+
+/**
+ * Who may merge two members.
+ *
+ * Stricter than the old rule, and deliberately so. A merge now folds the two
+ * accounts' credentials together, so "merge my record with an admin's" would
+ * hand the actor an admin membership their own passkey opens. The actor must
+ * therefore strictly outrank BOTH records and be neither of them — see
+ * `plans/merge-symmetric.md`. A consequence worth knowing: two `admin`
+ * duplicates can't be merged from here, because nobody outranks admin.
+ *
+ * Returns a response to send back, or null when the merge may proceed.
+ */
+async function assertCanMerge(
+  campId: string,
+  actorRole: string,
+  actorUserId: string,
+  idA: string,
+  idB: string,
+) {
+  if (idA === idB) {
+    return data(
+      { error: "Pick two different members to merge." },
+      { status: 400 },
+    );
+  }
+  const rows = await db
+    .select({
+      id: membership.id,
+      role: membership.role,
+      userId: membership.userId,
+    })
+    .from(membership)
+    .where(
+      and(
+        eq(membership.organizationId, campId),
+        inArray(membership.id, [idA, idB]),
+      ),
+    );
+  if (rows.length !== 2) {
+    return data({ error: "Member not found." }, { status: 404 });
+  }
+  if (rows.some((r) => r.userId === actorUserId)) {
+    return data(
+      {
+        error:
+          "You can't merge your own account. Ask another officer who outranks both records.",
+      },
+      { status: 400 },
+    );
+  }
+  if (rows.some((r) => rankOf(actorRole) <= rankOf(r.role))) {
+    return data(
+      { error: "You can only merge members ranked below you." },
+      { status: 403 },
+    );
+  }
+  return null;
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -438,44 +509,23 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "mergeMembers") {
-    const survivorId = String(form.get("survivorId"));
-    const staleId = String(form.get("staleId"));
+    const idA = String(form.get("idA"));
+    const idB = String(form.get("idB"));
+    const picks = readMergePicks(form);
 
-    const rows = await db
-      .select({
-        id: membership.id,
-        role: membership.role,
-        userId: membership.userId,
-      })
-      .from(membership)
-      .where(eq(membership.organizationId, campId));
-    const survivor = rows.find((r) => r.id === survivorId);
-    const stale = rows.find((r) => r.id === staleId);
-    if (!survivor || !stale) {
-      return data({ error: "Member not found." }, { status: 404 });
-    }
-    // Merging deletes the duplicate, so it needs the same authority as removal:
-    // you must strictly outrank the record being absorbed.
-    if (rankOf(actorRole) <= rankOf(stale.role)) {
-      return data(
-        { error: "You can only merge members ranked below you." },
-        { status: 403 },
-      );
-    }
-    if (stale.userId === actor.id) {
-      return data(
-        { error: "You can't merge your own account away." },
-        { status: 400 },
-      );
-    }
+    const guard = await assertCanMerge(campId, actorRole, actor.id, idA, idB);
+    if (guard) return guard;
 
     try {
-      const result = await mergeMemberships(campId, survivorId, staleId);
+      const result = await mergeMembers(campId, idA, idB, picks);
+      const moved =
+        result.total === 0
+          ? "The duplicate had nothing attached"
+          : `Moved ${result.total} record${result.total === 1 ? "" : "s"}`;
       return data({
-        ok:
-          result.total === 0
-            ? "Merged. The duplicate had no data attached."
-            : `Merged — moved ${result.total} record${result.total === 1 ? "" : "s"} onto the surviving member.`,
+        ok: `Merged into one member. ${moved}; they can sign in with ${
+          result.plan.signInMethods.join(", ") || "no stored credential"
+        }.`,
       });
     } catch (e) {
       console.error("mergeMembers failed", e);
@@ -520,10 +570,17 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "previewMerge") {
-    const survivorId = String(form.get("survivorId"));
-    const staleId = String(form.get("staleId"));
+    const idA = String(form.get("idA"));
+    const idB = String(form.get("idB"));
+    const guard = await assertCanMerge(campId, actorRole, actor.id, idA, idB);
+    if (guard) return guard;
     try {
-      const preview = await previewMembershipMerge(campId, survivorId, staleId);
+      const preview = await planMemberMerge(
+        campId,
+        idA,
+        idB,
+        readMergePicks(form),
+      );
       return data({ preview });
     } catch (e) {
       return data(
@@ -566,7 +623,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
   const [flagBody, setFlagBody] = useState("");
   const mergeFetcher = useFetcher<FetcherData>();
   const previewFetcher = useFetcher<{
-    preview?: MergePreview;
+    preview?: MergeOutcome;
     error?: string;
   }>();
   const [mergeTarget, setMergeTarget] = useState<{
@@ -574,6 +631,10 @@ export default function Members({ loaderData }: Route.ComponentProps) {
     name: string;
   } | null>(null);
   const [mergeInto, setMergeInto] = useState<string | null>(null);
+  // Conflict answers, keyed by field and holding the chosen VALUE — not a side.
+  // Which record a value came from is exactly what the officer can't reason
+  // about, so it never appears in this state.
+  const [mergePicks, setMergePicks] = useState<MergePicks>({});
   const mergePreview = previewFetcher.data?.preview ?? null;
 
   // The issued link comes back in the response body rather than being stored:
@@ -586,28 +647,44 @@ export default function Members({ loaderData }: Route.ComponentProps) {
   const resetLink = resetFetcher.data?.resetLink ?? null;
   const [dismissedLink, setDismissedLink] = useState<string | null>(null);
 
-  // Show what a merge would actually move before anyone commits to it — the
-  // operation deletes a record, so "6 records will move" beats a blind confirm.
-  // Driven from the Select's onChange rather than an effect: the survivor
-  // choice is the only thing it depends on, so there's nothing to synchronise.
-  const pickSurvivor = (survivorId: string | null) => {
-    setMergeInto(survivorId);
-    if (!mergeTarget || !survivorId) return;
+  // Show the person the two records become — what moves, which email stays
+  // primary, what will still sign them in — before anyone commits. The server
+  // resolves this, so the modal can't drift from what the merge will do.
+  const requestPreview = (otherId: string | null, picks: MergePicks) => {
+    if (!mergeTarget || !otherId) return;
     previewFetcher.submit(
       {
         intent: "previewMerge",
-        survivorId,
-        staleId: mergeTarget.memberId,
+        idA: mergeTarget.memberId,
+        idB: otherId,
+        ...Object.fromEntries(
+          Object.entries(picks).map(([k, v]) => [`pick.${k}`, v]),
+        ),
       },
       { method: "post" },
     );
   };
 
-  useFetcherNotifications(roleFetcher.data, roleFetcher.state);
-  useFetcherNotifications(mergeFetcher.data, mergeFetcher.state, () => {
+  const pickOther = (otherId: string | null) => {
+    setMergeInto(otherId);
+    setMergePicks({});
+    requestPreview(otherId, {});
+  };
+
+  const answerConflict = (field: keyof MergePicks, value: string) => {
+    const next = { ...mergePicks, [field]: value };
+    setMergePicks(next);
+    requestPreview(mergeInto, next);
+  };
+
+  const closeMerge = () => {
     setMergeTarget(null);
     setMergeInto(null);
-  });
+    setMergePicks({});
+  };
+
+  useFetcherNotifications(roleFetcher.data, roleFetcher.state);
+  useFetcherNotifications(mergeFetcher.data, mergeFetcher.state, closeMerge);
   useFetcherNotifications(addFetcher.data, addFetcher.state, () =>
     addFormRef.current?.reset(),
   );
@@ -1060,25 +1137,26 @@ export default function Members({ loaderData }: Route.ComponentProps) {
 
         <Modal
           opened={mergeTarget !== null}
-          onClose={() => {
-            setMergeTarget(null);
-            setMergeInto(null);
-          }}
-          title={`Merge ${mergeTarget?.name ?? "member"} into another member`}
+          onClose={closeMerge}
+          title={`Merge ${mergeTarget?.name ?? "member"} with their duplicate`}
           centered
         >
           <Stack gap="md">
             <Text size="sm">
-              Use this when the same person signed up twice. Everything attached
-              to <strong>{mergeTarget?.name}</strong> — declared gear, map
-              placements, tickets, passes, RSVP, answers, and any guests they're
-              bringing — moves onto the member you pick, and this duplicate
-              record is then deleted.
+              Use this when the same person signed up twice. The two records
+              become one: gear, map placements, tickets, passes, RSVP, answers
+              and guests all end up on the same member, and both accounts'
+              sign-ins keep working.
+            </Text>
+            <Text size="sm" c="dimmed">
+              It doesn't matter which one you call the duplicate — merging{" "}
+              <strong>{mergeTarget?.name}</strong> with someone gives the same
+              result as merging them the other way round.
             </Text>
             <Select
-              label="Keep this member"
-              description="The account they can actually log into. This record survives."
-              placeholder="Pick the surviving member"
+              label="Their other record"
+              description="The second sign-up for this same person."
+              placeholder="Pick the duplicate"
               searchable
               data={members
                 .filter((m) => m.memberId !== mergeTarget?.memberId)
@@ -1087,35 +1165,97 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                   label: m.playaName ? `${m.name} "${m.playaName}"` : m.name,
                 }))}
               value={mergeInto}
-              onChange={pickSurvivor}
+              onChange={pickOther}
             />
-            {mergePreview ? (
-              <Card withBorder padding="sm" radius="sm">
-                <Text size="sm" fw={500} mb={4}>
-                  {mergePreview.total === 0
-                    ? "This duplicate has no data attached."
-                    : `${mergePreview.total} record${mergePreview.total === 1 ? "" : "s"} will move:`}
-                </Text>
-                {mergePreview.moves.map((mv) => (
-                  <Text size="xs" c="dimmed" key={`${mv.table}.${mv.column}`}>
-                    {mv.rows} × {mv.table.replace(/_/g, " ")}
-                  </Text>
-                ))}
-              </Card>
+
+            {previewFetcher.data?.error ? (
+              <Text size="sm" c="red">
+                {previewFetcher.data.error}
+              </Text>
             ) : null}
+
+            {mergePreview ? (
+              <>
+                {mergePreview.plan.conflicts.map((c) => (
+                  <Radio.Group
+                    key={c.field}
+                    label={`Which ${c.label.toLowerCase()} is right?`}
+                    description="The two records disagree, so this one needs you."
+                    value={
+                      mergePicks[c.field] ??
+                      (c.field === "playaName"
+                        ? (mergePreview.plan.membership.playaName ??
+                          c.options[0])
+                        : mergePreview.plan.user.name)
+                    }
+                    onChange={(v) => answerConflict(c.field, v)}
+                  >
+                    <Stack gap={4} mt={4}>
+                      {c.options.map((o) => (
+                        <Radio key={o} value={o} label={o} />
+                      ))}
+                    </Stack>
+                  </Radio.Group>
+                ))}
+
+                <Card withBorder padding="sm" radius="sm">
+                  <Text size="sm" fw={500} mb={6}>
+                    They become one member:
+                  </Text>
+                  <Text size="xs">
+                    <strong>{mergePreview.plan.user.name}</strong>
+                    {mergePreview.plan.membership.playaName
+                      ? ` "${mergePreview.plan.membership.playaName}"`
+                      : ""}{" "}
+                    · {mergePreview.plan.membership.role}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    Member since{" "}
+                    {new Date(mergePreview.plan.membership.joinedAt)
+                      .toISOString()
+                      .slice(0, 10)}
+                  </Text>
+                  <Text size="xs" mt={6}>
+                    Email: {mergePreview.plan.user.email}
+                  </Text>
+                  {mergePreview.plan.aliasEmail ? (
+                    <Text size="xs" c="dimmed">
+                      {mergePreview.plan.aliasEmail} is kept on file as a former
+                      address — it will no longer sign them in.
+                    </Text>
+                  ) : null}
+                  <Text size="xs" mt={6}>
+                    They can still sign in with:{" "}
+                    {mergePreview.plan.signInMethods.join(", ") ||
+                      "nothing — they will need a recovery link"}
+                  </Text>
+                  {mergePreview.plan.droppedPassword ? (
+                    <Text size="xs" c="orange">
+                      Both accounts have a password; only one is kept. If the
+                      wrong one survives, issue a recovery link.
+                    </Text>
+                  ) : null}
+                  <Text size="xs" fw={500} mt={8}>
+                    {mergePreview.total === 0
+                      ? "Nothing else is attached to either record."
+                      : `${mergePreview.total} record${mergePreview.total === 1 ? "" : "s"} will be brought together:`}
+                  </Text>
+                  {mergePreview.moves.map((mv) => (
+                    <Text size="xs" c="dimmed" key={`${mv.table}.${mv.column}`}>
+                      {mv.rows} × {mv.table.replace(/_/g, " ")}
+                    </Text>
+                  ))}
+                </Card>
+              </>
+            ) : null}
+
             <Text size="xs" c="dimmed">
               This can't be undone. Where both records hold the same thing (both
-              answered a question, both signed up for a shift), the surviving
-              member's version is kept.
+              answered a question, both signed up for a shift), one copy is
+              kept. Everyone is signed out and will need to sign in again once.
             </Text>
             <Group justify="flex-end">
-              <Button
-                variant="default"
-                onClick={() => {
-                  setMergeTarget(null);
-                  setMergeInto(null);
-                }}
-              >
+              <Button variant="default" onClick={closeMerge}>
                 Cancel
               </Button>
               <Button
@@ -1127,14 +1267,20 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                     mergeFetcher.submit(
                       {
                         intent: "mergeMembers",
-                        survivorId: mergeInto,
-                        staleId: mergeTarget.memberId,
+                        idA: mergeTarget.memberId,
+                        idB: mergeInto,
+                        ...Object.fromEntries(
+                          Object.entries(mergePicks).map(([k, v]) => [
+                            `pick.${k}`,
+                            v,
+                          ]),
+                        ),
                       },
                       { method: "post" },
                     );
                 }}
               >
-                Merge and delete duplicate
+                Merge into one member
               </Button>
             </Group>
           </Stack>

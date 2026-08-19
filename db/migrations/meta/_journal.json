@@ -533,6 +533,13 @@
       "when": 1787093994647,
       "tag": "0075_fancy_talos",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1787171444815,
+      "tag": "0076_handy_speedball",
+      "breakpoints": true
     }
   ]
 }

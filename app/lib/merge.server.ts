@@ -31,7 +31,20 @@
  */
 import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { db, sqlite } from "../../db/client.server";
-import { attendee, membership, prospect } from "../../db/schema";
+import {
+  account,
+  attendee,
+  membership,
+  passkey,
+  prospect,
+  user,
+} from "../../db/schema";
+import {
+  type MergePicks,
+  type MergePlan,
+  type MergeSide,
+  planMerge,
+} from "./merge-plan";
 import { statusProgress } from "./prospects";
 
 type Ref = { table: string; column: string };
@@ -139,69 +152,120 @@ export function mergeAttendeeRows(
   sqlite.run("DELETE FROM attendee WHERE id = ?", [staleAttendeeId]);
 }
 
-/** What a membership merge would move. Read-only. */
-export async function previewMembershipMerge(
+/** Everything a merge decision needs about one member, in one round trip. */
+async function loadMergeSide(
   campId: string,
-  survivorId: string,
-  staleId: string,
-): Promise<MergePreview> {
-  await assertMergeable(campId, survivorId, staleId);
-  const moves = countRefs("membership", staleId);
-  return { moves, total: moves.reduce((n, m) => n + m.rows, 0) };
-}
-
-async function assertMergeable(
-  campId: string,
-  survivorId: string,
-  staleId: string,
-) {
-  if (survivorId === staleId) {
-    throw new Error("Pick two different members to merge.");
-  }
-  // Scoped to the camp so an id from another camp can never be reached.
-  const rows = await db
-    .select({ id: membership.id })
+  membershipId: string,
+): Promise<MergeSide> {
+  const [row] = await db
+    .select({ m: membership, u: user })
     .from(membership)
+    .innerJoin(user, eq(membership.userId, user.id))
     .where(
       and(
+        eq(membership.id, membershipId),
         eq(membership.organizationId, campId),
-        inArray(membership.id, [survivorId, staleId]),
       ),
-    );
-  const ids = new Set(rows.map((r) => r.id));
-  if (!ids.has(survivorId)) {
-    throw new Error("The surviving member is not in this camp.");
-  }
-  if (!ids.has(staleId)) {
-    throw new Error("The duplicate member is not in this camp.");
-  }
+    )
+    .limit(1);
+  // Scoped to the camp, so an id belonging to another camp reads as missing
+  // rather than as something this camp's officers may act on.
+  if (!row) throw new Error("That member is not in this camp.");
+
+  const accounts = await db
+    .select({ providerId: account.providerId })
+    .from(account)
+    .where(eq(account.userId, row.u.id));
+  const passkeys = await db
+    .select({ id: passkey.id })
+    .from(passkey)
+    .where(eq(passkey.userId, row.u.id));
+
+  return {
+    membershipId: row.m.id,
+    userId: row.u.id,
+    role: row.m.role,
+    status: row.m.status,
+    playaName: row.m.playaName,
+    invitedByMembershipId: row.m.invitedByMembershipId,
+    viaInviteId: row.m.viaInviteId,
+    wizardStep: row.m.wizardStep,
+    wizardCompletedAt: row.m.wizardCompletedAt?.getTime() ?? null,
+    joinedAt: row.m.joinedAt.getTime(),
+    createdAt: row.m.createdAt.getTime(),
+    userName: row.u.name,
+    userEmail: row.u.email,
+    userImage: row.u.image,
+    userEmailVerified: row.u.emailVerified,
+    userCreatedAt: row.u.createdAt.getTime(),
+    hasPassword: accounts.some((a) => a.providerId === "credential"),
+    passkeyCount: passkeys.length,
+    socialProviders: accounts
+      .map((a) => a.providerId)
+      .filter((p) => p !== "credential"),
+  };
+}
+
+export type MergeOutcome = MergePreview & { plan: MergePlan };
+
+/**
+ * What merging these two would produce. Read-only, and — like the merge itself
+ * — independent of which one was passed first.
+ */
+export async function planMemberMerge(
+  campId: string,
+  idA: string,
+  idB: string,
+  picks: MergePicks = {},
+): Promise<MergeOutcome> {
+  if (idA === idB) throw new Error("Pick two different members to merge.");
+  const [a, b] = await Promise.all([
+    loadMergeSide(campId, idA),
+    loadMergeSide(campId, idB),
+  ]);
+  const plan = planMerge(a, b, picks);
+
+  // Both halves of the person are being absorbed: the membership row and, when
+  // the two accounts differ, the account behind it.
+  //
+  // Sessions are excluded because they are *deleted*, not moved — counting them
+  // as "records that will be brought together" reads as a promise to keep them,
+  // which is the opposite of what happens (see `foldUser`).
+  const moves = [
+    ...countRefs("membership", plan.staleId),
+    ...(plan.sameUser
+      ? []
+      : countRefs("user", plan.staleUserId, [
+          { table: "session", column: "user_id" },
+        ])),
+  ];
+  return { plan, moves, total: moves.reduce((n, m) => n + m.rows, 0) };
 }
 
 /**
- * Merge `staleId` into `survivorId`. Atomic: either the whole merge lands or
+ * Merge two duplicate members into one. Atomic: either the whole thing lands or
  * nothing does.
  *
- * The survivor keeps its own role and identity; only blank fields are filled in
- * from the duplicate, so merging never silently downgrades or renames anyone.
+ * **Order-independent.** `mergeMembers(camp, a, b)` and `mergeMembers(camp, b,
+ * a)` produce the same camp, the same person and the same working logins — see
+ * `merge-plan.ts` for how each field is settled, and `plans/merge-symmetric.md`
+ * for why that matters (an officer cannot know which duplicate is "the real
+ * one", and the old UI made them guess).
+ *
+ * Both accounts' credentials end up on the surviving user, so whichever passkey
+ * / password / Discord login the person actually holds keeps working. Sessions
+ * are dropped on both sides: a merge is an identity event, and they sign in
+ * once more with whatever they have.
  */
-export async function mergeMemberships(
+export async function mergeMembers(
   campId: string,
-  survivorId: string,
-  staleId: string,
-): Promise<MergePreview> {
-  const preview = await previewMembershipMerge(campId, survivorId, staleId);
-
-  const [survivor] = await db
-    .select()
-    .from(membership)
-    .where(eq(membership.id, survivorId))
-    .limit(1);
-  const [stale] = await db
-    .select()
-    .from(membership)
-    .where(eq(membership.id, staleId))
-    .limit(1);
-  if (!survivor || !stale) throw new Error("Member not found.");
+  idA: string,
+  idB: string,
+  picks: MergePicks = {},
+): Promise<MergeOutcome> {
+  const outcome = await planMemberMerge(campId, idA, idB, picks);
+  const { plan } = outcome;
+  const { survivorId, staleId } = plan;
 
   // Both attendee rows for the same year must become one body, or the roster
   // would still double-count after the merge.
@@ -235,21 +299,106 @@ export async function mergeMemberships(
 
     repoint("membership", survivorId, staleId, ATTENDEE_MEMBERSHIP_COLS);
 
-    // Fill only what the survivor is missing; never overwrite live values.
-    if (!survivor.playaName && stale.playaName) {
-      sqlite.run("UPDATE membership SET playa_name = ? WHERE id = ?", [
-        stale.playaName,
+    // The resolved person, written as one row.
+    const m = plan.membership;
+    sqlite.run(
+      `UPDATE membership SET role = ?, status = ?, playa_name = ?,
+         invited_by_membership_id = ?, via_invite_id = ?, wizard_step = ?,
+         wizard_completed_at = ?, joined_at = ?, created_at = ?
+       WHERE id = ?`,
+      [
+        m.role,
+        m.status,
+        m.playaName,
+        m.invitedByMembershipId,
+        m.viaInviteId,
+        m.wizardStep,
+        m.wizardCompletedAt,
+        m.joinedAt,
+        m.createdAt,
         survivorId,
-      ]);
-    }
+      ],
+    );
+
+    // A membership can't point at itself as its own inviter, which the fill
+    // rule above can produce when one duplicate invited the other.
+    sqlite.run(
+      "UPDATE membership SET invited_by_membership_id = NULL WHERE id = ? AND invited_by_membership_id = ?",
+      [survivorId, survivorId],
+    );
 
     // Anything that couldn't move was a true duplicate of a row the survivor
     // already had; the ON DELETE rules clear it as the stale record goes.
     sqlite.run("DELETE FROM membership WHERE id = ?", [staleId]);
+
+    if (!plan.sameUser) foldUser(plan);
   });
   run();
 
-  return preview;
+  return outcome;
+}
+
+/**
+ * Fold the duplicate's account into the survivor's, inside the merge's
+ * transaction.
+ *
+ * Deliberately NOT scoped to the merging camp: the two accounts are one human,
+ * so memberships they hold in *other* camps move too. Half-moving a person
+ * between camps would be worse than not moving them — and if that leaves some
+ * other camp holding two memberships for one account, that camp has an ordinary
+ * duplicate to merge, which is not this camp's business.
+ */
+function foldUser(plan: MergePlan): void {
+  const { survivorUserId, staleUserId } = plan;
+
+  // Every session on both sides dies. `revokeOtherSessions` reasoning from
+  // plans/password-recovery.md applies: a credential change is an identity
+  // event, and the tokens predate the person this account now represents.
+  sqlite.run("DELETE FROM session WHERE user_id IN (?, ?)", [
+    survivorUserId,
+    staleUserId,
+  ]);
+
+  // better-auth's password paths assume at most one `credential` account per
+  // user, so a second one can't simply be moved across. The survivor's wins and
+  // the other is dropped — the preview says so out loud, because "my other
+  // password stopped working" is precisely the surprise this feature exists to
+  // prevent.
+  if (plan.droppedPassword) {
+    sqlite.run(
+      "DELETE FROM account WHERE user_id = ? AND provider_id = 'credential'",
+      [staleUserId],
+    );
+  }
+
+  // Passkeys, social logins, authored rows, and memberships in other camps all
+  // follow the same sweep that moves everything else in this file.
+  repoint("user", survivorUserId, staleUserId);
+
+  const u = plan.user;
+  sqlite.run(
+    "UPDATE user SET name = ?, email = ?, image = ?, email_verified = ?, updated_at = ? WHERE id = ?",
+    [
+      u.name,
+      u.email,
+      u.image,
+      u.emailVerified ? 1 : 0,
+      Date.now(),
+      survivorUserId,
+    ],
+  );
+
+  // Keep the address that stopped being primary findable. Bookkeeping only —
+  // nothing in the sign-in path reads it (plans/merge-symmetric.md decision 2).
+  if (plan.aliasEmail) {
+    sqlite.run(
+      `INSERT OR IGNORE INTO user_email_alias (id, user_id, email, reason, created_at)
+       VALUES (?, ?, ?, 'merge', ?)`,
+      [crypto.randomUUID(), survivorUserId, plan.aliasEmail, Date.now()],
+    );
+  }
+
+  sqlite.run("DELETE FROM user WHERE id = ?", [staleUserId]);
 }
 
 /**
