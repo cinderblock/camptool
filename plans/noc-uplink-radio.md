@@ -239,6 +239,15 @@ the pyramid pair — **a 12′ mast now sees over the pyramid's sloping edge whe
 Testing the pyramid means mocking `~/theme` (the camp theme is a Vite build-time
 alias, so `bun test` otherwise sees the empty default theme).
 
+**The camp-wide vector is now a stand-in, not a fixture.** It read as a second,
+redundant dashed line once a radio was placed — over ~4,900′ a radio anywhere in
+the lot aims within a degree or so of the lot centre, so the two lines lie on top
+of each other and invite the question "whose radio is *that*?". It's drawn only
+while `aims` is empty (no radio, or every radio's "Show aim path" off). The
+`NOC 4,872′ · 291°` readout follows whichever path is drawn — the camp vector, or
+otherwise the first radio's own beam — so no information is lost either way, and
+the compass ray is untouched.
+
 **One refinement while in there:** the height comparison now uses where the beam
 *centre line crosses* the slice, not the slice's nearest corner. A corner well
 off to the side is closer than the crossing, which reads the climbing sight line

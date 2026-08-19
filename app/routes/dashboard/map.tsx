@@ -6830,23 +6830,29 @@ function Editor({
                 </g>
               );
             })}
-            {/* Uplink aiming at the NOC tower. A faint camp-wide vector shows
-            where the tower lies from the lot; each uplink radio then gets the
-            cone it needs kept clear — wide enough to cover the 100′ target area
+            {/* Uplink aiming at the NOC tower. Each uplink radio gets the cone
+            it needs kept clear — wide enough to cover the 100′ target area
             around the tower — with anything of ours tall enough to block it
-            outlined in red. Drawn under the objects so it never hides them. */}
+            outlined in red. With no radio placed yet, a faint vector from the
+            middle of the lot stands in, so you can still see which way the
+            tower lies while deciding where the mast goes; once a radio exists
+            its own path says the same thing from a better place, and over
+            ~4,900′ the two are near enough parallel to read as one line drawn
+            twice. Drawn under the objects so it never hides them. */}
             {uplink ? (
               <g pointerEvents="none" clipPath="url(#ground-clip)">
-                <line
-                  x1={uplink.camp.px}
-                  y1={uplink.camp.py}
-                  x2={uplink.camp.px + uplink.camp.ux * uplink.camp.exit}
-                  y2={uplink.camp.py + uplink.camp.uy * uplink.camp.exit}
-                  stroke="#7048e8"
-                  strokeOpacity={0.3}
-                  strokeWidth={1.5}
-                  strokeDasharray="8 7"
-                />
+                {uplink.aims.length === 0 ? (
+                  <line
+                    x1={uplink.camp.px}
+                    y1={uplink.camp.py}
+                    x2={uplink.camp.px + uplink.camp.ux * uplink.camp.exit}
+                    y2={uplink.camp.py + uplink.camp.uy * uplink.camp.exit}
+                    stroke="#7048e8"
+                    strokeOpacity={0.3}
+                    strokeWidth={1.5}
+                    strokeDasharray="8 7"
+                  />
+                ) : null}
                 {uplink.aims.map((a) => {
                   const blocked = a.blockers.length > 0;
                   const color = blocked ? "#e8590c" : "#7048e8";
@@ -7102,22 +7108,30 @@ function Editor({
             verdict sits close to the radio, not out at the end of its beam. */}
             {uplink ? (
               <g pointerEvents="none" clipPath="url(#ground-clip)">
-                <text
-                  x={uplink.camp.px + uplink.camp.ux * uplink.camp.exit * 0.85}
-                  y={uplink.camp.py + uplink.camp.uy * uplink.camp.exit * 0.85}
-                  fontSize={10}
-                  fontWeight={600}
-                  fill="#7048e8"
-                  fillOpacity={0.6}
-                  textAnchor="middle"
-                  style={{ userSelect: "none" }}
-                >
-                  {`NOC ${Math.round(uplink.camp.distFt).toLocaleString()}′${
-                    uplink.bearingDeg == null
-                      ? ""
-                      : ` · ${Math.round(uplink.bearingDeg)}°`
-                  }`}
-                </text>
+                {/* How far the tower is and on what bearing — pinned to
+                whichever path is actually drawn: the camp-wide vector while no
+                radio is placed, otherwise the first radio's own beam. */}
+                {(() => {
+                  const lead = uplink.aims[0] ?? uplink.camp;
+                  return (
+                    <text
+                      x={lead.px + lead.ux * lead.exit * 0.85}
+                      y={lead.py + lead.uy * lead.exit * 0.85}
+                      fontSize={10}
+                      fontWeight={600}
+                      fill="#7048e8"
+                      fillOpacity={0.6}
+                      textAnchor="middle"
+                      style={{ userSelect: "none" }}
+                    >
+                      {`NOC ${Math.round(lead.distFt).toLocaleString()}′${
+                        uplink.bearingDeg == null
+                          ? ""
+                          : ` · ${Math.round(uplink.bearingDeg)}°`
+                      }`}
+                    </text>
+                  );
+                })()}
                 {uplink.aims.map((a) => {
                   const blocked = a.blockers.length > 0;
                   // Just up the beam from the radio, nudged off the line so the
