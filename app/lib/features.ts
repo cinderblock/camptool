@@ -34,7 +34,8 @@ export type FeatureKey =
   | "roster"
   | "schedule"
   | "training"
-  | "programming";
+  | "programming"
+  | "groups";
 
 export type CampFeatureDef = {
   key: FeatureKey;
@@ -164,6 +165,13 @@ export const FEATURES: CampFeatureDef[] = [
     label: "Who's coming",
     description:
       "The per-year attendee roster and headcount — members and their guests.",
+  },
+  {
+    key: "groups",
+    label: "Social groups",
+    description:
+      "Read the camp the way it actually is — the fire crew, the carpool, the people someone brought. Members and the roster can be grouped into named groups anyone can create, and the who-invited-whom tree is shown alongside. Descriptive only: being in a group grants nobody anything.",
+    starter: true,
   },
   {
     key: "schedule",

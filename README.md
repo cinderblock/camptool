@@ -306,3 +306,22 @@ server into a container. Both are documented in
   is delivered out-of-band on purpose. See
   [`plans/password-recovery.md`](plans/password-recovery.md). When real delivery
   is wired, flip `mailEnabled` in the same change and the affordances come back.
+- **Social groups are descriptive; the party link is not.** A camp reads as
+  crews and carpools, not a flat list, so members and the roster can be grouped
+  into named **social groups** anyone can create, and the who-invited-whom tree
+  (recorded on every invite redemption since invites shipped) is shown as an
+  actual tree — with one button to turn "everyone so-and-so brought" into a
+  group. Nothing is ever inferred: provenance is a fact, a group is a judgement,
+  and a human presses the button. Crucially a group grants **no authority** over
+  anyone; the thing that does is the one-level party link
+  ([`plans/party-member-links.md`](plans/party-member-links.md)), where a host
+  can manage their household's tickets and passes. Keeping those two apart is
+  the whole design. See [`plans/social-groups.md`](plans/social-groups.md).
+- **Merging duplicate members is direction-agnostic.** When the same person
+  signs up twice, an officer cannot know which of the two accounts still has a
+  working login — so the merge no longer asks. Every field is settled by a rule
+  over both records (highest role, earliest join date, blanks filled from either
+  side), the two accounts' passkeys / password / Discord logins fold onto one
+  account, and only a genuine disagreement (two different playa names) is put to
+  a human. Merging A with B and B with A produce the same person, which
+  `bun run e2e:member-merge` asserts by doing both.

@@ -89,7 +89,7 @@ import {
   toObjRow,
 } from "~/lib/map.server";
 import { clamp, round } from "~/lib/num";
-import { partyMapObjectsFor } from "~/lib/party-map.server";
+import { partyMapObjects, partyMapObjectsFor } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
@@ -132,6 +132,8 @@ import { db } from "../../../db/client.server";
 import {
   camp,
   campEdition,
+  campGroup,
+  campGroupMember,
   mapCable,
   mapEditSuggestion,
   mapObject,
@@ -609,11 +611,19 @@ async function loadClientMap(editionId: string) {
  * a bad link should show a normal map, not an error, and the camp scope stops
  * the param being used to probe another camp's memberships.
  */
+type MapFocus = {
+  membershipId: string | null;
+  name: string;
+  objectIds: string[];
+  /** A household, or a social group. Only the wording differs downstream. */
+  kind: "party" | "group";
+};
+
 async function resolveParty(
   campId: string,
   editionId: string,
   raw: string | null,
-): Promise<{ membershipId: string; name: string; objectIds: string[] } | null> {
+): Promise<MapFocus | null> {
   if (!raw) return null;
   const [row] = await db
     .select({ id: membership.id, name: user.name })
@@ -623,7 +633,46 @@ async function resolveParty(
     .limit(1);
   if (!row) return null;
   const objectIds = await partyMapObjectsFor(editionId, row.id);
-  return { membershipId: row.id, name: row.name, objectIds };
+  return { membershipId: row.id, name: row.name, objectIds, kind: "party" };
+}
+
+/**
+ * `/map?group=<groupId>` — where a social group is camped
+ * (`plans/social-groups.md`).
+ *
+ * Reuses the party highlight wholesale rather than adding a second dimming
+ * mechanism: a group is just a bigger set of the same object ids, unioned over
+ * everyone in it. Same camp scoping as `resolveParty`, and the same
+ * "a bad link shows a normal map" behaviour.
+ */
+async function resolveGroupFocus(
+  campId: string,
+  editionId: string,
+  raw: string | null,
+): Promise<MapFocus | null> {
+  if (!raw) return null;
+  const [row] = await db
+    .select({ id: campGroup.id, name: campGroup.name })
+    .from(campGroup)
+    .where(and(eq(campGroup.id, raw), eq(campGroup.campId, campId)))
+    .limit(1);
+  if (!row) return null;
+  const links = await db
+    .select({ membershipId: campGroupMember.membershipId })
+    .from(campGroupMember)
+    .where(eq(campGroupMember.groupId, row.id));
+  const byMember = await partyMapObjects(editionId);
+  const ids = new Set<string>();
+  for (const l of links) {
+    for (const objectId of byMember.get(l.membershipId) ?? [])
+      ids.add(objectId);
+  }
+  return {
+    membershipId: null,
+    name: row.name,
+    objectIds: [...ids],
+    kind: "group",
+  };
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -701,11 +750,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Resolved here rather than by shipping object ids in the URL: ids go stale
   // the moment the map changes, and a membership id stays meaningful and
   // shareable. Costs nothing on a normal map load, since the param is absent.
-  const party = await resolveParty(
-    active.camp.id,
-    editionId,
-    new URL(request.url).searchParams.get("party"),
-  );
+  const params = new URL(request.url).searchParams;
+  const party =
+    (await resolveParty(active.camp.id, editionId, params.get("party"))) ??
+    (await resolveGroupFocus(active.camp.id, editionId, params.get("group")));
 
   return redact(privacy, {
     party,
@@ -3520,9 +3568,13 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           color="blue"
           mb="sm"
           title={
-            party.objectIds.length > 0
-              ? `Showing ${party.name}'s party`
-              : `${party.name}'s party isn't on the map yet`
+            party.kind === "group"
+              ? party.objectIds.length > 0
+                ? `Showing ${party.name}`
+                : `Nobody in ${party.name} is on the map yet`
+              : party.objectIds.length > 0
+                ? `Showing ${party.name}'s party`
+                : `${party.name}'s party isn't on the map yet`
           }
         >
           <Group gap="sm" wrap="wrap">
@@ -3653,7 +3705,14 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                   { label: "Mine", value: "mine" },
                   // Only offered while a ?party= link is in play — there is no
                   // party to filter to otherwise.
-                  ...(party ? [{ label: "Party", value: "party" }] : []),
+                  ...(party
+                    ? [
+                        {
+                          label: party.kind === "group" ? "Group" : "Party",
+                          value: "party",
+                        },
+                      ]
+                    : []),
                   { label: "Homes", value: "domicile" },
                   { label: "Vehicles", value: "vehicle" },
                   { label: "Builds", value: "structure" },
@@ -4177,8 +4236,17 @@ function Editor({
   /** Free-text doneness label drawn as a watermark over the map (null = none). */
   mapStatus: string | null;
   highlight: string;
-  /** Set when arrived via ?party=… — the objects to light up, and whose. */
-  party: { membershipId: string; name: string; objectIds: string[] } | null;
+  /**
+   * Set when arrived via ?party=… or ?group=… — the objects to light up, and
+   * whose. `membershipId` is null for a group: it is a set of people, not one
+   * household anchor.
+   */
+  party: {
+    membershipId: string | null;
+    name: string;
+    objectIds: string[];
+    kind: "party" | "group";
+  } | null;
   lotOpen: boolean;
   setLotOpen: (v: boolean) => void;
   mapUpBearing: number | null;

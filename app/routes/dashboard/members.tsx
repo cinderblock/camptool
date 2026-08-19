@@ -7,7 +7,9 @@ import {
   CopyButton,
   Group,
   Modal,
+  MultiSelect,
   Radio,
+  SegmentedControl,
   Select,
   Stack,
   Table,
@@ -18,12 +20,28 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Form, Link, data, useFetcher } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState } from "~/lib/features.server";
+import {
+  addToGroup,
+  createGroup,
+  deleteGroup,
+  listGroups,
+  loadInviteEdges,
+  mergeGroups,
+  removeFromGroup,
+  renameGroup,
+} from "~/lib/groups.server";
+import {
+  type InviteNode,
+  buildInviteTree,
+  flattenTree,
+  subtreeIds,
+} from "~/lib/invite-tree";
 import type { MergePicks } from "~/lib/merge-plan";
 import {
   type MergeOutcome,
@@ -165,6 +183,9 @@ export async function loader({ request }: Route.LoaderArgs) {
   const members = rows
     .map(({ invitedByMembershipId, viaInviteId, ...r }) => ({
       ...r,
+      // Kept, not just resolved to a name: the invite TREE needs the edge, and
+      // a name can't be walked (plans/social-groups.md).
+      invitedByMembershipId,
       prospectId: prospectOf.get(r.memberId) ?? null,
       joinedAt: r.joinedAt ? r.joinedAt.toISOString() : null,
       discord: discord.get(r.userId) ?? null,
@@ -214,17 +235,27 @@ export async function loader({ request }: Route.LoaderArgs) {
     ? flagRows.filter((f) => f.reporterMembershipId === myMid).map(toView)
     : [];
 
+  // Social groups. Descriptive only — nothing on this page consults them to
+  // decide what anyone may do (plans/social-groups.md).
+  const groupsVisible = featureVisibleTo(
+    await getFeatureState(campId, "groups"),
+    actorRole,
+  );
+
   return redact(privacy, {
     campId,
     campName: active.camp.name,
     actorUserId: actor.id,
     actorRole,
+    myMembershipId: myMid,
     canManage,
     canFlag,
     assignableRoles,
     members,
     officerFlags,
     myFlags,
+    groupsVisible,
+    groups: groupsVisible ? await listGroups(campId) : [],
     // "N of M enrolled", the cheap-to-delete adoption summary.
     passkeyEnrolled: canManage ? withPasskey.size : 0,
   });
@@ -590,10 +621,153 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
 
+  // — Social groups ----------------------------------------------------------
+  // Any member may create a group and put people in it; officers tidy up
+  // (rename, merge, delete). A group grants nobody anything, so the cost of a
+  // wrong one is that somebody edits it — see plans/social-groups.md.
+  if (typeof intent === "string" && intent.startsWith("group")) {
+    const groupsOn = featureVisibleTo(
+      await getFeatureState(campId, "groups"),
+      actorRole,
+    );
+    if (!groupsOn) {
+      return data(
+        { error: "Social groups are off for this camp." },
+        { status: 403 },
+      );
+    }
+    const isOfficer = hasAtLeast(actorRole, "officer");
+    const ids = form.getAll("membershipId").map(String).filter(Boolean);
+    const groupId = String(form.get("groupId") ?? "");
+
+    try {
+      switch (intent) {
+        case "groupCreate": {
+          await createGroup({
+            campId,
+            name: String(form.get("name") ?? ""),
+            description: String(form.get("description") ?? ""),
+            color: String(form.get("color") ?? "") || null,
+            createdByMembershipId: myMid,
+            memberIds: ids,
+          });
+          return data({ ok: "Group created." });
+        }
+        case "groupRename": {
+          if (!isOfficer) {
+            return data(
+              { error: "Only officers can rename a group." },
+              { status: 403 },
+            );
+          }
+          await renameGroup({
+            campId,
+            groupId,
+            name: String(form.get("name") ?? ""),
+            description: String(form.get("description") ?? ""),
+            color: String(form.get("color") ?? "") || null,
+          });
+          return data({ ok: "Group updated." });
+        }
+        case "groupDelete": {
+          if (!isOfficer) {
+            return data(
+              { error: "Only officers can delete a group." },
+              { status: 403 },
+            );
+          }
+          await deleteGroup(campId, groupId);
+          return data({ ok: "Group deleted. Nobody left the camp." });
+        }
+        case "groupMerge": {
+          if (!isOfficer) {
+            return data(
+              { error: "Only officers can merge groups." },
+              { status: 403 },
+            );
+          }
+          await mergeGroups({
+            campId,
+            survivorId: groupId,
+            staleId: String(form.get("staleGroupId") ?? ""),
+          });
+          return data({ ok: "Groups merged." });
+        }
+        case "groupAdd": {
+          const n = await addToGroup({
+            campId,
+            groupId,
+            membershipIds: ids,
+            addedByMembershipId: myMid,
+          });
+          return data({
+            ok:
+              n === 0
+                ? "Everyone picked was already in that group."
+                : `Added ${n} ${n === 1 ? "person" : "people"}.`,
+          });
+        }
+        case "groupRemove": {
+          const [only] = ids;
+          if (!only) return data({ error: "Nobody picked." }, { status: 400 });
+          await removeFromGroup({ campId, groupId, membershipId: only });
+          return data({ ok: "Removed from the group." });
+        }
+        case "groupFromSubtree": {
+          // Provenance is a fact; a group is a judgement. This is the one place
+          // the two meet, and a human presses the button.
+          const rootId = String(form.get("rootId") ?? "");
+          const edges = await loadInviteEdges(campId);
+          await createGroup({
+            campId,
+            name: String(form.get("name") ?? ""),
+            createdByMembershipId: myMid,
+            memberIds: subtreeIds(edges, rootId),
+          });
+          return data({ ok: "Group created from the invite tree." });
+        }
+      }
+    } catch (e) {
+      return data(
+        { error: e instanceof Error ? e.message : "Group action failed." },
+        { status: 400 },
+      );
+    }
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
 type FetcherData = { ok?: string; error?: string };
+
+type LoadedMember = Awaited<ReturnType<typeof loader>>["members"][number];
+
+/** How the directory is nested: flat, by social group, or by who invited whom. */
+type GroupBy = "none" | "group" | "inviter";
+
+/**
+ * One rendered line. Sections and people share a list so the table body stays a
+ * single map — interleaving two arrays inside JSX is where this kind of view
+ * usually goes wrong.
+ */
+type MemberRow =
+  | {
+      kind: "section";
+      key: string;
+      title: string;
+      count: number;
+      note: string | null;
+    }
+  | {
+      kind: "member";
+      key: string;
+      member: LoadedMember;
+      depth: number;
+      /** Show the "invited by the row above" marker. Tree view only. */
+      arrow?: boolean;
+      /** For the invite tree: how many people this person brought in, total. */
+      subtreeCount?: number;
+    };
 
 export default function Members({ loaderData }: Route.ComponentProps) {
   const {
@@ -606,6 +780,9 @@ export default function Members({ loaderData }: Route.ComponentProps) {
     campId,
     officerFlags,
     myFlags,
+    groups,
+    groupsVisible,
+    myMembershipId,
   } = loaderData;
   const roleFetcher = useFetcher<FetcherData>();
   const addFetcher = useFetcher<FetcherData>();
@@ -636,6 +813,9 @@ export default function Members({ loaderData }: Route.ComponentProps) {
   // about, so it never appears in this state.
   const [mergePicks, setMergePicks] = useState<MergePicks>({});
   const mergePreview = previewFetcher.data?.preview ?? null;
+  const [groupBy, setGroupBy] = useState<GroupBy>("none");
+  const [groupPanel, setGroupPanel] = useState(false);
+  const groupFetcher = useFetcher<FetcherData>();
 
   // The issued link comes back in the response body rather than being stored:
   // we keep only its SHA-256 hash server-side, so THIS is the one moment the
@@ -703,6 +883,89 @@ export default function Members({ loaderData }: Route.ComponentProps) {
 
   const roleOptions = assignableRoles.map((r) => ({ value: r, label: r }));
   const showActions = canManage || canFlag;
+  const columnCount = 7 + (canManage ? 1 : 0) + (showActions ? 1 : 0);
+
+  // How the list is nested. "None" is the flat directory this page has always
+  // been; the other two are the ask (plans/social-groups.md).
+  const displayRows = useMemo((): MemberRow[] => {
+    if (groupBy === "group") {
+      const rows: MemberRow[] = [];
+      const grouped = new Set<string>();
+      for (const g of groups) {
+        // Filter the already-sorted member list rather than mapping the group's
+        // ids, so every section is in the same rank-then-name order as the flat
+        // view instead of in whatever order people were added.
+        const ids = new Set(g.memberIds);
+        const people = members.filter((m) => ids.has(m.memberId));
+        for (const p of people) grouped.add(p.memberId);
+        rows.push({
+          kind: "section",
+          key: `g:${g.id}`,
+          title: g.name,
+          count: people.length,
+          note: g.description,
+        });
+        // Someone in two groups appears under both — that IS the shape of the
+        // camp. The headcount above the table stays the honest total.
+        for (const p of people) {
+          rows.push({
+            kind: "member",
+            key: `g:${g.id}:${p.memberId}`,
+            member: p,
+            depth: 1,
+          });
+        }
+      }
+      const rest = members.filter((m) => !grouped.has(m.memberId));
+      if (rest.length) {
+        rows.push({
+          kind: "section",
+          key: "g:none",
+          title: "Not in a group",
+          count: rest.length,
+          note: null,
+        });
+        for (const p of rest) {
+          rows.push({
+            kind: "member",
+            key: `g:none:${p.memberId}`,
+            member: p,
+            depth: 1,
+          });
+        }
+      }
+      return rows;
+    }
+
+    if (groupBy === "inviter") {
+      const forest = buildInviteTree(
+        members.map((m) => ({ ...m, membershipId: m.memberId })),
+        (a, b) => a.name.localeCompare(b.name),
+      );
+      return flattenTree(forest).map(
+        (
+          n: InviteNode<(typeof members)[number] & { membershipId: string }>,
+        ) => ({
+          kind: "member" as const,
+          key: `t:${n.member.memberId}`,
+          member: n.member,
+          depth: n.depth,
+          // Only the tree earns the arrow: there it means "invited by the row
+          // above". In a group section it would read the same way and be wrong,
+          // so group rows indent without one.
+          arrow: n.depth > 0,
+          subtreeCount: n.descendants || undefined,
+        }),
+      );
+    }
+
+    return members.map((m) => ({
+      kind: "member" as const,
+      key: m.memberId,
+      member: m,
+      depth: 0,
+    }));
+  }, [members, groups, groupBy]);
 
   return (
     <Container size="lg">
@@ -816,6 +1079,27 @@ export default function Members({ loaderData }: Route.ComponentProps) {
           </Card>
         ) : null}
 
+        {groupsVisible ? (
+          <>
+            <GroupsBar
+              groups={groups}
+              groupBy={groupBy}
+              onGroupBy={setGroupBy}
+              canManage={canManage}
+              onManage={() => setGroupPanel(true)}
+            />
+            <GroupsPanel
+              opened={groupPanel}
+              onClose={() => setGroupPanel(false)}
+              groups={groups}
+              members={members}
+              canManage={canManage}
+              myMembershipId={myMembershipId}
+              fetcher={groupFetcher}
+            />
+          </>
+        ) : null}
+
         <Table.ScrollContainer minWidth={820}>
           <Table verticalSpacing="sm" highlightOnHover>
             <Table.Thead>
@@ -832,19 +1116,79 @@ export default function Members({ loaderData }: Route.ComponentProps) {
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {members.map((m) => {
+              {displayRows.map((row) => {
+                if (row.kind === "section") {
+                  return (
+                    <Table.Tr
+                      key={row.key}
+                      bg="var(--mantine-color-default-hover)"
+                    >
+                      <Table.Td colSpan={columnCount}>
+                        <Group gap="xs">
+                          <Text fw={600} size="sm">
+                            {row.title}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            {row.count} {row.count === 1 ? "person" : "people"}
+                          </Text>
+                          {row.note ? (
+                            <Text size="xs" c="dimmed">
+                              · {row.note}
+                            </Text>
+                          ) : null}
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                }
+                const m = row.member;
                 const isSelf = m.userId === actorUserId;
                 const editable =
                   canManage && !isSelf && rankOf(actorRole) > rankOf(m.role);
                 return (
-                  <Table.Tr key={m.memberId}>
-                    <Table.Td>
+                  <Table.Tr key={row.key}>
+                    <Table.Td style={{ paddingLeft: 12 + row.depth * 22 }}>
+                      {row.arrow ? (
+                        <Text span c="dimmed" size="xs" mr={4}>
+                          ↳
+                        </Text>
+                      ) : null}
                       {m.name}
                       {isSelf ? (
                         <Text span c="dimmed" size="xs">
                           {" "}
                           (you)
                         </Text>
+                      ) : null}
+                      {row.subtreeCount ? (
+                        <>
+                          <Text span c="dimmed" size="xs">
+                            {" "}
+                            · brought {row.subtreeCount}
+                          </Text>
+                          {groupsVisible ? (
+                            // Provenance is a fact, a group is a judgement —
+                            // this is the one place they meet, and a human
+                            // presses the button.
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              ml={6}
+                              onClick={() =>
+                                groupFetcher.submit(
+                                  {
+                                    intent: "groupFromSubtree",
+                                    rootId: m.memberId,
+                                    name: `${m.name}'s crew`,
+                                  },
+                                  { method: "post" },
+                                )
+                              }
+                            >
+                              Make a group
+                            </Button>
+                          ) : null}
+                        </>
                       ) : null}
                     </Table.Td>
                     <Table.Td>{m.playaName ?? "—"}</Table.Td>
@@ -1332,6 +1676,313 @@ export default function Members({ loaderData }: Route.ComponentProps) {
         </Modal>
       </Stack>
     </Container>
+  );
+}
+
+/**
+ * The nesting control, plus the camp's groups as chips.
+ *
+ * Sits above the table rather than inside it because it changes what the whole
+ * list *is*, and because "Invited by" needs to be reachable even when the camp
+ * has no named groups at all — that view costs nothing to offer, the edges have
+ * been recorded since invite links shipped.
+ */
+function GroupsBar({
+  groups,
+  groupBy,
+  onGroupBy,
+  canManage,
+  onManage,
+}: {
+  groups: {
+    id: string;
+    name: string;
+    color: string | null;
+    memberIds: string[];
+  }[];
+  groupBy: GroupBy;
+  onGroupBy: (v: GroupBy) => void;
+  canManage: boolean;
+  onManage: () => void;
+}) {
+  return (
+    <Card withBorder padding="sm" radius="md">
+      <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
+        <Stack gap={6}>
+          <Text size="sm" fw={600}>
+            Show as
+          </Text>
+          <SegmentedControl
+            size="xs"
+            value={groupBy}
+            onChange={(v) => onGroupBy(v as GroupBy)}
+            data={[
+              { value: "none", label: "Flat list" },
+              { value: "group", label: "Social groups" },
+              { value: "inviter", label: "Who invited whom" },
+            ]}
+          />
+        </Stack>
+        <Stack gap={6} style={{ flex: 1, minWidth: 220 }}>
+          <Group gap={6}>
+            <Text size="sm" fw={600}>
+              Groups
+            </Text>
+            <Button size="compact-xs" variant="subtle" onClick={onManage}>
+              {canManage ? "Manage" : "Create or join"}
+            </Button>
+          </Group>
+          {groups.length === 0 ? (
+            <Text size="xs" c="dimmed">
+              No groups yet — the fire crew, a carpool, whoever camps together.
+              Being in one grants nobody anything; it just says who goes with
+              who.
+            </Text>
+          ) : (
+            <Group gap={6}>
+              {groups.map((g) => (
+                // Links to the map with the whole group lit up — the same
+                // highlight the roster's "N on map" link uses, widened from one
+                // household to a set of them.
+                <Anchor
+                  key={g.id}
+                  component={Link}
+                  to={`/map?group=${g.id}`}
+                  underline="never"
+                >
+                  <Badge variant="light" color={g.color ?? "gray"} size="sm">
+                    {g.name} · {g.memberIds.length}
+                  </Badge>
+                </Anchor>
+              ))}
+            </Group>
+          )}
+        </Stack>
+      </Group>
+    </Card>
+  );
+}
+
+/**
+ * Create groups, put people in them, and (for officers) tidy them up.
+ *
+ * Everything here is deliberately available to ordinary members except rename /
+ * delete / merge. The camp knows its own social shape far better than its
+ * officers do, and a wrong group costs nothing — see plans/social-groups.md.
+ */
+function GroupsPanel({
+  opened,
+  onClose,
+  groups,
+  members,
+  canManage,
+  myMembershipId,
+  fetcher,
+}: {
+  opened: boolean;
+  onClose: () => void;
+  groups: {
+    id: string;
+    name: string;
+    description: string | null;
+    color: string | null;
+    memberIds: string[];
+  }[];
+  members: { memberId: string; name: string; playaName: string | null }[];
+  canManage: boolean;
+  myMembershipId: string;
+  fetcher: ReturnType<typeof useFetcher<FetcherData>>;
+}) {
+  const [newName, setNewName] = useState("");
+  const [newMembers, setNewMembers] = useState<string[]>([]);
+  const [addTo, setAddTo] = useState<Record<string, string[]>>({});
+  const busy = fetcher.state !== "idle";
+
+  const options = members.map((m) => ({
+    value: m.memberId,
+    label: m.playaName ? `${m.name} "${m.playaName}"` : m.name,
+  }));
+  const nameOf = new Map(options.map((o) => [o.value, o.label]));
+
+  const submit = (fields: Record<string, string | string[]>) => {
+    const body = new FormData();
+    for (const [k, v] of Object.entries(fields)) {
+      if (Array.isArray(v)) for (const one of v) body.append(k, one);
+      else body.set(k, v);
+    }
+    fetcher.submit(body, { method: "post" });
+  };
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title="Social groups"
+      size="lg"
+      centered
+    >
+      <Stack gap="lg">
+        <Text size="sm" c="dimmed">
+          A group is just a name for people who belong together — a crew, a
+          carpool, a camp-within-the-camp. Anyone can make one and add people.
+          It changes nothing about what anyone is allowed to do.
+        </Text>
+
+        <Card withBorder padding="sm" radius="sm">
+          <Stack gap="xs">
+            <TextInput
+              label="New group"
+              placeholder="Fire crew"
+              value={newName}
+              onChange={(e) => setNewName(e.currentTarget.value)}
+            />
+            <MultiSelect
+              label="Who's in it"
+              description="You can add people later too."
+              placeholder="Pick people"
+              searchable
+              data={options}
+              value={newMembers}
+              onChange={setNewMembers}
+            />
+            <Group justify="flex-end">
+              <Button
+                size="xs"
+                disabled={!newName.trim()}
+                loading={busy}
+                onClick={() => {
+                  submit({
+                    intent: "groupCreate",
+                    name: newName,
+                    membershipId: newMembers,
+                  });
+                  setNewName("");
+                  setNewMembers([]);
+                }}
+              >
+                Create group
+              </Button>
+            </Group>
+          </Stack>
+        </Card>
+
+        {groups.map((g) => (
+          <Card key={g.id} withBorder padding="sm" radius="sm">
+            <Stack gap="xs">
+              <Group justify="space-between">
+                <Text fw={600}>{g.name}</Text>
+                <Group gap={4}>
+                  {g.memberIds.includes(myMembershipId) ? (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="gray"
+                      onClick={() =>
+                        submit({
+                          intent: "groupRemove",
+                          groupId: g.id,
+                          membershipId: myMembershipId,
+                        })
+                      }
+                    >
+                      Leave
+                    </Button>
+                  ) : (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      onClick={() =>
+                        submit({
+                          intent: "groupAdd",
+                          groupId: g.id,
+                          membershipId: [myMembershipId],
+                        })
+                      }
+                    >
+                      Join
+                    </Button>
+                  )}
+                  {canManage ? (
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={() =>
+                        submit({ intent: "groupDelete", groupId: g.id })
+                      }
+                    >
+                      Delete
+                    </Button>
+                  ) : null}
+                </Group>
+              </Group>
+
+              {g.memberIds.length === 0 ? (
+                <Text size="xs" c="dimmed">
+                  Nobody in this group yet.
+                </Text>
+              ) : (
+                <Group gap={6}>
+                  {g.memberIds.map((id) => (
+                    <Badge
+                      key={id}
+                      variant="light"
+                      color={g.color ?? "gray"}
+                      size="sm"
+                      rightSection={
+                        <Text
+                          span
+                          size="xs"
+                          style={{ cursor: "pointer" }}
+                          onClick={() =>
+                            submit({
+                              intent: "groupRemove",
+                              groupId: g.id,
+                              membershipId: id,
+                            })
+                          }
+                        >
+                          ×
+                        </Text>
+                      }
+                    >
+                      {nameOf.get(id) ?? "Former member"}
+                    </Badge>
+                  ))}
+                </Group>
+              )}
+
+              <Group align="flex-end" gap="xs">
+                <MultiSelect
+                  size="xs"
+                  placeholder="Add people"
+                  searchable
+                  style={{ flex: 1 }}
+                  data={options.filter((o) => !g.memberIds.includes(o.value))}
+                  value={addTo[g.id] ?? []}
+                  onChange={(v) => setAddTo({ ...addTo, [g.id]: v })}
+                />
+                <Button
+                  size="xs"
+                  disabled={!(addTo[g.id] ?? []).length}
+                  loading={busy}
+                  onClick={() => {
+                    submit({
+                      intent: "groupAdd",
+                      groupId: g.id,
+                      membershipId: addTo[g.id] ?? [],
+                    });
+                    setAddTo({ ...addTo, [g.id]: [] });
+                  }}
+                >
+                  Add
+                </Button>
+              </Group>
+            </Stack>
+          </Card>
+        ))}
+      </Stack>
+    </Modal>
   );
 }
 

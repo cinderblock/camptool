@@ -20,7 +20,7 @@ import {
   VisuallyHidden,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
 import { CampMapView } from "~/components/CampMapView";
 import {
@@ -44,6 +44,7 @@ import { eventStartIso } from "~/lib/brc";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState, requireFeature } from "~/lib/features.server";
+import { listGroups } from "~/lib/groups.server";
 import {
   getOrCreatePromotionInvite,
   loadPromotionInvites,
@@ -141,6 +142,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     myPartyMembers: me?.partyMembers ?? [],
     partyHostCandidates,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
+    // Social groups, when the camp has them on. Purely a way to read the list —
+    // nothing here consults them for permission (plans/social-groups.md).
+    groups: featureVisibleTo(
+      await getFeatureState(active.camp.id, "groups"),
+      active.membership.role,
+    )
+      ? await listGroups(active.camp.id)
+      : [],
     locked: activeEdition.locked,
     year: activeEdition.year,
   });
@@ -351,6 +360,7 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
     myPartyHost,
     myPartyMembers,
     partyHostCandidates,
+    groups,
   } = loaderData;
 
   return (
@@ -398,6 +408,7 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
 
         <RosterTable
           members={members}
+          groups={groups}
           myMembershipId={myMembershipId}
           locked={locked}
           year={year}
@@ -1181,6 +1192,8 @@ function DayLegend({ year }: { year: number }) {
 
 function RosterTableInner({
   members,
+  sectionBefore,
+  chipsFor,
   myMembershipId,
   locked,
   year,
@@ -1192,6 +1205,10 @@ function RosterTableInner({
   selectable,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
+  /** Group heading to emit before a given membership's row. Null = flat. */
+  sectionBefore: Map<string, { title: string; count: number }> | null;
+  /** Every group each member belongs to, so nothing is hidden by the nesting. */
+  chipsFor: Map<string, string[]>;
   myMembershipId: string | null;
   locked: boolean;
   year: number;
@@ -1234,157 +1251,181 @@ function RosterTableInner({
             const canSelect = selectable;
             const isSelected = selected === m.membershipId;
             const toggle = () => onSelect(isSelected ? null : m.membershipId);
+            const head = sectionBefore?.get(m.membershipId);
             return (
-              <Table.Tr
-                key={m.membershipId}
-                onClick={
-                  canSelect
-                    ? (e) => {
-                        // The row owns the click, but not on top of its own
-                        // links and buttons ("That's me", the map link).
-                        if ((e.target as HTMLElement).closest("a,button"))
-                          return;
-                        toggle();
-                      }
-                    : undefined
-                }
-                onMouseEnter={
-                  canSelect ? () => onHover(m.membershipId) : undefined
-                }
-                onKeyDown={
-                  canSelect
-                    ? (e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
+              <Fragment key={m.membershipId}>
+                {head ? (
+                  <Table.Tr bg="var(--mantine-color-default-hover)">
+                    <Table.Td colSpan={mapVisible ? 6 : 5}>
+                      <Group gap="xs">
+                        <Text fw={600} size="sm">
+                          {head.title}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          {head.count} {head.count === 1 ? "person" : "people"}
+                        </Text>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ) : null}
+                <Table.Tr
+                  onClick={
+                    canSelect
+                      ? (e) => {
+                          // The row owns the click, but not on top of its own
+                          // links and buttons ("That's me", the map link).
+                          if ((e.target as HTMLElement).closest("a,button"))
+                            return;
                           toggle();
                         }
-                      }
-                    : undefined
-                }
-                tabIndex={canSelect ? 0 : undefined}
-                aria-pressed={canSelect ? isSelected : undefined}
-                style={
-                  canSelect
-                    ? {
-                        cursor: "pointer",
-                        background: isSelected
-                          ? "var(--mantine-color-default-hover)"
-                          : undefined,
-                      }
-                    : undefined
-                }
-              >
-                <Table.Td>
-                  <Text size="sm">
-                    {m.name}
-                    {m.playaName ? (
-                      <Text span c="dimmed" size="xs">
-                        {" "}
-                        “{m.playaName}”
+                      : undefined
+                  }
+                  onMouseEnter={
+                    canSelect ? () => onHover(m.membershipId) : undefined
+                  }
+                  onKeyDown={
+                    canSelect
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            toggle();
+                          }
+                        }
+                      : undefined
+                  }
+                  tabIndex={canSelect ? 0 : undefined}
+                  aria-pressed={canSelect ? isSelected : undefined}
+                  style={
+                    canSelect
+                      ? {
+                          cursor: "pointer",
+                          background: isSelected
+                            ? "var(--mantine-color-default-hover)"
+                            : undefined,
+                        }
+                      : undefined
+                  }
+                >
+                  <Table.Td>
+                    <Text size="sm">
+                      {m.name}
+                      {m.playaName ? (
+                        <Text span c="dimmed" size="xs">
+                          {" "}
+                          “{m.playaName}”
+                        </Text>
+                      ) : null}
+                    </Text>
+                    {/* Every group they're in, including the ones they aren't
+                      filed under — the nesting picks one home per person to
+                      keep the headcount honest, so the rest live here. */}
+                    {(chipsFor.get(m.membershipId) ?? []).length > 1 ? (
+                      <Text size="xs" c="dimmed">
+                        {(chipsFor.get(m.membershipId) ?? []).join(" · ")}
                       </Text>
                     ) : null}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Badge color={st.color} variant="light" size="sm">
-                    {st.label}
-                  </Badge>
-                </Table.Td>
-                <Table.Td>
-                  <DayCell iso={m.arrivalDate} year={year} />
-                </Table.Td>
-                <Table.Td>
-                  <DayCell iso={m.departureDate} year={year} />
-                </Table.Td>
-                <Table.Td>
-                  {m.guests.length === 0 &&
-                  m.partyMembers.length === 0 &&
-                  !m.partyHost ? (
-                    <Text size="sm" c="dimmed">
-                      —
-                    </Text>
-                  ) : (
-                    // wrap (not nowrap) so a long party doesn't blow out the
-                    // row on a phone.
-                    <Group gap={6} wrap="wrap">
-                      {/* Reads from this row's side: whose household this
+                  </Table.Td>
+                  <Table.Td>
+                    <Badge color={st.color} variant="light" size="sm">
+                      {st.label}
+                    </Badge>
+                  </Table.Td>
+                  <Table.Td>
+                    <DayCell iso={m.arrivalDate} year={year} />
+                  </Table.Td>
+                  <Table.Td>
+                    <DayCell iso={m.departureDate} year={year} />
+                  </Table.Td>
+                  <Table.Td>
+                    {m.guests.length === 0 &&
+                    m.partyMembers.length === 0 &&
+                    !m.partyHost ? (
+                      <Text size="sm" c="dimmed">
+                        —
+                      </Text>
+                    ) : (
+                      // wrap (not nowrap) so a long party doesn't blow out the
+                      // row on a phone.
+                      <Group gap={6} wrap="wrap">
+                        {/* Reads from this row's side: whose household this
                           person belongs to, or who belongs to theirs. Members
                           keep the default colour so they stay visibly distinct
                           from grape guests — they have their own accounts. */}
-                      {m.partyHost ? (
-                        <Badge variant="outline" size="sm">
-                          with {m.partyHost.name}
-                        </Badge>
-                      ) : null}
-                      {m.partyMembers.map((p) => (
-                        <Badge key={p.membershipId} variant="light" size="sm">
-                          {p.name}
-                        </Badge>
-                      ))}
-                      {m.guests.length > 0 ? (
-                        <Text size="sm">+{m.guests.length}</Text>
-                      ) : null}
-                      {m.guests.map((g) => (
-                        <Badge
-                          key={g.id}
-                          variant="light"
-                          color="grape"
-                          size="sm"
-                        >
-                          {g.name}
-                          {g.arrivalDate || g.departureDate ? " · " : ""}
-                          <DayRange
-                            arrival={g.arrivalDate}
-                            departure={g.departureDate}
-                            year={year}
-                          />
-                        </Badge>
-                      ))}
-                      {/* Someone listed under another member who now has their
+                        {m.partyHost ? (
+                          <Badge variant="outline" size="sm">
+                            with {m.partyHost.name}
+                          </Badge>
+                        ) : null}
+                        {m.partyMembers.map((p) => (
+                          <Badge key={p.membershipId} variant="light" size="sm">
+                            {p.name}
+                          </Badge>
+                        ))}
+                        {m.guests.length > 0 ? (
+                          <Text size="sm">+{m.guests.length}</Text>
+                        ) : null}
+                        {m.guests.map((g) => (
+                          <Badge
+                            key={g.id}
+                            variant="light"
+                            color="grape"
+                            size="sm"
+                          >
+                            {g.name}
+                            {g.arrivalDate || g.departureDate ? " · " : ""}
+                            <DayRange
+                              arrival={g.arrivalDate}
+                              departure={g.departureDate}
+                              year={year}
+                            />
+                          </Badge>
+                        ))}
+                        {/* Someone listed under another member who now has their
                           own account can un-double-count themselves here. */}
-                      {!locked && !isHost
-                        ? m.guests.map((g) => (
-                            <Button
-                              key={`claim-${g.id}`}
-                              size="compact-xs"
-                              variant="subtle"
-                              onClick={() =>
-                                onClaim({ id: g.id, name: g.name })
-                              }
-                            >
-                              {m.guests.length === 1
-                                ? "That's me"
-                                : `“${g.name}” is me`}
-                            </Button>
-                          ))
-                        : null}
-                    </Group>
-                  )}
-                </Table.Td>
-                {mapVisible ? (
-                  <Table.Td>
-                    {m.mapItems > 0 ? (
-                      // Deep-links the map with this whole party highlighted —
-                      // the member's own structures plus anything their guests
-                      // occupy. Someone in another member's party is keyed under
-                      // that host, so link there or the map lights up nothing.
-                      // No link when nothing is placed, rather than a link to a
-                      // map with nothing lit up.
-                      <Anchor
-                        component={Link}
-                        to={`/map?party=${m.partyHost?.membershipId ?? m.membershipId}`}
-                        size="sm"
-                      >
-                        {m.mapItems} on map
-                      </Anchor>
-                    ) : (
-                      <Text size="sm" c="dimmed">
-                        not placed
-                      </Text>
+                        {!locked && !isHost
+                          ? m.guests.map((g) => (
+                              <Button
+                                key={`claim-${g.id}`}
+                                size="compact-xs"
+                                variant="subtle"
+                                onClick={() =>
+                                  onClaim({ id: g.id, name: g.name })
+                                }
+                              >
+                                {m.guests.length === 1
+                                  ? "That's me"
+                                  : `“${g.name}” is me`}
+                              </Button>
+                            ))
+                          : null}
+                      </Group>
                     )}
                   </Table.Td>
-                ) : null}
-              </Table.Tr>
+                  {mapVisible ? (
+                    <Table.Td>
+                      {m.mapItems > 0 ? (
+                        // Deep-links the map with this whole party highlighted —
+                        // the member's own structures plus anything their guests
+                        // occupy. Someone in another member's party is keyed under
+                        // that host, so link there or the map lights up nothing.
+                        // No link when nothing is placed, rather than a link to a
+                        // map with nothing lit up.
+                        <Anchor
+                          component={Link}
+                          to={`/map?party=${m.partyHost?.membershipId ?? m.membershipId}`}
+                          size="sm"
+                        >
+                          {m.mapItems} on map
+                        </Anchor>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          not placed
+                        </Text>
+                      )}
+                    </Table.Td>
+                  ) : null}
+                </Table.Tr>
+              </Fragment>
             );
           })}
         </Table.Tbody>
@@ -1399,6 +1440,7 @@ function RosterTableInner({
  */
 function RosterTable({
   members,
+  groups,
   myMembershipId,
   locked,
   year,
@@ -1407,6 +1449,7 @@ function RosterTable({
   mapObjects,
 }: {
   members: Route.ComponentProps["loaderData"]["members"];
+  groups: Route.ComponentProps["loaderData"]["groups"];
   myMembershipId: string | null;
   locked: boolean;
   year: number;
@@ -1428,6 +1471,7 @@ function RosterTable({
   // device that has a pointer, and never clobbers an explicit selection.
   const [selected, setSelected] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [grouped, setGrouped] = useState(false);
   useFetcherNotifications(claimFetcher.data, claimFetcher.state, () =>
     setClaiming(null),
   );
@@ -1466,6 +1510,56 @@ function RosterTable({
   }, [members, showAll]);
 
   const hidden = notComing + noReply;
+
+  /**
+   * Optional nesting by social group (plans/social-groups.md).
+   *
+   * Unlike the members directory, nobody is listed twice here: this page is
+   * about *how many people are coming*, and a row appearing under two headings
+   * makes the reader count them twice however carefully the totals are worded.
+   * So each person sits under their first group alphabetically and carries
+   * chips naming every group they're in — nothing hidden, arithmetic intact.
+   */
+  const { ordered, sectionBefore, chipsFor } = useMemo(() => {
+    const chips = new Map<string, string[]>();
+    for (const g of groups) {
+      for (const id of g.memberIds) {
+        const list = chips.get(id);
+        if (list) list.push(g.name);
+        else chips.set(id, [g.name]);
+      }
+    }
+    if (!grouped) {
+      return { ordered: shown, sectionBefore: null, chipsFor: chips };
+    }
+
+    const homeOf = new Map<string, string>();
+    for (const g of groups) {
+      for (const id of g.memberIds) if (!homeOf.has(id)) homeOf.set(id, g.id);
+    }
+    const rows: typeof shown = [];
+    const heads = new Map<string, { title: string; count: number }>();
+    for (const g of groups) {
+      const mine = shown.filter((m) => homeOf.get(m.membershipId) === g.id);
+      if (mine.length === 0) continue;
+      const [first] = mine;
+      if (first)
+        heads.set(first.membershipId, { title: g.name, count: mine.length });
+      rows.push(...mine);
+    }
+    const rest = shown.filter((m) => !homeOf.has(m.membershipId));
+    if (rest.length) {
+      const [first] = rest;
+      if (first) {
+        heads.set(first.membershipId, {
+          title: "Not in a group",
+          count: rest.length,
+        });
+      }
+      rows.push(...rest);
+    }
+    return { ordered: rows, sectionBefore: heads, chipsFor: chips };
+  }, [shown, groups, grouped]);
 
   // Hover only previews while nothing is pinned, so a stray mouse crossing the
   // table can't silently replace what you chose.
@@ -1522,7 +1616,18 @@ function RosterTable({
       ) : null}
 
       <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
-        <DayLegend year={year} />
+        <Group gap="sm" wrap="wrap">
+          <DayLegend year={year} />
+          {groups.length > 0 ? (
+            <Button
+              size="compact-xs"
+              variant={grouped ? "light" : "subtle"}
+              onClick={() => setGrouped((v) => !v)}
+            >
+              {grouped ? "Ungroup" : "Group by social group"}
+            </Button>
+          ) : null}
+        </Group>
         {hidden > 0 ? (
           <Group gap="xs" wrap="nowrap">
             <Text size="xs" c="dimmed">
@@ -1545,7 +1650,9 @@ function RosterTable({
       </Group>
 
       <RosterTableInner
-        members={shown}
+        members={ordered}
+        sectionBefore={sectionBefore}
+        chipsFor={chipsFor}
         myMembershipId={myMembershipId}
         locked={locked}
         year={year}
