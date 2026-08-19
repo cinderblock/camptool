@@ -27,6 +27,7 @@ import { ShellBanner } from "~/components/ShellBanner";
 import { outstandingAsks } from "~/lib/asks";
 import { loadAskSnapshots } from "~/lib/asks.server";
 import { authClient, signOut } from "~/lib/auth-client";
+import { discordEnabled } from "~/lib/auth.server";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
 import { countPendingEntries } from "~/lib/faq.server";
@@ -123,6 +124,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       outstandingCount = outstandingAsks(snapshot, {
         weeksUntilEvent: weeksUntilEvent(activeEdition.year),
         featureStates: features,
+        capabilities: { discord: discordEnabled },
       }).length;
     }
   }

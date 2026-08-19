@@ -212,6 +212,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? outstandingAsks(snapshot, {
           weeksUntilEvent: weeksUntilEvent(activeEdition.year),
           featureStates: Object.fromEntries(featureStates),
+          capabilities: { discord: discordEnabled },
         })
       : [];
 
@@ -432,13 +433,6 @@ function CampOverview({
       key: "approvals",
       label: `${overview.pendingApprovals} map change${overview.pendingApprovals === 1 ? "" : "s"} need your approval`,
       to: "/map",
-    });
-  }
-
-  async function linkDiscord() {
-    await authClient.linkSocial({
-      provider: "discord",
-      callbackURL: "/",
     });
   }
 
@@ -672,11 +666,14 @@ function CampOverview({
                 <Text size="sm" c="dimmed" mb="sm">
                   Link your Discord to verify camp membership.
                 </Text>
+                {/* Same shape as the Passkey card above: the account page owns
+                    the credential controls, this is just the status. */}
                 <Button
+                  component={Link}
+                  to="/account"
                   size="xs"
                   variant="light"
                   color="indigo"
-                  onClick={linkDiscord}
                 >
                   Link Discord
                 </Button>

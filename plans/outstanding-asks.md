@@ -165,6 +165,11 @@ Verified in the running app for a camper with nothing done:
       Link your Discord account                     → /settings
       Anything else we should know?                 → /start
 
+(The last two lines of that capture are both since-fixed bugs — see the
+2026-08-18 progress-log entry. `sharing` no longer fires for a camper with
+nobody in their party, and `discord` is gated on the deployment having Discord
+and now routes to `/account`.)
+
 ### Phase D — the wizard becomes a view
 
 - [ ] `scheduleAsks` filters the new registry; `/start`'s `AskBody` switch keys
@@ -190,6 +195,9 @@ Verified in the running app for a camper with nothing done:
 - **Don't** let a to-do link to a page the camper's role or the camp's feature
   state would bounce them off.
 - **Don't** ship a to-do with no route (see the dues note).
+- **Don't** write an `isSatisfied` that treats "no rows" as "no answer". Empty
+  frequently *is* the answer — a tent with no occupants means "just me". Ask
+  what the camp can't already infer, or the list trains people to ignore it.
 - **Don't** treat `wizard_ask.status = 'done'` as satisfaction for any ask that
   has a real `isSatisfied` — that's the bug being fixed.
 
@@ -202,6 +210,26 @@ Verified in the running app for a camper with nothing done:
       against every camp in the dev database before wiring any UI, which is how
       the feature-gating and season windows got confirmed against real feature
       states rather than assumed.
+- [x] 2026-08-18 — Two false to-dos Cameron hit on the live deploy, both from
+      the same mistake: asking a question whose answer the app already had.
+      - **`sharing` nagged solo campers.** It read
+        `domicilesWithoutOccupants` — your own tent with an empty occupant list
+        counted as unanswered, even though the wizard itself renders that state
+        as "Just you so far.". Replaced with `partyWithoutBed`: attendee rows
+        *hosted by* this member (guests, party-linked members) who are still
+        coming and appear in no `map_object_occupant` row. A camper with nobody
+        in tow can no longer be asked anything here. Relabelled to "Say where
+        the people with you are sleeping".
+      - **`discord` showed on deployments with no Discord.** New
+        deployment-capability gate on `AskDef` (`capability: "discord"`,
+        supplied via `AskContext.capabilities`) — distinct from `feature`,
+        which is a per-camp switch. A missing capability defaults to
+        *unavailable*, so a caller that forgets to report one can't leave a dead
+        link on the list. Route moved `/settings` → `/account`: `/settings` is
+        the admin-only camp feature switchboard and never had a Discord
+        control. Added the Discord card to `/account` (link + status) and
+        pointed the Overview card at it, matching how the Passkey card already
+        defers to that page.
 
 ### Gotchas found while driving it
 

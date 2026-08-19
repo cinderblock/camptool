@@ -50,6 +50,14 @@ export type AskAudience = "all" | "returning" | "recruit";
  */
 export type AskImportance = "required" | "recommended" | "optional";
 
+/**
+ * A deployment-level capability an ask can depend on — something the
+ * self-hoster either configured or didn't, as opposed to a per-camp `feature`
+ * the camp turns on. An ask whose capability is missing is not "off for this
+ * camp", it's impossible: there is no Discord to link to, so asking is noise.
+ */
+export type AskCapability = "discord";
+
 export const IMPORTANCE_RANK: Record<AskImportance, number> = {
   required: 0,
   recommended: 1,
@@ -78,8 +86,16 @@ export type AskSnapshot = {
   // — gear and map —
   bringingCount: number;
   unplacedCount: number;
-  /** Domiciles/vehicles they own that nobody has been listed in. */
-  domicilesWithoutOccupants: number;
+  /**
+   * People attending under this member — their guests, and members linked into
+   * their party — who aren't listed as sleeping anywhere.
+   *
+   * Deliberately NOT "structures with no occupants": your own empty tent means
+   * "just me", which is a complete answer, and nagging a solo camper to name
+   * the occupant of their own tent is nonsense. The question only exists once
+   * someone else's bed depends on your answer.
+   */
+  partyWithoutBed: number;
 
   // — camp checklist —
   checklistRemaining: number;
@@ -136,6 +152,12 @@ export type AskDef = {
    * an ungated ask would link somewhere that bounces. Unset = core.
    */
   feature?: FeatureKey;
+  /**
+   * Deployment capability this ask needs. Dropped unless `AskContext` reports
+   * it available — and dropped when the context says nothing, since an ask that
+   * can't be acted on is worse than a missing one.
+   */
+  capability?: AskCapability;
   /** Appears as a step in the `/start` wizard. */
   wizard?: boolean;
   isSatisfied: (s: AskSnapshot) => boolean;
@@ -221,15 +243,15 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "sharing",
-    label: "Say who's sleeping in your structures",
-    hint: "So the camp knows where everyone is",
+    label: "Say where the people with you are sleeping",
+    hint: "Your guests, and anyone attending under you",
     route: "/start",
     audience: "all",
     importance: "optional",
     opensWeeksBefore: 12,
     feature: "bringing",
     wizard: true,
-    isSatisfied: (s) => !attending(s) || s.domicilesWithoutOccupants === 0,
+    isSatisfied: (s) => !attending(s) || s.partyWithoutBed === 0,
   },
   {
     key: "ticket",
@@ -320,10 +342,14 @@ export const ASKS: AskDef[] = [
     key: "discord",
     label: "Link your Discord account",
     hint: "Where the camp actually talks",
-    route: "/settings",
+    // Your account, next to the passkeys — NOT /settings, which is the
+    // admin-only camp feature switchboard and has never had a Discord control.
+    route: "/account",
     audience: "all",
     importance: "optional",
     opensWeeksBefore: null,
+    // Only when this deployment has Discord OAuth configured at all.
+    capability: "discord",
     isSatisfied: (s) => s.discordLinked,
   },
   {
@@ -377,6 +403,8 @@ export function askInSeason(
 export type AskContext = {
   weeksUntilEvent: number;
   featureStates?: Partial<Record<FeatureKey, FeatureState>>;
+  /** What this deployment can actually do — see `AskCapability`. */
+  capabilities?: Partial<Record<AskCapability, boolean>>;
 };
 
 /** Is this ask relevant to this camper right now, satisfied or not? */
@@ -394,6 +422,9 @@ export function askIsScheduled(
     )
       return false;
   }
+  // Unlike a feature, a missing capability defaults to unavailable: a caller
+  // that forgets to report one shouldn't leave a dead link on the to-do list.
+  if (ask.capability && !ctx.capabilities?.[ask.capability]) return false;
   return true;
 }
 

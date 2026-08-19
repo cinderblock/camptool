@@ -41,7 +41,7 @@ import {
   useSearchParams,
 } from "react-router";
 import { authClient } from "~/lib/auth-client";
-import { auth } from "~/lib/auth.server";
+import { auth, discordEnabled } from "~/lib/auth.server";
 import { redact } from "~/lib/privacy.server";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -81,8 +81,19 @@ export async function loader({ request }: Route.LoaderArgs) {
     .from(passkey)
     .where(eq(passkey.userId, user.id));
 
+  // Discord is a linked identity on the same account, so it belongs here next
+  // to the other credentials — and the "link your Discord" ask points at this
+  // page, which means the control has to exist for anyone the ask reaches.
+  const [discordAccount] = await db
+    .select({ id: account.id })
+    .from(account)
+    .where(and(eq(account.userId, user.id), eq(account.providerId, "discord")))
+    .limit(1);
+
   return redact(privacy, {
     hasPassword: await hasPasswordFor(user.id),
+    discordEnabled,
+    discordLinked: Boolean(discordAccount),
     // Password controls are hidden (and refused server-side) while an officer
     // is "working as" someone — see the action for why that would be actively
     // dangerous rather than merely confusing.
@@ -257,7 +268,13 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Account({ loaderData }: Route.ComponentProps) {
-  const { passkeys, hasPassword, impersonating } = loaderData;
+  const {
+    passkeys,
+    hasPassword,
+    impersonating,
+    discordEnabled,
+    discordLinked,
+  } = loaderData;
   const fetcher = useFetcher<typeof action>();
   const { revalidate } = useRevalidator();
   const [label, setLabel] = useState("");
@@ -346,6 +363,13 @@ export default function Account({ loaderData }: Route.ComponentProps) {
           </Stack>
         </Card>
 
+        {/* Only where the deployment actually has Discord OAuth configured —
+            otherwise there is nothing to link to, and the ask that points here
+            isn't shown either (see the "discord" capability in asks.ts). */}
+        {discordEnabled ? (
+          <DiscordCard linked={discordLinked} impersonating={impersonating} />
+        ) : null}
+
         {/* No "add a password" counterpart on purpose: passwords are a legacy
             credential here, so this card can only ever appear for accounts that
             already have one (plans/password-recovery.md decision 1). */}
@@ -357,6 +381,63 @@ export default function Account({ loaderData }: Route.ComponentProps) {
         ) : null}
       </Stack>
     </Container>
+  );
+}
+
+/** Link (or confirm) the Discord identity on this account. Unlinking isn't
+ * offered: Discord can be revoked from Discord's own side, and for a camp that
+ * uses it for membership verification, a one-click unlink here is a foot-gun. */
+function DiscordCard({
+  linked,
+  impersonating,
+}: {
+  linked: boolean;
+  impersonating: boolean;
+}) {
+  return (
+    <Card withBorder>
+      <Stack gap="md">
+        <Group justify="space-between" align="center">
+          <Text fw={600}>Discord</Text>
+          <Badge variant="light" color={linked ? "green" : "gray"}>
+            {linked ? "Linked" : "Not linked"}
+          </Badge>
+        </Group>
+        {linked ? (
+          <Text size="sm" c="dimmed">
+            Your Discord account is linked. You can sign in with it, and the
+            camp can match you to the person in its server.
+          </Text>
+        ) : impersonating ? (
+          <Alert color="yellow">
+            You're working as someone else. Linking Discord always applies to
+            your own account, so it's unavailable here.
+          </Alert>
+        ) : (
+          <>
+            <Text size="sm" c="dimmed">
+              Discord is where the camp actually talks. Linking it lets the camp
+              match your account to the person in its server — and gives you
+              another way to sign in.
+            </Text>
+            <Group>
+              <Button
+                variant="light"
+                color="indigo"
+                onClick={() =>
+                  authClient.linkSocial({
+                    provider: "discord",
+                    callbackURL: "/account",
+                  })
+                }
+              >
+                Link Discord
+              </Button>
+            </Group>
+          </>
+        )}
+      </Stack>
+    </Card>
   );
 }
 

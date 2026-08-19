@@ -20,7 +20,7 @@ const settled: AskSnapshot = {
   unansweredRequiredQuestions: 0,
   bringingCount: 1,
   unplacedCount: 0,
-  domicilesWithoutOccupants: 0,
+  partyWithoutBed: 0,
   checklistRemaining: 0,
   hasTicket: true,
   ticketRequested: false,
@@ -47,6 +47,7 @@ const ctx: AskContext = {
     onboarding: "on",
     dues: "on",
   },
+  capabilities: { discord: true },
 };
 
 const snap = (over: Partial<AskSnapshot> = {}): AskSnapshot => ({
@@ -302,6 +303,58 @@ describe("passkey ask", () => {
       (a) => a.key,
     );
     expect(keys).toContain("passkey");
+  });
+});
+
+describe("discord ask", () => {
+  test("is outstanding when the deployment has Discord and the account doesn't", () => {
+    expect(keys(snap({ discordLinked: false }))).toContain("discord");
+  });
+
+  test("is dropped when this deployment has no Discord configured", () => {
+    // Not "off for this camp" — there is no Discord to link to, so the row
+    // would be a dead end. Cameron hit exactly this on a deployment without it.
+    const s = snap({ discordLinked: false });
+    expect(keys(s, { ...ctx, capabilities: { discord: false } })).not.toContain(
+      "discord",
+    );
+  });
+
+  test("a caller that reports no capabilities gets no capability-gated asks", () => {
+    const s = snap({ discordLinked: false });
+    expect(keys(s, { ...ctx, capabilities: undefined })).not.toContain(
+      "discord",
+    );
+    // Ungated asks still come through, so this isn't a blunt filter.
+    expect(
+      keys(snap({ hasPasskey: false }), { ...ctx, capabilities: undefined }),
+    ).toContain("passkey");
+  });
+
+  test("points somewhere a camper can actually link it", () => {
+    // /settings is the admin-only camp feature switchboard and has no Discord
+    // control; the account page is where credentials live.
+    expect(ASKS.find((a) => a.key === "discord")?.route).toBe("/account");
+  });
+});
+
+describe("sharing ask", () => {
+  test("a solo camper is never asked who's in their own tent", () => {
+    // An empty occupant list on your own structure means "just me" — a
+    // complete answer. Nagging about it was the bug.
+    expect(keys(snap({ bringingCount: 2, partyWithoutBed: 0 }))).not.toContain(
+      "sharing",
+    );
+  });
+
+  test("is outstanding once someone in your party has no bed", () => {
+    expect(keys(snap({ partyWithoutBed: 1 }))).toContain("sharing");
+  });
+
+  test("someone who isn't coming is owed nothing about beds", () => {
+    expect(
+      keys(snap({ rsvp: "not_coming", partyWithoutBed: 2 })),
+    ).not.toContain("sharing");
   });
 });
 

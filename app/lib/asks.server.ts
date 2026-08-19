@@ -37,7 +37,6 @@ import {
 import type { AskSnapshot } from "./asks";
 import { audienceForRole } from "./asks";
 import { setupPassWindowFor } from "./brc";
-import { hasTag } from "./structures";
 
 /** Zero-value snapshot for a member we have no rows for at all. */
 function emptySnapshot(role: string): AskSnapshot {
@@ -52,7 +51,7 @@ function emptySnapshot(role: string): AskSnapshot {
     unansweredRequiredQuestions: 0,
     bringingCount: 0,
     unplacedCount: 0,
-    domicilesWithoutOccupants: 0,
+    partyWithoutBed: 0,
     checklistRemaining: 0,
     hasTicket: false,
     ticketRequested: false,
@@ -187,7 +186,6 @@ export async function loadAskSnapshots(
   const objects = await db
     .select({
       id: mapObject.id,
-      kind: mapObject.kind,
       ownerMembershipId: mapObject.ownerMembershipId,
       placed: mapObject.placed,
     })
@@ -198,25 +196,48 @@ export async function loadAskSnapshots(
         isNotNull(mapObject.ownerMembershipId),
       ),
     );
-  const occupiedObjectIds = new Set(
-    (
-      await db
-        .select({ objectId: mapObjectOccupant.objectId })
-        .from(mapObjectOccupant)
-        .where(eq(mapObjectOccupant.editionId, editionId))
-    ).map((r) => r.objectId),
-  );
   for (const o of objects) {
     const s = o.ownerMembershipId ? snaps.get(o.ownerMembershipId) : null;
     if (!s) continue;
     s.bringingCount += 1;
     if (!o.placed) s.unplacedCount += 1;
-    // Only somewhere a person sleeps needs an occupant list; a shade structure
-    // or a generator doesn't.
-    const sleepable = hasTag(o.kind, "domicile") || hasTag(o.kind, "vehicle");
-    if (sleepable && !occupiedObjectIds.has(o.id)) {
-      s.domicilesWithoutOccupants += 1;
-    }
+  }
+
+  // — people in someone's party with no bed named —
+  // Only bodies that are attending UNDER a member: a member's own structure with
+  // an empty occupant list already means "just me" (the wizard even says so),
+  // and asking a solo camper who's sleeping in their own tent is noise. So the
+  // question is only ever about the people whose bed nobody else can infer.
+  const bedded = new Set(
+    (
+      await db
+        .select({ attendeeId: mapObjectOccupant.attendeeId })
+        .from(mapObjectOccupant)
+        .where(eq(mapObjectOccupant.editionId, editionId))
+    )
+      .map((r) => r.attendeeId)
+      .filter((id): id is string => id != null),
+  );
+  for (const a of await db
+    .select({
+      id: attendee.id,
+      membershipId: attendee.membershipId,
+      hostMembershipId: attendee.hostMembershipId,
+      status: attendee.status,
+    })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        isNotNull(attendee.hostMembershipId),
+      ),
+    )) {
+    // Someone who isn't coming needs no bed; nor does a self-hosted row.
+    if (a.status === "not_coming") continue;
+    if (a.membershipId && a.membershipId === a.hostMembershipId) continue;
+    if (bedded.has(a.id)) continue;
+    const s = a.hostMembershipId ? snaps.get(a.hostMembershipId) : null;
+    if (s) s.partyWithoutBed += 1;
   }
 
   // — camp checklist —
