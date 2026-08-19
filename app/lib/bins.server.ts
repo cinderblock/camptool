@@ -65,6 +65,8 @@ export async function setBinsLink(opts: {
   campId: string;
   baseUrl: string;
   accessCode: string | null;
+  /** Read-scoped `/api/v1` token; omit to leave whatever is stored. */
+  apiToken?: string | null;
   label: string | null;
   updatedByMembershipId: string;
 }): Promise<void> {
@@ -75,6 +77,8 @@ export async function setBinsLink(opts: {
       .set({
         baseUrl: opts.baseUrl,
         accessCode: opts.accessCode,
+        apiToken:
+          opts.apiToken === undefined ? existing.apiToken : opts.apiToken,
         label: opts.label,
         updatedByMembershipId: opts.updatedByMembershipId,
         updatedAt: new Date(),
@@ -89,6 +93,7 @@ export async function setBinsLink(opts: {
     campId: opts.campId,
     baseUrl: opts.baseUrl,
     accessCode: opts.accessCode,
+    apiToken: opts.apiToken ?? null,
     label: opts.label,
     updatedByMembershipId: opts.updatedByMembershipId,
   });

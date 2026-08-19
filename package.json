@@ -21,6 +21,7 @@
     "e2e:pictures": "bun e2e/pictures.ts",
     "e2e:backup": "bun e2e/backup.ts",
     "e2e:bins": "bun e2e/bins.ts",
+    "e2e:bins-stock": "bun e2e/bins-stock.ts",
     "e2e:prospects": "bun e2e/prospects.ts",
     "e2e:responses": "bun e2e/question-responses.ts",
     "lint": "biome check .",

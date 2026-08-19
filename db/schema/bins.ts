@@ -39,6 +39,15 @@ export const campBins = sqliteTable(
      * payload — only in the redirect issued at click time.
      */
     accessCode: text("access_code"),
+    /**
+     * A READ-scoped integration token from the bins admin page
+     * (`bins_<prefix>_<secret>`), used server-side to read stock over
+     * `/api/v1`. Separate from `accessCode` on purpose: that one is a human
+     * hand-off credential handed to members, this one is a machine credential
+     * that never leaves the server and can be revoked in bins without
+     * disturbing anybody's sign-in.
+     */
+    apiToken: text("api_token"),
     /** What to call it in the menu; defaults to "Bins" when unset. */
     label: text("label"),
     updatedByMembershipId: text("updated_by_membership_id").references(

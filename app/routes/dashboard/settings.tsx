@@ -23,6 +23,7 @@ import {
 } from "@mantine/core";
 import { type ReactNode, useState } from "react";
 import { data, redirect, useFetcher } from "react-router";
+import { clearBinsCache } from "~/lib/bins-api.server";
 import {
   clearBinsLink,
   getBinsLink,
@@ -58,6 +59,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       baseUrl: binsLink?.baseUrl ?? "",
       label: binsLink?.label ?? "",
       hasCode: !!binsLink?.accessCode,
+      hasToken: !!binsLink?.apiToken,
     },
     features: FEATURES.map((def) => ({
       key: def.key,
@@ -85,14 +87,19 @@ export async function action({ request }: Route.ActionArgs) {
     // A blank code field means "leave the stored one alone" — the form can't
     // show the existing secret, so blank must not silently erase it.
     const typed = String(form.get("accessCode") ?? "").trim();
+    const typedToken = String(form.get("apiToken") ?? "").trim();
     const existing = await getBinsLink(active.camp.id);
     await setBinsLink({
       campId: active.camp.id,
       baseUrl,
       accessCode: typed || existing?.accessCode || null,
+      apiToken: typedToken || existing?.apiToken || null,
       label: String(form.get("label") ?? "").trim() || null,
       updatedByMembershipId: active.membership.id,
     });
+    // Config changed — the next Supplies view should re-read, not serve a
+    // snapshot fetched with the old address or token.
+    clearBinsCache(active.camp.id);
     return { ok: true };
   }
 
@@ -204,12 +211,18 @@ function FeatureCard({
 function BinsConfig({
   bins,
 }: {
-  bins: { baseUrl: string; label: string; hasCode: boolean };
+  bins: {
+    baseUrl: string;
+    label: string;
+    hasCode: boolean;
+    hasToken: boolean;
+  };
 }) {
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const [baseUrl, setBaseUrl] = useState(bins.baseUrl);
   const [label, setLabel] = useState(bins.label);
   const [accessCode, setAccessCode] = useState("");
+  const [apiToken, setApiToken] = useState("");
   const saving = fetcher.state !== "idle";
 
   const saved = fetcher.data?.ok && !saving;
@@ -246,6 +259,18 @@ function BinsConfig({
         value={accessCode}
         onChange={(e) => setAccessCode(e.currentTarget.value)}
       />
+      <PasswordInput
+        size="xs"
+        label="Read token"
+        description={
+          bins.hasToken
+            ? "Saved. Type a new one to replace it, or leave blank to keep it."
+            : "Optional. A read-scoped integration token from your bins admin page — with one, Supplies can look up which box something is in. Stays on the server."
+        }
+        placeholder={bins.hasToken ? "••••••••" : "bins_…"}
+        value={apiToken}
+        onChange={(e) => setApiToken(e.currentTarget.value)}
+      />
       {fetcher.data?.error ? (
         <Text size="xs" c="red">
           {fetcher.data.error}
@@ -275,7 +300,7 @@ function BinsConfig({
           loading={saving}
           onClick={() =>
             fetcher.submit(
-              { intent: "bins", baseUrl, accessCode, label },
+              { intent: "bins", baseUrl, accessCode, apiToken, label },
               { method: "post" },
             )
           }

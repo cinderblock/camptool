@@ -1,0 +1,1 @@
+ALTER TABLE `camp_bins` ADD `api_token` text;

@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Anchor,
   Badge,
   Button,
   Card,
@@ -17,7 +18,10 @@ import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
-import { requireFeature } from "~/lib/features.server";
+import { type BinSummary, binHref, binTitle, searchBins } from "~/lib/bins";
+import { getBinsStock } from "~/lib/bins-api.server";
+import { featureVisibleTo } from "~/lib/features";
+import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -111,6 +115,17 @@ export async function loader({ request }: Route.LoaderArgs) {
     }));
   }
 
+  // What's already in the camp's storage, read live from its bins instance
+  // (plans/bins-integration.md). Absent unless the camp runs bins, has the
+  // feature on and has pasted a read token — and it degrades to nothing at all
+  // if the warehouse is unreachable, because not being able to reach a
+  // warehouse must never stop anyone claiming a supply.
+  const binsVisible = featureVisibleTo(
+    await getFeatureState(campId, "bins"),
+    role,
+  );
+  const warehouse = binsVisible ? await getBinsStock(campId) : null;
+
   return redact(privacy, {
     canManage,
     locked: activeEdition.locked,
@@ -119,6 +134,15 @@ export async function loader({ request }: Route.LoaderArgs) {
     categories: categories.map((c) => ({ id: c.id, name: c.name })),
     items,
     roster,
+    warehouse:
+      warehouse?.ok === true
+        ? {
+            baseUrl: warehouse.baseUrl,
+            bins: warehouse.stock.bins,
+            locations: warehouse.stock.locations,
+            fetchedAt: warehouse.stock.fetchedAt,
+          }
+        : null,
   });
 }
 
@@ -407,9 +431,97 @@ type FetcherData = { ok?: boolean; error?: string; message?: string };
 type LoaderData = Route.ComponentProps["loaderData"];
 type Item = LoaderData["items"][number];
 
+/**
+ * "Which box is it in?" — a live lookup against the camp's bins instance,
+ * shown beside the supply list so nobody buys a second roll of gaff tape when
+ * there are four in storage. Read-only and best-effort: the panel simply isn't
+ * there if bins isn't configured or can't be reached.
+ */
+function Warehouse({
+  warehouse,
+}: {
+  warehouse: {
+    baseUrl: string;
+    bins: BinSummary[];
+    locations: string[];
+    fetchedAt: number;
+  };
+}) {
+  const [query, setQuery] = useState("");
+  const hits = useMemo(
+    () => searchBins(warehouse.bins, query).slice(0, 8),
+    [warehouse.bins, query],
+  );
+  return (
+    <Card withBorder padding="md" radius="md">
+      <Group justify="space-between" align="flex-start" gap="sm" mb="xs">
+        <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+          <Text fw={600} size="sm">
+            In storage
+          </Text>
+          {/* Built as one string rather than interleaved JSX: SSR splits
+              `{n}{" "}boxes` into separate text nodes, which reads the same but
+              can't be asserted on (and copy-pastes with stray markers). */}
+          <Text size="xs" c="dimmed">
+            {`${warehouse.bins.length} ${
+              warehouse.bins.length === 1 ? "box" : "boxes"
+            }${
+              warehouse.locations.length
+                ? ` across ${warehouse.locations.length} ${
+                    warehouse.locations.length === 1 ? "place" : "places"
+                  }`
+                : ""
+            }. Search before you buy.`}
+          </Text>
+        </div>
+      </Group>
+      <TextInput
+        size="xs"
+        placeholder="e.g. gaff tape"
+        value={query}
+        onChange={(e) => setQuery(e.currentTarget.value)}
+      />
+      {query.trim() ? (
+        hits.length ? (
+          <Stack gap={4} mt="xs">
+            {hits.map((b) => (
+              <Group key={b.id} justify="space-between" gap="sm" wrap="wrap">
+                <Anchor
+                  href={binHref(warehouse.baseUrl, b.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  size="sm"
+                  style={{ flex: "1 1 160px", minWidth: 0 }}
+                >
+                  {binTitle(b)}
+                </Anchor>
+                <Text size="xs" c="dimmed">
+                  {b.locationName ?? "no location set"}
+                </Text>
+              </Group>
+            ))}
+          </Stack>
+        ) : (
+          <Text size="xs" c="dimmed" mt="xs">
+            Nothing in storage matches "{query.trim()}".
+          </Text>
+        )
+      ) : null}
+    </Card>
+  );
+}
+
 export default function Supplies({ loaderData }: Route.ComponentProps) {
-  const { categories, items, canManage, locked, year, roster, myMembershipId } =
-    loaderData;
+  const {
+    categories,
+    items,
+    canManage,
+    locked,
+    year,
+    roster,
+    myMembershipId,
+    warehouse,
+  } = loaderData;
 
   return (
     <Container size="md">
@@ -424,6 +536,8 @@ export default function Supplies({ loaderData }: Route.ComponentProps) {
             tents and vehicles live under Bringing.)
           </Text>
         </div>
+
+        {warehouse ? <Warehouse warehouse={warehouse} /> : null}
 
         {locked ? (
           <Text size="sm" c="dimmed">

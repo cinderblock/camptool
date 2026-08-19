@@ -69,7 +69,39 @@ shown once the feature isn't off. A blank access-code field means "keep the
 stored one" — the form can't display the existing secret, so blank must not
 silently erase it.
 
-## Phase 2 — the data link (NOT BUILT; design below)
+## Phase 2 — the data link (FIRST SLICE LANDED)
+
+**What shipped:** a read-only **"In storage"** panel on `/supplies` — a search
+box over the camp's real bins stock, so nobody buys a second roll of gaff tape
+when there are four in the warehouse. Each hit links to that box in bins.
+
+- **Auth:** bins mints scoped, revocable **integration tokens**
+  (`POST /api/admin/integrations/create` → `bins_<prefix>_<secret>`, `scope:
+  "read"`, shown once, hash stored). The admin pastes one into `/settings`; it
+  lands in `camp_bins.api_token` (**migration 0078**) and is used **server-side
+  only**. Distinct from `access_code` on purpose: that is a human credential
+  handed to members, this is a machine one that can be revoked in bins without
+  disturbing anyone's sign-in.
+- **Caching:** 60s TTL, keyed by **camp + address + token**, so changing either
+  takes effect at once rather than after the TTL. 4s timeout per request.
+- **Degradation is the point.** No token, bins down, 401, garbage JSON, or slow
+  → the panel is simply absent and Supplies renders exactly as before. A
+  warehouse we can't reach must never stop anyone claiming a supply. One
+  deliberate exception: a *transient* failure falls back to the last good
+  snapshot, because stale beats empty for a blip.
+- **Search runs client-side** over the snapshot in the loader payload, so
+  typing is instant and doesn't hit bins per keystroke. That does mean bin
+  names/locations reach the browser — they're camp data shown to members, which
+  is the same bar as the rest of the page. The **token never does**;
+  `e2e/bins-stock.ts` asserts it.
+
+**Still open — per-supply matching.** The original July 30 wording was "show
+real counts inline at the point of claiming", i.e. each supply line knowing its
+own stock. That needs a way to match a supply row to bins boxes, and it is
+still the unanswered design question below. The search panel delivers the
+useful half without guessing at it.
+
+### Original design notes (kept for context)
 
 **This was already decided and then blocked.** `plans/july-30-meeting.md`
 decision 4: *"Warehouse inventory → PULL bins data into the supplies view.
@@ -125,7 +157,16 @@ hop-out. Only worth it once there's data to show — i.e. after the pull above.
       `/bins` redirect route, top-bar item, admin config card at `/settings`.
       typecheck + lint + build green, 174/174 unit tests, **`e2e/bins.ts`
       12/12** (`bun run e2e:bins`), migration verified (72 clean, 60 tables).
-- [ ] Phase 2 — the supplies data pull (unblocked; needs the matching decision).
+- [x] 2026-08-17 — Phase 2 first slice: `camp_bins.api_token` (**migration
+      0078**, one ALTER), `app/lib/bins.ts` (pure search/title/href, 7 unit
+      tests) + `bins-api.server.ts` (fetch, TTL cache keyed by credentials,
+      graceful degradation), read-token field at `/settings`, and the
+      **"In storage"** search panel on `/supplies`. typecheck + lint + build
+      green, 307 unit tests, 79 migrations clean, **`e2e/bins-stock.ts` 10/10**
+      against a stub bins instance (`bun run e2e:bins-stock`). Dev-server log
+      checked for SSR throws — clean.
+- [ ] Phase 2b — per-supply stock ("counts inline at the point of claiming"),
+      blocked on the matching question below.
 - [ ] Phase 3 — possible in-app bins page / left-menu entry.
 
 ## Open questions for the user
