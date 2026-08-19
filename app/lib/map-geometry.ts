@@ -200,6 +200,38 @@ export function fitCenterOutsideLot(
   return best ?? { x: cx, y: cy };
 }
 
+/**
+ * Where a ray from a point inside the lot crosses the border (plot-local feet).
+ * The lot is convex, so the exit is just the nearest edge the ray is heading
+ * toward — and a ray aimed at a corner lands on that corner, which is the case
+ * that matters for annotations meant to hang off the camp's edge rather than
+ * cut across the middle of everyone's stuff.
+ *
+ * Falls back to the origin point if the ray heads at no edge at all (a zero
+ * direction), so a caller can use the result unconditionally.
+ */
+export function lotExitPoint(
+  cx: number,
+  cy: number,
+  ux: number,
+  uy: number,
+  frontageFt: number,
+  depthFt: number,
+  rear: number,
+): { x: number; y: number } {
+  let t = Number.POSITIVE_INFINITY;
+  for (const e of lotEdges(frontageFt, depthFt, rear)) {
+    // Normals point OUT of the lot, so a positive denominator means the ray is
+    // heading toward this edge rather than away from (or along) it.
+    const denom = ux * e.nx + uy * e.ny;
+    if (denom <= 1e-9) continue;
+    const hit = ((e.px - cx) * e.nx + (e.py - cy) * e.ny) / denom;
+    if (hit >= 0) t = Math.min(t, hit);
+  }
+  if (!Number.isFinite(t)) return { x: cx, y: cy };
+  return { x: cx + ux * t, y: cy + uy * t };
+}
+
 /** Is a whole polygon (absolute plot-local feet) clear of the lot? Same convex
  * separating-edge argument as `fitCenterOutsideLot`: one lot edge with every
  * vertex on its outer side proves the polygon and the lot don't overlap. */

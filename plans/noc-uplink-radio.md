@@ -239,7 +239,15 @@ the pyramid pair — **a 12′ mast now sees over the pyramid's sloping edge whe
 Testing the pyramid means mocking `~/theme` (the camp theme is a Vite build-time
 alias, so `bun test` otherwise sees the empty default theme).
 
-**The camp-wide vector is now a stand-in, not a fixture.** It read as a second,
+**The camp-wide vector starts at the camp's edge**, not its middle — the point
+where a ray from the lot centre leaves the border, which is a corner when the
+bearing points at one (`lotExitPoint` in `app/lib/map-geometry.ts`, convex
+half-plane walk, unit-tested against the wedge's slanted sides). Drawing it from
+the centre put a dashed line straight through everyone's stuff to say something
+about a tower 4,900′ away. Starting 50–100′ out costs about a degree, and the
+distance it's labelled with is recomputed from where the line actually begins.
+
+**It's also a stand-in now, not a fixture.** It read as a second,
 redundant dashed line once a radio was placed — over ~4,900′ a radio anywhere in
 the lot aims within a degree or so of the lot centre, so the two lines lie on top
 of each other and invite the question "whose radio is *that*?". It's drawn only

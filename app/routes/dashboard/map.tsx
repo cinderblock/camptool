@@ -66,6 +66,7 @@ import {
   fitCenterToLot,
   frontageRadiusOf,
   layoutFor,
+  lotExitPoint,
   lotHalfWidthAt,
   pointInLot,
   polygonOutsideLot,
@@ -5005,11 +5006,27 @@ function Editor({
       return { o, mastFt, blockers, ...a };
     });
 
+    // The faint camp-level vector: where the NOC lies from the lot as a whole,
+    // shown while nobody has placed a radio yet. It starts at the lot's own
+    // border — the point (often a corner) where a ray from the middle leaves
+    // the lot — so it hangs off the edge of the camp instead of being drawn
+    // across the middle of everyone's stuff. Over ~4,900′ starting 50–100′ out
+    // costs about a degree, and the number it's labelled with is recomputed
+    // from where it actually starts.
+    const middle = aim(lot.frontageFt / 2, lot.depthFt / 2);
+    const edge = lotExitPoint(
+      lot.frontageFt / 2,
+      lot.depthFt / 2,
+      middle.ux,
+      middle.uy,
+      lot.frontageFt,
+      lot.depthFt,
+      rearWidthOf(lot, frontageRadiusOf(lot)),
+    );
+
     return {
       target,
-      // The faint camp-level vector: where the NOC lies from the lot as a whole,
-      // drawn whether or not anyone has placed a radio yet.
-      camp: aim(lot.frontageFt / 2, lot.depthFt / 2),
+      camp: aim(edge.x, edge.y),
       bearingDeg: sight?.bearingDeg ?? null,
       aims,
     };

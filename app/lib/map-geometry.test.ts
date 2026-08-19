@@ -15,6 +15,7 @@ import {
   fitCenterOutsideLot,
   fitCenterToLot,
   layoutFor,
+  lotExitPoint,
   pointInLot,
   polygonOutsideLot,
 } from "./map-geometry";
@@ -186,5 +187,73 @@ describe("fitCenterInsideLot is unchanged by the move", () => {
     ];
     const c = fitCenterInsideLot(0, 0, huge, 100, 100, 100);
     expect(c.y).toBeCloseTo(50, 6);
+  });
+});
+
+describe("lotExitPoint", () => {
+  const exit = (
+    lot: { frontageFt: number; depthFt: number; rear: number },
+    ux: number,
+    uy: number,
+  ) => {
+    const len = Math.hypot(ux, uy);
+    return lotExitPoint(
+      lot.frontageFt / 2,
+      lot.depthFt / 2,
+      ux / len,
+      uy / len,
+      lot.frontageFt,
+      lot.depthFt,
+      lot.rear,
+    );
+  };
+
+  test("straight out the front lands on the street edge", () => {
+    const p = exit(RECT, 0, -1);
+    expect(p.x).toBeCloseTo(50, 6);
+    expect(p.y).toBeCloseTo(0, 6);
+  });
+
+  test("straight out the back lands on the alley edge", () => {
+    const p = exit(RECT, 0, 1);
+    expect(p.y).toBeCloseTo(100, 6);
+  });
+
+  test("aimed at a corner, it lands on that corner", () => {
+    // From the centre of the rectangle toward the front-left corner.
+    const p = exit(RECT, -50, -50);
+    expect(p.x).toBeCloseTo(0, 6);
+    expect(p.y).toBeCloseTo(0, 6);
+  });
+
+  test("the wedge's slanted side is respected, not a bounding box", () => {
+    // Due left on a lot that widens toward the rear: the border at mid-depth is
+    // 10ft further out than the frontage half-width.
+    const p = exit(WEDGE, -1, 0);
+    expect(p.y).toBeCloseTo(50, 6);
+    expect(p.x).toBeCloseTo(-10, 6);
+    expect(pointInLot(p.x, p.y, 100, 100, 140)).toBe(true);
+  });
+
+  test("the point it returns is ON the border — a hair further is outside", () => {
+    for (const [ux, uy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+      [3, -1],
+      [-2, 5],
+    ] as const) {
+      const p = exit(WEDGE, ux, uy);
+      const len = Math.hypot(ux, uy);
+      const past = { x: p.x + (ux / len) * 0.5, y: p.y + (uy / len) * 0.5 };
+      expect(pointInLot(p.x, p.y, 100, 100, 140)).toBe(true);
+      expect(pointInLot(past.x, past.y, 100, 100, 140)).toBe(false);
+    }
+  });
+
+  test("a zero direction stays put rather than returning nonsense", () => {
+    const p = lotExitPoint(50, 50, 0, 0, 100, 100, 100);
+    expect(p).toEqual({ x: 50, y: 50 });
   });
 });
