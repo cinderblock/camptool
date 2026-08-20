@@ -561,6 +561,7 @@ export default function Supplies({ loaderData }: Route.ComponentProps) {
               locked={locked}
               roster={roster}
               myMembershipId={myMembershipId}
+              warehouse={warehouse}
             />
           ))
         )}
@@ -580,6 +581,7 @@ function CategoryCard({
   locked,
   roster,
   myMembershipId,
+  warehouse,
 }: {
   category: { id: string; name: string };
   items: Item[];
@@ -589,6 +591,7 @@ function CategoryCard({
   locked: boolean;
   roster: { value: string; label: string }[];
   myMembershipId: string;
+  warehouse: { baseUrl: string; bins: BinSummary[] } | null;
 }) {
   const fetcher = useFetcher<FetcherData>();
   useFetcherError(fetcher.data, fetcher.state);
@@ -662,6 +665,7 @@ function CategoryCard({
               locked={locked}
               roster={roster}
               mine={item.ownerMembershipId === myMembershipId}
+              warehouse={warehouse}
             />
           ))
         )}
@@ -873,16 +877,27 @@ function ItemRow({
   locked,
   roster,
   mine,
+  warehouse,
 }: {
   item: Item;
   canManage: boolean;
   locked: boolean;
   roster: { value: string; label: string }[];
   mine: boolean;
+  /** Stock snapshot, when the camp has bins wired up. */
+  warehouse: { baseUrl: string; bins: BinSummary[] } | null;
 }) {
   const fetcher = useFetcher<FetcherData>();
   useFetcherError(fetcher.data, fetcher.state);
   const [editing, setEditing] = useState(false);
+  // "Do we already own some of this?" answered without anybody configuring a
+  // mapping: the supply's own name IS the query. Supplies are edition-scoped
+  // and re-created each year, so a stored per-item mapping would have to be
+  // re-entered every year; a name matches for free and forever.
+  const inStorage = useMemo(
+    () => (warehouse ? searchBins(warehouse.bins, item.name) : []),
+    [warehouse, item.name],
+  );
   const save = (field: string, value: string) =>
     fetcher.submit(
       { intent: "updateItem", id: item.id, field, value },
@@ -1062,6 +1077,22 @@ function ItemRow({
           ) : null}
         </>
       )}
+      {/* Outside the edit/read branches on purpose: officers get the editing
+          branch, and they are exactly the people deciding whether to buy more
+          of something the camp already owns. */}
+      {inStorage.length > 0 && warehouse ? (
+        <Anchor
+          href={binHref(warehouse.baseUrl, (inStorage[0] as BinSummary).id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          size="xs"
+          c="dimmed"
+        >
+          {inStorage.length === 1
+            ? `in ${binTitle(inStorage[0] as BinSummary)}`
+            : `in ${inStorage.length} boxes`}
+        </Anchor>
+      ) : null}
     </Group>
   );
 }

@@ -95,11 +95,20 @@ when there are four in the warehouse. Each hit links to that box in bins.
   is the same bar as the rest of the page. The **token never does**;
   `e2e/bins-stock.ts` asserts it.
 
-**Still open — per-supply matching.** The original July 30 wording was "show
-real counts inline at the point of claiming", i.e. each supply line knowing its
-own stock. That needs a way to match a supply row to bins boxes, and it is
-still the unanswered design question below. The search panel delivers the
-useful half without guessing at it.
+**Per-supply matching — SOLVED without a mapping.** The open question was how a
+supply row finds its boxes. The answer turned out to be that **it needs no
+configuration at all: the supply's own name is the query.** A line called
+"Gaff tape" searches the warehouse for "gaff tape" and links to the box.
+
+That is better than the per-item "bins search string" originally recommended,
+for a reason specific to this schema: `inventory_item` is **edition-scoped**
+and re-created each year, so a stored per-item mapping would have to be
+re-entered every single year — precisely the trap the re-commit model exists to
+avoid. A name matches for free, forever, and for a brand-new camp on day one.
+
+If names ever prove too noisy, an optional per-item override can be layered on
+later; nothing here forecloses it. Until there's evidence of that, the zero-
+config version is the whole feature.
 
 ### Original design notes (kept for context)
 
@@ -165,15 +174,13 @@ hop-out. Only worth it once there's data to show — i.e. after the pull above.
       green, 307 unit tests, 79 migrations clean, **`e2e/bins-stock.ts` 10/10**
       against a stub bins instance (`bun run e2e:bins-stock`). Dev-server log
       checked for SSR throws — clean.
-- [ ] Phase 2b — per-supply stock ("counts inline at the point of claiming"),
-      blocked on the matching question below.
+- [x] 2026-08-19 — Phase 2b: per-supply stock, inline on each row, matched on
+      the supply's own NAME (no mapping, no migration, no per-year re-entry).
+      Shown to officers as well as members — they're the ones deciding whether
+      to buy more. `e2e/bins-stock.ts` 11/11.
 - [ ] Phase 3 — possible in-app bins page / left-menu entry.
 
 ## Open questions for the user
 
-1. **How should a supply line find its bins stock?** My recommendation: an
-   optional per-supply "bins search" string an officer fills in, matched
-   against bins names/labels/notes — no convention to enforce, and it degrades
-   to "no match, show nothing".
-2. Should the top-bar item be **officers-only** instead of members+? Currently
+1. Should the top-bar item be **officers-only** instead of members+? Currently
    members+, since bins itself treats anyone with the code as a full user.

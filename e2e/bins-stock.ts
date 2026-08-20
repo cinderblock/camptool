@@ -18,7 +18,14 @@ import { eq } from "drizzle-orm";
 import { setBinsLink } from "../app/lib/bins.server";
 import { setFeatureState } from "../app/lib/features.server";
 import { db } from "../db/client.server";
-import { camp, campEdition, membership, user } from "../db/schema";
+import {
+  camp,
+  campEdition,
+  inventoryCategory,
+  inventoryItem,
+  membership,
+  user,
+} from "../db/schema";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17928";
 const STAMP = Date.now();
@@ -135,6 +142,27 @@ for (const key of ["supplies", "bins"] as const) {
   });
 }
 
+const categoryId = crypto.randomUUID();
+await db.insert(inventoryCategory).values({
+  id: categoryId,
+  campId,
+  name: "Build",
+});
+const editionRow = await db
+  .select({ id: campEdition.id })
+  .from(campEdition)
+  .where(eq(campEdition.campId, campId));
+await db.insert(inventoryItem).values({
+  id: crypto.randomUUID(),
+  campId,
+  editionId: editionRow[0]?.id ?? null,
+  categoryId,
+  // Deliberately the plain thing a camp would actually type. It has to find
+  // the "Gaff tape and zip ties" box with nobody configuring a mapping.
+  name: "Gaff tape",
+  quantity: 1,
+});
+
 /* ----------------------------------------------------------------- tests */
 
 // 1. Address but no read token: the hand-off still works, but there is nothing
@@ -169,6 +197,10 @@ check("2b. it counts the boxes", withToken.includes("2 boxes"));
 check(
   "2c. the stock is on the page, so search works offline of bins",
   withToken.includes("Gaff tape and zip ties"),
+);
+check(
+  "2d. a supply line finds its box by name, with no mapping configured",
+  withToken.includes("in Gaff tape and zip ties"),
 );
 check(
   "3. bins was called with the token as a bearer",
