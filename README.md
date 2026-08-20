@@ -306,17 +306,21 @@ server into a container. Both are documented in
   is delivered out-of-band on purpose. See
   [`plans/password-recovery.md`](plans/password-recovery.md). When real delivery
   is wired, flip `mailEnabled` in the same change and the affordances come back.
-- **Social groups are descriptive; the party link is not.** A camp reads as
-  crews and carpools, not a flat list, so members and the roster can be grouped
-  into named **social groups** anyone can create, and the who-invited-whom tree
-  (recorded on every invite redemption since invites shipped) is shown as an
-  actual tree — with one button to turn "everyone so-and-so brought" into a
-  group. Nothing is ever inferred: provenance is a fact, a group is a judgement,
-  and a human presses the button. Crucially a group grants **no authority** over
-  anyone; the thing that does is the one-level party link
-  ([`plans/party-member-links.md`](plans/party-member-links.md)), where a host
-  can manage their household's tickets and passes. Keeping those two apart is
-  the whole design. See [`plans/social-groups.md`](plans/social-groups.md).
+- **Social groups are relationships, not teams — and not permissions.** A camp
+  is a handful of families and friendships that happen to share a lot, so
+  members and the roster can be grouped into named **social groups** anyone can
+  create: a family, a couple, housemates, the friends somebody brought along.
+  They nest as deeply as the relationships do — a household inside the wider
+  family — and the who-invited-whom tree (recorded on every invite redemption
+  since invites shipped) is shown as an actual tree beside them, with one button
+  to turn "everyone so-and-so brought" into a group. Nothing is ever inferred:
+  provenance is a fact, a group is a judgement, and a human presses the button.
+  Two deliberate boundaries: what the camp *does* together is shifts and roles
+  on the **schedule**, not groups; and who you're *camping* with is the one-level
+  **party link** ([`plans/party-member-links.md`](plans/party-member-links.md)),
+  which is per-year and carries real authority over tickets and passes. A group
+  grants **nobody anything**. Keeping those three apart is the whole design. See
+  [`plans/social-groups.md`](plans/social-groups.md).
 - **Merging duplicate members is direction-agnostic.** When the same person
   signs up twice, an officer cannot know which of the two accounts still has a
   working login — so the merge no longer asks. Every field is settled by a rule

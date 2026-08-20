@@ -1,18 +1,31 @@
 /**
- * Social groups — the camp's own idea of who belongs with whom.
+ * Social groups — who belongs with whom.
  *
- * A camp of sixty is not a flat list of sixty: it is the fire crew, the Santa
- * Cruz carpool, the people who came because Albert asked them. These tables let
- * that be said out loud so the roster and the directory can be read the way the
- * camp actually thinks (see `plans/social-groups.md`).
+ * These are **relationships, not teams**: a family, a couple, housemates, the
+ * friends somebody brought along, the people who have camped together for a
+ * decade. A camp of sixty is not a flat list of sixty, and it is not an org
+ * chart either — it is a handful of families and friendships that happen to
+ * share a lot. These tables let that be said out loud so the roster and the
+ * directory read the way the camp actually thinks (`plans/social-groups.md`).
  *
- * Two things this deliberately is NOT:
+ * Work crews are a different shape and are not this: what a camp *does*
+ * together lives on the schedule as shifts and roles, where a job has hours and
+ * a headcount. If a group starts being used to mean "the people rostered onto
+ * the kitchen", that belongs in `db/schema/schedule.ts` instead.
+ *
+ * Three things this deliberately is NOT:
  *
  *  - **Not a permission.** Nothing anywhere grants authority because two people
  *    share a group. Authority over another person's tickets or passes comes
  *    from the party link (`attendee.host_membership_id`, see
  *    `plans/party-member-links.md`) or from a role, and it stays there. A group
  *    that granted reach would be a party, and a party already exists.
+ *
+ *  - **Not who someone is camping with.** That is the party link too, it is
+ *    per-year, and it drives real logistics (tent, arrival, tickets). A family
+ *    outlives any one year and may not even be on playa together; the two
+ *    overlap constantly but they are different claims about the world.
+ *
  *  - **Not the invite tree.** Who invited whom is a fact, already recorded on
  *    `membership.invited_by_membership_id`. A social group is a judgement, and
  *    the two drift apart the moment someone is invited by an officer they
@@ -41,10 +54,11 @@ export const campGroup = sqliteTable(
       .references(() => camp.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description"),
-    // Groups nest: "Kitchen crew" under "Infrastructure". Structural only —
-    // being in a child does NOT make you a member of its parent; a parent's
-    // own list is its own list, and the UI shows rolled-up counts beside
-    // direct ones rather than inventing membership nobody declared.
+    // Groups nest: a household inside the wider family, a couple inside a
+    // household. Structural only — being in a child does NOT make you a member
+    // of its parent; a parent's own list is its own list, and the UI shows
+    // rolled-up counts beside direct ones rather than inventing membership
+    // nobody declared.
     //
     // SET NULL, not cascade: deleting a parent must never take its children's
     // members with it. Orphaned children resurface as roots.
@@ -66,7 +80,7 @@ export const campGroup = sqliteTable(
       .default(now),
   },
   // Names are the handle people use to talk about a group, so two groups called
-  // "Fire crew" in one camp would defeat the purpose. Compared case-insensitively.
+  // "The Riveras" in one camp would defeat the purpose. Compared case-insensitively.
   (t) => [uniqueIndex("camp_group_name").on(t.campId, sql`lower(${t.name})`)],
 );
 

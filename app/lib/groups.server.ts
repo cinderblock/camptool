@@ -1,6 +1,10 @@
 /**
  * Social groups — reads and writes (see `plans/social-groups.md`).
  *
+ * These describe RELATIONSHIPS — families, couples, housemates, the friends
+ * somebody brought — not work crews. What the camp does together lives on the
+ * schedule; see the header of `db/schema/group.ts`.
+ *
  * Authorization here is deliberately loose: any member may create a group and
  * put people in it, officers may rename/merge/delete. Same reasoning as the
  * party link — a small, high-trust camp, and a group grants no authority over
@@ -260,8 +264,8 @@ export async function removeFromGroup(opts: {
 
 /**
  * Fold one group into another: everyone in `staleId` joins `survivorId`, then
- * the empty group goes. Officer tidy-up for the inevitable "Fire Crew" and
- * "fire crew 2026".
+ * the empty group goes. Officer tidy-up for the inevitable "The Riveras" and
+ * "Rivera family" both existing because two people made one.
  */
 export async function mergeGroups(opts: {
   campId: string;

@@ -1258,7 +1258,10 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   {
                                     intent: "groupFromSubtree",
                                     rootId: m.memberId,
-                                    name: `${m.name}'s crew`,
+                                    // "People", not "crew": these are the
+                                    // friends and family somebody brought in,
+                                    // not a work detail.
+                                    name: `${m.name}'s people`,
                                   },
                                   { method: "post" },
                                 )
@@ -1808,9 +1811,9 @@ function GroupsBar({
           </Group>
           {groups.length === 0 ? (
             <Text size="xs" c="dimmed">
-              No groups yet — the fire crew, a carpool, whoever camps together.
-              Being in one grants nobody anything; it just says who goes with
-              who.
+              No groups yet — a family, a couple, housemates, the friends
+              somebody brought along. Being in one grants nobody anything; it
+              just says who belongs with who.
             </Text>
           ) : (
             <Group gap={6}>
@@ -1921,17 +1924,32 @@ function GroupsPanel({
       centered
     >
       <Stack gap="lg">
-        <Text size="sm" c="dimmed">
-          A group is just a name for people who belong together — a crew, a
-          carpool, a camp-within-the-camp. Anyone can make one and add people.
-          It changes nothing about what anyone is allowed to do.
-        </Text>
+        <Stack gap={4}>
+          <Text size="sm" c="dimmed">
+            A group is a name for people who belong together — a family, a
+            couple, housemates, friends who've been coming together for years.
+            Anyone can make one and add people, and groups can sit inside each
+            other, so a household can live inside the wider family.
+          </Text>
+          {/* People will otherwise use this for "who I'm camping with", which
+              is a different thing that already exists and carries real
+              authority. Say so once, here, where the group is being made. */}
+          <Text size="sm" c="dimmed">
+            This is about relationships, not logistics: it changes nothing about
+            what anyone is allowed to do. For who you're actually sharing a tent
+            or an arrival with, use{" "}
+            <Anchor component={Link} to="/roster" size="sm">
+              who you're camping with
+            </Anchor>{" "}
+            on the roster instead.
+          </Text>
+        </Stack>
 
         <Card withBorder padding="sm" radius="sm">
           <Stack gap="xs">
             <TextInput
               label="New group"
-              placeholder="Fire crew"
+              placeholder="The Riveras"
               value={newName}
               onChange={(e) => setNewName(e.currentTarget.value)}
             />
@@ -1946,7 +1964,7 @@ function GroupsPanel({
             />
             <Select
               label="Inside another group"
-              description="Optional — leave empty for a top-level group."
+              description="Optional — e.g. a household inside the wider family."
               placeholder="Top level"
               clearable
               searchable

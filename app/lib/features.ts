@@ -170,7 +170,7 @@ export const FEATURES: CampFeatureDef[] = [
     key: "groups",
     label: "Social groups",
     description:
-      "Read the camp the way it actually is — the fire crew, the carpool, the people someone brought. Members and the roster can be grouped into named groups anyone can create, and the who-invited-whom tree is shown alongside. Descriptive only: being in a group grants nobody anything.",
+      "Who belongs with who — families, couples, housemates, the friends somebody brought along. Members and the roster can be grouped into named groups anyone can create, nested as deeply as the relationships go, with the who-invited-whom tree alongside. Descriptive only: being in a group grants nobody anything, and it is separate from who you are actually camping with.",
     starter: true,
   },
   {

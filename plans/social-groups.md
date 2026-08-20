@@ -11,9 +11,18 @@ We should already track who invited who. I want to easily group campers into
 known logical social groups (and/or let them do so, and use the invite link
 provenance)."*
 
-A camp of 60 is not a flat list of 60 — it is "the fire crew", "Albert's
-people", "the Santa Cruz carpool". The roster and directory should read that
-way, and most of the raw material is already in the database.
+A camp of 60 is not a flat list of 60 — it is a handful of families and
+friendships that happen to share a lot. The roster and directory should read
+that way, and most of the raw material is already in the database.
+
+**These are relationships, not teams** (Cameron, 2026-08-19, correcting the
+first pass): families, couples, housemates, the friends somebody brought along,
+the people who have camped together for a decade. Not "the fire crew" — what a
+camp *does* together is shifts and roles on the schedule, where a job has hours
+and a headcount. Every example in the UI, the schema header and this plan is
+deliberately a relationship; if the copy drifts back toward work crews, people
+will file the camp as an org chart and the feature stops answering the question
+it exists for.
 
 ## What already exists (don't rebuild it)
 
@@ -51,8 +60,8 @@ Implied, and worth writing down:
    still belongs to any number of groups, so the overlap half of the original
    decision stands; only "flat" is gone.
 
-   The nesting is **structural, not membership**. Being in "Kitchen crew" does
-   not put you in its parent "Infrastructure" — a parent's own list is its own
+   The nesting is **structural, not membership**. Being in a household does not
+   put you in the wider family it sits inside — a parent's own list is its own
    list. Rolled-up counts are shown alongside direct ones so the hierarchy is
    readable without inventing membership nobody declared.
 5. **No permissions attach to a group.** See above.
