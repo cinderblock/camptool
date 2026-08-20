@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   type FuelRow,
+  NO_FUEL,
   amountLabel,
   defaultUnitFor,
+  fuelLabel,
   fuelPhase,
   fuelTotals,
   isFuelType,
   isFuelUnit,
+  isNoFuel,
   needsPhaseSeparation,
+  noFuelCount,
   totalLabel,
 } from "./fuel";
 
@@ -43,6 +47,55 @@ describe("catalog guards and lookups", () => {
     expect(defaultUnitFor("propane")).toBe("lb");
     expect(defaultUnitFor("gasoline")).toBe("gal");
     expect(defaultUnitFor("nonsense")).toBe("gal");
+  });
+});
+
+describe("declaring none", () => {
+  test("'none' is not a fuel type, so it can't be picked or edited into", () => {
+    expect(isFuelType(NO_FUEL)).toBe(false);
+    expect(isNoFuel(NO_FUEL)).toBe(true);
+    expect(isNoFuel("gasoline")).toBe(false);
+  });
+
+  test("reads as 'No fuel' rather than as the raw value", () => {
+    expect(fuelLabel(NO_FUEL)).toBe("No fuel");
+  });
+
+  test("counts the people who answered 'none'", () => {
+    expect(
+      noFuelCount([
+        row({ fuelType: NO_FUEL, amount: 0, containerCount: 0 }),
+        row({ fuelType: NO_FUEL, amount: 0, containerCount: 0 }),
+        row({ fuelType: "propane", unit: "lb" }),
+      ]),
+    ).toBe(2);
+  });
+
+  test("contributes nothing to the totals — not a type, not a container", () => {
+    const totals = fuelTotals([
+      row({ fuelType: NO_FUEL, amount: 0, containerCount: 0 }),
+      row({ fuelType: "gasoline", amount: 5, containerCount: 1 }),
+    ]);
+    expect(totals.map((t) => t.fuelType)).toEqual(["gasoline"]);
+    expect(totals[0]?.containers).toBe(1);
+    expect(totals[0]?.lines).toBe(1);
+    // And it must not land in the containment worry list either.
+    expect(totals[0]?.containmentUnknown).toBe(1);
+  });
+
+  test("a camp where everyone declared none has no totals at all", () => {
+    expect(
+      fuelTotals([row({ fuelType: NO_FUEL, amount: 0, containerCount: 0 })]),
+    ).toEqual([]);
+  });
+
+  test("never triggers a phase-separation warning", () => {
+    expect(
+      needsPhaseSeparation([
+        row({ fuelType: "gasoline", amount: 5 }),
+        row({ fuelType: NO_FUEL, amount: 0, containerCount: 0 }),
+      ]),
+    ).toBe(false);
   });
 });
 

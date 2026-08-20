@@ -8,6 +8,11 @@
  * answer was how much fuel is coming and in how many vessels — so the totals
  * are the point, and they sit at the top of the page rather than at the bottom.
  *
+ * "I'm not bringing any" is a first-class answer here, not an empty list. The
+ * review has to chase everyone it hasn't heard from, and someone who has
+ * genuinely thought about it and has nothing to store should be able to say so
+ * and stop being chased.
+ *
  * Campers manage their own lines. Officers see everything plus the roll-up, and
  * can remove a line. Gated by the `fuel` camp feature.
  */
@@ -35,13 +40,16 @@ import { requireFeature } from "~/lib/features.server";
 import {
   FUEL_TYPES,
   FUEL_UNITS,
+  NO_FUEL,
   defaultUnitFor,
   fuelColor,
   fuelLabel,
   fuelTotals,
   isFuelType,
   isFuelUnit,
+  isNoFuel,
   needsPhaseSeparation,
+  noFuelCount,
   totalLabel,
 } from "~/lib/fuel";
 import { hasAtLeast } from "~/lib/permissions";
@@ -132,6 +140,49 @@ export async function action({ request }: Route.ActionArgs) {
     return raw === "yes" ? true : raw === "no" ? false : null;
   };
 
+  /** This member's own lines this year — what "none" has to be exclusive of. */
+  const myLines = () =>
+    db
+      .select({
+        id: fuelDeclaration.id,
+        fuelType: fuelDeclaration.fuelType,
+      })
+      .from(fuelDeclaration)
+      .where(
+        and(
+          eq(fuelDeclaration.editionId, activeEdition.id),
+          eq(fuelDeclaration.membershipId, mid),
+        ),
+      );
+
+  // "I'm not bringing any fuel." A row, so the review can tell it from silence,
+  // but one that carries no amount and no containers.
+  if (intent === "none") {
+    const existing = await myLines();
+    if (existing.some((r) => !isNoFuel(r.fuelType))) {
+      return data(
+        { error: "You've already declared fuel — remove those lines first." },
+        { status: 400 },
+      );
+    }
+    // Already said it. Saying it twice is the same answer, not a second one.
+    if (existing.length > 0) return data({ ok: true });
+    await db.insert(fuelDeclaration).values({
+      id: crypto.randomUUID(),
+      campId: active.camp.id,
+      editionId: activeEdition.id,
+      membershipId: mid,
+      fuelType: NO_FUEL,
+      amount: 0,
+      unit: "gal",
+      containerType: null,
+      containerCount: 0,
+      secondaryContainment: null,
+      notes: null,
+    });
+    return data({ ok: true, message: "Noted — no fuel from you." });
+  }
+
   if (intent === "add" || intent === "update") {
     const fuelType = String(form.get("fuelType") ?? "");
     if (!isFuelType(fuelType)) {
@@ -162,7 +213,26 @@ export async function action({ request }: Route.ActionArgs) {
         secondaryContainment: containment(),
         notes,
       });
-      return data({ ok: true, message: "Added." });
+      // Declaring actual fuel supersedes an earlier "none" — they changed their
+      // mind, and leaving both would make the sheet say two things at once.
+      // After the insert, so a failed insert can't quietly drop the old answer.
+      const dropped = await db
+        .delete(fuelDeclaration)
+        .where(
+          and(
+            eq(fuelDeclaration.editionId, activeEdition.id),
+            eq(fuelDeclaration.membershipId, mid),
+            eq(fuelDeclaration.fuelType, NO_FUEL),
+          ),
+        )
+        .returning({ id: fuelDeclaration.id });
+      return data({
+        ok: true,
+        message:
+          dropped.length > 0
+            ? "Added — that replaces your “no fuel” declaration."
+            : "Added.",
+      });
     }
 
     const [row] = await db
@@ -231,7 +301,13 @@ export default function Fuel({ loaderData }: Route.ComponentProps) {
   const { declarations, totals, mixedPhases, locked, year, isOfficer } =
     loaderData;
   const mine = declarations.filter((d) => d.mine);
-  const others = declarations.filter((d) => !d.mine);
+  // Real fuel first — a list of "no fuel" cards shouldn't push the thing the
+  // safety review came here to read below the fold.
+  const others = declarations
+    .filter((d) => !d.mine)
+    .sort(
+      (a, b) => Number(isNoFuel(a.fuelType)) - Number(isNoFuel(b.fuelType)),
+    );
 
   return (
     <Container size="md">
@@ -258,7 +334,7 @@ export default function Fuel({ loaderData }: Route.ComponentProps) {
         <Totals
           totals={totals}
           mixedPhases={mixedPhases}
-          empty={declarations.length === 0}
+          noFuel={noFuelCount(declarations)}
         />
 
         <div>
@@ -269,7 +345,9 @@ export default function Fuel({ loaderData }: Route.ComponentProps) {
             <Text size="sm" c="dimmed" mb="xs">
               Nothing declared. If you're bringing fuel of any kind — generator
               gas, propane for a stove, diesel — add it here so it can be stored
-              safely and separated properly.
+              safely and separated properly. If you're bringing none, say that
+              too: it's a real answer, and it's how you stop being counted as
+              someone nobody has heard from.
             </Text>
           ) : (
             <Stack gap="xs" mb="xs">
@@ -278,7 +356,7 @@ export default function Fuel({ loaderData }: Route.ComponentProps) {
               ))}
             </Stack>
           )}
-          {!locked ? <AddForm /> : null}
+          {!locked ? <AddForm canDeclareNone={mine.length === 0} /> : null}
         </div>
 
         {others.length > 0 ? (
@@ -302,17 +380,24 @@ export default function Fuel({ loaderData }: Route.ComponentProps) {
 function Totals({
   totals,
   mixedPhases,
-  empty,
+  noFuel,
 }: {
   totals: LoaderData["totals"];
   mixedPhases: boolean;
-  empty: boolean;
+  /** How many people have said, explicitly, that they're bringing none. */
+  noFuel: number;
 }) {
-  if (empty) {
+  const noFuelLine =
+    noFuel > 0
+      ? `${noFuel} ${noFuel === 1 ? "person has" : "people have"} declared no fuel`
+      : null;
+
+  if (totals.length === 0) {
     return (
       <Paper withBorder p="md" radius="md">
         <Text size="sm" c="dimmed">
           Nobody has declared any fuel yet.
+          {noFuelLine ? ` ${noFuelLine} — that part is answered.` : ""}
         </Text>
       </Paper>
     );
@@ -355,6 +440,11 @@ function Totals({
           you place fuel-storage objects.
         </Text>
       ) : null}
+      {noFuelLine ? (
+        <Text size="xs" c="dimmed" mt="xs">
+          {noFuelLine}.
+        </Text>
+      ) : null}
       <Text size="xs" c="dimmed" mt="xs">
         Gallons and pounds are kept apart on purpose; converting between them
         would invent precision nobody gave us.
@@ -375,6 +465,45 @@ function Row({
   const fetcher = useFetcher<FetcherData>();
   const [editing, setEditing] = useState(false);
   useNotify(fetcher.data, fetcher.state, () => setEditing(false));
+  const remove = () =>
+    fetcher.submit({ intent: "delete", id: d.id }, { method: "post" });
+
+  // "None" has nothing to edit — it's one bit, and the way to change it is to
+  // declare fuel (which supersedes it) or take it back.
+  if (isNoFuel(d.fuelType)) {
+    return (
+      <Card withBorder padding="sm" radius="sm">
+        <Group justify="space-between" wrap="wrap" gap="sm">
+          <div style={{ minWidth: 0 }}>
+            <Group gap="xs" wrap="wrap">
+              <Badge variant="light" color="gray" size="sm">
+                No fuel
+              </Badge>
+              <Text size="sm">
+                {d.mine
+                  ? "You've said you're not bringing any fuel."
+                  : "Not bringing any fuel."}
+              </Text>
+            </Group>
+            <Text size="xs" c="dimmed" mt={2}>
+              {d.ownerName}
+              {d.mine ? " (you)" : ""}
+            </Text>
+          </div>
+          {canEdit && !locked ? (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              color="red"
+              onClick={remove}
+            >
+              Remove
+            </Button>
+          ) : null}
+        </Group>
+      </Card>
+    );
+  }
 
   if (editing) {
     return (
@@ -447,12 +576,7 @@ function Row({
               size="compact-xs"
               variant="subtle"
               color="red"
-              onClick={() =>
-                fetcher.submit(
-                  { intent: "delete", id: d.id },
-                  { method: "post" },
-                )
-              }
+              onClick={remove}
             >
               Remove
             </Button>
@@ -548,15 +672,30 @@ function Fields({ d }: { d?: Declaration }) {
   );
 }
 
-function AddForm() {
+function AddForm({ canDeclareNone }: { canDeclareNone: boolean }) {
   const fetcher = useFetcher<FetcherData>();
   const [open, setOpen] = useState(false);
   useNotify(fetcher.data, fetcher.state, () => setOpen(false));
   if (!open) {
     return (
-      <Button variant="light" size="xs" onClick={() => setOpen(true)}>
-        + Add fuel
-      </Button>
+      <Group gap="xs">
+        <Button variant="light" size="xs" onClick={() => setOpen(true)}>
+          + Add fuel
+        </Button>
+        {canDeclareNone ? (
+          <Button
+            variant="subtle"
+            size="xs"
+            color="gray"
+            loading={fetcher.state !== "idle"}
+            onClick={() =>
+              fetcher.submit({ intent: "none" }, { method: "post" })
+            }
+          >
+            I'm not bringing any
+          </Button>
+        ) : null}
+      </Group>
     );
   }
   return (

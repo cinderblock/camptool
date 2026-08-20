@@ -116,7 +116,9 @@ A **Fuel** page records who's bringing what fuel, how much, and in what
 containers, and rolls it up per type with container counts and a secondary-
 containment tally — the numbers a fire-safety review actually needs. Gallons and
 pounds are never added together, and the page flags when the camp has both
-liquid fuel and propane, which need separating. Relatedly, an RV can be marked
+liquid fuel and propane, which need separating. "I'm not bringing any" is a
+declarable answer, so the review can tell someone who has nothing to store from
+someone nobody has heard from. Relatedly, an RV can be marked
 as needing **pump-out / cleanout access**, which whoever lays out the map sees
 alongside the existing "near my car" preference.
 

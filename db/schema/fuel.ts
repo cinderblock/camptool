@@ -50,7 +50,10 @@ export const fuelDeclaration = sqliteTable(
       .notNull()
       .references(() => membership.id, { onDelete: "cascade" }),
     // Soft enum — labels + the liquid/gas split live in app/lib/fuel.ts:
-    // gasoline | diesel | propane | other.
+    // gasoline | diesel | propane | other, plus `none`. A `none` row is a
+    // camper saying they're bringing nothing, which the safety review needs to
+    // tell apart from never having answered; it carries no amount and no
+    // containers, and is mutually exclusive with that member's real fuel lines.
     fuelType: text("fuel_type").notNull(),
     // How much, in `unit`. Real because "2.5 gal" is a thing people bring.
     amount: real("amount").notNull().default(0),

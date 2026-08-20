@@ -18,6 +18,24 @@
 export type FuelType = "gasoline" | "diesel" | "propane" | "other";
 export type FuelUnit = "gal" | "lb";
 
+/**
+ * "I'm not bringing any" — a declaration row carrying this fuel type.
+ *
+ * Silence and "none" look identical in a table of fuel lines, and they are not
+ * the same thing: one is a camper who has thought about it and has nothing to
+ * store, the other is someone nobody has heard from. The safety review only
+ * needs to chase the second group, so it has to be able to tell them apart.
+ *
+ * Deliberately NOT a member of `FUEL_TYPES`: it isn't a fuel, it never appears
+ * in the type picker, and `isFuelType` rejects it so an ordinary fuel line can
+ * never be edited into one. It contributes no amount and no containers.
+ */
+export const NO_FUEL = "none";
+
+export function isNoFuel(type: string): boolean {
+  return type === NO_FUEL;
+}
+
 export const FUEL_TYPES: {
   value: FuelType;
   label: string;
@@ -71,6 +89,7 @@ export function isFuelUnit(value: string): value is FuelUnit {
 }
 
 export function fuelLabel(type: string): string {
+  if (isNoFuel(type)) return "No fuel";
   return FUEL_TYPES.find((f) => f.value === type)?.label ?? type;
 }
 
@@ -120,6 +139,9 @@ export type FuelTotal = {
 export function fuelTotals(rows: FuelRow[]): FuelTotal[] {
   const byType = new Map<string, FuelTotal>();
   for (const r of rows) {
+    // A "none" declaration is an answer, not an amount — it belongs in the
+    // count of who has answered, never in a total or a container count.
+    if (isNoFuel(r.fuelType)) continue;
     const t = byType.get(r.fuelType) ?? {
       fuelType: r.fuelType,
       byUnit: [],
@@ -143,6 +165,11 @@ export function fuelTotals(rows: FuelRow[]): FuelTotal[] {
   );
 }
 
+/** How many lines are an explicit "not bringing any". */
+export function noFuelCount(rows: { fuelType: string }[]): number {
+  return rows.filter((r) => isNoFuel(r.fuelType)).length;
+}
+
 /** "12.5 gal" or, when a type arrived in both units, "12.5 gal + 40 lb". */
 export function totalLabel(total: FuelTotal): string {
   return total.byUnit.map((u) => amountLabel(u.amount, u.unit)).join(" + ");
@@ -155,7 +182,9 @@ export function totalLabel(total: FuelTotal): string {
  */
 export function needsPhaseSeparation(rows: FuelRow[]): boolean {
   const phases = new Set(
-    rows.filter((r) => r.amount > 0).map((r) => fuelPhase(r.fuelType)),
+    rows
+      .filter((r) => !isNoFuel(r.fuelType) && r.amount > 0)
+      .map((r) => fuelPhase(r.fuelType)),
   );
   return phases.has("liquid") && phases.has("gas");
 }

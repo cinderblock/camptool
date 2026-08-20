@@ -183,6 +183,15 @@ New for this pass:
       declares a `cleanout` control, and surfaced on `/inventory` and the map's
       Unplaced tray. 14 DB assertions + 13 unit tests, plus a VACUUM INTO copy
       check (see below).
+      **Follow-up (2026-08-19):** "I'm not bringing any" is now declarable — a
+      `fuel_declaration` row with `fuelType = 'none'`, no amount, no containers.
+      No migration; `fuel_type` was already a soft enum. It exists because
+      silence and none looked identical, and the review only needs to chase
+      silence. `none` is deliberately NOT in `FUEL_TYPES`, so `isFuelType`
+      rejects it and a real line can't be edited into one; it's excluded from
+      totals, container counts, the containment tallies and the phase-separation
+      check, and is mutually exclusive with that member's real lines (declaring
+      actual fuel supersedes it). It satisfies the `fuel` ask like any other row.
 - [x] **#14 — arrivals distribution** (`4ea79c6`), on top of the concurrent
       thread's roster day-chip work (`d838efd`). Per-day arrivals AND on-site
       counts; on-site is the one the potluck question needs, and it requires
