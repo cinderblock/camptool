@@ -115,17 +115,15 @@ type PageLike = {
 };
 
 /**
- * The QR painted on one page, or null.
+ * The square images a page paints, in drawing order.
  *
- * Square images only — the page also paints a tall Code128 strip and two large
- * logos. Smallest-first, because the QR is the smallest square thing on a SAP
- * page and the full-page background is both the largest and the most expensive
- * to hand to a decoder.
+ * Square-only is the cheap filter that skips the tall Code128 strip and the
+ * wide logos without decoding them.
  */
-export async function qrOnPage(
+async function squareImagesOnPage(
   page: PageLike,
   OPS: { paintImageXObject: number },
-): Promise<string | null> {
+): Promise<PdfImage[]> {
   const ops = await page.getOperatorList();
   const names: string[] = [];
   for (let i = 0; i < ops.fnArray.length; i++) {
@@ -135,7 +133,7 @@ export async function qrOnPage(
     }
   }
 
-  const candidates: PdfImage[] = [];
+  const out: PdfImage[] = [];
   for (const name of names) {
     let img: unknown;
     try {
@@ -146,10 +144,25 @@ export async function qrOnPage(
     const c = img as PdfImage;
     if (!c?.data || !c.width || !c.height) continue;
     if (Math.abs(c.width - c.height) > 1) continue; // a QR is square
-    candidates.push(c);
+    out.push(c);
   }
-  candidates.sort((a, b) => a.width - b.width);
+  return out;
+}
 
+/**
+ * **The** QR painted on one page, or null — for the vendor's layout, which is
+ * one pass per page.
+ *
+ * Smallest-first, because the QR is the smallest square thing on a SAP page and
+ * the full-page background is both the largest and by far the most expensive to
+ * hand to a decoder.
+ */
+export async function qrOnPage(
+  page: PageLike,
+  OPS: { paintImageXObject: number },
+): Promise<string | null> {
+  const candidates = await squareImagesOnPage(page, OPS);
+  candidates.sort((a, b) => a.width - b.width);
   for (const img of candidates) {
     const text = readQr(img);
     if (text) return text;
@@ -157,7 +170,26 @@ export async function qrOnPage(
   return null;
 }
 
-/** Every QR code the document's pages actually draw, in page order. */
+/**
+ * **Every** QR painted on one page, in drawing order.
+ *
+ * Needed because our own group sheet carries several passes per page — a
+ * first-match reader would report one code and quietly lose the rest, which is
+ * precisely the bug a round-trip test exists to catch.
+ */
+export async function qrsOnPage(
+  page: PageLike,
+  OPS: { paintImageXObject: number },
+): Promise<string[]> {
+  const found: string[] = [];
+  for (const img of await squareImagesOnPage(page, OPS)) {
+    const text = readQr(img);
+    if (text) found.push(text);
+  }
+  return found;
+}
+
+/** Every QR code the document's pages draw, in page then drawing order. */
 export async function scanCodesInPdf(bytes: Uint8Array): Promise<string[]> {
   const { getDocumentProxy } = await import("unpdf");
   const { OPS } = await import("unpdf/pdfjs");
@@ -166,8 +198,7 @@ export async function scanCodesInPdf(bytes: Uint8Array): Promise<string[]> {
   for (let n = 1; n <= pdf.numPages; n++) {
     const page = await pdf.getPage(n);
     try {
-      const code = await qrOnPage(page, OPS);
-      if (code) found.push(code);
+      found.push(...(await qrsOnPage(page, OPS)));
     } finally {
       page.cleanup();
     }

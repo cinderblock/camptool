@@ -187,21 +187,44 @@ Bun + `bun.lock` per the global standard.
 
 ## Steps
 
-- [ ] Answers to the four questions above; fold into this plan.
-- [ ] Deps + `packages`/lib scaffolding.
-- [ ] `scripts/parse-sap-pdf.ts` — standalone CLI over a PDF → JSON rows. Proves
-      parsing on the real 2024 files before any schema exists.
-- [ ] Schema + migration (`sap_document`, `setup_pass_stock`, audit).
-- [ ] Import UI: upload → preview parsed table → confirm → idempotent by
-      `vendor_ticket_id` (re-importing the same PDF must not duplicate).
-- [ ] Assign / unassign (officer), respecting arrival-date matching from the
-      existing queue.
-- [ ] Release (typed confirm) + void/burn (admin, reason).
-- [ ] Camper view: assigned state (no codes) → released state (codes + PDF).
-- [ ] Sliced-PDF generation **+ the leak assertion test**.
-- [ ] Combined travel-group page.
-- [ ] E2E covering the whole lifecycle; `e2e/passes.ts` for the existing
-      entitlement flow, which currently has no committed coverage.
+**Engine and data — done (2026-08-21).**
+
+- [x] Answers to the four questions; folded in above.
+- [x] Deps: `pdf-lib`, `unpdf`, `jsqr`, `jpeg-js`, `bwip-js`.
+- [x] `app/lib/sap-pdf.server.ts` — parse a vendor PDF to pass rows.
+- [x] `app/lib/sap-qr.server.ts` — QR decode; drawn-vs-embedded scanners.
+- [x] `app/lib/sap-slice.server.ts` — leak-safe single-page slice, self-checked.
+- [x] `app/lib/sap-render.server.ts` — combined travel-group sheet.
+- [x] `app/lib/sap.server.ts` — storage, import, state machine, read helpers.
+- [x] `scripts/parse-sap-pdf.ts` (masked by default) and
+      `scripts/audit-sap-pdf.ts` (drawn vs embedded, exits non-zero on a leak).
+- [x] Schema + migration **0080** (`sap_document`, `setup_pass_stock`,
+      `setup_pass_stock_event`). Chain verified: 81 migrations, 72 tables.
+- [x] 17 tests on a synthetic fixture; whole suite 345 pass. typecheck + biome
+      green.
+
+**UI and delivery — not started.** This is the half that makes it usable.
+
+- [ ] Import UI on `/passes`: upload → preview parsed table → confirm.
+- [ ] Officer stock table: assign / unassign, with the early-arrivals-without-a-
+      pass list (`earlyArrivalsWithoutStock` is written and unused).
+- [ ] Release (typed confirm) + void (admin, reason).
+- [ ] Camper view: assigned (no codes) → released (codes + PDF download).
+- [ ] Authenticated download routes: sliced single-page PDF; group sheet.
+- [ ] E2E over the lifecycle; plus `e2e/passes.ts` for the existing entitlement
+      flow, which still has no committed coverage.
+
+## Verified against the real 2024 order (2026-08-21)
+
+- **Parsing**: 26 of 26 passes across 10 files, zero unreadable. Allocation
+  shape 8/21×4, 8/22×8, 8/23×6, 8/24×8.
+- **Timings** (13-page file): parse 1.27s, slice **0.04s** including the
+  self-check. The per-download path is the fast one, as it needs to be.
+- **Leak, reproduced and fixed**: source file shows 13 QR codes and contains 26.
+  A naive `copyPages` slice shows 1 and contains 26. `sliceSapPage` shows 1 and
+  contains 1.
+- `scripts/audit-sap-pdf.ts` on last year's files: "shows 1 pass(es), contains
+  26 — LEAKS 25 other passes".
 
 ## Findings / gotchas
 
