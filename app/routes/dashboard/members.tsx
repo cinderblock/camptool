@@ -6,8 +6,10 @@ import {
   Container,
   CopyButton,
   Group,
+  Menu,
   Modal,
   MultiSelect,
+  Popover,
   Radio,
   SegmentedControl,
   Select,
@@ -21,7 +23,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Form, Link, data, useFetcher } from "react-router";
+import { Link, data, useFetcher, useSubmit } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
 import { featureVisibleTo } from "~/lib/features";
@@ -931,7 +933,12 @@ export default function Members({ loaderData }: Route.ComponentProps) {
 
   const roleOptions = assignableRoles.map((r) => ({ value: r, label: r }));
   const showActions = canManage || canFlag;
-  const columnCount = 7 + (canManage ? 1 : 0) + (showActions ? 1 : 0);
+  // Name · Email · Role · Details, plus Actions when the viewer has any.
+  const columnCount = 4 + (showActions ? 1 : 0);
+  // "Work as" is a full navigation (the action answers with a Set-Cookie
+  // redirect), so it submits like the <Form> it replaced rather than through a
+  // fetcher — it just no longer needs a form element sitting in every row.
+  const submit = useSubmit();
 
   // How the list is nested. "None" is the flat directory this page has always
   // been; the other two are the ask (plans/social-groups.md).
@@ -1163,18 +1170,20 @@ export default function Members({ loaderData }: Route.ComponentProps) {
           </>
         ) : null}
 
-        <Table.ScrollContainer minWidth={820}>
+        {/* Four columns, not nine. Playa name rides along with the name it
+            belongs to, and the fields that are the same for almost everybody —
+            Discord, who invited them, which credentials they hold, a status
+            that has only ever been "active" — moved behind the per-row Details
+            button. Anything genuinely unusual still shows in the row without a
+            tap: see the badges beside it. */}
+        <Table.ScrollContainer minWidth={620}>
           <Table verticalSpacing="sm" highlightOnHover>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Name</Table.Th>
-                <Table.Th>Playa name</Table.Th>
                 <Table.Th>Email</Table.Th>
-                <Table.Th>Discord</Table.Th>
-                <Table.Th>Invited by</Table.Th>
-                {canManage ? <Table.Th>Sign-in</Table.Th> : null}
-                <Table.Th>Status</Table.Th>
                 <Table.Th>Role</Table.Th>
+                <Table.Th>Details</Table.Th>
                 {showActions ? <Table.Th>Actions</Table.Th> : null}
               </Table.Tr>
             </Table.Thead>
@@ -1233,6 +1242,16 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                         </Text>
                       ) : null}
                       {m.name}
+                      {/* Beside the name rather than in a column of its own —
+                          it IS the name, for the half of the camp that uses
+                          one, and an empty column of em-dashes was costing more
+                          width than the answer was worth. */}
+                      {m.playaName ? (
+                        <Text span c="dimmed" size="sm">
+                          {" "}
+                          “{m.playaName}”
+                        </Text>
+                      ) : null}
                       {isSelf ? (
                         <Text span c="dimmed" size="xs">
                           {" "}
@@ -1273,77 +1292,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                         </>
                       ) : null}
                     </Table.Td>
-                    <Table.Td>{m.playaName ?? "—"}</Table.Td>
                     <Table.Td>{m.email}</Table.Td>
-                    <Table.Td>
-                      {m.discord ? (
-                        <Text size="sm">
-                          {m.discord.discordUsername ?? m.discord.discordUserId}
-                          {m.discord.inGuild ? (
-                            <Badge
-                              ml={6}
-                              size="xs"
-                              color="green"
-                              variant="light"
-                            >
-                              in server
-                            </Badge>
-                          ) : null}
-                        </Text>
-                      ) : (
-                        <Text size="sm" c="dimmed">
-                          Not linked
-                        </Text>
-                      )}
-                    </Table.Td>
-                    <Table.Td>
-                      {m.invitedByName ? (
-                        <Text size="sm">{m.invitedByName}</Text>
-                      ) : m.invitedVia ? (
-                        // An open camp link records the door but nobody's name.
-                        <Text size="sm" c="dimmed">
-                          via {m.invitedVia}
-                        </Text>
-                      ) : m.prospectId ? null : (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      )}
-                      {/* The conversation that produced them, when the camp was
-                          tracking it before they joined. This is what makes the
-                          "log follows the person" decision actually true. */}
-                      {m.prospectId ? (
-                        <Anchor
-                          component={Link}
-                          to={`/prospects/${m.prospectId}`}
-                          size="xs"
-                          display="block"
-                        >
-                          Recruiting history
-                        </Anchor>
-                      ) : null}
-                    </Table.Td>
-                    {/* Plain Text, not Badge: Mantine's Badge label is
-                        overflow:hidden + ellipsis, so in a column this narrow
-                        both badges collapse to unreadable slivers ("N…", "PA…")
-                        no matter what nowrap you put on the cell. */}
-                    {canManage ? (
-                      <Table.Td style={{ whiteSpace: "nowrap" }}>
-                        <Text size="xs" c={m.hasPasskey ? "green" : "dimmed"}>
-                          {m.hasPasskey ? "passkey" : "no passkey"}
-                        </Text>
-                        {m.hasPassword ? (
-                          <Text size="xs" c="dimmed">
-                            password
-                          </Text>
-                        ) : null}
-                      </Table.Td>
-                    ) : null}
-                    <Table.Td>
-                      <Text size="sm" c="dimmed">
-                        {m.status}
-                      </Text>
-                    </Table.Td>
                     <Table.Td>
                       {editable ? (
                         <Select
@@ -1374,45 +1323,60 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                         </Badge>
                       )}
                     </Table.Td>
+                    {/* nowrap so the column asks the table for the width its
+                        badges actually need — Mantine's Badge label ellipsises
+                        rather than pushing back, so a squeezed column silently
+                        turns "alumni" into "alu…". */}
+                    <Table.Td style={{ whiteSpace: "nowrap" }}>
+                      <MemberDetails member={m} canManage={canManage} />
+                    </Table.Td>
                     {showActions ? (
                       <Table.Td>
-                        <Group gap="xs" wrap="nowrap">
-                          {editable ? (
-                            <>
-                              <Form method="post" action="/impersonate">
-                                <input
-                                  type="hidden"
-                                  name="intent"
-                                  value="start"
-                                />
-                                <input
-                                  type="hidden"
-                                  name="targetUserId"
-                                  value={m.userId}
-                                />
-                                <input
-                                  type="hidden"
-                                  name="campId"
-                                  value={campId}
-                                />
-                                <Button
-                                  type="submit"
-                                  size="xs"
-                                  variant="light"
-                                  color="grape"
-                                >
-                                  Work as
-                                </Button>
-                              </Form>
+                        {editable ? (
+                          // One button. Five buttons per row put the two
+                          // irreversible ones (Remove, Merge) a mis-tap away
+                          // from the two routine ones, and made the row so wide
+                          // the name scrolled off the left on a phone.
+                          <Menu
+                            position="bottom-end"
+                            withinPortal
+                            shadow="md"
+                            width={230}
+                          >
+                            <Menu.Target>
                               <Button
                                 size="xs"
                                 variant="light"
-                                color="blue"
                                 loading={
                                   resetFetcher.state !== "idle" &&
                                   resetFetcher.formData?.get("memberId") ===
                                     m.memberId
                                 }
+                              >
+                                Manage ▾
+                              </Button>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              <Menu.Label>{m.name}</Menu.Label>
+                              <Menu.Item
+                                color="grape"
+                                onClick={() =>
+                                  submit(
+                                    {
+                                      intent: "start",
+                                      targetUserId: m.userId,
+                                      campId,
+                                    },
+                                    {
+                                      method: "post",
+                                      action: "/impersonate",
+                                    },
+                                  )
+                                }
+                              >
+                                Work as them
+                              </Menu.Item>
+                              <Menu.Item
                                 onClick={() =>
                                   resetFetcher.submit(
                                     {
@@ -1423,11 +1387,32 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   )
                                 }
                               >
-                                Recovery link
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="subtle"
+                                Issue a recovery link
+                              </Menu.Item>
+                              <Menu.Item
+                                onClick={() =>
+                                  setMergeTarget({
+                                    memberId: m.memberId,
+                                    name: m.name,
+                                  })
+                                }
+                              >
+                                Merge with a duplicate…
+                              </Menu.Item>
+                              {canFlag && !isSelf ? (
+                                <Menu.Item
+                                  onClick={() =>
+                                    setFlagTarget({
+                                      memberId: m.memberId,
+                                      name: m.name,
+                                    })
+                                  }
+                                >
+                                  Flag a concern…
+                                </Menu.Item>
+                              ) : null}
+                              <Menu.Divider />
+                              <Menu.Item
                                 color="red"
                                 onClick={() =>
                                   setRemoveTarget({
@@ -1436,39 +1421,27 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   })
                                 }
                               >
-                                Remove
-                              </Button>
-                              <Button
-                                size="xs"
-                                variant="subtle"
-                                color="orange"
-                                onClick={() =>
-                                  setMergeTarget({
-                                    memberId: m.memberId,
-                                    name: m.name,
-                                  })
-                                }
-                              >
-                                Merge
-                              </Button>
-                            </>
-                          ) : null}
-                          {canFlag && !isSelf ? (
-                            <Button
-                              size="xs"
-                              variant="subtle"
-                              color="gray"
-                              onClick={() =>
-                                setFlagTarget({
-                                  memberId: m.memberId,
-                                  name: m.name,
-                                })
-                              }
-                            >
-                              Flag
-                            </Button>
-                          ) : null}
-                        </Group>
+                                Remove from the camp…
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
+                        ) : canFlag && !isSelf ? (
+                          // An ordinary member has exactly one action here, and
+                          // a menu holding one item is a worse button.
+                          <Button
+                            size="xs"
+                            variant="subtle"
+                            color="gray"
+                            onClick={() =>
+                              setFlagTarget({
+                                memberId: m.memberId,
+                                name: m.name,
+                              })
+                            }
+                          >
+                            Flag
+                          </Button>
+                        ) : null}
                       </Table.Td>
                     ) : null}
                   </Table.Tr>
@@ -1758,6 +1731,154 @@ export default function Members({ loaderData }: Route.ComponentProps) {
         </Modal>
       </Stack>
     </Container>
+  );
+}
+
+/**
+ * Everything about a member that is the same for almost everybody.
+ *
+ * These were five columns, and four of them said the same thing on every row —
+ * "Not linked", "—", "passkey", "active" — while pushing the name and the
+ * actions off the side of a phone. They're now one tappable button per row.
+ *
+ * A tap, not a hover: a `title=` attribute or a hover tooltip is invisible on a
+ * touch device, which is where half of this gets read. Anything that ISN'T the
+ * usual answer stays visible in the row as a badge, so nobody has to open a
+ * row to discover something is wrong with it.
+ */
+/** Badges keep their own width; the column grows instead of the label eliding. */
+const NO_SHRINK = { flexShrink: 0 };
+
+function MemberDetails({
+  member: m,
+  canManage,
+}: {
+  member: LoadedMember;
+  canManage: boolean;
+}) {
+  const [opened, setOpened] = useState(false);
+  // Neither credential means they cannot get in at all — actionable, and the
+  // one thing in here worth interrupting an officer for.
+  const noSignIn = canManage && !m.hasPasskey && !m.hasPassword;
+
+  const field = (label: string, value: React.ReactNode) => (
+    <Stack gap={0} key={label}>
+      <Text size="xs" c="dimmed">
+        {label}
+      </Text>
+      <Text size="sm" component="div">
+        {value}
+      </Text>
+    </Stack>
+  );
+
+  return (
+    // Wrapping, not shrinking: the two badges are rare, so on the rows that
+    // have them the button drops to a second line rather than every element in
+    // the cell being squeezed down to an ellipsis.
+    <Group gap={6} wrap="wrap">
+      {m.status !== "active" ? (
+        <Badge size="xs" color="yellow" variant="light" style={NO_SHRINK}>
+          {m.status}
+        </Badge>
+      ) : null}
+      {noSignIn ? (
+        <Badge size="xs" color="red" variant="light" style={NO_SHRINK}>
+          no sign-in
+        </Badge>
+      ) : null}
+      <Popover
+        opened={opened}
+        onChange={setOpened}
+        position="bottom-end"
+        withArrow
+        shadow="md"
+        width={280}
+        withinPortal
+      >
+        <Popover.Target>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            color="gray"
+            onClick={() => setOpened((o) => !o)}
+            aria-label={`Details for ${m.name}`}
+            style={NO_SHRINK}
+          >
+            Details
+          </Button>
+        </Popover.Target>
+        <Popover.Dropdown>
+          <Stack gap="xs">
+            {field(
+              "Discord",
+              m.discord ? (
+                <>
+                  {m.discord.discordUsername ?? m.discord.discordUserId}
+                  {m.discord.inGuild ? (
+                    <Badge ml={6} size="xs" color="green" variant="light">
+                      in server
+                    </Badge>
+                  ) : null}
+                </>
+              ) : (
+                <Text span size="sm" c="dimmed">
+                  Not linked
+                </Text>
+              ),
+            )}
+            {field(
+              "Invited by",
+              <>
+                {m.invitedByName ? (
+                  m.invitedByName
+                ) : m.invitedVia ? (
+                  // An open camp link records the door but nobody's name.
+                  <Text span size="sm" c="dimmed">
+                    via {m.invitedVia}
+                  </Text>
+                ) : (
+                  <Text span size="sm" c="dimmed">
+                    Nobody recorded
+                  </Text>
+                )}
+                {/* The conversation that produced them, when the camp was
+                    tracking it before they joined. This is what makes the
+                    "log follows the person" decision actually true. */}
+                {m.prospectId ? (
+                  <Anchor
+                    component={Link}
+                    to={`/prospects/${m.prospectId}`}
+                    size="xs"
+                    display="block"
+                  >
+                    Recruiting history
+                  </Anchor>
+                ) : null}
+              </>,
+            )}
+            {canManage
+              ? field(
+                  "Sign-in",
+                  [
+                    m.hasPasskey ? "passkey" : null,
+                    m.hasPassword ? "password" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || (
+                    <Text span size="sm" c="red">
+                      nothing — they need a recovery link
+                    </Text>
+                  ),
+                )
+              : null}
+            {field("Status", m.status)}
+            {/* Recorded since the camp started but never shown anywhere. */}
+            {m.joinedAt ? field("Member since", m.joinedAt.slice(0, 10)) : null}
+          </Stack>
+        </Popover.Dropdown>
+      </Popover>
+    </Group>
   );
 }
 

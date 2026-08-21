@@ -6,6 +6,7 @@ import {
   Group,
   NavLink as MantineNavLink,
   Menu,
+  ScrollArea,
   Select,
   Text,
   Title,
@@ -526,27 +527,37 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         // the breakpoint, and both cases have to slide fully out of view.
         style={navHidden ? { transform: "translateX(-100%)" } : undefined}
       >
-        {nav.map((item) => (
-          <MantineNavLink
-            key={item.to}
-            component={NavLink}
-            to={item.to}
-            end={item.end}
-            label={item.label}
-            rightSection={
-              "preview" in item && item.preview ? (
-                <Badge size="xs" color="grape" variant="light">
-                  preview
-                </Badge>
-              ) : "badge" in item && item.badge ? (
-                <Badge size="xs" color="red" variant="filled" circle>
-                  {item.badge}
-                </Badge>
-              ) : undefined
-            }
-            onClick={() => opened && toggle()}
-          />
-        ))}
+        {/* The nav list scrolls on its own. Enough features are switched on now
+            that the list is taller than a laptop viewport, and without this the
+            navbar — which is `position: fixed` at exactly viewport height —
+            simply clipped whatever didn't fit, with no way to reach it: the
+            page's own scrollbar moves the main content and leaves the navbar
+            where it is. `grow` inside the navbar's flex column plus
+            ScrollArea's `overflow: hidden` root (which is what lets a flex item
+            shrink below its content) is Mantine's own pattern for this. */}
+        <AppShell.Section grow component={ScrollArea} type="auto">
+          {nav.map((item) => (
+            <MantineNavLink
+              key={item.to}
+              component={NavLink}
+              to={item.to}
+              end={item.end}
+              label={item.label}
+              rightSection={
+                "preview" in item && item.preview ? (
+                  <Badge size="xs" color="grape" variant="light">
+                    preview
+                  </Badge>
+                ) : "badge" in item && item.badge ? (
+                  <Badge size="xs" color="red" variant="filled" circle>
+                    {item.badge}
+                  </Badge>
+                ) : undefined
+              }
+              onClick={() => opened && toggle()}
+            />
+          ))}
+        </AppShell.Section>
       </AppShell.Navbar>
 
       <AppShell.Main
