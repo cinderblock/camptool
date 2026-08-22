@@ -25,7 +25,7 @@ const settled: AskSnapshot = {
   hasTicket: true,
   ticketRequested: false,
   ticketsAwaitingPurchase: 0,
-  hasSetupPassRow: false,
+  setupPassSettled: false,
   fuelDeclared: true,
   duesOwedCents: 0,
   discordLinked: true,
@@ -164,7 +164,7 @@ describe("someone who isn't coming", () => {
     fuelDeclared: false,
     duesOwedCents: 50000,
     needsSetupPass: true,
-    hasSetupPassRow: false,
+    setupPassSettled: false,
   });
 
   test("is not chased for logistics", () => {
@@ -237,19 +237,24 @@ describe("season windows", () => {
 describe("setup passes are only asked of early arrivals", () => {
   test("no pass needed when arriving after gates open", () => {
     expect(
-      keys(snap({ needsSetupPass: false, hasSetupPassRow: false })),
+      keys(snap({ needsSetupPass: false, setupPassSettled: false })),
     ).not.toContain("setup_pass");
   });
 
   test("asked when arriving early without one", () => {
     expect(
-      keys(snap({ needsSetupPass: true, hasSetupPassRow: false })),
+      keys(snap({ needsSetupPass: true, setupPassSettled: false })),
     ).toContain("setup_pass");
   });
 
-  test("satisfied once requested", () => {
+  test("settled once requested — or once they simply hold one", () => {
+    // Both paths set the same flag. The second is the one that used to be
+    // missed: an officer sets a pass aside for someone who never filed a
+    // request, and they were told to "Request a Setup Access Pass" while
+    // holding one, with the request form correctly hidden — an unclearable
+    // to-do.
     expect(
-      keys(snap({ needsSetupPass: true, hasSetupPassRow: true })),
+      keys(snap({ needsSetupPass: true, setupPassSettled: true })),
     ).not.toContain("setup_pass");
   });
 });

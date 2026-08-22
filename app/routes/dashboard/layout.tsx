@@ -33,6 +33,7 @@ import { authClient, signOut } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
+import { featureName } from "~/lib/events";
 import { countPendingEntries } from "~/lib/faq.server";
 import {
   type FeatureKey,
@@ -194,6 +195,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     activeEditionId: activeEdition?.id ?? null,
     activeEditionLocked: activeEdition?.locked ?? false,
     activeEditionYear: activeEdition?.year ?? null,
+    // Which event this year is — the nav uses it to name features the way the
+    // camp actually says them (`featureName`).
+    activeEditionEvent: activeEdition?.event ?? null,
     editions: editions.map((e) => ({
       id: e.id,
       label: e.label ? `${e.year} · ${e.label}` : String(e.year),
@@ -239,6 +243,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     activeEditionId,
     activeEditionLocked,
     activeEditionYear,
+    activeEditionEvent,
   } = loaderData;
   const editionFetcher = useFetcher();
   const privacyFetcher = useFetcher();
@@ -335,8 +340,17 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           id: "travel",
           label: "Getting there",
           items: [
-            ...gated("tickets", "/tickets", "Tickets"),
-            ...gated("passes", "/passes", "Passes"),
+            // The event names these, not the core app — see `featureName`.
+            ...gated(
+              "tickets",
+              "/tickets",
+              featureName("tickets", activeEditionEvent, "Tickets"),
+            ),
+            ...gated(
+              "passes",
+              "/passes",
+              featureName("passes", activeEditionEvent, "Passes"),
+            ),
             ...gated("swaps", "/swaps", "Spares board"),
           ],
         },

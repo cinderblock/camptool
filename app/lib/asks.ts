@@ -106,7 +106,10 @@ export type AskSnapshot = {
   ticketsAwaitingPurchase: number;
 
   // — setup passes —
-  hasSetupPassRow: boolean;
+  /** They've asked for a setup pass, or already hold one. Either settles the
+   * ask — being handed a pass without having filed a request is now the normal
+   * path, not an edge case. */
+  setupPassSettled: boolean;
 
   // — declarations —
   fuelDeclared: boolean;
@@ -285,7 +288,8 @@ export const ASKS: AskDef[] = [
     opensWeeksBefore: null,
     feature: "passes",
     // Only ever asked of someone whose stated arrival is before gate-open.
-    isSatisfied: (s) => !attending(s) || !s.needsSetupPass || s.hasSetupPassRow,
+    isSatisfied: (s) =>
+      !attending(s) || !s.needsSetupPass || s.setupPassSettled,
   },
   {
     key: "fuel",

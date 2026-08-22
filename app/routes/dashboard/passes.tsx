@@ -25,7 +25,7 @@ import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { eventStartIso } from "~/lib/brc";
-import { isBurningMan } from "~/lib/events";
+import { featureName, isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import { canManageAttendee, inMyParty, isMe } from "~/lib/party";
 import { hasAtLeast } from "~/lib/permissions";
@@ -61,8 +61,13 @@ function cleanPdfName(raw: string): string {
   return base.replace(/\s+/g, " ").trim().slice(0, 120) || "passes.pdf";
 }
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Passes · CampTool" }];
+export function meta({ data }: Route.MetaArgs) {
+  // Match the nav, which the event names — a tab reading "Passes" while the
+  // sidebar says "Setup Access Passes" is a small translation tax on every
+  // glance.
+  return [
+    { title: `${featureName("passes", data?.event, "Passes")} · CampTool` },
+  ];
 }
 
 type PassRow = {
@@ -111,7 +116,12 @@ type StockRow = {
   holderIsGuest: boolean;
   holderRef: string | null;
   assignedAttendeeId: string | null;
+  /** In the viewer's party — their own, or anyone they host. */
   mine: boolean;
+  /** The holder IS the viewer. Asking for a pass is a statement about your own
+   * arrival, so the request form keys off this — a host holding a pass for a
+   * guest must still be able to ask for one of their own. */
+  isSelf: boolean;
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -243,6 +253,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       },
       myMembershipId,
     ),
+    isSelf: isMe({ membershipId: s.attendeeMembershipId }, myMembershipId),
   }));
 
   // Codes for MY party's released passes only. Everyone else's stay on the
@@ -601,6 +612,9 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
   useFetcherNotifications(fetcher.data, fetcher.state);
 
   const myStock = stock.filter((s) => s.mine && s.status !== "void");
+  // Self, not party: a host holding a pass for a guest still needs to be able
+  // to ask for their own.
+  const myOwnStock = myStock.filter((s) => s.isSelf);
   const liveStock = stock.filter((s) => s.status !== "void");
   const voidStockRows = stock.filter((s) => s.status === "void");
 
@@ -684,13 +698,13 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
                   </Group>
                 ))}
               </Stack>
-            ) : myStock.length === 0 ? (
+            ) : myOwnStock.length === 0 ? (
               <Text size="sm" c="dimmed">
                 Nothing set aside for you yet.
               </Text>
             ) : null}
 
-            {!locked && !myOwnActive && myStock.length === 0 ? (
+            {!locked && !myOwnActive && myOwnStock.length === 0 ? (
               <RequestPassForm fetcher={fetcher} myArrival={myArrival} />
             ) : null}
           </Stack>

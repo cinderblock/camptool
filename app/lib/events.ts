@@ -35,3 +35,32 @@ export function eventLabel(value: string): string {
 export function isBurningMan(event: string | null | undefined): boolean {
   return event === BURNING_MAN;
 }
+
+/**
+ * What an event calls a feature, when it has a name of its own.
+ *
+ * "Passes" and "Tickets" are vague on their own, and at Burning Man they mean
+ * two precise things — a **Setup Access Pass** and a **Directed Group Sale**
+ * ticket — which is what campers actually say to each other. Using the vague
+ * word costs a beat of translation every time somebody reads the nav.
+ *
+ * This lives in the event layer rather than in the core feature registry
+ * precisely because it's vocabulary, not capability: another event runs the
+ * same early-arrival and allocation machinery under different names, and a camp
+ * not at Burning Man should never see "DGS".
+ */
+const EVENT_VOCAB: Record<string, Record<string, string>> = {
+  [BURNING_MAN]: {
+    passes: "Setup Access Passes",
+    tickets: "DGS Tickets",
+  },
+};
+
+/** The event's name for a feature, or the generic one. */
+export function featureName(
+  key: string,
+  event: string | null | undefined,
+  fallback: string,
+): string {
+  return (event && EVENT_VOCAB[event]?.[key]) || fallback;
+}

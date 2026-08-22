@@ -29,6 +29,7 @@ import {
   passkey,
   questionAnswer,
   setupPass,
+  setupPassStock,
   ticket,
   ticketRequest,
   user,
@@ -56,7 +57,7 @@ function emptySnapshot(role: string): AskSnapshot {
     hasTicket: false,
     ticketRequested: false,
     ticketsAwaitingPurchase: 0,
-    hasSetupPassRow: false,
+    setupPassSettled: false,
     fuelDeclared: false,
     duesOwedCents: 0,
     discordLinked: false,
@@ -304,7 +305,13 @@ export async function loadAskSnapshots(
     bump(snaps, r.membershipId, "ticketRequested", true);
   }
 
-  // — setup passes — any non-denied row means they've asked.
+  // — setup passes — settled either by asking or by already holding one.
+  //
+  // Holding one is the stronger case and it used to be missed entirely: since
+  // assigning a pass IS the grant (plans/sap-import-and-distribution.md), an
+  // officer can set a pass aside for someone who never filed a request, and
+  // that person was then told to "Request a Setup Access Pass" while holding
+  // one — with the request form correctly hidden, so the to-do was unclearable.
   for (const p of await db
     .select({ attendeeId: setupPass.attendeeId })
     .from(setupPass)
@@ -312,7 +319,20 @@ export async function loadAskSnapshots(
       and(eq(setupPass.editionId, editionId), ne(setupPass.status, "denied")),
     )) {
     const mid = p.attendeeId ? attendeeToMembership.get(p.attendeeId) : null;
-    bump(snaps, mid ?? null, "hasSetupPassRow", true);
+    bump(snaps, mid ?? null, "setupPassSettled", true);
+  }
+  // Actually holding one settles it too, and this is the common path now.
+  for (const p of await db
+    .select({ attendeeId: setupPassStock.assignedAttendeeId })
+    .from(setupPassStock)
+    .where(
+      and(
+        eq(setupPassStock.editionId, editionId),
+        ne(setupPassStock.status, "void"),
+      ),
+    )) {
+    const mid = p.attendeeId ? attendeeToMembership.get(p.attendeeId) : null;
+    bump(snaps, mid ?? null, "setupPassSettled", true);
   }
 
   // — fuel —

@@ -23,7 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
-import { isBurningMan } from "~/lib/events";
+import { featureName, isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import { canManageAttendee, inMyParty } from "~/lib/party";
 import { hasAtLeast } from "~/lib/permissions";
@@ -40,8 +40,10 @@ import {
 } from "../../../db/schema";
 import type { Route } from "./+types/tickets";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Tickets · CampTool" }];
+export function meta({ data }: Route.MetaArgs) {
+  return [
+    { title: `${featureName("tickets", data?.event, "Tickets")} · CampTool` },
+  ];
 }
 
 type TicketRow = {

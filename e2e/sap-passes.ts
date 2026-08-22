@@ -26,6 +26,8 @@
 import bwipjs from "bwip-js/node";
 import { and, eq } from "drizzle-orm";
 import { PDFDocument, PDFName, StandardFonts } from "pdf-lib";
+import { outstandingAsks } from "../app/lib/asks";
+import { loadAskSnapshots } from "../app/lib/asks.server";
 import { ensureMemberAttendee } from "../app/lib/attendee.server";
 import { setFeatureState } from "../app/lib/features.server";
 import {
@@ -561,6 +563,53 @@ check(
   "15b. it shows the coverage summary instead",
   quotaless.includes("Setup access at a glance"),
 );
+
+// 16. The to-do must clear when you simply HOLD a pass. An officer setting one
+//     aside for somebody who never filed a request used to leave them staring
+//     at "Request a Setup Access Pass" with the request form correctly hidden —
+//     a to-do with no way to clear it.
+const holderMid = mids.member as string;
+const holderAttendee = await ensureMemberAttendee(campId, editionId, holderMid);
+await db
+  .update(attendee)
+  .set({ arrivalDate: `${YEAR}-08-25`, status: "coming" })
+  .where(eq(attendee.id, holderAttendee));
+// Make sure they hold one and have NO request of their own.
+await db.delete(setupPass).where(eq(setupPass.attendeeId, holderAttendee));
+const spare2 = (
+  await db
+    .select()
+    .from(setupPassStock)
+    .where(eq(setupPassStock.editionId, editionId))
+).find((s) => s.status === "available");
+if (spare2) {
+  await post("/passes", officer.cookie, {
+    intent: "assignStock",
+    id: spare2.id,
+    granteeRef: `m:${holderMid}`,
+  });
+}
+
+const snapshot = (await loadAskSnapshots(campId, editionId, YEAR)).get(
+  holderMid,
+);
+check(
+  "16. holding a pass settles the setup-pass to-do",
+  snapshot?.setupPassSettled === true,
+  `settled=${snapshot?.setupPassSettled}, held=${spare2?.id ?? "none"}`,
+);
+if (snapshot) {
+  const todo = outstandingAsks(snapshot, {
+    weeksUntilEvent: 1,
+    featureStates: { passes: "on" },
+    role: "member",
+  }).map((a) => a.key);
+  check(
+    "16b. so it is off their list",
+    !todo.includes("setup_pass"),
+    todo.join(","),
+  );
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
