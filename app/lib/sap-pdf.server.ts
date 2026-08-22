@@ -144,9 +144,20 @@ export function parseTextFields(items: string[]): TextFields {
   // The year lives on the event line ("Black Rock City: Access 2024"); the
   // date itself ("8/21 & Later") carries no year at all.
   const year = text.match(/Access\s+(\d{4})/);
-  const md = text.match(
-    /Setup Pass \(SAP\)\s+(\d{1,2})\/(\d{1,2})\s*&\s*Later/,
-  );
+  // Anchor on "M/D & Later", NOT on the label in front of it. The vendor has
+  // now used at least three labels for the same field:
+  //
+  //   2024   "Placement Setup Pass (SAP) 8/23 & Later"
+  //   2026   "Placement Setup Pass 8/25 & Later"        (the camp allocation)
+  //   2026   "Setup Access Pass 8/27 & Later"           (a single pass)
+  //
+  // Matching the label cost a whole import the first time it changed, and the
+  // date format itself has never moved. Prefer a line that also says "Pass" so
+  // a stray "8/27 & Later" elsewhere on the page can't win; fall back to the
+  // page if the wording drifts again.
+  const dateRe = /(\d{1,2})\/(\d{1,2})\s*&\s*Later/;
+  const passLine = items.find((s) => /pass/i.test(s) && dateRe.test(s));
+  const md = (passLine ?? text).match(dateRe);
   if (year?.[1] && md?.[1] && md?.[2]) {
     const y = Number(year[1]);
     const m = Number(md[1]);

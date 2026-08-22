@@ -265,9 +265,46 @@ badges, the voided section, the gap card).
 - `scripts/audit-sap-pdf.ts` on last year's files: "shows 1 pass(es), contains
   26 — LEAKS 25 other passes".
 
+## The 2026 passes: the label moved (2026-08-22)
+
+The real 2026 files arrived and **every page came back unreadable**. Only the
+date failed; ticket ID, confirmation, security code and the QR all still read.
+
+The cause: the label in front of the date is not stable, and the parser was
+anchored on it.
+
+| Year | Line |
+|---|---|
+| 2024 | `Placement Setup Pass (SAP) 8/23 & Later` |
+| 2026 (camp allocation) | `Placement Setup Pass 8/25 & Later` |
+| 2026 (a single pass) | `Setup Access Pass 8/27 & Later` |
+
+Three labels in two years — and two *different* ones inside the same year. The
+date format itself has never moved, so the parser now anchors on
+`M/D & Later` and merely *prefers* a line that also says "Pass". Guarded by a
+test that lists all three labels; a fourth won't break it.
+
+Everything else about the format is unchanged: same text fields, same 174×174
+JPEG QR carrying the 10-digit scan code, same undecodable Code128 strip. The
+confirmation ID format did change shape (`1DDGTGF159110514` →
+`3G721RY211046234`, and it's the filename), which the "value after the label"
+approach absorbed without a change.
+
+Verified on the real files: **27 of 27 pages** — the 26-pass camp allocation
+(8/25×2, 8/26×4, 8/27×6, 8/28×8, 8/29×6) plus one standalone pass — and the
+2024 order still reads 26 of 26. Slicing page 1, 13 and 26 out of the real 2026
+order each gives **drawn=1, embedded=1**, matching the expected scan code.
+
+Timing note: a slice *with* the scan-code self-check costs ~1.5–2s on this
+26-page order (pdf.js decodes the page's full-size background to reach the QR);
+without it, ~40ms. Worth it on a per-download click, but that's where the time
+goes if it ever needs attention.
+
 ## Findings / gotchas
 
 - Text layer is reliable — **no OCR anywhere in this feature**.
+- **Don't anchor on vendor label text.** It moved between 2024 and 2026 and
+  differs between two 2026 products. Anchor on the data's own shape.
 - The 30×79 Code128 image is undecodable; the QR is the only readable source of
   the scan code. Don't waste time on the barcode strip.
 - "8/23 & Later" has no year. Parse the year from `Black Rock City: Access 2024`

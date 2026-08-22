@@ -114,6 +114,34 @@ describe("parseTextFields", () => {
     expect(f.onOrAfterDate).toBe("2026-08-22");
   });
 
+  test("reads the date under every label the vendor has used", () => {
+    // The label in front of the date is not stable. Anchoring on it cost a
+    // whole import the first time it moved: the 2026 passes arrived saying
+    // "Setup Access Pass 8/27 & Later" and every page came back unreadable,
+    // because 2024 had said "Placement Setup Pass (SAP) 8/23 & Later".
+    const labels = [
+      "Placement Setup Pass (SAP) 8/23 & Later", // 2024
+      "Placement Setup Pass 8/25 & Later", // 2026, the camp's allocation
+      "Setup Access Pass 8/27 & Later", // 2026, a single pass
+    ];
+    const dates = labels.map(
+      (label) =>
+        parseTextFields([label, "Black Rock City: Access 2026"]).onOrAfterDate,
+    );
+    expect(dates).toEqual(["2026-08-23", "2026-08-25", "2026-08-27"]);
+  });
+
+  test("prefers the date on the line that mentions a pass", () => {
+    // Falling back to the whole page is what keeps a fourth label working; the
+    // "Pass" preference is what stops an unrelated "& Later" winning.
+    const f = parseTextFields([
+      "Gates close 9/1 & Later for exodus",
+      "Placement Setup Pass 8/25 & Later",
+      "Black Rock City: Access 2026",
+    ]);
+    expect(f.onOrAfterDate).toBe("2026-08-25");
+  });
+
   test("keeps a security code containing / and +", () => {
     const f = parseTextFields(["Security code: 1/Ca/aa+bb/cc"]);
     expect(f.securityCode).toBe("1/Ca/aa+bb/cc");
