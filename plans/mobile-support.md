@@ -150,3 +150,67 @@ Manage menu both open with the right contents; "Work as" round-trips and Stop
 clears it; the invite-tree view still indents correctly; no page-level
 horizontal overflow at 390px (the table scrolls inside its own container, which
 is intended).
+
+### Second pass — the nav is filed, not flat (2026-08-21)
+
+Scrolling fixed *reachability*; it didn't fix the fact that a camp with every
+feature on shows twenty-five links in one column, which to someone who joined
+last week reads as a wall rather than a map of the app. The list is now grouped
+and collapsible.
+
+Shape (`app/routes/dashboard/layout.tsx`):
+
+- **Pinned at the top, never inside a group:** Overview (with the outstanding-asks
+  badge), How it works, Announcements.
+- **Seven groups**, named as the question a camper is actually asking rather than
+  after the feature that implements it: `Getting set up` (Onboarding, Questions,
+  Training) · `People` (Members, Who's coming, Invite friends, Recruits*,
+  Prospects*) · `Getting there` (Tickets, Passes, Spares board) · `What we're
+  bringing` (Map, Bringing, Supplies, Fuel, Inventory*) · `What's on` (Schedule,
+  Programming) · `Camp info` (Wiki, FAQ, Documents, Years) · `Running the camp`
+  (Finances*, Dues*, Camp settings*).
+- **Pinned at the bottom, under a divider:** Your account, Site admin*.
+
+Rules that make it behave:
+
+- A group renders only the links *this* viewer can see, so an empty group
+  disappears entirely — a recruit never learns "Running the camp" exists.
+- **A group with exactly one surviving link renders as that link**, ungrouped.
+  This is not cosmetic: for a member of a camp whose Schedule is on-but-empty,
+  "What's on" would otherwise be a category wrapping the single word
+  "Programming".
+- **Collapsed by default**, except the group holding the page you're on — which
+  is computed from `location.pathname` with the same matching rule NavLink uses,
+  so the open group and the highlighted link can't disagree, and it's correct in
+  SSR without waiting for localStorage.
+- Choices are remembered in `camptool:nav-groups`, and **only groups the viewer
+  has explicitly toggled get an entry** — so turning a feature on next year
+  doesn't land it inside a group somebody silently closed months ago.
+- Navigating *into* a group you'd closed re-opens it (effect keyed on the group
+  id changing), because otherwise the one link you can't see is the highlighted
+  one. Your own click to close it still sticks.
+- A closed group carries the **sum of its children's badges**, so the FAQ queue
+  and unclaimed prospects can't hide inside a fold.
+
+Gotchas:
+
+- Mantine's `NavLink` puts a chevron in `rightSection` *only when you don't pass
+  one* — a custom `rightSection` replaces the chevron and gets rotated by the
+  open state. Badges on a group header therefore go in the `label` node.
+- Group headers need `component="button"`: `NavLink`'s default root is `<a>`, and
+  an anchor with no `href` takes no keyboard focus. Mantine also only sets
+  `data-expanded`, so `aria-expanded` is passed explicitly.
+- **`Collapse` keeps closed children mounted** at height 0 with `overflow:
+  hidden`, and the children keep their natural `getBoundingClientRect().height`.
+  Any DOM-walking assertion about "what's visible" will therefore report every
+  link in every group. Assert on the header's `aria-expanded` (or read the
+  screenshot) instead — two verification passes were misread this way.
+
+Verified against a throwaway copy of the dev DB with all 23 features on, two
+pending FAQ entries and two unclaimed prospects: as admin the first look is 12
+rows (was 26) with `People 2` and `Camp info 2` bubbled up; opening a group by
+hand survives a navigation while the page's own group also opens; Enter on a
+focused header toggles it and flips `aria-expanded`; impersonating a recruit
+gives 9 rows, no "Running the camp", and Programming as a bare link because
+"What's on" was down to one item; the phone overlay scrolls with everything
+expanded.

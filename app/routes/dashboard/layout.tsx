@@ -3,6 +3,7 @@ import {
   Badge,
   Burger,
   Button,
+  Divider,
   Group,
   NavLink as MantineNavLink,
   Menu,
@@ -14,6 +15,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure, useLocalStorage, useMediaQuery } from "@mantine/hooks";
 import { eq } from "drizzle-orm";
+import { useEffect } from "react";
 import {
   Form,
   NavLink,
@@ -204,6 +206,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   });
 }
 
+type NavItem = {
+  to: string;
+  label: string;
+  end: boolean;
+  /** Officers+ only: the feature is on in preview, so members can't see it. */
+  preview?: boolean;
+  /** A count worth interrupting for — unanswered FAQs, unclaimed prospects. */
+  badge?: string | null;
+};
+
+type NavGroup = { id: string; label: string; items: NavItem[] };
+
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const {
     user,
@@ -239,21 +253,26 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     features[key] ?? "off";
   const canSee = (key: FeatureKey) =>
     !!activeRole && featureVisibleTo(featureState(key), activeRole);
-  const gated = (key: FeatureKey, to: string, label: string) =>
+  const gated = (key: FeatureKey, to: string, label: string): NavItem[] =>
     canSee(key)
       ? [{ to, label, end: false, preview: featureState(key) === "preview" }]
       : [];
+  const officer = hasAtLeast(activeRole ?? "", "officer");
+
   // Camp-scoped routes all bounce back to "/" for a camp-less user (e.g. an
   // applicant awaiting review), so only show them once there's an active camp.
-  const nav = !activeCampId
-    ? [
-        { to: "/", label: "Overview", end: true },
-        // Account-level, not camp-level, so it's here even with no camp.
-        { to: "/account", label: "Your account", end: false },
-        ...(superAdmin
-          ? [{ to: "/admin", label: "Site admin", end: false }]
-          : []),
-      ]
+  //
+  // The list is FILED, not flat. A camp with most features on was showing
+  // twenty-five links in one column, which to someone who joined last week
+  // reads as a wall rather than a map of the app. So: the three everybody wants
+  // first stay pinned at the top, the rest sit under headings phrased as the
+  // question a camper is actually asking ("Getting there", "What we're
+  // bringing"), and account-level links stay pinned at the bottom. Each group
+  // holds only the links this viewer can see, so an officer's Prospects and a
+  // member's Tickets file themselves under the same heading without either of
+  // them seeing an empty one.
+  const topLinks: NavItem[] = !activeCampId
+    ? [{ to: "/", label: "Overview", end: true }]
     : [
         // The count rides on Overview rather than becoming its own link: the
         // to-do card lives there, and a second entry pointing at "/" would
@@ -266,61 +285,120 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         },
         { to: "/guide", label: "How it works", end: false },
         ...gated("announcements", "/announcements", "Announcements"),
-        // An on-but-empty Schedule stays hidden from members (see the loader).
-        ...(scheduleEmpty && !hasAtLeast(activeRole ?? "", "officer")
-          ? []
-          : gated("schedule", "/schedule", "Schedule")),
-        ...gated("programming", "/programming", "Programming"),
-        { to: "/members", label: "Members · all years", end: false },
-        ...gated(
-          "roster",
-          "/roster",
-          activeEditionYear
-            ? `Who's coming · ${activeEditionYear}`
-            : "Who's coming",
-        ),
-        ...(activeRole && hasAtLeast(activeRole, "member")
-          ? [{ to: "/invite", label: "Invite friends", end: false }]
-          : []),
-        { to: "/editions", label: "Years", end: false },
-        ...gated("map", "/map", "Map"),
-        ...gated("bringing", "/bringing", "Bringing"),
-        ...gated("supplies", "/supplies", "Supplies"),
-        ...gated("fuel", "/fuel", "Fuel"),
-        ...gated("documents", "/documents", "Documents"),
-        ...gated("wiki", "/wiki", "Wiki"),
-        // Badged for officers only — the count is the queue of unanswered
-        // questions, which nobody else can clear.
-        ...gated("faq", "/faq", "FAQ").map((item) => ({
-          ...item,
-          badge: faqPending > 0 ? String(faqPending) : null,
-        })),
-        ...gated("tickets", "/tickets", "Tickets"),
-        ...gated("passes", "/passes", "Passes"),
-        ...gated("swaps", "/swaps", "Spares board"),
-        ...(activeRole && hasAtLeast(activeRole, "officer")
-          ? [
-              ...gated("recruiting", "/recruits", "Recruits"),
-              ...gated("prospects", "/prospects", "Prospects").map((item) => ({
-                ...item,
-                badge: prospectsPending > 0 ? String(prospectsPending) : null,
-              })),
-              ...gated("bringing", "/inventory", "Inventory"),
-              ...gated("finances", "/finances", "Finances"),
-              ...gated("dues", "/dues", "Dues"),
-            ]
-          : []),
-        ...gated("training", "/training", "Training"),
-        ...gated("questions", "/questions", "Questions"),
-        ...gated("onboarding", "/onboarding", "Onboarding"),
-        { to: "/account", label: "Your account", end: false },
-        ...(activeRole === "admin"
-          ? [{ to: "/settings", label: "Camp settings", end: false }]
-          : []),
-        ...(superAdmin
-          ? [{ to: "/admin", label: "Site admin", end: false }]
-          : []),
       ];
+
+  const groups: NavGroup[] = !activeCampId
+    ? []
+    : [
+        // Everything the camp asks of a camper personally. Officers see the
+        // same three pages from the authoring side, which is where they'd go
+        // looking for them anyway.
+        {
+          id: "setup",
+          label: "Getting set up",
+          items: [
+            ...gated("onboarding", "/onboarding", "Onboarding"),
+            ...gated("questions", "/questions", "Questions"),
+            ...gated("training", "/training", "Training"),
+          ],
+        },
+        {
+          id: "people",
+          label: "People",
+          items: [
+            { to: "/members", label: "Members · all years", end: false },
+            ...gated(
+              "roster",
+              "/roster",
+              activeEditionYear
+                ? `Who's coming · ${activeEditionYear}`
+                : "Who's coming",
+            ),
+            ...(activeRole && hasAtLeast(activeRole, "member")
+              ? [{ to: "/invite", label: "Invite friends", end: false }]
+              : []),
+            ...(officer
+              ? [
+                  ...gated("recruiting", "/recruits", "Recruits"),
+                  ...gated("prospects", "/prospects", "Prospects").map(
+                    (item) => ({
+                      ...item,
+                      badge:
+                        prospectsPending > 0 ? String(prospectsPending) : null,
+                    }),
+                  ),
+                ]
+              : []),
+          ],
+        },
+        {
+          id: "travel",
+          label: "Getting there",
+          items: [
+            ...gated("tickets", "/tickets", "Tickets"),
+            ...gated("passes", "/passes", "Passes"),
+            ...gated("swaps", "/swaps", "Spares board"),
+          ],
+        },
+        {
+          id: "gear",
+          label: "What we're bringing",
+          items: [
+            ...gated("map", "/map", "Map"),
+            ...gated("bringing", "/bringing", "Bringing"),
+            ...gated("supplies", "/supplies", "Supplies"),
+            ...gated("fuel", "/fuel", "Fuel"),
+            ...(officer ? gated("bringing", "/inventory", "Inventory") : []),
+          ],
+        },
+        {
+          id: "whats-on",
+          label: "What's on",
+          items: [
+            // An on-but-empty Schedule stays hidden from members (see loader).
+            ...(scheduleEmpty && !officer
+              ? []
+              : gated("schedule", "/schedule", "Schedule")),
+            ...gated("programming", "/programming", "Programming"),
+          ],
+        },
+        {
+          id: "info",
+          label: "Camp info",
+          items: [
+            ...gated("wiki", "/wiki", "Wiki"),
+            // Badged for officers only — the count is the queue of unanswered
+            // questions, which nobody else can clear.
+            ...gated("faq", "/faq", "FAQ").map((item) => ({
+              ...item,
+              badge: faqPending > 0 ? String(faqPending) : null,
+            })),
+            ...gated("documents", "/documents", "Documents"),
+            { to: "/editions", label: "Years", end: false },
+          ],
+        },
+        {
+          id: "running",
+          label: "Running the camp",
+          items: [
+            ...(officer
+              ? [
+                  ...gated("finances", "/finances", "Finances"),
+                  ...gated("dues", "/dues", "Dues"),
+                ]
+              : []),
+            ...(activeRole === "admin"
+              ? [{ to: "/settings", label: "Camp settings", end: false }]
+              : []),
+          ],
+        },
+      ];
+
+  // Account-level, not camp-level, so these are here even with no camp.
+  const bottomLinks: NavItem[] = [
+    { to: "/account", label: "Your account", end: false },
+    ...(superAdmin ? [{ to: "/admin", label: "Site admin", end: false }] : []),
+  ];
   const [opened, { toggle }] = useDisclosure();
   // Desktop nav collapse. Mantine's AppShell only hides the navbar below the
   // breakpoint, which leaves a skinny-but-not-phone window (a half-screen browser,
@@ -349,6 +427,39 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
       ? featureDef(previewKey)
       : null;
 
+  // Which group holds the page you're on. Same matching rule NavLink itself
+  // uses, so "the open group" and "the highlighted link" can never disagree.
+  const isCurrent = (item: NavItem) =>
+    item.end
+      ? location.pathname === item.to
+      : location.pathname === item.to ||
+        location.pathname.startsWith(`${item.to}/`);
+  const currentGroupId =
+    groups.find((g) => g.items.some(isCurrent))?.id ?? null;
+
+  // Collapsed by default, and remembered. A newcomer's first look is seven
+  // headings rather than twenty-five links, and the one they're standing in is
+  // already open — which is the whole point of filing them. Only groups the
+  // viewer has explicitly toggled get an entry here, so turning a feature on
+  // later doesn't land inside a group someone silently closed months ago.
+  const [openGroups, setOpenGroups] = useLocalStorage<Record<string, boolean>>({
+    key: "camptool:nav-groups",
+    defaultValue: {},
+    getInitialValueInEffect: true,
+  });
+  const groupOpen = (g: NavGroup) =>
+    openGroups[g.id] ?? g.id === currentGroupId;
+  // Navigating INTO a group you'd closed re-opens it — otherwise the link that
+  // is currently highlighted would be the one link you can't see. Deliberately
+  // keyed on the group changing, so your own click to close it still sticks.
+  useEffect(() => {
+    if (currentGroupId && openGroups[currentGroupId] === false) {
+      // Explicit object, not a functional updater — Mantine's useLocalStorage
+      // setter passes its own uninitialised state to the callback.
+      setOpenGroups({ ...openGroups, [currentGroupId]: true });
+    }
+  }, [currentGroupId, openGroups, setOpenGroups]);
+
   async function switchCamp(id: string | null) {
     if (!id || id === activeCampId) return;
     await authClient.organization.setActive({ organizationId: id });
@@ -359,6 +470,28 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     await signOut();
     navigate("/login");
   }
+
+  const renderNavLink = (item: NavItem) => (
+    <MantineNavLink
+      key={item.to}
+      component={NavLink}
+      to={item.to}
+      end={item.end}
+      label={item.label}
+      rightSection={
+        item.preview ? (
+          <Badge size="xs" color="grape" variant="light">
+            preview
+          </Badge>
+        ) : item.badge ? (
+          <Badge size="xs" color="red" variant="filled" circle>
+            {item.badge}
+          </Badge>
+        ) : undefined
+      }
+      onClick={() => opened && toggle()}
+    />
+  );
 
   return (
     <AppShell
@@ -536,27 +669,52 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             ScrollArea's `overflow: hidden` root (which is what lets a flex item
             shrink below its content) is Mantine's own pattern for this. */}
         <AppShell.Section grow component={ScrollArea} type="auto">
-          {nav.map((item) => (
-            <MantineNavLink
-              key={item.to}
-              component={NavLink}
-              to={item.to}
-              end={item.end}
-              label={item.label}
-              rightSection={
-                "preview" in item && item.preview ? (
-                  <Badge size="xs" color="grape" variant="light">
-                    preview
-                  </Badge>
-                ) : "badge" in item && item.badge ? (
-                  <Badge size="xs" color="red" variant="filled" circle>
-                    {item.badge}
-                  </Badge>
-                ) : undefined
-              }
-              onClick={() => opened && toggle()}
-            />
-          ))}
+          {topLinks.map(renderNavLink)}
+          {groups.map((g) => {
+            const [only] = g.items;
+            if (!only) return null;
+            // A category holding one thing is a worse link than the thing.
+            if (g.items.length === 1) return renderNavLink(only);
+            const buried = g.items.reduce(
+              (n, i) => n + Number(i.badge ?? 0),
+              0,
+            );
+            const isOpen = groupOpen(g);
+            return (
+              <MantineNavLink
+                key={g.id}
+                // A real <button>: an <a> with no href takes no keyboard focus,
+                // and these only ever expand — they navigate nowhere.
+                component="button"
+                childrenOffset={16}
+                opened={isOpen}
+                // Mantine only sets `data-expanded`, which says nothing to a
+                // screen reader; this is a disclosure and should announce as one.
+                aria-expanded={isOpen}
+                onChange={(o) => setOpenGroups({ ...openGroups, [g.id]: o })}
+                label={
+                  <Group gap={6} wrap="nowrap">
+                    <Text size="sm" fw={600}>
+                      {g.label}
+                    </Text>
+                    {/* A closed group must not swallow a count somebody needs
+                        to act on. Shown only while closed — once it's open the
+                        badge on the link itself says it better. */}
+                    {!isOpen && buried > 0 ? (
+                      <Badge size="xs" color="red" variant="filled" circle>
+                        {buried}
+                      </Badge>
+                    ) : null}
+                  </Group>
+                }
+              >
+                {g.items.map(renderNavLink)}
+              </MantineNavLink>
+            );
+          })}
+          {/* Below the line is you, not the camp. */}
+          <Divider my="xs" />
+          {bottomLinks.map(renderNavLink)}
         </AppShell.Section>
       </AppShell.Navbar>
 
