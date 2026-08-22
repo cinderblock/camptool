@@ -28,6 +28,7 @@ import { QuestionField } from "~/components/QuestionField";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { parseBannedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
+import { shownQuestions } from "~/lib/conditions";
 import { redact } from "~/lib/privacy.server";
 import type { QuestionType } from "~/lib/questions";
 import { isAnswered, parseOptions, surfacedInWizard } from "~/lib/questions";
@@ -237,9 +238,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       membershipId: mid,
       userId: authUser.id,
     });
-    const rows = filterByAudience(await loadCampQuestions(campId), role).filter(
-      (q) => surfacedInWizard(q.surface),
-    );
+    const inWizard = filterByAudience(
+      await loadCampQuestions(campId),
+      role,
+    ).filter((q) => surfacedInWizard(q.surface));
+    // Conditions are evaluated against the answers they already have, so a
+    // follow-up appears the moment its premise is answered (the page
+    // revalidates on save) and disappears when it's taken back.
+    const rows = shownQuestions(inWizard, answers);
     const mapped: (WizardQuestion & { placement: string })[] = rows.map(
       (q) => ({
         id: q.id,
@@ -352,17 +358,20 @@ export async function action({ request }: Route.ActionArgs) {
       !activeEdition.locked
     ) {
       const placement = askKey === "extras" ? "after" : "before";
-      const required = filterByAudience(
+      const inWizard = filterByAudience(
         await loadCampQuestions(campId),
         active.membership.role,
-      ).filter(
+      ).filter((q) => surfacedInWizard(q.surface));
+      const answers = await loadAnswers({ editionId, membershipId: mid });
+      // Hidden questions can't block: an unanswerable required question is a
+      // disabled button with no visible cause. Evaluate conditions FIRST, then
+      // ask which of the remaining are required.
+      const required = shownQuestions(inWizard, answers).filter(
         (q) =>
           q.required &&
-          surfacedInWizard(q.surface) &&
           (q.wizardPlacement === "after" ? "after" : "before") === placement,
       );
       if (required.length > 0) {
-        const answers = await loadAnswers({ editionId, membershipId: mid });
         const missing = required.filter(
           (q) => !isAnswered(q.type, answers[q.id]),
         );

@@ -89,6 +89,24 @@ export const campQuestion = sqliteTable(
     // wizard | application | both — see QuestionSurface.
     surface: text("surface").notNull().default("wizard"),
     required: integer("required", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Conditional display: ask this only when question `show_if_question_id`
+     * currently answers `show_if_value`. Both null = always ask.
+     *
+     * Three rules travel with it, and skipping any of them breaks something
+     * quietly (see `app/lib/conditions.ts`):
+     *   - a hidden question is never *required*, or the wizard gains an
+     *     unpassable gate with no visible cause;
+     *   - a hidden question's stored answer is KEPT, so flipping the
+     *     controlling answer back and forth doesn't destroy what was typed;
+     *   - conditions are one level deep and may not cycle, enforced on save.
+     *
+     * Deliberately not a foreign key with cascade: deleting the controlling
+     * question should orphan the condition (it then always shows), not delete
+     * the dependent question along with it.
+     */
+    showIfQuestionId: text("show_if_question_id"),
+    showIfValue: text("show_if_value"),
     sortOrder: integer("sort_order").notNull().default(0),
     // Soft-retire: a question with archivedAt set is hidden from new answers but
     // its existing answers are preserved (vs a hard delete that cascades them away).

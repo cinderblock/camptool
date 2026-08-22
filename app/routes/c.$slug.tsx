@@ -16,6 +16,7 @@ import { CampHero } from "~/components/CampHero";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";
+import { shownQuestions } from "~/lib/conditions";
 import { getFeatureState } from "~/lib/features.server";
 import {
   getInstanceSettings,
@@ -164,7 +165,10 @@ export async function action({ request, params }: Route.ActionArgs) {
     const v = raw[q.id];
     if (typeof v === "string" && v !== "") answers[q.id] = v;
   }
-  const missing = appQuestions.filter(
+  // A hidden question can't be required — the applicant never saw it, so an
+  // unanswered one would reject the form with nothing on screen to fix. Same
+  // rule as the wizard, same function.
+  const missing = shownQuestions(appQuestions, answers).filter(
     (q) => q.required && !isAnswered(q.type, answers[q.id]),
   );
   if (missing.length > 0) {

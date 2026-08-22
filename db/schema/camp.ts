@@ -110,6 +110,27 @@ export const membership = sqliteTable("membership", {
   role: text("role").notNull().default("member"),
   // Our additional fields (registered via the plugin's additionalFields).
   playaName: text("playa_name"),
+  /**
+   * Profile, camp-scoped like the playa name — somebody in two camps may share
+   * a phone but needn't share anything else. All free text: a phone type would
+   * need country handling nobody asked for, and pronouns are not an enum.
+   *
+   * Visibility is NOT uniform and the difference matters:
+   *   pronouns  — everyone in camp. Stating them is the point.
+   *   phone     — member+ in camp.
+   *   emergency — **officers and the person themselves, nobody else**, and
+   *               never in a list view. It belongs on someone's own card,
+   *               where a human went looking for it on purpose.
+   *
+   * Privacy/demo mode redacts all of these for free via the key-naming
+   * convention in `app/lib/privacy.ts` (`*Phone` → phone, `*Name` → person).
+   * Renaming these columns without keeping those suffixes would silently
+   * un-redact them.
+   */
+  pronouns: text("pronouns"),
+  phone: text("phone"),
+  emergencyContactName: text("emergency_contact_name"),
+  emergencyContactPhone: text("emergency_contact_phone"),
   status: text("status").notNull().default("active"),
   // Invite-tree edge: the membership that invited this one (null = joined via
   // public application or is a root, e.g. the founder). Self-referential.

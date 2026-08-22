@@ -80,6 +80,20 @@ export const attendee = sqliteTable(
     // Access Pass (see setup_pass).
     arrivalDate: text("arrival_date"),
     departureDate: text("departure_date"),
+    /**
+     * Do they want to be placed under the camp's communal shade?
+     *
+     * A column rather than a questionnaire answer because the **map and roster
+     * consume it** — you want to filter and group placements by it — and that
+     * is the line this project draws between structured data and questions
+     * (see `plans/questions-and-profile.md`). Named for the general thing, not
+     * "the main shade": plenty of camps have communal shade, and the core
+     * schema shouldn't learn one camp's vocabulary.
+     *
+     * NULL = never asked, which is different from "no". Placement needs to see
+     * that difference.
+     */
+    wantsCommunalShade: integer("wants_communal_shade", { mode: "boolean" }),
     note: text("note"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()

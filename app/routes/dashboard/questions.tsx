@@ -38,6 +38,11 @@ import { and, asc, eq } from "drizzle-orm";
 import { memo, useEffect, useRef, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
 import { QuestionField } from "~/components/QuestionField";
+import {
+  checkCondition,
+  conditionMessage,
+  shownQuestions,
+} from "~/lib/conditions";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
@@ -111,6 +116,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     surface: q.surface as QuestionSurface,
     required: q.required,
     exclusiveOption: q.exclusiveOption,
+    showIfQuestionId: q.showIfQuestionId,
+    showIfValue: q.showIfValue,
   }));
 
   return redact(privacy, {
@@ -276,6 +283,33 @@ export async function action({ request }: Route.ActionArgs) {
       case "exclusiveOption":
         set.exclusiveOption = val.trim() || null;
         break;
+      case "showIf": {
+        // "" clears the condition; otherwise "<questionId>=<value>".
+        const raw = val.trim();
+        if (!raw) {
+          set.showIfQuestionId = null;
+          set.showIfValue = null;
+          break;
+        }
+        const at = raw.indexOf("=");
+        const target = at < 0 ? raw : raw.slice(0, at);
+        const want = at < 0 ? "" : raw.slice(at + 1);
+        // Validated server-side, always: the authoring UI can only offer
+        // sensible targets, but a cycle reaching the database would make the
+        // questionnaire un-renderable for every camper at once.
+        const problem = checkCondition({
+          questionId: id,
+          showIfQuestionId: target,
+          showIfValue: want,
+          all: await loadCampQuestions(campId),
+        });
+        if (problem) {
+          return data({ error: conditionMessage(problem) }, { status: 400 });
+        }
+        set.showIfQuestionId = target;
+        set.showIfValue = want;
+        break;
+      }
       default:
         return data({ error: "Unknown field." }, { status: 400 });
     }
@@ -328,10 +362,17 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
   } = loaderData;
   // Members only see the questions relevant to them (application-only ones are
   // the apply form's, not theirs); officers manage all of them.
-  const mine = questions.filter(
-    (q) =>
-      (q.audience === "all" || q.audience === audience) &&
-      surfacedInWizard(q.surface),
+  // Conditions are evaluated client-side against the answers already in hand,
+  // so a follow-up appears the moment its premise is answered rather than after
+  // a round trip. `shownQuestions` is the same function the wizard and the
+  // apply form use — one rule, three surfaces.
+  const mine = shownQuestions(
+    questions.filter(
+      (q) =>
+        (q.audience === "all" || q.audience === audience) &&
+        surfacedInWizard(q.surface),
+    ),
+    answers,
   );
 
   return (
@@ -485,6 +526,7 @@ function QuestionEditor({
                 <SortableQuestion
                   key={q.id}
                   q={q}
+                  allQuestions={order}
                   value={answers[q.id]}
                   locked={locked}
                   year={year}
@@ -555,6 +597,113 @@ function EditableText({
  * `onExclusiveChange` is provided (multi_select), each choice gets a toggle to
  * mark it the mutually-exclusive option ("clears the others" — e.g. "I don't
  * have space" on a ride-share question). */
+/**
+ * "Only ask this if…" — the officer control for a conditional question.
+ *
+ * Offers only questions that could legally control this one: not itself, not
+ * one that is already conditional, and nothing that already depends on this
+ * one. That keeps the one-level rule visible in the UI instead of only in the
+ * error the server would return.
+ */
+function ConditionRow({
+  question,
+  all,
+  save,
+}: {
+  question: Question;
+  all: Question[];
+  save: (field: string, value: string) => void;
+}) {
+  const candidates = all.filter(
+    (o) =>
+      o.id !== question.id &&
+      !o.showIfQuestionId &&
+      !all.some((x) => x.showIfQuestionId === question.id),
+  );
+  const target = all.find((o) => o.id === question.showIfQuestionId) ?? null;
+  const options = target?.options ?? [];
+
+  // A boolean/consent question has no options list, but its answers are still a
+  // closed set — offer them rather than making an officer guess the wording.
+  const valueChoices =
+    target && (target.type === "boolean" || target.type === "consent")
+      ? [
+          { value: "true", label: "Yes" },
+          { value: "false", label: "No" },
+        ]
+      : options.map((o) => ({ value: o, label: o }));
+
+  if (candidates.length === 0 && !target) return null;
+
+  return (
+    <Group gap="xs" align="flex-end" wrap="wrap">
+      <Select
+        size="xs"
+        label="Only ask if"
+        placeholder="always ask"
+        clearable
+        w={220}
+        data={candidates.map((o) => ({ value: o.id, label: o.prompt }))}
+        value={question.showIfQuestionId}
+        comboboxProps={{ withinPortal: true }}
+        onChange={(v) => {
+          // Clearing removes the condition; picking a new target leaves the
+          // value blank until they choose one, so nothing is half-applied.
+          if (!v) save("showIf", "");
+          else if (valueChoicesFor(all, v).length > 0) {
+            save("showIf", `${v}=${valueChoicesFor(all, v)[0]?.value ?? ""}`);
+          }
+        }}
+      />
+      {target ? (
+        valueChoices.length > 0 ? (
+          <Select
+            size="xs"
+            label="answers"
+            w={180}
+            data={valueChoices}
+            value={question.showIfValue}
+            allowDeselect={false}
+            comboboxProps={{ withinPortal: true }}
+            onChange={(v) =>
+              v && save("showIf", `${question.showIfQuestionId}=${v}`)
+            }
+          />
+        ) : (
+          <TextInput
+            size="xs"
+            label="answers"
+            w={180}
+            defaultValue={question.showIfValue ?? ""}
+            onBlur={(e) =>
+              save(
+                "showIf",
+                `${question.showIfQuestionId}=${e.currentTarget.value}`,
+              )
+            }
+          />
+        )
+      ) : null}
+    </Group>
+  );
+}
+
+/** The closed set of answers a question can have, if it has one. */
+function valueChoicesFor(
+  all: Question[],
+  id: string,
+): { value: string; label: string }[] {
+  const target = all.find((o) => o.id === id);
+  if (!target) return [];
+  if (target.type === "boolean" || target.type === "consent") {
+    return [
+      { value: "true", label: "Yes" },
+      { value: "false", label: "No" },
+    ];
+  }
+  return target.options.map((o) => ({ value: o, label: o }));
+}
+
 function OptionsEditor({
   options,
   onChange,
@@ -637,6 +786,7 @@ function OptionsEditor({
  * re-renders only the moving row. */
 const SortableQuestion = memo(function SortableQuestion({
   q,
+  allQuestions,
   value,
   locked,
   year,
@@ -644,6 +794,9 @@ const SortableQuestion = memo(function SortableQuestion({
   inviterOptions,
 }: {
   q: Question;
+  /** Every question in the camp — the condition control needs to know which
+   * others could legally control this one. */
+  allQuestions: Question[];
   value: string | undefined;
   locked: boolean;
   year: number;
@@ -798,6 +951,7 @@ const SortableQuestion = memo(function SortableQuestion({
               }
             />
           </Group>
+          <ConditionRow question={q} all={allQuestions} save={save} />
         </Stack>
         <ActionIcon
           variant="subtle"
