@@ -31,6 +31,7 @@ import {
   setupPassStockEvent,
   user,
 } from "../../db/schema";
+import { needsSetupPass } from "./age";
 import { uploadsRoot } from "./images.server";
 import { type PartyViewer, canManageAttendee } from "./party";
 import { hasAtLeast } from "./permissions";
@@ -592,17 +593,25 @@ export async function earlyArrivalsWithoutStock(
       memberName: user.name,
       arrivalDate: attendee.arrivalDate,
       status: attendee.status,
+      ageBand: attendee.ageBand,
     })
     .from(attendee)
     .leftJoin(membership, eq(attendee.membershipId, membership.id))
     .leftJoin(user, eq(membership.userId, user.id))
     .where(eq(attendee.editionId, editionId));
 
-  return rows
-    .filter((r) => r.status !== "not_coming")
-    .filter((r) => r.arrivalDate && r.arrivalDate < gateOpenIso)
-    .filter((r) => !covered.has(r.id))
-    .sort((a, b) => (a.arrivalDate ?? "").localeCompare(b.arrivalDate ?? ""));
+  return (
+    rows
+      .filter((r) => r.status !== "not_coming")
+      // Under-13s are admitted free and need no pass of their own. Without
+      // this they arrive early with their parents, land in the officers'
+      // "needs a pass" list, and make the camp look short of passes it does
+      // not need.
+      .filter((r) => needsSetupPass(r.ageBand))
+      .filter((r) => r.arrivalDate && r.arrivalDate < gateOpenIso)
+      .filter((r) => !covered.has(r.id))
+      .sort((a, b) => (a.arrivalDate ?? "").localeCompare(b.arrivalDate ?? ""))
+  );
 }
 
 export type SapCoverage = {
@@ -672,13 +681,20 @@ export async function sapCoverage(
   // Everyone attending whose arrival we don't know. They can't be counted as
   // demand and they can't be ruled out either.
   const noDate = await db
-    .select({ id: attendee.id, status: attendee.status })
+    .select({
+      id: attendee.id,
+      status: attendee.status,
+      ageBand: attendee.ageBand,
+    })
     .from(attendee)
     .where(
       and(eq(attendee.editionId, editionId), isNull(attendee.arrivalDate)),
     );
   const unknownArrival = noDate.filter(
-    (a) => a.status === "coming" || a.status === "maybe",
+    (a) =>
+      (a.status === "coming" || a.status === "maybe") &&
+      // A child who'd need no pass either way isn't an unknown worth chasing.
+      needsSetupPass(a.ageBand),
   ).length;
 
   // Greedy match, earliest arrival first.

@@ -94,6 +94,25 @@ export const attendee = sqliteTable(
      * that difference.
      */
     wantsCommunalShade: integer("wants_communal_shade", { mode: "boolean" }),
+    /**
+     * `adult` (default) | `under_18` | `under_13`.
+     *
+     * A child who never leaves their parents' side is still a **person**, not a
+     * "+2" on the adult's row: headcount counts them, map occupancy points at
+     * an attendee id, and a number has nowhere to record that one of them turns
+     * 13, or has a medical note. So they get a row like everybody else, and
+     * this band suppresses the asks that don't apply to them — the same shape
+     * as the RSVP gate and conditional questions.
+     *
+     * `under_13` is the band with teeth at Burning Man: no ticket and no Setup
+     * Access Pass. `under_18` still needs both, and exists so "who is a minor"
+     * is answerable without storing anyone's date of birth.
+     *
+     * NULL = adult. Deliberately not NOT NULL: every existing row is an adult
+     * and backfilling a default would claim the camp had answered a question
+     * nobody asked.
+     */
+    ageBand: text("age_band"),
     note: text("note"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()

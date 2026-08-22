@@ -38,6 +38,8 @@ type Item = {
   height: number;
   placed: boolean;
   placeNearVehicle: boolean;
+  needsEgress: boolean;
+  egressNote: string | null;
   /** "Put me near this person" — a membership in this camp, or null. */
   nearMembershipId: string | null;
   needsPumpout: boolean;
@@ -122,6 +124,8 @@ export async function loader({ request }: Route.LoaderArgs) {
       height: r.height,
       placed: r.placed,
       placeNearVehicle: r.placeNearVehicle,
+      needsEgress: r.needsEgress,
+      egressNote: r.egressNote,
       nearMembershipId: r.nearMembershipId,
       needsPumpout: r.needsPumpout,
     })) satisfies Item[],
@@ -201,6 +205,12 @@ export async function action({ request }: Route.ActionArgs) {
       const v = form.get("name");
       set.name = v == null || v === "" ? null : String(v);
     }
+    if (form.has("needsEgress")) {
+      set.needsEgress = form.get("needsEgress") === "true";
+    }
+    if (form.has("egressNote")) {
+      set.egressNote = String(form.get("egressNote") ?? "").trim() || null;
+    }
     if (form.has("placeNearVehicle")) {
       set.placeNearVehicle = form.get("placeNearVehicle") === "true";
     }
@@ -248,6 +258,8 @@ export async function action({ request }: Route.ActionArgs) {
         config: mapObject.config,
         mirrored: mapObject.mirrored,
         placeNearVehicle: mapObject.placeNearVehicle,
+        needsEgress: mapObject.needsEgress,
+        egressNote: mapObject.egressNote,
         needsPumpout: mapObject.needsPumpout,
         year: campEdition.year,
       })
@@ -278,6 +290,8 @@ export async function action({ request }: Route.ActionArgs) {
         config: s.config,
         mirrored: s.mirrored,
         placeNearVehicle: s.placeNearVehicle,
+        needsEgress: s.needsEgress,
+        egressNote: s.egressNote,
         needsPumpout: s.needsPumpout,
         placed: false,
         createdById: user.id,
@@ -445,6 +459,47 @@ function ItemRow({
                   ? `${round(item.width)}′ wide × adjustable length`
                   : "adjustable"}
             </Text>
+            {/* Only a vehicle can drive out, so only a vehicle is asked. A
+                mid-week trip — a supply run, a hospital visit, someone leaving
+                and coming back — means this must not be parked in behind three
+                tents. Like the preference below it, the app surfaces it and a
+                human does the placing: whether something can actually get out
+                depends on lanes and on what ends up beside it. */}
+            {def.vehicle ? (
+              <Stack gap={4} mt={6}>
+                <Checkbox
+                  size="xs"
+                  disabled={locked}
+                  defaultChecked={item.needsEgress}
+                  onChange={(e) =>
+                    commit({
+                      needsEgress: e.currentTarget.checked ? "true" : "false",
+                    })
+                  }
+                  label={
+                    <Text size="xs">
+                      Must be able to drive out{" "}
+                      <Text span c="dimmed">
+                        — leaving and coming back during the event
+                      </Text>
+                    </Text>
+                  }
+                />
+                {item.needsEgress ? (
+                  <TextInput
+                    size="xs"
+                    disabled={locked}
+                    placeholder="e.g. out Wednesday morning, back Thursday"
+                    aria-label="When it needs to leave"
+                    defaultValue={item.egressNote ?? ""}
+                    onBlur={(e) =>
+                      commit({ egressNote: e.currentTarget.value })
+                    }
+                  />
+                ) : null}
+              </Stack>
+            ) : null}
+
             {/* Only meaningful for something you sleep in — asking whether a
                 car should be parked next to a car isn't a question. Off means
                 "don't care", which is the common case: plenty of campers

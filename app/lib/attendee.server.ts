@@ -36,6 +36,8 @@ export type RosterGuest = {
   arrivalDate: string | null;
   departureDate: string | null;
   note: string | null;
+  /** adult (null) | under_18 | under_13 — see `app/lib/age.ts`. */
+  ageBand: string | null;
 };
 
 export type RosterMember = {
@@ -86,6 +88,7 @@ export async function loadRoster(
       arrivalDate: attendee.arrivalDate,
       departureDate: attendee.departureDate,
       note: attendee.note,
+      ageBand: attendee.ageBand,
       partyHostMembershipId: attendee.hostMembershipId,
     })
     .from(membership)
@@ -108,6 +111,7 @@ export async function loadRoster(
       arrivalDate: attendee.arrivalDate,
       departureDate: attendee.departureDate,
       note: attendee.note,
+      ageBand: attendee.ageBand,
     })
     .from(attendee)
     .where(and(eq(attendee.editionId, editionId), isGuestRow));
@@ -122,6 +126,7 @@ export async function loadRoster(
       arrivalDate: g.arrivalDate,
       departureDate: g.departureDate,
       note: g.note,
+      ageBand: g.ageBand,
     });
     guestsByHost.set(g.hostMembershipId, list);
   }
@@ -228,6 +233,7 @@ export async function listGuests(
       arrivalDate: attendee.arrivalDate,
       departureDate: attendee.departureDate,
       note: attendee.note,
+      ageBand: attendee.ageBand,
     })
     .from(attendee)
     .where(
@@ -243,6 +249,7 @@ export async function listGuests(
     arrivalDate: r.arrivalDate,
     departureDate: r.departureDate,
     note: r.note,
+    ageBand: r.ageBand,
   }));
 }
 
@@ -255,6 +262,8 @@ export async function addGuest(opts: {
   arrivalDate?: string | null;
   departureDate?: string | null;
   note?: string | null;
+  /** adult (default) | under_18 | under_13 — see `app/lib/age.ts`. */
+  ageBand?: string | null;
 }): Promise<void> {
   await db.insert(attendee).values({
     id: crypto.randomUUID(),
@@ -267,6 +276,7 @@ export async function addGuest(opts: {
     status: "coming",
     arrivalDate: opts.arrivalDate ?? null,
     departureDate: opts.departureDate ?? null,
+    ageBand: opts.ageBand ?? null,
     note: opts.note ?? null,
   });
 }
@@ -319,6 +329,7 @@ export async function updateGuest(
     arrivalDate?: string | null;
     departureDate?: string | null;
     note?: string | null;
+    ageBand?: string | null;
   },
 ): Promise<void> {
   await db

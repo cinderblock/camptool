@@ -23,6 +23,7 @@ import { notifications } from "@mantine/notifications";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
 import { CampMapView } from "~/components/CampMapView";
+import { AGE_BANDS, ageLabel, bandOf, minorSummary } from "~/lib/age";
 import {
   arrivalDistribution,
   arrivalSortKey,
@@ -164,6 +165,13 @@ function cleanDate(v: FormDataEntryValue | null): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }
 
+/** An age band from a form, or NULL for adult — anything unrecognised is an
+ * adult rather than an error, matching `bandOf`. */
+function cleanBand(v: FormDataEntryValue | null): string | null {
+  const s = String(v ?? "").trim();
+  return s === "under_13" || s === "under_18" ? s : null;
+}
+
 export async function action({ request }: Route.ActionArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
   await requireFeature(active, "roster");
@@ -191,6 +199,7 @@ export async function action({ request }: Route.ActionArgs) {
       email: String(form.get("email") ?? "").trim() || null,
       arrivalDate: cleanDate(form.get("arrivalDate")),
       departureDate: cleanDate(form.get("departureDate")),
+      ageBand: cleanBand(form.get("ageBand")),
       note: String(form.get("note") ?? "")
         .trim()
         .slice(0, MAX_NOTE),
@@ -299,6 +308,7 @@ export async function action({ request }: Route.ActionArgs) {
       name,
       arrivalDate: cleanDate(form.get("arrivalDate")),
       departureDate: cleanDate(form.get("departureDate")),
+      ageBand: cleanBand(form.get("ageBand")),
       note: String(form.get("note") ?? "")
         .trim()
         .slice(0, MAX_NOTE),
@@ -364,6 +374,9 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
     groups,
   } = loaderData;
 
+  // Minors across the whole roster — everyone's guests, not just the viewer's.
+  const minorsNote = minorSummary(members.flatMap((m) => m.guests));
+
   return (
     <Container size="lg">
       <Stack gap="lg">
@@ -393,6 +406,16 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
           <Stat value={headcount.guests} label="guests" />
           <Stat value={headcount.membersMaybe} label="maybe" />
         </SimpleGrid>
+        {minorsNote ? (
+          // Children count toward the headcount like anyone else — they eat,
+          // they sleep somewhere, they're bodies in camp. What they don't need
+          // is a ticket or a pass, and that difference is worth stating next to
+          // the number rather than discovering when the allocation looks short.
+          <Text size="xs" c="dimmed">
+            Includes {minorsNote} — no ticket or setup access pass needed for
+            under-13s.
+          </Text>
+        ) : null}
 
         <Arrivals members={members} year={year} />
 
@@ -625,6 +648,8 @@ type PartyGuest = {
   arrivalDate: string | null;
   departureDate: string | null;
   note: string | null;
+  /** adult (null) | under_18 | under_13 — see `app/lib/age.ts`. */
+  ageBand: string | null;
   /** A promotion link already exists for this guest — durable, not transient. */
   inviteLink?: string | null;
   /** They've signed up through it, so their plus-one slot became a real member. */
@@ -822,6 +847,12 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
                 <Group gap={6} wrap="wrap" style={{ minWidth: 0 }}>
                   <Text size="sm">
                     {g.name}
+                    {ageLabel(g.ageBand) ? (
+                      <Text span c="dimmed" size="xs">
+                        {" "}
+                        ({ageLabel(g.ageBand)})
+                      </Text>
+                    ) : null}
                     {g.note ? (
                       <Text span c="dimmed" size="xs">
                         {" "}
@@ -990,6 +1021,16 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
             label="Departs"
             w={{ base: "48%", xs: 150 }}
           />
+          <Select
+            name="ageBand"
+            label="Age"
+            description="Under 13s need no ticket or pass"
+            data={AGE_BANDS}
+            defaultValue="adult"
+            allowDeselect={false}
+            w={{ base: "100%", xs: 170 }}
+            comboboxProps={{ withinPortal: true }}
+          />
           <Button type="submit" loading={addFetcher.state !== "idle"}>
             Add
           </Button>
@@ -1030,6 +1071,7 @@ function EditGuestForm({
   // and departure.
   const [arrivalDate, setArrivalDate] = useState(guest.arrivalDate ?? "");
   const [departureDate, setDepartureDate] = useState(guest.departureDate ?? "");
+  const [ageBand, setAgeBand] = useState(bandOf(guest.ageBand));
   return (
     <Stack gap="md">
       <TextInput
@@ -1052,6 +1094,15 @@ function EditGuestForm({
           onChange={(e) => setDepartureDate(e.currentTarget.value)}
         />
       </Group>
+      <Select
+        label="Age"
+        description="Under 13s need no ticket and no setup access pass"
+        data={AGE_BANDS}
+        value={ageBand}
+        onChange={(v) => v && setAgeBand(bandOf(v))}
+        allowDeselect={false}
+        comboboxProps={{ withinPortal: true }}
+      />
       <Textarea
         label="Note"
         value={note}
@@ -1076,6 +1127,7 @@ function EditGuestForm({
                 note,
                 arrivalDate,
                 departureDate,
+                ageBand,
               },
               { method: "post" },
             )
@@ -1384,6 +1436,9 @@ function RosterTableInner({
                             size="sm"
                           >
                             {g.name}
+                            {ageLabel(g.ageBand)
+                              ? ` (${ageLabel(g.ageBand)})`
+                              : ""}
                             {g.arrivalDate || g.departureDate ? " · " : ""}
                             <DayRange
                               arrival={g.arrivalDate}

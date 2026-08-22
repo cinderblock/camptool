@@ -107,6 +107,26 @@ export const mapObject = sqliteTable(
     placeNearVehicle: integer("place_near_vehicle", { mode: "boolean" })
       .notNull()
       .default(false),
+    /**
+     * "This has to be able to drive out." A vehicle that leaves mid-week and
+     * comes back — a day trip, a hospital run, a supply run — must not be
+     * parked in behind three tents and a shade structure.
+     *
+     * A PREFERENCE surfaced to whoever arranges the map, like the two fields
+     * around it, and for the same reason: whether something can actually get
+     * out depends on lanes and on what ends up beside it, which the app cannot
+     * see. Once in-camp fire lanes and service roads exist, this flag is what a
+     * real check would read.
+     *
+     * NOT a departure. They are coming back, so nothing may treat this as
+     * leaving — that would drop them from the on-site count for the rest of the
+     * week.
+     */
+    needsEgress: integer("needs_egress", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    /** When, and why — free text, for the humans doing placement. */
+    egressNote: text("egress_note"),
     // "Put me next to THIS PERSON." The other half of the same wish, for the
     // case the app can't infer: a camper wants to be near a friend, not near
     // their own car. Like `placeNearVehicle` it is a PREFERENCE surfaced to

@@ -575,6 +575,13 @@
       "when": 1787423920415,
       "tag": "0081_workable_spyke",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1787439451211,
+      "tag": "0082_chilly_wolfpack",
+      "breakpoints": true
     }
   ]
 }
