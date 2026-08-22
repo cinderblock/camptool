@@ -28,8 +28,9 @@ import {
   useComputedColorScheme,
 } from "@mantine/core";
 import { useLocalStorage, useMediaQuery } from "@mantine/hooks";
-import { and, desc, eq, gt, isNotNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, lt, or } from "drizzle-orm";
 import {
+  type ReactNode,
   memo,
   useEffect,
   useLayoutEffect,
@@ -534,6 +535,127 @@ async function listSnapshots(editionId: string) {
   }));
 }
 
+/**
+ * Resolve a stored snapshot blob into the same client shape the editor draws
+ * (`loadClientMap`'s output), so a saved version can be *looked at* and not only
+ * restored over the top of the official map.
+ *
+ * The blob holds RAW `map_object` rows, which differ from the editor's shape in
+ * three ways that all bite if you skip them: it keeps UNPLACED objects (the
+ * officer's to-site queue, which the editor never draws, at whatever stale
+ * coordinates those rows carry), it stores `config` as JSON text, and it carries
+ * no owner NAME because `serializeMap` does no join. Filter, parse, and
+ * re-resolve the names — otherwise a version renders the siting queue on top of
+ * the map with every object ownerless.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: raw serialized rows, revived below
+type RawSnapRow = any;
+
+async function snapshotClientMap(dataJson: string) {
+  let d: {
+    placement?: RawSnapRow;
+    objects?: RawSnapRow[];
+    zones?: RawSnapRow[];
+    cables?: RawSnapRow[];
+    roads?: RawSnapRow[];
+  };
+  try {
+    d = JSON.parse(dataJson);
+  } catch {
+    return null;
+  }
+  // The editor's `onMap` rule: sited objects plus ones parked in the apron.
+  const rows = (Array.isArray(d.objects) ? d.objects : []).filter(
+    (o) => o?.placed || o?.staged,
+  );
+  const ownerIds = [
+    ...new Set(
+      rows.map((o) => o.ownerMembershipId).filter((id): id is string => !!id),
+    ),
+  ];
+  const nameRows = ownerIds.length
+    ? await db
+        .select({ id: membership.id, name: user.name })
+        .from(membership)
+        .leftJoin(user, eq(membership.userId, user.id))
+        .where(inArray(membership.id, ownerIds))
+    : [];
+  const nameOf = new Map(nameRows.map((r) => [r.id, r.name]));
+  const lot = d.placement ?? null;
+  return {
+    objects: rows.map((o) =>
+      toObjRow({
+        id: String(o.id),
+        name: o.name ?? null,
+        kind: String(o.kind ?? "structure"),
+        x: Number(o.x) || 0,
+        y: Number(o.y) || 0,
+        width: Number(o.width) || 0,
+        height: Number(o.height) || 0,
+        rotation: Number(o.rotation) || 0,
+        tallFt: Number(o.tallFt) || 0,
+        showDoor: !!o.showDoor,
+        mirrored: !!o.mirrored,
+        config: o.config ?? null,
+        color: o.color ?? null,
+        notes: o.notes ?? null,
+        groupId: o.groupId ?? null,
+        staged: !!o.staged,
+        ownerMembershipId: o.ownerMembershipId ?? null,
+        ownerName: nameOf.get(o.ownerMembershipId) ?? null,
+        placeNearVehicle: !!o.placeNearVehicle,
+        nearMembershipId: o.nearMembershipId ?? null,
+        // Dead columns (retired with the pending* flow) but still in old blobs.
+        pendingAt: o.pendingAt ? new Date(o.pendingAt) : null,
+        pendingPrev: o.pendingPrev ?? null,
+        pendingBy: o.pendingByMembershipId ?? null,
+      } satisfies ObjSelectRow),
+    ) satisfies ObjRow[],
+    zones: (d.zones ?? []).map((z) => ({
+      id: String(z.id),
+      name: z.name ?? null,
+      kind: String(z.kind ?? "custom"),
+      color: String(z.color ?? "#fa5252"),
+      points: parseZonePoints(z.points ?? "[]"),
+      groupId: z.groupId ?? null,
+      notes: z.notes ?? null,
+    })) satisfies ZoneRow[],
+    cables: (d.cables ?? []).map((c) => ({
+      id: String(c.id),
+      name: c.name ?? null,
+      kind: String(c.kind ?? "power"),
+      color: String(c.color ?? "#fab005"),
+      points: parseZonePoints(c.points ?? "[]"),
+      amps: c.amps ?? null,
+      gauge: c.gauge ?? null,
+      notes: c.notes ?? null,
+    })) satisfies CableRow[],
+    roads: (d.roads ?? []).map((r) => ({
+      id: String(r.id),
+      name: r.name ?? null,
+      kind: String(r.kind ?? "fire-lane"),
+      color: String(r.color ?? "#868e96"),
+      width: Number(r.width) || 20,
+      cutback: Number(r.cutback) || 0,
+      points: parseZonePoints(r.points ?? "[]"),
+      notes: r.notes ?? null,
+    })) satisfies RoadRow[],
+    lot: lot
+      ? {
+          streetLetter: lot.streetLetter ?? null,
+          year: lot.year ?? null,
+          frontsToMan: !!lot.frontsToMan,
+          street: lot.street ?? null,
+          address: lot.address ?? null,
+          frontageFt: Number(lot.frontageFt) || 0,
+          depthFt: Number(lot.depthFt) || 0,
+          innerRadiusFt: lot.innerRadiusFt ?? null,
+          notes: lot.notes ?? null,
+        }
+      : null,
+  };
+}
+
 /** Everything the EDITOR draws on the map surface: objects sited in the lot, plus
  * ones parked in the staging apron outside it. Staged objects are deliberately
  * still `placed = false` (they stay on the officer's to-site queue), so "is it on
@@ -860,17 +982,21 @@ export async function action({ request }: Route.ActionArgs) {
       },
     );
   }
-  if (activeEdition.locked) {
+  const canManage = hasAtLeast(active.membership.role, "officer");
+  const myMembershipId = active.membership.id;
+  const form = await request.formData();
+  const intent = String(form.get("intent"));
+
+  // Reading a saved version changes nothing, so a locked year must not block it —
+  // a locked year is exactly when people most want to look back at what was
+  // planned. Every other intent still stops here.
+  const READ_ONLY_INTENTS = new Set(["viewSnapshot"]);
+  if (activeEdition.locked && !READ_ONLY_INTENTS.has(intent)) {
     return data(
       { error: "This year is locked. Unlock it to make changes." },
       { status: 403 },
     );
   }
-
-  const canManage = hasAtLeast(active.membership.role, "officer");
-  const myMembershipId = active.membership.id;
-  const form = await request.formData();
-  const intent = String(form.get("intent"));
   const num = (k: string, fallback = 0) => {
     const v = form.get(k);
     if (v == null || v === "") return fallback;
@@ -1034,6 +1160,27 @@ export async function action({ request }: Route.ActionArgs) {
         map: await loadClientMap(editionId),
         history: await historyState(editionId),
         snapshots: await listSnapshots(editionId),
+      });
+    }
+
+    // Look at a saved version without touching the official map. Deliberately
+    // NOT officer-only: restoring a snapshot is an officer's call, but reading
+    // one is how everybody sees the layouts that are in flight.
+    if (intent === "viewSnapshot") {
+      const id = String(form.get("id"));
+      const [snap] = await db
+        .select({ data: mapSnapshot.data, label: mapSnapshot.label })
+        .from(mapSnapshot)
+        .where(
+          and(eq(mapSnapshot.id, id), eq(mapSnapshot.editionId, editionId)),
+        )
+        .limit(1);
+      if (!snap) return data({ error: "Version not found." }, { status: 404 });
+      const view = await snapshotClientMap(snap.data);
+      if (!view)
+        return data({ error: "That version can't be read." }, { status: 422 });
+      return data({
+        view: { id, label: snap.label ?? "Snapshot", map: view },
       });
     }
 
@@ -2978,13 +3125,191 @@ function BurningManExport({
   );
 }
 
-/** Officer snapshots panel: save named restore points of the official map and
- * restore/delete them. Restoring is itself undoable (it goes on the undo stack). */
-function SnapshotsPanel({
+// ---- Versions: one shape for "a whole map you can look at" ------------------
+//
+// Three different things in this app already amount to a complete layout, and
+// until now not one of them could simply be LOOKED at: the live official map, a
+// named snapshot (whose only verb was Restore — overwrite the official map to
+// find out what was in it), and the one nobody thought of as a map at all, the
+// set of suggestions a single camper has outstanding. Resolve all three to the
+// same shape and a single read-only viewer plus a single diff serves every one
+// of them. A camper's version costs nothing to build: the page already holds
+// the official geometry and everybody's suggestions.
+// See plans/map-versions-and-diffs.md.
+
+type VersionMap = {
+  objects: ObjRow[];
+  zones: ZoneRow[];
+  cables: CableRow[];
+  roads: RoadRow[];
+  lot: Lot | null;
+};
+
+/** What's on screen instead of the live map. `key` is stable and identifies the
+ * source (`snapshot:<id>` / `member:<membershipId>`) so the picker can show
+ * which one is open. */
+type ViewedVersion = { key: string; label: string; map: VersionMap };
+
+/** Overlay a camper's suggestions on the official map — *their* version of it.
+ * Suggestions only carry geometry for objects that already exist, so this can
+ * never add or drop anything; every difference is a thing that moved. */
+function memberVersionMap(
+  base: VersionMap,
+  suggestions: Suggestion[],
+  membershipId: string,
+): VersionMap {
+  const mine = new Map(
+    suggestions
+      .filter((s) => s.membershipId === membershipId)
+      .map((s) => [s.objectId, s] as const),
+  );
+  return {
+    ...base,
+    objects: base.objects.map((o) => {
+      const s = mine.get(o.id);
+      return s
+        ? {
+            ...o,
+            x: s.x,
+            y: s.y,
+            width: s.width,
+            height: s.height,
+            rotation: s.rotation,
+          }
+        : o;
+    }),
+  };
+}
+
+/** The campers with an outstanding version, newest-looking first by name so the
+ * list is stable rather than in whatever order the rows came back. */
+function memberVersionList(suggestions: Suggestion[]) {
+  const by = new Map<string, { name: string; count: number }>();
+  for (const s of suggestions) {
+    const seen = by.get(s.membershipId);
+    if (seen) seen.count += 1;
+    else by.set(s.membershipId, { name: s.memberName ?? "Someone", count: 1 });
+  }
+  return [...by.entries()]
+    .map(([membershipId, v]) => ({ membershipId, ...v }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Feet. Below this two positions are the same position — floats round-trip
+// through JSON and a drag lands on sub-inch fractions nobody means.
+const DIFF_EPS = 0.01;
+
+function geomDiffers(a: ObjRow, b: ObjRow) {
+  return (
+    Math.abs(a.x - b.x) > DIFF_EPS ||
+    Math.abs(a.y - b.y) > DIFF_EPS ||
+    Math.abs(a.width - b.width) > DIFF_EPS ||
+    Math.abs(a.height - b.height) > DIFF_EPS ||
+    Math.abs(a.rotation - b.rotation) > DIFF_EPS
+  );
+}
+
+type MapDiff = {
+  /** In the version, not on the official map. */
+  added: ObjRow[];
+  /** On the official map, not in the version. */
+  removed: ObjRow[];
+  /** In both, sitting differently. `was` is official, `now` is the version. */
+  changed: { was: ObjRow; now: ObjRow }[];
+  zones: number;
+  cables: number;
+  roads: number;
+  lotChanged: boolean;
+};
+
+function diffMaps(official: VersionMap, version: VersionMap): MapDiff {
+  const before = new Map(official.objects.map((o) => [o.id, o] as const));
+  const after = new Map(version.objects.map((o) => [o.id, o] as const));
+  const added: ObjRow[] = [];
+  const removed: ObjRow[] = [];
+  const changed: { was: ObjRow; now: ObjRow }[] = [];
+  for (const [id, now] of after) {
+    const was = before.get(id);
+    if (!was) added.push(now);
+    else if (geomDiffers(was, now)) changed.push({ was, now });
+  }
+  for (const [id, was] of before) if (!after.has(id)) removed.push(was);
+  return {
+    added,
+    removed,
+    changed,
+    zones: version.zones.length - official.zones.length,
+    cables: version.cables.length - official.cables.length,
+    roads: version.roads.length - official.roads.length,
+    lotChanged:
+      (official.lot?.frontageFt ?? 0) !== (version.lot?.frontageFt ?? 0) ||
+      (official.lot?.depthFt ?? 0) !== (version.lot?.depthFt ?? 0),
+  };
+}
+
+function diffIsEmpty(d: MapDiff) {
+  return (
+    d.added.length === 0 &&
+    d.removed.length === 0 &&
+    d.changed.length === 0 &&
+    d.zones === 0 &&
+    d.cables === 0 &&
+    d.roads === 0 &&
+    !d.lotChanged
+  );
+}
+
+/** How far something moved, in plain feet, for the change list. */
+function moveSummary(was: ObjRow, now: ObjRow): string {
+  const bits: string[] = [];
+  const dist = Math.hypot(now.x - was.x, now.y - was.y);
+  if (dist > DIFF_EPS) bits.push(`moved ${feetInches(dist)}`);
+  if (
+    Math.abs(was.width - now.width) > DIFF_EPS ||
+    Math.abs(was.height - now.height) > DIFF_EPS
+  )
+    bits.push(`resized to ${feetInches(now.width)}×${feetInches(now.height)}`);
+  const dr = Math.abs(now.rotation - was.rotation);
+  if (dr > DIFF_EPS) bits.push(`turned ${Math.round(dr)}°`);
+  return bits.join(", ") || "changed";
+}
+
+/** Name a thing in the change list. Most objects are unnamed, and a camp is
+ * mostly one person's several things — so lead with WHAT it is and qualify with
+ * whose, or a list of six moves all read "Bob". */
+function objLabel(o: ObjRow): string {
+  const named = o.name?.trim();
+  if (named) return named;
+  const who = o.ownerName?.split(" ")[0];
+  const what = kindDef(o.kind).label;
+  return who ? `${what} (${who})` : what;
+}
+
+/**
+ * Versions panel — every layout in flight, in one list, for every member.
+ *
+ * Members get to see and read them (which is the whole point: the camp had
+ * several maps going and no way to compare them). The verbs that change the
+ * official map — save a new restore point, restore one, delete one — stay
+ * behind `canManage`, exactly as before.
+ */
+function VersionsPanel({
   snapshots,
+  members,
+  viewing,
+  onView,
+  onExit,
+  diff,
+  canManage,
   fetcher,
 }: {
   snapshots: { id: string; label: string; createdAt: number }[];
+  members: { membershipId: string; name: string; count: number }[];
+  viewing: ViewedVersion | null;
+  onView: (key: string) => void;
+  onExit: () => void;
+  diff: MapDiff | null;
+  canManage: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const [label, setLabel] = useState("");
@@ -2995,79 +3320,201 @@ function SnapshotsPanel({
     );
     setLabel("");
   };
+  const row = (key: string, name: string, note: string, extra?: ReactNode) => {
+    const open = viewing?.key === key;
+    return (
+      <Group
+        key={key}
+        justify="space-between"
+        gap={6}
+        wrap="nowrap"
+        data-version-row={key}
+      >
+        <Box style={{ flex: 1, minWidth: 0 }}>
+          <Text size="xs" fw={open ? 700 : 500} truncate>
+            {name}
+          </Text>
+          <Text size="10px" c="dimmed" truncate>
+            {note}
+          </Text>
+        </Box>
+        <Button
+          size="compact-xs"
+          variant={open ? "filled" : "light"}
+          onClick={() => (open ? onExit() : onView(key))}
+        >
+          {open ? "Close" : "View"}
+        </Button>
+        {extra}
+      </Group>
+    );
+  };
   return (
     <Paper withBorder p="sm" radius="md">
       <Text size="xs" fw={600} mb={6}>
-        Snapshots
+        Versions
       </Text>
-      <Group gap={6} wrap="nowrap">
-        <TextInput
-          size="xs"
-          placeholder="Label (e.g. Planned v1)"
-          style={{ flex: 1 }}
-          value={label}
-          maxLength={80}
-          onChange={(e) => setLabel(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              save();
-            }
-          }}
-        />
-        <Button size="compact-xs" onClick={save}>
-          Save
-        </Button>
-      </Group>
-      {snapshots.length > 0 ? (
-        <Stack gap={4} mt={8}>
-          {snapshots.map((s) => (
-            <Group key={s.id} justify="space-between" gap={4} wrap="nowrap">
-              <Text
-                size="xs"
-                title={`${s.label} · ${new Date(s.createdAt).toISOString().slice(0, 16).replace("T", " ")}`}
-                style={{
-                  flex: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {s.label}
-              </Text>
-              <Button
-                size="compact-xs"
-                variant="light"
-                onClick={() =>
-                  fetcher.submit(
-                    { intent: "restoreSnapshot", id: s.id },
-                    { method: "post" },
-                  )
-                }
-              >
-                Restore
-              </Button>
-              <Button
-                size="compact-xs"
-                variant="subtle"
-                color="red"
-                onClick={() =>
-                  fetcher.submit(
-                    { intent: "deleteSnapshot", id: s.id },
-                    { method: "post" },
-                  )
-                }
-              >
-                ✕
-              </Button>
-            </Group>
-          ))}
-        </Stack>
-      ) : (
+      <Stack gap={8}>
+        {row(
+          "official",
+          "Official map",
+          canManage ? "The live layout — the one you edit" : "The live layout",
+        )}
+        {snapshots.map((s) =>
+          row(
+            `snapshot:${s.id}`,
+            s.label,
+            `Saved ${new Date(s.createdAt).toISOString().slice(0, 10)}`,
+            canManage ? (
+              <Menu position="bottom-end" withinPortal>
+                <Menu.Target>
+                  <ActionIcon
+                    size="sm"
+                    variant="subtle"
+                    aria-label="Version actions"
+                  >
+                    ⋯
+                  </ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item
+                    onClick={() =>
+                      fetcher.submit(
+                        { intent: "restoreSnapshot", id: s.id },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    Make this the official map
+                  </Menu.Item>
+                  <Menu.Item
+                    color="red"
+                    onClick={() =>
+                      fetcher.submit(
+                        { intent: "deleteSnapshot", id: s.id },
+                        { method: "post" },
+                      )
+                    }
+                  >
+                    Delete this version
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+            ) : undefined,
+          ),
+        )}
+        {members.map((m) =>
+          row(
+            `member:${m.membershipId}`,
+            `${m.name}'s version`,
+            `${m.count} suggested ${m.count === 1 ? "move" : "moves"}`,
+          ),
+        )}
+      </Stack>
+
+      {viewing && diff ? (
+        <Box
+          mt="sm"
+          pt="sm"
+          style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}
+        >
+          <Text size="xs" fw={600} mb={4}>
+            Compared to the official map
+          </Text>
+          {diffIsEmpty(diff) ? (
+            <Text size="xs" c="dimmed">
+              Identical — nothing differs.
+            </Text>
+          ) : (
+            <Stack gap={3}>
+              {diff.changed.map(({ was, now }) => (
+                <Text key={`c-${was.id}`} size="xs">
+                  <Text span c="blue.7" fw={600}>
+                    ●
+                  </Text>{" "}
+                  {objLabel(was)} — {moveSummary(was, now)}
+                </Text>
+              ))}
+              {diff.added.map((o) => (
+                <Text key={`a-${o.id}`} size="xs">
+                  <Text span c="teal.7" fw={600}>
+                    +
+                  </Text>{" "}
+                  {objLabel(o)} — only in this version
+                </Text>
+              ))}
+              {diff.removed.map((o) => (
+                <Text key={`r-${o.id}`} size="xs">
+                  <Text span c="red.7" fw={600}>
+                    −
+                  </Text>{" "}
+                  {objLabel(o)} — not in this version
+                </Text>
+              ))}
+              {diff.zones !== 0 ? (
+                <Text size="xs" c="dimmed">
+                  {diff.zones > 0
+                    ? `${diff.zones} more`
+                    : `${-diff.zones} fewer`}{" "}
+                  {Math.abs(diff.zones) === 1 ? "zone" : "zones"}
+                </Text>
+              ) : null}
+              {diff.cables !== 0 ? (
+                <Text size="xs" c="dimmed">
+                  {diff.cables > 0
+                    ? `${diff.cables} more`
+                    : `${-diff.cables} fewer`}{" "}
+                  {Math.abs(diff.cables) === 1 ? "run" : "runs"} (power/water)
+                </Text>
+              ) : null}
+              {diff.roads !== 0 ? (
+                <Text size="xs" c="dimmed">
+                  {diff.roads > 0
+                    ? `${diff.roads} more`
+                    : `${-diff.roads} fewer`}{" "}
+                  {Math.abs(diff.roads) === 1 ? "lane" : "lanes"}
+                </Text>
+              ) : null}
+              {diff.lotChanged ? (
+                <Text size="xs" c="dimmed">
+                  The lot itself is a different size in this version.
+                </Text>
+              ) : null}
+            </Stack>
+          )}
+        </Box>
+      ) : null}
+
+      {/* Saving snapshots the OFFICIAL map, so offering it while a version is
+          open just invites "save" to be read as "save what I'm looking at". */}
+      {canManage && !viewing ? (
+        <Group gap={6} wrap="nowrap" mt="sm">
+          <TextInput
+            size="xs"
+            placeholder="Save the official map as…"
+            style={{ flex: 1 }}
+            value={label}
+            maxLength={80}
+            onChange={(e) => setLabel(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                save();
+              }
+            }}
+          />
+          <Button size="compact-xs" onClick={save}>
+            Save
+          </Button>
+        </Group>
+      ) : null}
+      {snapshots.length === 0 && members.length === 0 ? (
         <Text size="xs" c="dimmed" mt={6}>
-          Save a restore point you can return to anytime.
+          {canManage
+            ? "Save the layout under a name and it becomes a version everyone can look at."
+            : "Only the official map so far. Drag your own things to propose a version of your own."}
         </Text>
-      )}
+      ) : null}
     </Paper>
   );
 }
@@ -3172,6 +3619,12 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const doUndoSuggestion = () => {
     fetcher.submit({ intent: "deleteMySuggestion" }, { method: "post" });
   };
+  // Which version is on screen. null = the live official map, and the ONLY one
+  // anyone can edit — every other version is read-only, so the live state below
+  // is never overwritten by looking at one. See plans/map-versions-and-diffs.md.
+  const [viewing, setViewing] = useState<ViewedVersion | null>(null);
+  // Draw the differences on the map itself, not just list them in the rail.
+  const [showDiff, setShowDiff] = useState(true);
   const [objects, setObjects] = useState<ObjRow[]>(loaderData.objects);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Multi-selection: all currently-selected object ids (includes the primary
@@ -3288,14 +3741,29 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           history?: typeof loaderData.history;
           snapshots?: typeof loaderData.snapshots;
           suggestions?: typeof loaderData.suggestions;
+          view?: { id: string; label: string; map: VersionMap };
         }
       | undefined;
     if (!d || d === lastSynced.current) return;
     lastSynced.current = d;
+    // A saved version came back to be looked at. It replaces nothing: the live
+    // state stays exactly where it is, and `viewing` is drawn instead of it.
+    if (d.view) {
+      setViewing({
+        key: `snapshot:${d.view.id}`,
+        label: d.view.label,
+        map: d.view.map,
+      });
+      return;
+    }
     // Suggestion list refresh (may accompany an object update or arrive alone).
     if (d.suggestions) setSuggestions(d.suggestions);
-    // Undo/redo/snapshot-restore return the whole map — replace all state.
+    // Undo/redo/snapshot-restore return the whole map — replace all state. The
+    // official map just moved under the viewer's feet, so drop back to it
+    // rather than leave a version on screen that's now diffed against stale
+    // ground (restoring a version is exactly how someone lands here).
     if (d.map) {
+      setViewing(null);
       setObjects(d.map.objects);
       setZones(d.map.zones);
       setCables(d.map.cables);
@@ -3433,6 +3901,65 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
     (s) => s.membershipId === myMembershipId,
   ).length;
 
+  // ---- Versions -------------------------------------------------------------
+  // The live map, packaged in the same shape a saved version arrives in, so the
+  // viewer and the diff never have to care which one they were handed.
+  const officialMap: VersionMap = useMemo(
+    () => ({ objects, zones, cables, roads, lot }),
+    [objects, zones, cables, roads, lot],
+  );
+  // Every camper with something outstanding has a version, whether or not they
+  // ever thought of it that way.
+  const memberVersions = useMemo(
+    () => memberVersionList(suggestions),
+    [suggestions],
+  );
+  const openVersion = (key: string) => {
+    if (key === "official") {
+      setViewing(null);
+      return;
+    }
+    if (key.startsWith("member:")) {
+      const membershipId = key.slice("member:".length);
+      const who = memberVersions.find((m) => m.membershipId === membershipId);
+      // Built right here: the page already holds the official geometry and
+      // everybody's suggestions, so a camper's version costs no round trip.
+      setViewing({
+        key,
+        label: `${who?.name ?? "Someone"}'s version`,
+        map: memberVersionMap(officialMap, suggestions, membershipId),
+      });
+      return;
+    }
+    // A saved snapshot is the only kind that has to be fetched — its geometry
+    // lives in a blob on the server, not in anything the page already has.
+    fetcher.submit(
+      { intent: "viewSnapshot", id: key.slice("snapshot:".length) },
+      { method: "post" },
+    );
+  };
+  // A camper's version is derived from live state, so it has to be rebuilt when
+  // that state moves underneath it — otherwise approving one ghost leaves the
+  // rest of the version showing the geometry from before.
+  const viewingMemberId = viewing?.key.startsWith("member:")
+    ? viewing.key.slice("member:".length)
+    : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rebuild on source change, not on `viewing` itself
+  useEffect(() => {
+    if (!viewingMemberId) return;
+    const who = memberVersions.find((m) => m.membershipId === viewingMemberId);
+    // Their last suggestion was resolved — there's no version left to look at.
+    if (!who) {
+      setViewing(null);
+      return;
+    }
+    setViewing({
+      key: `member:${viewingMemberId}`,
+      label: `${who.name}'s version`,
+      map: memberVersionMap(officialMap, suggestions, viewingMemberId),
+    });
+  }, [viewingMemberId, officialMap, suggestions]);
+
   if (!lot) {
     return (
       <Stack gap="lg" maw={620}>
@@ -3449,6 +3976,20 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       </Stack>
     );
   }
+
+  // What actually gets drawn: the version if one is open, the live map if not.
+  const shown = viewing ? viewing.map : officialMap;
+  const shownLot = shown.lot ?? lot;
+  const diff = viewing ? diffMaps(officialMap, viewing.map) : null;
+  // Everything the editor lets you do is off while a version is on screen: a
+  // version is a photograph, and the only ways one becomes the official map are
+  // the officer verbs that already existed (Restore, or Approve a suggestion).
+  const readOnly = viewing !== null;
+  const noop = () => {};
+  // The rail's editing panels answer to the same rule as the canvas: a version
+  // is not a thing you edit, so they stand down while one is open.
+  const railManage = canManage && !readOnly;
+  const railEdit = canEdit && !readOnly;
 
   return (
     // Fill the dashboard content area (viewport − header − Main padding) and keep
@@ -3479,14 +4020,14 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Camp map</Title>
           <Text c="dimmed" size="sm">
-            {lot.frontageFt}′ frontage × {lot.depthFt}′ deep
-            {lot.street
-              ? ` · ${lot.street}`
-              : lot.streetLetter && lot.year
-                ? ` · ${streetLabel(lot.year, lot.streetLetter)}`
+            {shownLot.frontageFt}′ frontage × {shownLot.depthFt}′ deep
+            {shownLot.street
+              ? ` · ${shownLot.street}`
+              : shownLot.streetLetter && shownLot.year
+                ? ` · ${streetLabel(shownLot.year, shownLot.streetLetter)}`
                 : ""}
-            {lot.address ? ` @ ${lot.address}` : ""}
-            {lot.frontsToMan ? "" : " · mountain-facing"}
+            {shownLot.address ? ` @ ${shownLot.address}` : ""}
+            {shownLot.frontsToMan ? "" : " · mountain-facing"}
           </Text>
         </div>
         <Group gap="xs" align="center" wrap="nowrap">
@@ -3526,7 +4067,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           <Button variant="default" size="xs" onClick={() => window.print()}>
             Print
           </Button>
-          {canManage && isBurningMan(event) ? (
+          {canManage && !readOnly && isBurningMan(event) ? (
             <BurningManExport
               campName={loaderData.campName}
               lotLocation={
@@ -3558,6 +4099,46 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           </Button>
         </Group>
       </Group>
+
+      {/* Nobody should be able to mistake a version for the real map. Say what
+          they're looking at, say what differs, and put the way back where they
+          are — not in a rail that's folded away on a phone. */}
+      {viewing && diff ? (
+        <Alert
+          variant="light"
+          color="grape"
+          mb="sm"
+          title={`Viewing ${viewing.label}`}
+        >
+          <Group gap="sm" wrap="wrap">
+            <Text size="sm">
+              {diffIsEmpty(diff)
+                ? "Identical to the official map."
+                : [
+                    diff.changed.length > 0 && `${diff.changed.length} moved`,
+                    diff.added.length > 0 && `${diff.added.length} only here`,
+                    diff.removed.length > 0 && `${diff.removed.length} missing`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+              {" — read-only."}
+            </Text>
+            <Checkbox
+              size="xs"
+              label="Show changes on the map"
+              checked={showDiff}
+              onChange={(e) => setShowDiff(e.currentTarget.checked)}
+            />
+            <Button
+              size="compact-xs"
+              variant="default"
+              onClick={() => setViewing(null)}
+            >
+              Back to the official map
+            </Button>
+          </Group>
+        </Alert>
+      ) : null}
 
       {/* A dimmed map must never be unexplained: say whose party is showing,
           and give a way out that doesn't require finding the Highlight
@@ -3621,35 +4202,43 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
         >
           {/* Print-only caption: identifies the printout (screen-hidden). */}
           <div className="camp-map-print-caption">
-            <strong>{loaderData.campName}</strong> — {lot.frontageFt}′ ×{" "}
-            {lot.depthFt}′{lot.address ? ` @ ${lot.address}` : ""}
+            <strong>{loaderData.campName}</strong> — {shownLot.frontageFt}′ ×{" "}
+            {shownLot.depthFt}′
+            {shownLot.address ? ` @ ${shownLot.address}` : ""}
+            {viewing ? ` · ${viewing.label} (not the official map)` : ""}
             {mapStatus ? ` · ${mapStatus}` : ""}
           </div>
+          {/* While a version is open the editor is handed THAT state, with the
+              write paths shut off and inert setters, so nothing a stray drag
+              does can be mistaken for an edit to the official map. */}
           <Editor
-            lot={lot}
-            objects={objects}
-            setObjects={setObjects}
+            lot={shownLot}
+            objects={shown.objects}
+            setObjects={readOnly ? noop : setObjects}
             selectedId={selectedId}
             setSelectedId={setSelectedId}
             selectedIds={selectedIds}
             setSelectedIds={setSelectedIds}
-            zones={zones}
-            setZones={setZones}
+            zones={shown.zones}
+            setZones={readOnly ? noop : setZones}
             selectedZoneId={selectedZoneId}
             setSelectedZoneId={setSelectedZoneId}
             selectedZoneIds={selectedZoneIds}
             setSelectedZoneIds={setSelectedZoneIds}
-            suggestions={suggestions}
-            cables={cables}
-            setCables={setCables}
+            // A version already HAS the suggestions baked into its geometry;
+            // drawing the loose ghosts on top would double them up.
+            suggestions={readOnly ? [] : suggestions}
+            diff={readOnly && showDiff ? diff : null}
+            cables={shown.cables}
+            setCables={readOnly ? noop : setCables}
             selectedCableId={selectedCableId}
             setSelectedCableId={setSelectedCableId}
-            roads={roads}
-            setRoads={setRoads}
+            roads={shown.roads}
+            setRoads={readOnly ? noop : setRoads}
             selectedRoadId={selectedRoadId}
             setSelectedRoadId={setSelectedRoadId}
-            canEdit={canEdit}
-            canManage={canManage}
+            canEdit={canEdit && !readOnly}
+            canManage={canManage && !readOnly}
             myMembershipId={myMembershipId}
             bannedKinds={bannedKinds}
             mapStatus={mapStatus}
@@ -3657,7 +4246,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             party={party}
             lotOpen={lotOpen}
             setLotOpen={setLotOpen}
-            mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
+            mapUpBearing={mapUpBearingFor(
+              shownLot.address,
+              shownLot.frontsToMan,
+            )}
             sun={sun}
             showDoors={showDoors}
             showFire={showFire}
@@ -3669,7 +4261,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             windParticles={windParticles}
             fetcher={fetcher}
           />
-          <GridScaleNote lot={lot} />
+          <GridScaleNote lot={shownLot} />
         </div>
         {railOpen ? (
           <Stack
@@ -3682,15 +4274,25 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               paddingRight: 4,
             }}
           >
-            {canManage ? (
+            {railManage ? (
               <MapStatusControl
                 status={loaderData.mapStatus ?? ""}
                 fetcher={fetcher}
               />
             ) : null}
-            {canManage ? (
-              <SnapshotsPanel snapshots={snapshots} fetcher={fetcher} />
-            ) : null}
+            {/* Everyone's, deliberately: the camp had several layouts going and
+                no way to see any but the live one. Officers still own the verbs
+                that change the official map. */}
+            <VersionsPanel
+              snapshots={snapshots}
+              members={memberVersions}
+              viewing={viewing}
+              onView={openVersion}
+              onExit={() => setViewing(null)}
+              diff={diff}
+              canManage={canManage}
+              fetcher={fetcher}
+            />
             <Paper withBorder p="sm" radius="md">
               <Text size="xs" fw={600} mb={6}>
                 Highlight
@@ -3805,7 +4407,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 setWindStrength(1);
               }}
             />
-            {canManage ? (
+            {railManage ? (
               <SuggestionsPanel
                 suggestions={suggestions}
                 objects={objects}
@@ -3813,17 +4415,17 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 fetcher={fetcher}
               />
             ) : null}
-            {canManage ? (
+            {railManage ? (
               <UnplacedTray unplaced={unplaced} fetcher={fetcher} />
             ) : null}
-            {canManage ? <BlockPalette /> : null}
-            {canManage ? <Legend bannedKinds={bannedKinds} /> : null}
+            {railManage ? <BlockPalette /> : null}
+            {railManage ? <Legend bannedKinds={bannedKinds} /> : null}
             {selectedZoneId ? (
               <ZonePanel
                 zones={zones}
                 selectedZoneId={selectedZoneId}
                 setZones={setZones}
-                canManage={canManage}
+                canManage={railManage}
                 fetcher={fetcher}
               />
             ) : null}
@@ -3832,7 +4434,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 cables={cables}
                 selectedCableId={selectedCableId}
                 setCables={setCables}
-                canManage={canManage}
+                canManage={railManage}
                 fetcher={fetcher}
               />
             ) : null}
@@ -3841,7 +4443,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 roads={roads}
                 selectedRoadId={selectedRoadId}
                 setRoads={setRoads}
-                canManage={canManage}
+                canManage={railManage}
                 fetcher={fetcher}
               />
             ) : null}
@@ -3855,7 +4457,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                   the box to rotate the group. Arrows nudge · Space/R rotate ·
                   Del unplaces. Shift-click or box-drag to change the selection.
                 </Text>
-                {canManage ? (
+                {railManage ? (
                   <Group gap="xs" mt="xs">
                     <Button
                       size="compact-xs"
@@ -3930,15 +4532,15 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               </Paper>
             ) : null}
             <SidePanel
-              lot={lot}
-              objects={objects}
-              setObjects={setObjects}
+              lot={shownLot}
+              objects={shown.objects}
+              setObjects={readOnly ? noop : setObjects}
               selectedId={selectedId}
-              canEdit={canEdit}
-              canManage={canManage}
+              canEdit={railEdit}
+              canManage={railManage}
               myMembershipId={myMembershipId}
               bannedKinds={bannedKinds}
-              suggestions={suggestions}
+              suggestions={readOnly ? [] : suggestions}
               lotOpen={lotOpen}
               fetcher={fetcher}
               wiki={loaderData.wiki}
@@ -4178,6 +4780,7 @@ function Editor({
   selectedZoneIds,
   setSelectedZoneIds,
   suggestions,
+  diff,
   cables,
   setCables,
   selectedCableId,
@@ -4221,6 +4824,9 @@ function Editor({
   selectedZoneIds: string[];
   setSelectedZoneIds: React.Dispatch<React.SetStateAction<string[]>>;
   suggestions: Suggestion[];
+  /** Non-null only while a saved/derived version is on screen: what differs
+   * between it and the official map, drawn over the top. */
+  diff: MapDiff | null;
   cables: CableRow[];
   setCables: React.Dispatch<React.SetStateAction<CableRow[]>>;
   selectedCableId: string | null;
@@ -7250,6 +7856,100 @@ function Editor({
                     </text>
                   );
                 })}
+              </g>
+            ) : null}
+            {/* Version diff: what this layout does that the official map doesn't.
+            A list in the rail tells you fifteen things changed; only the map
+            tells you they all shuffled toward the road. Each moved item keeps a
+            faint outline where it officially sits, with a line to where this
+            version puts it; things missing here are outlined in red where they
+            officially are, and things only here get a green ring. */}
+            {diff ? (
+              <g pointerEvents="none">
+                {diff.changed.map(({ was, now }) => {
+                  const wcx = was.x + was.width / 2;
+                  const wcy = was.y + was.height / 2;
+                  const ncx = now.x + now.width / 2;
+                  const ncy = now.y + now.height / 2;
+                  const pts = footprintOutline(
+                    was.kind,
+                    was.width,
+                    was.height,
+                    was.config,
+                    was.mirrored,
+                  )
+                    .map(([lx, ly]) => {
+                      const v = rotateVec(lx, ly, was.rotation);
+                      return `${originX + (wcx + v.x) * ppf},${originY + (wcy + v.y) * ppf}`;
+                    })
+                    .join(" ");
+                  return (
+                    <g key={`diff-${was.id}`}>
+                      <polygon
+                        points={pts}
+                        fill="#868e96"
+                        fillOpacity={0.08}
+                        stroke="#868e96"
+                        strokeWidth={1.25}
+                        strokeDasharray="3 3"
+                      />
+                      <line
+                        x1={originX + wcx * ppf}
+                        y1={originY + wcy * ppf}
+                        x2={originX + ncx * ppf}
+                        y2={originY + ncy * ppf}
+                        stroke="#7048e8"
+                        strokeWidth={1.5}
+                        strokeDasharray="2 3"
+                      />
+                      <circle
+                        cx={originX + ncx * ppf}
+                        cy={originY + ncy * ppf}
+                        r={3}
+                        fill="#7048e8"
+                      />
+                    </g>
+                  );
+                })}
+                {diff.removed.map((o) => {
+                  const cx = o.x + o.width / 2;
+                  const cy = o.y + o.height / 2;
+                  const pts = footprintOutline(
+                    o.kind,
+                    o.width,
+                    o.height,
+                    o.config,
+                    o.mirrored,
+                  )
+                    .map(([lx, ly]) => {
+                      const v = rotateVec(lx, ly, o.rotation);
+                      return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
+                    })
+                    .join(" ");
+                  return (
+                    <polygon
+                      key={`gone-${o.id}`}
+                      points={pts}
+                      fill="#fa5252"
+                      fillOpacity={0.06}
+                      stroke="#fa5252"
+                      strokeWidth={1.25}
+                      strokeDasharray="5 3"
+                    />
+                  );
+                })}
+                {diff.added.map((o) => (
+                  <circle
+                    key={`new-${o.id}`}
+                    cx={originX + (o.x + o.width / 2) * ppf}
+                    cy={originY + (o.y + o.height / 2) * ppf}
+                    r={Math.max(o.width, o.height) * ppf * 0.6}
+                    fill="none"
+                    stroke="#0ca678"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                  />
+                ))}
               </g>
             ) : null}
             {/* Suggested-edit "ghosts": each camper's proposed geometry for an
