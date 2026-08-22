@@ -1,5 +1,11 @@
 /**
- * Your account — passkey and password management.
+ * Your account — who you are to the camp, plus credential management.
+ *
+ * Onboarding (`/start`) is a one-way corridor: it walks you through the asks
+ * and then lets you out. Everything it collected then had no home afterwards,
+ * so "I go by a different playa name now" or "my name is spelled wrong" had
+ * nowhere to go. This page is that home — the durable, re-editable half of what
+ * the wizard asks once.
  *
  * The app had no passkey UI at all before this: the only way to enrol was a
  * card on the Overview that hardcoded the name "My device", with no list, no
@@ -19,6 +25,7 @@
  */
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Card,
@@ -42,11 +49,24 @@ import {
 } from "react-router";
 import { authClient } from "~/lib/auth-client";
 import { auth, discordEnabled } from "~/lib/auth.server";
+import { addToGroup, listGroups, removeFromGroup } from "~/lib/groups.server";
 import { redact } from "~/lib/privacy.server";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { account, passkey } from "../../../db/schema";
+import {
+  account,
+  attendee,
+  membership,
+  passkey,
+  user as userTable,
+} from "../../../db/schema";
 import type { Route } from "./+types/account";
+
+type SerializedIdentity = Awaited<ReturnType<typeof loader>> extends {
+  identity: infer I;
+}
+  ? I
+  : never;
 
 /** better-auth keeps the password hash on the account row whose providerId is
  * "credential"; OAuth accounts share the table with their own providerIds. */
@@ -69,7 +89,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   // resolveActiveCamp rather than requireUser: it works fine with no camp
   // (active is just null) and it's what carries the privacy lens. Passkey names
   // are user-authored labels and are on the redaction list.
-  const { user, privacy, impersonatedBy } = await resolveActiveCamp(request);
+  const { user, active, privacy, impersonatedBy } =
+    await resolveActiveCamp(request);
   const keys = await db
     .select({
       id: passkey.id,
@@ -90,7 +111,40 @@ export async function loader({ request }: Route.LoaderArgs) {
     .where(and(eq(account.userId, user.id), eq(account.providerId, "discord")))
     .limit(1);
 
+  // Who you are to THIS camp. Null when the account has no camp yet, in which
+  // case the identity card simply doesn't render — there is no playa name
+  // without a camp to have one in.
+  const mid = active?.membership.id ?? null;
+  const campId = active?.camp.id ?? null;
+
+  const allGroups = campId ? await listGroups(campId) : [];
+
+  // Their RSVP, so the card can say what it is and point at the one place that
+  // changes it, rather than quietly duplicating the control.
+  const [rsvp] = mid
+    ? await db
+        .select({ status: attendee.status })
+        .from(attendee)
+        .where(eq(attendee.membershipId, mid))
+        .limit(1)
+    : [];
+
   return redact(privacy, {
+    identity: active
+      ? {
+          name: user.name ?? "",
+          email: user.email ?? "",
+          playaName: active.membership.playaName ?? "",
+          campName: active.camp.name,
+          rsvp: rsvp?.status ?? "unknown",
+        }
+      : null,
+    groups: allGroups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      mine: mid ? g.memberIds.includes(mid) : false,
+      memberCount: g.memberIds.length,
+    })),
     hasPassword: await hasPasswordFor(user.id),
     discordEnabled,
     discordLinked: Boolean(discordAccount),
@@ -124,6 +178,58 @@ export async function action({ request }: Route.ActionArgs) {
   // Scope every mutation to the caller's OWN passkeys. Without the userId in
   // the predicate, any id would do.
   const owned = and(eq(passkey.id, id), eq(passkey.userId, session.user.id));
+
+  // --- who you are to the camp -------------------------------------------
+  if (intent === "saveIdentity") {
+    if (!session.active) {
+      return data({ error: "You're not in a camp yet." }, { status: 400 });
+    }
+    const name = String(form.get("name") ?? "").trim();
+    if (!name)
+      return data({ error: "A name can't be blank." }, { status: 400 });
+    if (name.length > 120) {
+      return data({ error: "That name is too long." }, { status: 400 });
+    }
+    const raw = String(form.get("playaName") ?? "").trim();
+    if (raw.length > 60) {
+      return data({ error: "That playa name is too long." }, { status: 400 });
+    }
+    // Same split as the wizard's profile step: the real name is on the shared
+    // account, the playa name belongs to this camp's membership. Somebody in
+    // two camps can be Bug in one of them and not the other.
+    await db
+      .update(userTable)
+      .set({ name })
+      .where(eq(userTable.id, session.user.id));
+    await db
+      .update(membership)
+      .set({ playaName: raw || null })
+      .where(eq(membership.id, session.active.membership.id));
+    return data({ ok: true });
+  }
+
+  if (intent === "joinGroup" || intent === "leaveGroup") {
+    if (!session.active) {
+      return data({ error: "You're not in a camp yet." }, { status: 400 });
+    }
+    // Self-service only. Groups grant no authority, so a member managing their
+    // OWN membership of one is the lightest possible thing — but it is still
+    // scoped to themselves here; adding other people happens on /members.
+    const groupId = String(form.get("groupId") ?? "");
+    const campId = session.active.camp.id;
+    const me = session.active.membership.id;
+    if (intent === "joinGroup") {
+      await addToGroup({
+        campId,
+        groupId,
+        membershipIds: [me],
+        addedByMembershipId: me,
+      });
+    } else {
+      await removeFromGroup({ campId, groupId, membershipId: me });
+    }
+    return data({ ok: true });
+  }
 
   if (intent === "rename") {
     const name = String(form.get("name") ?? "").trim();
@@ -269,6 +375,8 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function Account({ loaderData }: Route.ComponentProps) {
   const {
+    identity,
+    groups,
     passkeys,
     hasPassword,
     impersonating,
@@ -308,10 +416,12 @@ export default function Account({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Your account</Title>
           <Text size="sm" c="dimmed">
-            Passkeys let you sign in with your face, fingerprint or device PIN.
-            Nothing to remember, nothing to leak.
+            Your details, who you're grouped with, and how you sign in.
           </Text>
         </div>
+
+        {identity ? <IdentityCard identity={identity} /> : null}
+        {identity ? <GroupsCard groups={groups} /> : null}
 
         <Card withBorder>
           <Stack gap="md">
@@ -606,6 +716,197 @@ function PasswordCard({
             ) : null}
           </>
         )}
+      </Stack>
+    </Card>
+  );
+}
+
+/**
+ * Your name, your playa name, and a way back into the questionnaire.
+ *
+ * The RSVP is shown but not editable here on purpose: it lives on `/start`,
+ * where changing it also re-shapes what else you're asked. Two controls for one
+ * fact is how the pass ledger went wrong; a link is enough.
+ */
+function IdentityCard({
+  identity,
+}: {
+  identity: NonNullable<SerializedIdentity>;
+}) {
+  const fetcher = useFetcher<typeof action>();
+  const [name, setName] = useState(identity.name);
+  const [playaName, setPlayaName] = useState(identity.playaName);
+  const dirty =
+    name.trim() !== identity.name || playaName.trim() !== identity.playaName;
+
+  const rsvpLabel: Record<string, string> = {
+    coming: "Coming this year",
+    maybe: "Maybe this year",
+    not_coming: "Not this year",
+    unknown: "Haven't said yet",
+  };
+
+  return (
+    <Card withBorder>
+      <Stack gap="md">
+        <div>
+          <Text fw={600}>Your details</Text>
+          <Text size="xs" c="dimmed">
+            How you appear to {identity.campName}. Change these any time — they
+            were asked once during sign-up and this is where they live now.
+          </Text>
+        </div>
+
+        <TextInput
+          label="Name"
+          description="Your real name, as the camp knows you"
+          value={name}
+          onChange={(e) => setName(e.currentTarget.value)}
+          maxLength={120}
+        />
+        <TextInput
+          label="Playa name"
+          description="Optional. Leave blank if you don't have one."
+          placeholder="e.g. Bug"
+          value={playaName}
+          onChange={(e) => setPlayaName(e.currentTarget.value)}
+          maxLength={60}
+        />
+        <TextInput
+          label="Email"
+          value={identity.email}
+          readOnly
+          description="Ask an officer if this needs to change"
+        />
+
+        <Group justify="space-between" align="center" wrap="wrap">
+          <Group gap="xs">
+            <Text size="sm" c="dimmed">
+              {rsvpLabel[identity.rsvp] ?? "Haven't said yet"}
+            </Text>
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              component="a"
+              href="/start"
+            >
+              Update your answers
+            </Button>
+          </Group>
+          <Button
+            disabled={!dirty || !name.trim()}
+            loading={fetcher.state !== "idle"}
+            onClick={() =>
+              fetcher.submit(
+                { intent: "saveIdentity", name, playaName },
+                { method: "post" },
+              )
+            }
+          >
+            Save
+          </Button>
+        </Group>
+      </Stack>
+    </Card>
+  );
+}
+
+/**
+ * The social groups you're in, and the ones you could join.
+ *
+ * Self-service, because a group grants no authority over anybody — the worst a
+ * wrong one does is misfile you in the directory. Creating and renaming groups,
+ * and putting *other* people in them, stays on /members.
+ */
+function GroupsCard({
+  groups,
+}: {
+  groups: { id: string; name: string; mine: boolean; memberCount: number }[];
+}) {
+  const fetcher = useFetcher<typeof action>();
+  const mine = groups.filter((g) => g.mine);
+  const rest = groups.filter((g) => !g.mine);
+  const busy = fetcher.state !== "idle";
+
+  return (
+    <Card withBorder>
+      <Stack gap="md">
+        <div>
+          <Text fw={600}>Your groups</Text>
+          <Text size="xs" c="dimmed">
+            Families, couples, housemates, the people you've camped with for
+            years. They shape how the roster reads — they grant nobody any
+            authority over anybody.
+          </Text>
+        </div>
+
+        {mine.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            You're not in any groups yet.
+          </Text>
+        ) : (
+          <Stack gap="xs">
+            {mine.map((g) => (
+              <Group key={g.id} justify="space-between" wrap="wrap">
+                <Text size="sm">
+                  {g.name}
+                  <Text span size="xs" c="dimmed">
+                    {" "}
+                    · {g.memberCount}{" "}
+                    {g.memberCount === 1 ? "person" : "people"}
+                  </Text>
+                </Text>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="red"
+                  loading={busy}
+                  onClick={() =>
+                    fetcher.submit(
+                      { intent: "leaveGroup", groupId: g.id },
+                      { method: "post" },
+                    )
+                  }
+                >
+                  Leave
+                </Button>
+              </Group>
+            ))}
+          </Stack>
+        )}
+
+        {rest.length > 0 ? (
+          <Group gap="xs" wrap="wrap" align="center">
+            <Text size="xs" c="dimmed">
+              Join:
+            </Text>
+            {rest.map((g) => (
+              <Button
+                key={g.id}
+                size="compact-xs"
+                variant="light"
+                loading={busy}
+                onClick={() =>
+                  fetcher.submit(
+                    { intent: "joinGroup", groupId: g.id },
+                    { method: "post" },
+                  )
+                }
+              >
+                {g.name}
+              </Button>
+            ))}
+          </Group>
+        ) : null}
+
+        <Text size="xs" c="dimmed">
+          Need a group that doesn't exist yet, or want to add someone else?
+          That's on the{" "}
+          <Anchor href="/members" size="xs">
+            members page
+          </Anchor>
+          .
+        </Text>
       </Stack>
     </Card>
   );

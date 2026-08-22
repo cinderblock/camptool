@@ -48,6 +48,13 @@ export type AskDef = {
    * has the feature visible to this camper (see plans/camp-features.md).
    * Unset = core, always asked. */
   feature?: FeatureKey;
+  /**
+   * Only makes sense if they're actually coming. Someone who has said "not this
+   * year" should not be walked through what tent they're bringing — the
+   * dashboard to-do list has always known that (`attending()` in asks.ts) and
+   * the wizard did not, so the two disagreed about the same person.
+   */
+  comingOnly?: boolean;
 };
 
 /** Catalog order = the order the wizard presents asks. Roughly the season arc:
@@ -73,6 +80,7 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "bringing",
+    comingOnly: true,
     label: "Bringing",
     hint: "Tents, vehicles, …",
     audience: "all",
@@ -82,6 +90,7 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "extras",
+    comingOnly: true,
     label: "A few more questions",
     hint: "About your gear & anything else",
     audience: "all",
@@ -90,6 +99,7 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "sharing",
+    comingOnly: true,
     label: "Sharing",
     hint: "Who's with you",
     audience: "all",
@@ -99,6 +109,7 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "checklist",
+    comingOnly: true,
     label: "Checklist",
     hint: "Camp tasks",
     audience: "all",
@@ -140,11 +151,16 @@ export function scheduleAsks(opts: {
   role: string;
   weeksUntilEvent: number;
   featureStates?: Partial<Record<FeatureKey, FeatureState>>;
+  /** Their RSVP for this edition. "not_coming" drops the coming-only asks;
+   * anything else (including not having answered yet) keeps them, because an
+   * unanswered RSVP is not a "no". */
+  rsvp?: string | null;
 }): AskDef[] {
   return ASKS.filter(
     (a) =>
       askMatchesAudience(a, opts.role) &&
       askInSeason(a, opts.weeksUntilEvent) &&
+      !(a.comingOnly && opts.rsvp === "not_coming") &&
       (!a.feature ||
         !opts.featureStates ||
         featureVisibleTo(opts.featureStates[a.feature] ?? "off", opts.role)),

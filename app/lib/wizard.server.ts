@@ -69,6 +69,10 @@ export async function loadWizardState(opts: {
     // Asks for features the camp turned off (or that this camper can't see
     // yet) aren't scheduled — no nudging toward pages that would bounce.
     featureStates: Object.fromEntries(await loadFeatureStates(campId)),
+    // Someone who has said "not this year" is not walked through what tent
+    // they're bringing. The dashboard to-do list has always known this; the
+    // wizard didn't, so the two disagreed about the same person.
+    rsvp: part?.status ?? null,
   });
   const pending = scheduled.filter((a) => !resolved[a.key]).map((a) => a.key);
 
