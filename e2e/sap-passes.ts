@@ -38,7 +38,7 @@ import {
   camp,
   campEdition,
   membership,
-  setupPassDate,
+  setupPass,
   setupPassStock,
   user,
 } from "../db/schema";
@@ -226,19 +226,24 @@ check(
   stockRows.filter((s) => s.onOrAfterDate === `${YEAR}-08-24`).length === 2,
 );
 
-const quotaFor = async (date: string) => {
-  const [row] = await db
+/** Live (non-void) passes held for a date — the only capacity there is now
+ * that quotas are gone. */
+const heldFor = async (date: string) => {
+  const rows = await db
     .select()
-    .from(setupPassDate)
+    .from(setupPassStock)
     .where(
-      and(eq(setupPassDate.editionId, editionId), eq(setupPassDate.date, date)),
+      and(
+        eq(setupPassStock.editionId, editionId),
+        eq(setupPassStock.onOrAfterDate, date),
+      ),
     );
-  return row?.quota ?? null;
+  return rows.filter((r) => r.status !== "void").length;
 };
 check(
-  "1d. the date's quota became the number of passes imported for it",
-  (await quotaFor(`${YEAR}-08-24`)) === 2,
-  `quota ${await quotaFor(`${YEAR}-08-24`)}`,
+  "1d. capacity for a date is simply the passes imported for it",
+  (await heldFor(`${YEAR}-08-24`)) === 2,
+  `held ${await heldFor(`${YEAR}-08-24`)}`,
 );
 
 // 2. Re-uploading the same order must not double the camp's allocation.
@@ -405,13 +410,12 @@ check(
   "10d. voiding does NOT put it back in the pool",
   voidRow?.status !== "available",
 );
-// The camp is now genuinely one pass short for that date, and the quota the
-// grant screen enforces has to say so — otherwise it keeps promising capacity
-// that burned up.
+// The camp is genuinely one pass short for that date now. With one ledger
+// there is nothing to keep in step — the count simply drops.
 check(
-  "10e. and the date's quota drops to what's left",
-  (await quotaFor(`${YEAR}-08-24`)) === 1,
-  `quota ${await quotaFor(`${YEAR}-08-24`)}`,
+  "10e. and the camp is one pass shorter for that date",
+  (await heldFor(`${YEAR}-08-24`)) === 1,
+  `held ${await heldFor(`${YEAR}-08-24`)}`,
 );
 
 // ------------------------------------------------------------- group sheet
@@ -477,8 +481,85 @@ await db
   .where(eq(attendee.id, strangerAttendeeId));
 const withGap = await (await get("/passes", officer.cookie)).text();
 check(
-  "13. an early arrival with no pass shows in the gap list",
-  withGap.includes("Arriving early without a pass"),
+  "13. an early arrival with no pass shows in the needs list",
+  withGap.includes("Needs a pass"),
+);
+
+// 14. One ledger: assigning a pass IS the grant. A request must not be left
+//     sitting "requested" beside a pass the person already holds, and taking
+//     the pass back must reopen the ask rather than leave them looking served.
+const asker = await post("/passes", stranger.cookie, { intent: "requestPass" });
+check("14. a member can ask for a pass", asker.status === 200);
+
+// The three passes above are all spoken for by now, so bring in one more —
+// which also re-checks that a second order tops up the same edition.
+await upload(
+  officer.cookie,
+  await buildOrder(YEAR, [
+    {
+      ticket: "990000004",
+      scan: "4040400004",
+      date: "8/24",
+      sec: "1/Zz/jjj+kkk/lll444",
+    },
+  ]),
+  "top-up.pdf",
+);
+const spare = (
+  await db
+    .select()
+    .from(setupPassStock)
+    .where(eq(setupPassStock.editionId, editionId))
+).find((s) => s.status === "available");
+if (!spare) throw new Error("no spare pass left to assign");
+
+await post("/passes", officer.cookie, {
+  intent: "assignStock",
+  id: spare.id,
+  granteeRef: `m:${mids.member2}`,
+});
+const [afterAssign] = await db
+  .select()
+  .from(setupPass)
+  .where(eq(setupPass.editionId, editionId));
+const [stockAfterAssign] = await db
+  .select()
+  .from(setupPassStock)
+  .where(eq(setupPassStock.id, spare.id));
+check(
+  "14b. assigning a pass satisfies their request",
+  afterAssign?.status === "granted",
+  `request is ${afterAssign?.status}`,
+);
+check(
+  "14c. and the pass records which request it satisfied",
+  stockAfterAssign?.setupPassId === afterAssign?.id,
+);
+
+await post("/passes", officer.cookie, {
+  intent: "unassignStock",
+  id: spare.id,
+});
+const [afterTakeBack] = await db
+  .select()
+  .from(setupPass)
+  .where(eq(setupPass.editionId, editionId));
+check(
+  "14d. taking it back reopens their request",
+  afterTakeBack?.status === "requested",
+  `request is ${afterTakeBack?.status}`,
+);
+
+// 15. Quotas are gone: there is no second number to drift.
+const quotaless = await (await get("/passes", officer.cookie)).text();
+check(
+  "15. the officer screen no longer shows a quota ledger",
+  !quotaless.includes("Pass dates &amp; quotas") &&
+    !quotaless.includes("Pass dates & quotas"),
+);
+check(
+  "15b. it shows the coverage summary instead",
+  quotaless.includes("Setup access at a glance"),
 );
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

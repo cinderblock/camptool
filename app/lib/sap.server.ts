@@ -20,13 +20,13 @@
  */
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import {
   attendee,
   membership,
   sapDocument,
-  setupPassDate,
+  setupPass,
   setupPassStock,
   setupPassStockEvent,
   user,
@@ -133,17 +133,11 @@ export async function importSapPdf(opts: {
       alreadyKnown++;
       continue;
     }
-    const passDateId = await ensurePassDate(
-      opts.campId,
-      opts.editionId,
-      page.onOrAfterDate,
-    );
     const id = crypto.randomUUID();
     await db.insert(setupPassStock).values({
       id,
       campId: opts.campId,
       editionId: opts.editionId,
-      passDateId,
       onOrAfterDate: page.onOrAfterDate,
       vendorTicketId: page.vendorTicketId,
       confirmationId: page.confirmationId,
@@ -161,8 +155,6 @@ export async function importSapPdf(opts: {
     imported++;
   }
 
-  await syncQuotas(opts.editionId, [...dates]);
-
   const byDate: Record<string, number> = {};
   for (const d of [...dates].sort()) {
     byDate[d] = await countStockForDate(opts.editionId, d);
@@ -179,33 +171,9 @@ export async function importSapPdf(opts: {
   };
 }
 
-/** The `setup_pass_date` row for a printed date, created if the camp hasn't
- * got one yet — an imported pass always knows its own date, even when nobody
- * typed it in first. */
-async function ensurePassDate(
-  campId: string,
-  editionId: string,
-  date: string,
-): Promise<string> {
-  const [found] = await db
-    .select({ id: setupPassDate.id })
-    .from(setupPassDate)
-    .where(
-      and(eq(setupPassDate.editionId, editionId), eq(setupPassDate.date, date)),
-    )
-    .limit(1);
-  if (found) return found.id;
-
-  const id = crypto.randomUUID();
-  await db
-    .insert(setupPassDate)
-    .values({ id, campId, editionId, date, quota: 0 });
-  return id;
-}
-
 /** Passes held for a date — void ones excluded, because a dead pass isn't
- * capacity. */
-async function countStockForDate(
+ * capacity, it's a replacement request. */
+export async function countStockForDate(
   editionId: string,
   date: string,
 ): Promise<number> {
@@ -220,43 +188,6 @@ async function countStockForDate(
       ),
     );
   return rows.length;
-}
-
-/**
- * Point each date's quota at the stock actually held.
- *
- * Before import existed, `quota` was a number an officer typed from an email.
- * Once real passes are in the system it should be what the camp has — otherwise
- * the grant screen enforces a cap that no longer means anything. Dates with no
- * imported stock are left alone, so a camp can still grant against passes the
- * vendor has promised but not yet sent.
- */
-export async function syncQuotas(
-  editionId: string,
-  dates?: string[],
-): Promise<void> {
-  const targets =
-    dates ??
-    (
-      await db
-        .selectDistinct({ date: setupPassStock.onOrAfterDate })
-        .from(setupPassStock)
-        .where(eq(setupPassStock.editionId, editionId))
-    ).map((r) => r.date);
-
-  for (const date of targets) {
-    const held = await countStockForDate(editionId, date);
-    if (held === 0) continue;
-    await db
-      .update(setupPassDate)
-      .set({ quota: held, updatedAt: new Date() })
-      .where(
-        and(
-          eq(setupPassDate.editionId, editionId),
-          eq(setupPassDate.date, date),
-        ),
-      );
-  }
 }
 
 // --- state machine ---------------------------------------------------------
@@ -294,16 +225,43 @@ export async function assignStock(
   if (!person)
     throw new SapStateError("That person isn't in this year's roster.");
 
+  // Assigning a real pass IS the grant. If this person had an open request,
+  // it is now satisfied — mark it and record which pass satisfied it, so there
+  // is one ledger rather than a promise sitting beside a pass, each unaware of
+  // the other.
+  const [request] = await db
+    .select({ id: setupPass.id })
+    .from(setupPass)
+    .where(
+      and(
+        eq(setupPass.editionId, editionId),
+        eq(setupPass.attendeeId, attendeeId),
+        eq(setupPass.status, "requested"),
+      ),
+    )
+    .limit(1);
+
   await db
     .update(setupPassStock)
     .set({
       status: "assigned",
       assignedAttendeeId: attendeeId,
+      setupPassId: request?.id ?? null,
       assignedAt: new Date(),
       assignedByMembershipId: actor.membershipId,
       updatedAt: new Date(),
     })
     .where(eq(setupPassStock.id, stockId));
+  if (request) {
+    await db
+      .update(setupPass)
+      .set({
+        status: "granted",
+        resolvedByMembershipId: actor.membershipId,
+        resolvedAt: new Date(),
+      })
+      .where(eq(setupPass.id, request.id));
+  }
   await logStockEvent(stockId, "assigned", {
     attendeeId,
     attendeeName: person.name ?? person.memberName ?? null,
@@ -332,11 +290,15 @@ export async function unassignStock(
     .set({
       status: "available",
       assignedAttendeeId: null,
+      setupPassId: null,
       assignedAt: null,
       assignedByMembershipId: null,
       updatedAt: new Date(),
     })
     .where(eq(setupPassStock.id, stockId));
+  // Their ask is open again. Leaving it "granted" while they hold no pass
+  // would be the two-ledger drift this design exists to avoid.
+  await reopenRequest(row.setupPassId);
   await logStockEvent(stockId, "unassigned", {
     attendeeId: row.assignedAttendeeId,
     actorMembershipId: actor.membershipId,
@@ -402,13 +364,28 @@ export async function voidStock(
       updatedAt: new Date(),
     })
     .where(eq(setupPassStock.id, stockId));
+  // The holder is now short a pass, so their ask is open again — and they
+  // reappear in the "needs a pass" list rather than looking served.
+  await reopenRequest(row.setupPassId);
   await logStockEvent(stockId, "voided", {
     attendeeId: row.assignedAttendeeId,
     actorMembershipId: actor.membershipId,
     actorName: actor.name,
     detail: trimmed,
   });
-  if (row.editionId) await syncQuotas(row.editionId, [row.onOrAfterDate]);
+}
+
+/** A request whose pass went away is an open request again. */
+async function reopenRequest(setupPassId: string | null): Promise<void> {
+  if (!setupPassId) return;
+  await db
+    .update(setupPass)
+    .set({
+      status: "requested",
+      resolvedByMembershipId: null,
+      resolvedAt: null,
+    })
+    .where(and(eq(setupPass.id, setupPassId), eq(setupPass.status, "granted")));
 }
 
 async function loadStock(editionId: string, stockId: string) {
@@ -626,6 +603,123 @@ export async function earlyArrivalsWithoutStock(
     .filter((r) => r.arrivalDate && r.arrivalDate < gateOpenIso)
     .filter((r) => !covered.has(r.id))
     .sort((a, b) => (a.arrivalDate ?? "").localeCompare(b.arrivalDate ?? ""));
+}
+
+export type SapCoverage = {
+  held: number;
+  spare: number;
+  assigned: number;
+  released: number;
+  voided: number;
+  /** Passes held per "on or after" date, void excluded. */
+  byDate: { date: string; held: number; spare: number }[];
+  /** Arriving before gates open with no pass — the demand. */
+  needing: number;
+  /** Of those, how many the spare passes can actually cover. */
+  coverable: number;
+  /** Arriving so early that nothing spare is dated early enough for them. */
+  uncoverable: { name: string; arrivalDate: string }[];
+  /**
+   * Coming (or maybe) with NO arrival date at all. Not counted as demand,
+   * because we genuinely don't know — but they're who to chase, since an
+   * early arrival nobody wrote down is the one way to be short on the day.
+   */
+  unknownArrival: number;
+};
+
+/**
+ * How the camp's passes line up against who needs one.
+ *
+ * The matching is not just a count, because a pass admits **on or after** its
+ * date: a pass dated the 28th is no use to someone arriving on the 25th, while
+ * a 25th pass covers everybody. So the earliest arrivals are the hardest to
+ * serve, and "we hold 26 and 26 people need one" can still leave someone
+ * stranded.
+ *
+ * Greedy over arrivals earliest-first, giving each person the **latest** pass
+ * that still covers them — which leaves the early-dated passes for the people
+ * who can't use anything else. That's optimal here, and it means `uncoverable`
+ * is a real shortfall rather than an artefact of assignment order.
+ */
+export async function sapCoverage(
+  editionId: string,
+  gateOpenIso: string,
+): Promise<SapCoverage> {
+  const stock = await db
+    .select({
+      id: setupPassStock.id,
+      onOrAfterDate: setupPassStock.onOrAfterDate,
+      status: setupPassStock.status,
+    })
+    .from(setupPassStock)
+    .where(eq(setupPassStock.editionId, editionId));
+
+  const live = stock.filter((s) => s.status !== "void");
+  const spares = live
+    .filter((s) => s.status === "available")
+    .sort((a, b) => a.onOrAfterDate.localeCompare(b.onOrAfterDate));
+
+  const byDateMap = new Map<string, { held: number; spare: number }>();
+  for (const s of live) {
+    const row = byDateMap.get(s.onOrAfterDate) ?? { held: 0, spare: 0 };
+    row.held++;
+    if (s.status === "available") row.spare++;
+    byDateMap.set(s.onOrAfterDate, row);
+  }
+
+  const people = await earlyArrivalsWithoutStock(editionId, gateOpenIso);
+
+  // Everyone attending whose arrival we don't know. They can't be counted as
+  // demand and they can't be ruled out either.
+  const noDate = await db
+    .select({ id: attendee.id, status: attendee.status })
+    .from(attendee)
+    .where(
+      and(eq(attendee.editionId, editionId), isNull(attendee.arrivalDate)),
+    );
+  const unknownArrival = noDate.filter(
+    (a) => a.status === "coming" || a.status === "maybe",
+  ).length;
+
+  // Greedy match, earliest arrival first.
+  const pool = [...spares];
+  let coverable = 0;
+  const uncoverable: { name: string; arrivalDate: string }[] = [];
+  for (const p of people) {
+    const arrival = p.arrivalDate;
+    if (!arrival) continue;
+    // The latest spare that still admits them; spares are date-ascending.
+    let pick = -1;
+    for (let i = 0; i < pool.length; i++) {
+      const candidate = pool[i];
+      if (candidate && candidate.onOrAfterDate <= arrival) pick = i;
+      else break;
+    }
+    if (pick >= 0) {
+      pool.splice(pick, 1);
+      coverable++;
+    } else {
+      uncoverable.push({
+        name: p.guestName ?? p.memberName ?? "Unknown",
+        arrivalDate: arrival,
+      });
+    }
+  }
+
+  return {
+    held: live.length,
+    spare: live.filter((s) => s.status === "available").length,
+    assigned: live.filter((s) => s.status === "assigned").length,
+    released: live.filter((s) => s.status === "released").length,
+    voided: stock.length - live.length,
+    byDate: [...byDateMap.entries()]
+      .map(([date, v]) => ({ date, ...v }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    needing: people.length,
+    coverable,
+    uncoverable,
+    unknownArrival,
+  };
 }
 
 /** The audit trail for one pass, newest first. */

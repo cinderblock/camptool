@@ -1,5 +1,4 @@
 import {
-  ActionIcon,
   Alert,
   Badge,
   Button,
@@ -10,7 +9,6 @@ import {
   Group,
   List,
   Modal,
-  NumberInput,
   Paper,
   Select,
   Stack,
@@ -18,9 +16,7 @@ import {
   TextInput,
   Textarea,
   Title,
-  Tooltip,
 } from "@mantine/core";
-import { DateInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
 import { and, eq, isNotNull } from "drizzle-orm";
@@ -28,7 +24,7 @@ import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
-import { eventStartIso, setupPassWindowFor } from "~/lib/brc";
+import { eventStartIso } from "~/lib/brc";
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import { canManageAttendee, inMyParty, isMe } from "~/lib/party";
@@ -41,6 +37,7 @@ import {
   earlyArrivalsWithoutStock,
   importSapPdf,
   releaseStock,
+  sapCoverage,
   stockForEdition,
   stockWithCodes,
   unassignStock,
@@ -49,13 +46,7 @@ import {
 } from "~/lib/sap.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import {
-  attendee,
-  membership,
-  setupPass,
-  setupPassDate,
-  user,
-} from "../../../db/schema";
+import { attendee, membership, setupPass, user } from "../../../db/schema";
 import type { Route } from "./+types/passes";
 
 /** A camp's whole SAP order in one PDF: 26 passes came to ~2MB in 2024, so
@@ -74,12 +65,6 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Passes · CampTool" }];
 }
 
-type DateRow = {
-  id: string;
-  date: string;
-  label: string | null;
-  quota: number;
-};
 type PassRow = {
   id: string;
   // NULL while a request is unbound — the officer picks the "on or after"
@@ -99,6 +84,21 @@ type PassRow = {
   note: string | null;
 };
 type GrantGroup = { group: string; items: { value: string; label: string }[] };
+/** The coverage summary as it arrives in the browser (null for non-officers). */
+type CoverageData = Awaited<ReturnType<typeof sapCoverage>> | null;
+/** Someone who still needs a pass — because of their arrival date, because
+ * they asked, or both. */
+type NeedRow = {
+  attendeeId: string;
+  ref: string;
+  name: string;
+  arrivalDate: string | null;
+  /** They explicitly requested one, as opposed to us inferring it. */
+  asked: boolean;
+  /** The request row, when there is one — only an ask can be declined. */
+  requestId: string | null;
+  note: string | null;
+};
 /** An imported pass. Never carries codes — those travel separately, only for
  * released passes the viewer is entitled to, in `myCodes`. */
 type StockRow = {
@@ -110,6 +110,7 @@ type StockRow = {
   holderName: string | null;
   holderIsGuest: boolean;
   holderRef: string | null;
+  assignedAttendeeId: string | null;
   mine: boolean;
 };
 
@@ -119,18 +120,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireFeature(active, "passes");
   const editionId = activeEdition.id;
   const isOfficer = hasAtLeast(active.membership.role, "officer");
-
-  const dates = (
-    await db
-      .select({
-        id: setupPassDate.id,
-        date: setupPassDate.date,
-        label: setupPassDate.label,
-        quota: setupPassDate.quota,
-      })
-      .from(setupPassDate)
-      .where(eq(setupPassDate.editionId, editionId))
-  ).sort((a, b) => a.date.localeCompare(b.date)) satisfies DateRow[];
 
   const myMembershipId = active.membership.id;
   const rawPasses = await db
@@ -238,6 +227,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     vendorTicketId: s.vendorTicketId,
     status: s.status,
     voidReason: s.voidReason,
+    assignedAttendeeId: s.assignedAttendeeId,
     holderName: s.guestName ?? s.memberName ?? null,
     holderIsGuest:
       s.assignedAttendeeId != null && s.attendeeMembershipId == null,
@@ -269,23 +259,61 @@ export async function loader({ request }: Route.LoaderArgs) {
     };
   }
 
-  // Who set an early arrival and has no pass set aside? The inverse of the
-  // request queue, and the list that actually matters when allocating scarce
-  // stock — someone who never clicked "request a pass" is invisible to a queue
-  // built from requests.
-  const earlyMissing = isOfficer
-    ? (
-        await earlyArrivalsWithoutStock(
-          editionId,
-          eventStartIso(activeEdition.year),
-        )
-      ).map((r) => ({
+  // Who still needs a pass? Two ways to land here, one list:
+  //   - they set an arrival before gates open (the app worked it out), or
+  //   - they asked for one outright (plans changed, or they want to help build
+  //     without having said so on the calendar).
+  // Anyone already holding a live pass is served and drops off.
+  const gateOpen = eventStartIso(activeEdition.year);
+  const needsPass: NeedRow[] = [];
+  if (isOfficer) {
+    const held = new Set(
+      stock
+        .filter((s) => s.status !== "void")
+        .map((s) => s.assignedAttendeeId)
+        .filter(Boolean),
+    );
+    const seen = new Set<string>();
+    for (const r of await earlyArrivalsWithoutStock(editionId, gateOpen)) {
+      seen.add(r.id);
+      needsPass.push({
         attendeeId: r.id,
         ref: r.membershipId ? `m:${r.membershipId}` : `a:${r.id}`,
         name: r.guestName ?? r.memberName ?? "Unknown",
         arrivalDate: r.arrivalDate,
-      }))
-    : [];
+        asked: false,
+        requestId: null,
+        note: null,
+      });
+    }
+    // Requests from people the arrival date didn't catch.
+    for (const p of passes) {
+      if (p.status !== "requested" || !p.attendeeId) continue;
+      if (held.has(p.attendeeId)) continue;
+      const already = needsPass.find((n) => n.attendeeId === p.attendeeId);
+      if (already) {
+        already.asked = true;
+        already.requestId = p.id;
+        already.note = p.note;
+        continue;
+      }
+      if (seen.has(p.attendeeId)) continue;
+      needsPass.push({
+        attendeeId: p.attendeeId,
+        ref: p.holderRef ?? `a:${p.attendeeId}`,
+        name: p.holderName ?? "Unknown",
+        arrivalDate: arrivals[p.attendeeId] ?? null,
+        asked: true,
+        requestId: p.id,
+        note: p.note,
+      });
+    }
+    needsPass.sort((a, b) =>
+      (a.arrivalDate ?? "9999").localeCompare(b.arrivalDate ?? "9999"),
+    );
+  }
+
+  const coverage = isOfficer ? await sapCoverage(editionId, gateOpen) : null;
 
   return redact(privacy, {
     isOfficer,
@@ -294,13 +322,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     myMembershipId,
     myArrival,
     year: activeEdition.year,
-    dates,
     passes,
     grantGroups,
     arrivals: isOfficer ? arrivals : {},
     stock,
     myCodes,
-    earlyMissing,
+    needsPass,
+    coverage,
   });
 }
 
@@ -326,26 +354,6 @@ export async function action({ request }: Route.ActionArgs) {
     const v = form.get(k);
     return v == null || v === "" ? null : String(v);
   };
-
-  // Quota check: granted passes for a date must stay below its quota.
-  async function hasRoom(passDateId: string): Promise<boolean> {
-    const [d] = await db
-      .select({ quota: setupPassDate.quota })
-      .from(setupPassDate)
-      .where(eq(setupPassDate.id, passDateId))
-      .limit(1);
-    if (!d) return false;
-    const granted = await db
-      .select({ id: setupPass.id })
-      .from(setupPass)
-      .where(
-        and(
-          eq(setupPass.passDateId, passDateId),
-          eq(setupPass.status, "granted"),
-        ),
-      );
-    return granted.length < d.quota;
-  }
 
   // Does this attendee already hold an active (requested or granted) pass this
   // year? One pass per person — requests are unbound (no date) until granted.
@@ -546,192 +554,6 @@ export async function action({ request }: Route.ActionArgs) {
     return aid;
   }
 
-  const num = (k: string): number | null => {
-    const v = form.get(k);
-    if (v == null || v === "") return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-
-  if (intent === "addDate") {
-    const date = str("date");
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return data({ error: "Pick a valid date." }, { status: 400 });
-    }
-    // Enforce the pre-event setup window server-side too (not just the picker).
-    // YYYY-MM-DD strings compare lexicographically the same as chronologically.
-    const win = setupPassWindowFor(activeEdition.year);
-    if (date < win.min || date > win.max) {
-      return data(
-        { error: `Setup dates must be between ${win.min} and ${win.max}.` },
-        { status: 400 },
-      );
-    }
-    const quota = Math.max(0, Math.round(num("quota") ?? 0));
-    try {
-      await db.insert(setupPassDate).values({
-        id: crypto.randomUUID(),
-        campId,
-        editionId,
-        date,
-        label: str("label"),
-        quota,
-      });
-    } catch {
-      return data({ error: "That date already exists." }, { status: 409 });
-    }
-    return data({ ok: "Date added." });
-  }
-
-  const ownDate = (id: string) =>
-    and(eq(setupPassDate.id, id), eq(setupPassDate.editionId, editionId));
-
-  if (intent === "editDate") {
-    const set: Record<string, unknown> = { updatedAt: new Date() };
-    if (form.has("label")) set.label = str("label");
-    if (form.has("quota"))
-      set.quota = Math.max(0, Math.round(num("quota") ?? 0));
-    await db
-      .update(setupPassDate)
-      .set(set)
-      .where(ownDate(String(form.get("id"))));
-    return data({ ok: "Saved." });
-  }
-
-  if (intent === "deleteDate") {
-    const id = String(form.get("id"));
-    const [granted] = await db
-      .select({ id: setupPass.id })
-      .from(setupPass)
-      .where(and(eq(setupPass.passDateId, id), eq(setupPass.status, "granted")))
-      .limit(1);
-    if (granted) {
-      return data(
-        { error: "Revoke its granted passes first." },
-        {
-          status: 409,
-        },
-      );
-    }
-    // Clear any lingering requested/denied rows, then drop the date.
-    await db.delete(setupPass).where(eq(setupPass.passDateId, id));
-    await db.delete(setupPassDate).where(ownDate(id));
-    return data({ ok: "Date removed." });
-  }
-
-  if (intent === "grantPass") {
-    const passDateId = String(form.get("passDateId"));
-    // `m:<membershipId>` (a member) or `a:<attendeeId>` (a guest).
-    const ref = str("granteeRef");
-    if (!ref) return data({ error: "Pick someone." }, { status: 400 });
-    let targetAttendeeId: string | null = null;
-    if (ref.startsWith("m:")) {
-      const targetMid = ref.slice(2);
-      const [tm] = await db
-        .select({ id: membership.id })
-        .from(membership)
-        .where(
-          and(
-            eq(membership.id, targetMid),
-            eq(membership.organizationId, campId),
-          ),
-        )
-        .limit(1);
-      if (!tm) return data({ error: "Unknown member." }, { status: 400 });
-      targetAttendeeId = await ensureMemberAttendee(
-        campId,
-        editionId,
-        targetMid,
-      );
-    } else if (ref.startsWith("a:")) {
-      const aid = ref.slice(2);
-      const [g] = await db
-        .select({ id: attendee.id })
-        .from(attendee)
-        .where(
-          and(
-            eq(attendee.id, aid),
-            eq(attendee.campId, campId),
-            eq(attendee.editionId, editionId),
-          ),
-        )
-        .limit(1);
-      if (!g) return data({ error: "Unknown guest." }, { status: 400 });
-      targetAttendeeId = aid;
-    }
-    if (!targetAttendeeId)
-      return data({ error: "Pick someone." }, { status: 400 });
-    if (!(await hasRoom(passDateId))) {
-      return data({ error: "That date is at its quota." }, { status: 409 });
-    }
-    const existing = await activePassFor(targetAttendeeId);
-    if (existing?.status === "granted") {
-      return data(
-        { error: "They already have a granted pass." },
-        { status: 409 },
-      );
-    }
-    if (existing) {
-      // Resolve their open request with this date.
-      await db
-        .update(setupPass)
-        .set({
-          passDateId,
-          status: "granted",
-          resolvedByMembershipId: myMid,
-          resolvedAt: new Date(),
-        })
-        .where(eq(setupPass.id, existing.id));
-    } else {
-      await db.insert(setupPass).values({
-        id: crypto.randomUUID(),
-        campId,
-        editionId,
-        passDateId,
-        attendeeId: targetAttendeeId,
-        status: "granted",
-        resolvedByMembershipId: myMid,
-        resolvedAt: new Date(),
-        createdById: actor.id,
-      });
-    }
-    return data({ ok: "Pass granted." });
-  }
-
-  if (intent === "approvePass") {
-    const id = String(form.get("id"));
-    // The request is unbound — the officer picks the "on or after" date here.
-    const passDateId = str("passDateId");
-    if (!passDateId) {
-      return data({ error: "Pick an on-or-after date." }, { status: 400 });
-    }
-    const [p] = await db
-      .select({ id: setupPass.id })
-      .from(setupPass)
-      .where(and(eq(setupPass.id, id), eq(setupPass.editionId, editionId)))
-      .limit(1);
-    if (!p) return data({ error: "Not found." }, { status: 404 });
-    const [d] = await db
-      .select({ id: setupPassDate.id })
-      .from(setupPassDate)
-      .where(ownDate(passDateId))
-      .limit(1);
-    if (!d) return data({ error: "Unknown date." }, { status: 400 });
-    if (!(await hasRoom(passDateId))) {
-      return data({ error: "That date is at its quota." }, { status: 409 });
-    }
-    await db
-      .update(setupPass)
-      .set({
-        passDateId,
-        status: "granted",
-        resolvedByMembershipId: myMid,
-        resolvedAt: new Date(),
-      })
-      .where(eq(setupPass.id, id));
-    return data({ ok: "Pass granted." });
-  }
-
   if (intent === "denyPass") {
     await db
       .update(setupPass)
@@ -749,24 +571,7 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: "Request denied." });
   }
 
-  if (intent === "revokePass") {
-    await db
-      .delete(setupPass)
-      .where(
-        and(
-          eq(setupPass.id, String(form.get("id"))),
-          eq(setupPass.editionId, editionId),
-        ),
-      );
-    return data({ ok: "Pass revoked." });
-  }
-
   return data({ error: "Unknown action." }, { status: 400 });
-}
-
-function fmtDate(date: string, label: string | null): string {
-  const d = dayjs(date).format("ddd, MMM D");
-  return label ? `${label} · ${d}` : d;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -785,13 +590,12 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
     myMembershipId,
     myArrival,
     year,
-    dates,
     passes,
     grantGroups,
-    arrivals,
     stock,
     myCodes,
-    earlyMissing,
+    needsPass,
+    coverage,
   } = loaderData;
   const fetcher = useFetcher<FetcherData>();
   useFetcherNotifications(fetcher.data, fetcher.state);
@@ -800,14 +604,11 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
   const liveStock = stock.filter((s) => s.status !== "void");
   const voidStockRows = stock.filter((s) => s.status === "void");
 
-  const grantedFor = (dateId: string) =>
-    passes.filter((p) => p.passDateId === dateId && p.status === "granted")
-      .length;
-  const dateById = new Map(dates.map((d) => [d.id, d]));
-
   // "mine" = my whole party. The request form is self-only, so it keys off
   // `isSelf` — my own pass, not one belonging to someone I host.
-  const myPasses = passes.filter((p) => p.mine);
+  // A granted request is a pass, and the pass card renders it; showing it here
+  // too would be the second ledger all over again.
+  const myOpenRequests = passes.filter((p) => p.mine && p.status !== "granted");
   const myOwnActive = passes.find((p) => p.isSelf && p.status !== "denied");
   const pending = passes.filter((p) => p.status === "requested");
 
@@ -836,62 +637,60 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
           </Paper>
         ) : null}
 
-        {/* ----- Member self-service ----- */}
+        {/* ----- Member self-service: the ASK ----- */}
+        {/* Granted requests aren't shown here — a granted request IS a pass,
+            and the card below shows the pass itself. Leaving both would be the
+            two-ledger confusion this screen just got rid of. */}
         <Card withBorder padding="md" radius="md">
           <Stack gap="sm">
-            <Text fw={600}>Your passes</Text>
-            {myPasses.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                None yet.
-              </Text>
-            ) : (
+            <Text fw={600}>Early arrival</Text>
+            {myOpenRequests.length > 0 ? (
               <Stack gap="xs">
-                {myPasses.map((p) => {
-                  const d = p.passDateId ? dateById.get(p.passDateId) : null;
-                  return (
-                    <Group key={p.id} gap="xs">
-                      {p.holderIsGuest ? (
-                        <Text size="sm" fw={500}>
-                          {p.holderName ?? "Guest"}
-                          <Text span c="dimmed" size="xs">
-                            {" "}
-                            (guest)
-                          </Text>
+                {myOpenRequests.map((p) => (
+                  <Group key={p.id} gap="xs">
+                    {p.holderIsGuest ? (
+                      <Text size="sm" fw={500}>
+                        {p.holderName ?? "Guest"}
+                        <Text span c="dimmed" size="xs">
+                          {" "}
+                          (guest)
                         </Text>
-                      ) : null}
-                      <Badge
-                        size="lg"
-                        variant="light"
-                        color={STATUS_COLOR[p.status] ?? "gray"}
+                      </Text>
+                    ) : null}
+                    <Badge
+                      size="lg"
+                      variant="light"
+                      color={STATUS_COLOR[p.status] ?? "gray"}
+                    >
+                      {p.status === "requested"
+                        ? "Asked for a pass — an officer will set one aside"
+                        : "Not granted"}
+                    </Badge>
+                    {!locked && p.status === "requested" ? (
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        color="red"
+                        onClick={() =>
+                          fetcher.submit(
+                            { intent: "cancelPass", id: p.id },
+                            { method: "post" },
+                          )
+                        }
                       >
-                        {d
-                          ? `Arrive ${fmtDate(d.date, d.label)} or later · ${p.status}`
-                          : p.status === "requested"
-                            ? "Requested — awaiting a date"
-                            : p.status}
-                      </Badge>
-                      {!locked && p.status === "requested" ? (
-                        <Button
-                          size="xs"
-                          variant="subtle"
-                          color="red"
-                          onClick={() =>
-                            fetcher.submit(
-                              { intent: "cancelPass", id: p.id },
-                              { method: "post" },
-                            )
-                          }
-                        >
-                          Cancel
-                        </Button>
-                      ) : null}
-                    </Group>
-                  );
-                })}
+                        Cancel
+                      </Button>
+                    ) : null}
+                  </Group>
+                ))}
               </Stack>
-            )}
+            ) : myStock.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                Nothing set aside for you yet.
+              </Text>
+            ) : null}
 
-            {!locked && !myOwnActive ? (
+            {!locked && !myOwnActive && myStock.length === 0 ? (
               <RequestPassForm fetcher={fetcher} myArrival={myArrival} />
             ) : null}
           </Stack>
@@ -905,64 +704,10 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
         {/* ----- Officer management ----- */}
         {isOfficer ? (
           <>
-            {pending.length > 0 ? (
-              <Card withBorder padding="md" radius="md">
-                <Text fw={600} mb="xs">
-                  Pending requests · {pending.length}
-                </Text>
-                <Stack gap="xs">
-                  {pending.map((p) => (
-                    <PendingRequestRow
-                      key={p.id}
-                      p={p}
-                      arrival={
-                        p.attendeeId ? (arrivals[p.attendeeId] ?? null) : null
-                      }
-                      dates={dates}
-                      grantedFor={grantedFor}
-                      fetcher={fetcher}
-                      locked={locked}
-                    />
-                  ))}
-                </Stack>
-              </Card>
-            ) : null}
-
-            <Card withBorder padding="md" radius="md">
-              <Text fw={600} mb="xs">
-                Pass dates &amp; quotas
-              </Text>
-              {dates.length === 0 ? (
-                <Text size="sm" c="dimmed" mb="sm">
-                  No dates yet. Add the camp's allocation below — each date is
-                  the earliest day its passes admit entry.
-                </Text>
-              ) : (
-                <Stack gap="sm" mb="md">
-                  {dates.map((d) => (
-                    <DateRowView
-                      key={d.id}
-                      d={d}
-                      granted={grantedFor(d.id)}
-                      passes={passes.filter(
-                        (p) => p.passDateId === d.id && p.status === "granted",
-                      )}
-                      grantGroups={grantGroups}
-                      fetcher={fetcher}
-                      locked={locked}
-                    />
-                  ))}
-                </Stack>
-              )}
-              {locked ? null : <AddDateForm fetcher={fetcher} year={year} />}
-            </Card>
-          </>
-        ) : null}
-        {isOfficer ? (
-          <>
-            {earlyMissing.length > 0 ? (
-              <EarlyArrivalsCard
-                people={earlyMissing}
+            <CoverageCard coverage={coverage} />
+            {needsPass.length > 0 ? (
+              <NeedsPassCard
+                people={needsPass}
                 stock={liveStock}
                 fetcher={fetcher}
                 locked={locked}
@@ -1133,305 +878,6 @@ function RequestPassForm({
   );
 }
 
-/** An unbound request in the officer queue: shows the requester's planned
- * arrival and lets the officer pick the "on or after" date row to grant. */
-function PendingRequestRow({
-  p,
-  arrival,
-  dates,
-  grantedFor,
-  fetcher,
-  locked,
-}: {
-  p: PassRow;
-  arrival: string | null;
-  dates: DateRow[];
-  grantedFor: (dateId: string) => number;
-  fetcher: ReturnType<typeof useFetcher>;
-  locked: boolean;
-}) {
-  const open = dates.filter((d) => grantedFor(d.id) < d.quota);
-  // Best default: the latest date that still covers their arrival (least
-  // early-entry burn), else whatever the request already carried.
-  const covering = arrival ? open.filter((d) => d.date <= arrival) : [];
-  const suggested = covering.at(-1)?.id ?? p.passDateId;
-  const [dateId, setDateId] = useState<string | null>(
-    suggested && open.some((d) => d.id === suggested) ? suggested : null,
-  );
-  return (
-    <Group justify="space-between" wrap="wrap" align="flex-end">
-      <div>
-        <Text size="sm" fw={500}>
-          {p.holderName ?? "Unknown"}
-          {arrival ? (
-            <Text span size="xs" c="dimmed">
-              {" "}
-              — arriving {dayjs(arrival).format("ddd, MMM D")}
-            </Text>
-          ) : (
-            <Text span size="xs" c="dimmed">
-              {" "}
-              — no arrival date set
-            </Text>
-          )}
-        </Text>
-        {p.note ? (
-          <Text size="xs" c="dimmed">
-            “{p.note}”
-          </Text>
-        ) : null}
-      </div>
-      {locked ? null : (
-        <Group gap={4} wrap="nowrap" align="flex-end">
-          <Select
-            size="xs"
-            w={210}
-            placeholder="on or after…"
-            data={open.map((d) => ({
-              value: d.id,
-              label: `On or after ${fmtDate(d.date, d.label)}${
-                arrival && d.date > arrival ? " (after their arrival!)" : ""
-              }`,
-            }))}
-            value={dateId}
-            onChange={setDateId}
-          />
-          <Button
-            size="compact-xs"
-            variant="light"
-            color="green"
-            disabled={!dateId}
-            onClick={() => {
-              if (dateId)
-                fetcher.submit(
-                  { intent: "approvePass", id: p.id, passDateId: dateId },
-                  { method: "post" },
-                );
-            }}
-          >
-            Grant
-          </Button>
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            color="red"
-            onClick={() =>
-              fetcher.submit(
-                { intent: "denyPass", id: p.id },
-                { method: "post" },
-              )
-            }
-          >
-            Deny
-          </Button>
-        </Group>
-      )}
-    </Group>
-  );
-}
-
-function AddDateForm({
-  fetcher,
-  year,
-}: {
-  fetcher: ReturnType<typeof useFetcher>;
-  year: number;
-}) {
-  const [date, setDate] = useState<Date | null>(null);
-  const [label, setLabel] = useState("");
-  const [quota, setQuota] = useState<number | string>(1);
-  // Setup access only runs the Monday→Saturday before gates open — bound the
-  // picker to that window so officers can't add unrelated dates.
-  const win = setupPassWindowFor(year);
-  const minDate = dayjs(win.min).toDate();
-  const maxDate = dayjs(win.max).toDate();
-  return (
-    <Group align="flex-end">
-      <DateInput
-        label="On-or-after date"
-        placeholder="pick a date"
-        value={date}
-        onChange={setDate as (v: Date | null) => void}
-        minDate={minDate}
-        maxDate={maxDate}
-        defaultDate={minDate}
-        w={170}
-        valueFormat="ddd, MMM D"
-      />
-      <TextInput
-        label="Label (optional)"
-        placeholder="Monday"
-        value={label}
-        onChange={(e) => setLabel(e.currentTarget.value)}
-        w={140}
-      />
-      <NumberInput
-        label="Quota"
-        value={quota}
-        onChange={setQuota}
-        min={0}
-        w={90}
-      />
-      <Button
-        disabled={!date}
-        loading={fetcher.state !== "idle"}
-        onClick={() => {
-          if (!date) return;
-          fetcher.submit(
-            {
-              intent: "addDate",
-              date: dayjs(date).format("YYYY-MM-DD"),
-              label,
-              quota: String(quota),
-            },
-            { method: "post" },
-          );
-          setDate(null);
-          setLabel("");
-          setQuota(1);
-        }}
-      >
-        Add date
-      </Button>
-    </Group>
-  );
-}
-
-function DateRowView({
-  d,
-  granted,
-  passes,
-  grantGroups,
-  fetcher,
-  locked,
-}: {
-  d: DateRow;
-  granted: number;
-  passes: PassRow[];
-  grantGroups: GrantGroup[];
-  fetcher: ReturnType<typeof useFetcher>;
-  locked: boolean;
-}) {
-  const remaining = d.quota - granted;
-  const heldBy = new Set(passes.map((p) => p.holderRef).filter(Boolean));
-  const grantable = grantGroups
-    .map((g) => ({
-      group: g.group,
-      items: g.items.filter((i) => !heldBy.has(i.value)),
-    }))
-    .filter((g) => g.items.length > 0);
-  return (
-    <Paper withBorder p="sm" radius="sm">
-      <Group justify="space-between" wrap="wrap" align="flex-start">
-        <div style={{ minWidth: 0 }}>
-          <Text fw={600} size="sm">
-            On or after {fmtDate(d.date, d.label)}
-          </Text>
-          <Group gap={6} mt={2}>
-            <Badge size="sm" variant="light" color="green">
-              {granted} granted
-            </Badge>
-            <Badge
-              size="sm"
-              variant="light"
-              color={remaining > 0 ? "blue" : "gray"}
-            >
-              {remaining} of {d.quota} left
-            </Badge>
-          </Group>
-          {passes.length > 0 ? (
-            <Group gap={4} mt={6}>
-              {passes.map((p) => (
-                <Badge
-                  key={p.id}
-                  size="sm"
-                  variant="outline"
-                  color="green"
-                  rightSection={
-                    locked ? null : (
-                      <ActionIcon
-                        size="xs"
-                        variant="transparent"
-                        color="red"
-                        onClick={() =>
-                          fetcher.submit(
-                            { intent: "revokePass", id: p.id },
-                            { method: "post" },
-                          )
-                        }
-                      >
-                        ✕
-                      </ActionIcon>
-                    )
-                  }
-                >
-                  {p.holderName ?? "—"}
-                </Badge>
-              ))}
-            </Group>
-          ) : null}
-        </div>
-        {locked ? null : (
-          <Group gap="xs" wrap="nowrap" align="flex-end">
-            <Select
-              size="xs"
-              placeholder="grant to…"
-              w={180}
-              data={grantable}
-              searchable
-              disabled={remaining <= 0}
-              value={null}
-              onChange={(value) => {
-                if (value)
-                  fetcher.submit(
-                    {
-                      intent: "grantPass",
-                      passDateId: d.id,
-                      granteeRef: value,
-                    },
-                    { method: "post" },
-                  );
-              }}
-            />
-            <NumberInput
-              size="xs"
-              w={80}
-              min={0}
-              defaultValue={d.quota}
-              aria-label="quota"
-              onBlur={(e) => {
-                const q = Number(e.currentTarget.value);
-                if (Number.isFinite(q) && q !== d.quota)
-                  fetcher.submit(
-                    { intent: "editDate", id: d.id, quota: String(q) },
-                    { method: "post" },
-                  );
-              }}
-            />
-            <Tooltip
-              label={granted > 0 ? "Remove its passes first" : "Remove date"}
-            >
-              <ActionIcon
-                variant="subtle"
-                color="red"
-                disabled={passes.length > 0}
-                onClick={() =>
-                  fetcher.submit(
-                    { intent: "deleteDate", id: d.id },
-                    { method: "post" },
-                  )
-                }
-              >
-                ✕
-              </ActionIcon>
-            </Tooltip>
-          </Group>
-        )}
-      </Group>
-    </Paper>
-  );
-}
-
 /** Upload the vendor's PDF. One file, one pass per page; re-uploading the same
  * order is safe and imports nothing new. */
 function ImportCard({
@@ -1492,25 +938,123 @@ function ImportCard({
 }
 
 /**
- * Who's arriving before gates open with no pass set aside.
+ * The numbers an officer needs before allocating: what the camp holds, who
+ * needs one, and whether those two facts are compatible.
  *
- * The list the pending-request queue can't show: someone who set an early
- * arrival date and never clicked "request a pass" appears here and nowhere
- * else. Each row assigns straight from the earliest pass that covers them, so
- * the common case is one click.
+ * "Compatible" is not a subtraction. A pass admits **on or after** its date, so
+ * a pass dated the 28th is no use to someone arriving on the 25th — the camp
+ * can hold more passes than it has people and still leave somebody stranded.
+ * `coverable` comes from an actual matching, which is why it is worth showing
+ * beside the raw totals instead of leaving the arithmetic to a tired human.
  */
-function EarlyArrivalsCard({
+function CoverageCard({ coverage }: { coverage: CoverageData }) {
+  if (!coverage) return null;
+  const short = coverage.uncoverable.length;
+  return (
+    <Card withBorder padding="md" radius="md">
+      <Stack gap="sm">
+        <Text fw={600}>Setup access at a glance</Text>
+
+        <Group gap="xs" wrap="wrap">
+          <Badge size="lg" variant="light">
+            {coverage.held} held
+          </Badge>
+          <Badge size="lg" variant="light" color="blue">
+            {coverage.spare} spare
+          </Badge>
+          <Badge size="lg" variant="light" color="cyan">
+            {coverage.assigned} set aside
+          </Badge>
+          <Badge size="lg" variant="light" color="green">
+            {coverage.released} released
+          </Badge>
+          {coverage.voided > 0 ? (
+            <Badge size="lg" variant="light" color="gray">
+              {coverage.voided} void
+            </Badge>
+          ) : null}
+        </Group>
+
+        <Group gap="xs" wrap="wrap">
+          <Badge
+            size="lg"
+            variant="light"
+            color={coverage.needing > 0 ? "orange" : "green"}
+          >
+            {coverage.needing} still need one
+          </Badge>
+          {coverage.needing > 0 ? (
+            <Badge
+              size="lg"
+              variant="light"
+              color={short > 0 ? "red" : "green"}
+            >
+              {coverage.coverable} of them coverable
+            </Badge>
+          ) : null}
+          {coverage.unknownArrival > 0 ? (
+            <Badge size="lg" variant="light" color="yellow">
+              {coverage.unknownArrival} haven't said when they arrive
+            </Badge>
+          ) : null}
+        </Group>
+
+        {short > 0 ? (
+          <Alert
+            color="red"
+            variant="light"
+            title="Short of early-enough passes"
+          >
+            <Text size="sm">
+              These people arrive before any spare pass admits entry. Holding
+              more passes doesn't help — they need passes dated earlier.
+            </Text>
+            <List size="sm" mt={6}>
+              {coverage.uncoverable.map((u) => (
+                <List.Item key={`${u.name}-${u.arrivalDate}`}>
+                  {u.name} — arriving{" "}
+                  {dayjs(u.arrivalDate).format("ddd, MMM D")}
+                </List.Item>
+              ))}
+            </List>
+          </Alert>
+        ) : null}
+
+        {coverage.unknownArrival > 0 ? (
+          <Text size="xs" c="dimmed">
+            The unknowns aren't counted as needing a pass — we genuinely don't
+            know. They're who to chase, though: an early arrival nobody wrote
+            down is the one way to come up short on the day.
+          </Text>
+        ) : null}
+
+        {coverage.byDate.length > 0 ? (
+          <Group gap={6} wrap="wrap">
+            {coverage.byDate.map((d) => (
+              <Badge key={d.date} size="sm" variant="outline">
+                {dayjs(d.date).format("MMM D")}+ · {d.spare}/{d.held} spare
+              </Badge>
+            ))}
+          </Group>
+        ) : null}
+      </Stack>
+    </Card>
+  );
+}
+
+/**
+ * Everyone who still needs a pass, from both directions at once: the app worked
+ * it out from their arrival date, or they asked outright. One list, because an
+ * officer allocating passes doesn't care which way somebody got onto it — and a
+ * queue built only from requests silently omits everyone who never asked.
+ */
+function NeedsPassCard({
   people,
   stock,
   fetcher,
   locked,
 }: {
-  people: {
-    attendeeId: string;
-    ref: string;
-    name: string;
-    arrivalDate: string | null;
-  }[];
+  people: NeedRow[];
   stock: StockRow[];
   fetcher: ReturnType<typeof useFetcher>;
   locked: boolean;
@@ -1523,52 +1067,88 @@ function EarlyArrivalsCard({
     <Card withBorder padding="md" radius="md">
       <Stack gap="sm">
         <div>
-          <Text fw={600}>Arriving early without a pass · {people.length}</Text>
+          <Text fw={600}>Needs a pass · {people.length}</Text>
           <Text size="xs" c="dimmed">
-            They've told us they arrive before gates open. Nobody has set a pass
-            aside for them — including people who never got round to asking.
+            Arriving before gates open, or asked for a pass, and nothing set
+            aside yet. Nobody has to ask to appear here — an early arrival date
+            is enough.
           </Text>
         </div>
         {people.map((p) => {
-          // The latest pass that still covers their arrival: burns the least
-          // early-entry capacity, same rule the grant queue uses.
+          // The latest pass that still covers their arrival — it burns the
+          // least early-entry capacity, leaving the early-dated passes for the
+          // people who can't use anything else.
           const covering = available.filter(
             (s) => !p.arrivalDate || s.onOrAfterDate <= p.arrivalDate,
           );
           const best = covering.at(-1);
           return (
             <Group key={p.attendeeId} justify="space-between" wrap="wrap">
-              <Text size="sm">
-                {p.name}
-                <Text span size="xs" c="dimmed">
-                  {" "}
-                  — arriving{" "}
-                  {p.arrivalDate
-                    ? dayjs(p.arrivalDate).format("ddd, MMM D")
-                    : "date unknown"}
+              <div>
+                <Text size="sm">
+                  {p.name}
+                  <Text span size="xs" c="dimmed">
+                    {" "}
+                    — arriving{" "}
+                    {p.arrivalDate
+                      ? dayjs(p.arrivalDate).format("ddd, MMM D")
+                      : "date not given"}
+                  </Text>
+                  {p.asked ? (
+                    <Badge size="xs" variant="light" ml={6}>
+                      asked
+                    </Badge>
+                  ) : null}
                 </Text>
-              </Text>
-              {locked ? null : best ? (
-                <Button
-                  size="compact-xs"
-                  variant="light"
-                  onClick={() =>
-                    fetcher.submit(
-                      {
-                        intent: "assignStock",
-                        id: best.id,
-                        granteeRef: p.ref,
-                      },
-                      { method: "post" },
-                    )
-                  }
-                >
-                  Set aside {dayjs(best.onOrAfterDate).format("MMM D")}
-                </Button>
-              ) : (
-                <Text size="xs" c="orange">
-                  No spare pass covers that arrival
-                </Text>
+                {p.note ? (
+                  <Text size="xs" c="dimmed">
+                    “{p.note}”
+                  </Text>
+                ) : null}
+              </div>
+              {locked ? null : (
+                <Group gap={4} wrap="nowrap">
+                  {best ? (
+                    <Button
+                      size="compact-xs"
+                      variant="light"
+                      onClick={() =>
+                        fetcher.submit(
+                          {
+                            intent: "assignStock",
+                            id: best.id,
+                            granteeRef: p.ref,
+                          },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Set aside {dayjs(best.onOrAfterDate).format("MMM D")}
+                    </Button>
+                  ) : (
+                    <Text size="xs" c="orange">
+                      No spare pass covers that arrival
+                    </Text>
+                  )}
+                  {p.requestId ? (
+                    // Only an explicit ask can be declined. Someone who merely
+                    // has an early arrival date hasn't asked for anything, so
+                    // there is nothing to say no to — chase the date instead.
+                    <Button
+                      size="compact-xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={() =>
+                        fetcher.submit(
+                          { intent: "denyPass", id: p.requestId as string },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Decline
+                    </Button>
+                  ) : null}
+                </Group>
               )}
             </Group>
           );
