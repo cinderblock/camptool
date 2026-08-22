@@ -47,9 +47,9 @@ for (const file of files) {
 
 if (leaky > 0) {
   console.log(
-    `\n${leaky} of ${files.length} file(s) carry passes they don't show.` +
-      "\nAnyone holding one of these can recover the extra codes. Re-cut them" +
-      "\nwith CampTool's importer rather than sending these.",
+    `\n${leaky} of ${files.length} file(s) carry passes they don't show.
+Anyone holding one of these can recover the extra codes. Re-cut them
+with CampTool's importer rather than sending these.`,
   );
   process.exit(1);
 }
