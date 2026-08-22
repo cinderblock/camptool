@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { arrivalDistribution, arrivalSortKey, dayChip } from "./arrival";
+import { eventStartIso, setupPassWindowFor } from "./brc";
 
 // 2026 gates open Sunday 2026-08-30 by the BRC approximation, so anything in
 // August before that is setup week. Anchoring the fixtures to real dates keeps
@@ -191,5 +192,25 @@ describe("projecting the people who haven't given dates", () => {
     const d = arrivalDistribution([p(null), p(null)], YEAR);
     expect(d.days).toHaveLength(0);
     expect(d.undated).toBe(2);
+  });
+});
+
+describe("the setup / gates-open boundary", () => {
+  // Three places decide "is this arrival before gates open?": the roster chips
+  // (dayChip), the onboarding prompt on /start, and the to-do engine in
+  // asks.server.ts. They must agree, and the way they stopped agreeing was one
+  // of them reaching for setupPassWindowFor().max — the last day a pass is
+  // FOR, which is the Saturday, not the Sunday gates open.
+  test("gate-open is the day AFTER the last setup day", () => {
+    expect(eventStartIso(YEAR)).toBe("2026-08-30");
+    expect(setupPassWindowFor(YEAR).max).toBe("2026-08-29");
+  });
+
+  test("a Saturday arrival is setup week, and needs a pass", () => {
+    // The most common early arrival there is. Using the window's max as the
+    // boundary silently excluded exactly this person from being asked.
+    expect(dayChip("2026-08-29", YEAR)?.setup).toBe(true);
+    expect("2026-08-29" < eventStartIso(YEAR)).toBe(true);
+    expect("2026-08-29" < setupPassWindowFor(YEAR).max).toBe(false);
   });
 });

@@ -36,7 +36,7 @@ import {
 } from "../../db/schema";
 import type { AskSnapshot } from "./asks";
 import { audienceForRole } from "./asks";
-import { setupPassWindowFor } from "./brc";
+import { eventStartIso } from "./brc";
 
 /** Zero-value snapshot for a member we have no rows for at all. */
 function emptySnapshot(role: string): AskSnapshot {
@@ -107,7 +107,13 @@ export async function loadAskSnapshots(
   }
 
   // — attendance —
-  const gateOpen = setupPassWindowFor(year).max;
+  // Gate-open, i.e. the Sunday. This used to be `setupPassWindowFor(year).max`,
+  // which is the SATURDAY — the last day a pass is *for*, not the day gates
+  // open. One day out, and the day it lost is the most common early arrival
+  // there is: anyone coming in on the Saturday got no "request a Setup Access
+  // Pass" to-do, while /start and the roster chips both told them they were
+  // arriving during setup. Same boundary in all three places now.
+  const gateOpen = eventStartIso(year);
   const attendees = await db
     .select({
       id: attendee.id,

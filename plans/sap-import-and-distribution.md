@@ -225,11 +225,12 @@ Bun + `bun.lock` per the global standard.
 - [ ] Email delivery on release — deferred by decision 2 above.
 - [ ] `e2e/passes.ts` for the older *entitlement* flow (request/grant), which
       still has no committed coverage of its own.
-- [ ] The one-day off-by-one in `asks.server.ts:110`: it uses
-      `setupPassWindowFor(year).max` (the Saturday) where `/start` and the
-      roster use `eventStartIso` (the Sunday), so someone arriving the Saturday
-      before gates open never gets the "request a Setup Access Pass" to-do.
-      Unrelated to this feature; found while surveying it.
+- [x] Fixed the one-day off-by-one in `asks.server.ts`: it used
+      `setupPassWindowFor(year).max` (the Saturday — the last day a pass is
+      *for*) where `/start` and the roster use `eventStartIso` (the Sunday
+      gates open), so nobody arriving on the Saturday ever got the "request a
+      Setup Access Pass" to-do. All three now share one boundary, guarded by a
+      test in `arrival.test.ts`.
 
 ## Verified end to end (2026-08-21)
 
