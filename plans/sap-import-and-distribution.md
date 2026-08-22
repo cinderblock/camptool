@@ -203,16 +203,54 @@ Bun + `bun.lock` per the global standard.
 - [x] 17 tests on a synthetic fixture; whole suite 345 pass. typecheck + biome
       green.
 
-**UI and delivery — not started.** This is the half that makes it usable.
+**UI and delivery — done (2026-08-21).**
 
-- [ ] Import UI on `/passes`: upload → preview parsed table → confirm.
-- [ ] Officer stock table: assign / unassign, with the early-arrivals-without-a-
-      pass list (`earlyArrivalsWithoutStock` is written and unused).
-- [ ] Release (typed confirm) + void (admin, reason).
-- [ ] Camper view: assigned (no codes) → released (codes + PDF download).
-- [ ] Authenticated download routes: sliced single-page PDF; group sheet.
-- [ ] E2E over the lifecycle; plus `e2e/passes.ts` for the existing entitlement
-      flow, which still has no committed coverage.
+- [x] Import card on `/passes` (officer): multipart upload, result summarised as
+      "imported N, M already in stock, now holding <date ×n>".
+- [x] Officer stock table grouped by date: set aside / take back / release /
+      void, plus the **"Arriving early without a pass"** card, which assigns
+      from the latest pass that still covers the person's arrival.
+- [x] Release confirm modal (names listed; bulk "release all set aside") and a
+      void modal that demands a reason.
+- [x] Camper card: "set aside" shows the date and nothing else; "ready" shows
+      both codes plus per-pass and whole-group PDF downloads.
+- [x] `/sap/pass/:stockId` and `/sap/group?ids=…`, both gated on released +
+      entitled, both refused outright in privacy mode (and registered in
+      `privacy-coverage.test.ts` with that as the stated reason).
+- [x] `e2e/sap-passes.ts` — **32 assertions, all passing** (`bun run e2e:sap`).
+- [x] README updated.
+
+**Still open (not blockers for this year):**
+
+- [ ] Email delivery on release — deferred by decision 2 above.
+- [ ] `e2e/passes.ts` for the older *entitlement* flow (request/grant), which
+      still has no committed coverage of its own.
+- [ ] The one-day off-by-one in `asks.server.ts:110`: it uses
+      `setupPassWindowFor(year).max` (the Saturday) where `/start` and the
+      roster use `eventStartIso` (the Sunday), so someone arriving the Saturday
+      before gates open never gets the "request a Setup Access Pass" to-do.
+      Unrelated to this feature; found while surveying it.
+
+## Verified end to end (2026-08-21)
+
+`bun run e2e:sap` against a scratch server on :17932, real HTTP, real
+multipart upload, four real accounts (admin / officer / holder / stranger):
+
+- import creates one pass per page; re-importing the same order adds nothing;
+  a 2024 PDF into the 2026 edition is refused; a member can't import
+- **assigned reveals nothing** — not on the holder's page, not on the
+  *officer's* page, and the download 404s
+- released shows both codes to the holder and to nobody else
+- the downloaded PDF **shows one pass and contains one pass**
+- unassigning a released pass → 409; voiding needs admin **and** a reason;
+  voiding doesn't restock, and the date's quota drops to match
+- the group sheet round-trips every QR, and refuses ids the viewer isn't
+  entitled to rather than dropping them silently
+- the officer screens render (SSR content asserted, since an SSR throw still
+  returns 200); dev-server log clean
+
+Officer page also inspected visually in Chrome (stock grouped by date, released
+badges, the voided section, the gap card).
 
 ## Verified against the real 2024 order (2026-08-21)
 

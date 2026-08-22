@@ -91,8 +91,30 @@ handles early-arrival **Setup Access Passes**: officers define "on or after"
 dates with a per-date quota (e.g. 2 valid from Monday, 4 from Wednesday);
 members request a pass (onboarding files the request automatically for anyone
 arriving before gates open) and an officer grants each one a date that covers
-the requester's planned arrival, quota-enforced. Both are scoped to the active
-year and go read-only when that year is locked.
+the requester's planned arrival, quota-enforced.
+
+The passes themselves are **imported from the vendor's PDF** — the one that
+arrives with a pass per page. CampTool reads each page's date, ticket ID,
+security code and the scan code behind its QR, and each date's quota becomes
+however many passes actually turned up. Re-uploading the same order imports
+nothing twice. Officers then **set a pass aside** for someone, which reveals
+nothing at all — no codes, no download, not even to officers — and later
+**release** it, which hands the codes over and cannot be undone. A pass that
+has to be pulled after release is *voided* (admin, with a reason) rather than
+returned to the pool, because there is no un-sending a secret.
+
+Released passes are delivered two ways: the vendor's own page, cut out of the
+order on demand, and CampTool's own rendering that puts **a whole travel
+group's passes on one sheet** — one page for everyone arriving in the same
+vehicle, instead of a stack to shuffle through at the gate. Cutting a page is
+done by rebuilding it from only what it draws: a PDF page's resource dictionary
+lists every image in the document it came from, so a page copied the obvious
+way carries every *other* pass's QR code along invisibly.
+`bun scripts/audit-sap-pdf.ts <file.pdf>` reports what a PDF shows versus what
+it contains, for checking files from anywhere.
+
+All of this is scoped to the active year and goes read-only when that year is
+locked.
 
 A **Schedule** organizes what the camp does together — work parties, meetings,
 and daily service — with sign-ups. Each day of a gathering is split into

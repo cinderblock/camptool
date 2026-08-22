@@ -32,7 +32,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "e2e:passkey-recovery": "node --experimental-strip-types e2e/passkey-recovery.ts",
-    "e2e:member-merge": "bun e2e/member-merge.ts"
+    "e2e:member-merge": "bun e2e/member-merge.ts",
+    "e2e:sap": "bun e2e/sap-passes.ts"
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.14",

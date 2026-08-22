@@ -20,7 +20,7 @@
  */
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import {
   attendee,
@@ -516,6 +516,45 @@ export async function slicedPassPdf(
   }
   const bytes = await documentBytes(campId, stock.sourceDocumentId);
   return sliceSapPage(bytes, stock.sourcePageIndex, stock.scanCode);
+}
+
+/**
+ * Passes **with their codes**, for the download routes — the only read here
+ * that returns them.
+ *
+ * Returns whatever the ids match, still carrying the party columns; it does not
+ * itself decide who may see them. Callers must run every row past
+ * `visibleCodesFor` and drop the ones that fail. Split that way on purpose: a
+ * function that both fetched secrets and judged access would be one refactor
+ * away from being called for its rows and trusted for its judgement.
+ */
+export async function stockWithCodes(editionId: string, ids: string[]) {
+  if (ids.length === 0) return [];
+  return db
+    .select({
+      id: setupPassStock.id,
+      onOrAfterDate: setupPassStock.onOrAfterDate,
+      vendorTicketId: setupPassStock.vendorTicketId,
+      status: setupPassStock.status,
+      securityCode: setupPassStock.securityCode,
+      scanCode: setupPassStock.scanCode,
+      sourceDocumentId: setupPassStock.sourceDocumentId,
+      sourcePageIndex: setupPassStock.sourcePageIndex,
+      membershipId: attendee.membershipId,
+      hostMembershipId: attendee.hostMembershipId,
+      guestName: attendee.name,
+      memberName: user.name,
+    })
+    .from(setupPassStock)
+    .leftJoin(attendee, eq(setupPassStock.assignedAttendeeId, attendee.id))
+    .leftJoin(membership, eq(attendee.membershipId, membership.id))
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(
+      and(
+        eq(setupPassStock.editionId, editionId),
+        inArray(setupPassStock.id, ids),
+      ),
+    );
 }
 
 /** Stock for an edition with holder details joined — the officer table. Codes

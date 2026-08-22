@@ -50,6 +50,15 @@ const EXEMPT: Record<string, string> = {
     "Public password-reset landing, reached without a session (the whole point " +
     "is that they can't sign in), so there is no privacy cookie to honour. The " +
     "one identifier it returns is already masked by maskEmail().",
+  "routes/sap.pass.$stockId.tsx":
+    "Streams a Setup Access Pass PDF, not a payload — there is no object for " +
+    "redact() to walk, and a pseudonymized pass would be a pass that doesn't " +
+    "work. Privacy mode refuses this route outright (403) instead, which is " +
+    "stricter than redacting: the codes are the most consequential data in " +
+    "the app.",
+  "routes/sap.group.tsx":
+    "Same as sap.pass: streams a generated PDF of real pass codes, and " +
+    "privacy mode refuses it outright (403) rather than transforming it.",
   "routes/spike.passkey.tsx":
     "Dev-only passkey harness (its loader 404s in production) and it returns " +
     "no data at all — the loader exists purely to gate the route.",

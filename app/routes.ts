@@ -33,6 +33,12 @@ export default [
   route("media/:id", "routes/media.$id.tsx"),
   route("media/:id/full", "routes/media.$id.full.tsx"),
   route("api/media", "routes/api.media.tsx"),
+  // Setup Access Pass downloads (plans/sap-import-and-distribution.md).
+  // Resource routes, outside the shell: they stream a PDF, not markup. Both
+  // are gated on the pass being RELEASED and the viewer being entitled to it —
+  // an assigned-but-unreleased pass is downloadable by nobody.
+  route("sap/pass/:stockId", "routes/sap.pass.$stockId.tsx"),
+  route("sap/group", "routes/sap.group.tsx"),
   route("api/auth/*", "routes/api.auth.$.tsx"),
   // Begin a passkey-first (password-less) signup; returns the opaque handle
   // that addPasskey({ context }) carries back to the server.
