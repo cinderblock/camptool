@@ -73,6 +73,14 @@ export default [
       "schedule/:gatheringId",
       "routes/dashboard/schedule.$gatheringId.tsx",
     ),
+    // Camp meetings — a purpose-built view over `kind="meeting"` gatherings,
+    // keyed on the OCCURRENCE because the agenda and the write-up belong to one
+    // dated meeting, not to the series (plans/camp-meetings.md).
+    route("meetings", "routes/dashboard/meetings.tsx"),
+    route(
+      "meetings/:occurrenceId",
+      "routes/dashboard/meetings.$occurrenceId.tsx",
+    ),
     route("programming", "routes/dashboard/programming.tsx"),
     route("programming/board", "routes/dashboard/programming.board.tsx"),
     route(

@@ -30,6 +30,7 @@ import { weeksUntilEvent } from "~/lib/brc";
 import { featureVisibleTo } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
+import { meetingsHomeCard } from "~/lib/meetings.server";
 import { type Role, hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { pendingApplicationWhere } from "~/lib/recruits.server";
@@ -67,6 +68,10 @@ type ScheduleCard = {
   }[];
   understaffedDays: number;
 };
+
+/** The next meeting, and any write-ups this viewer hasn't read — how a summary
+ * reaches the camp without a mailer (plans/camp-meetings.md). */
+type MeetingsCard = Awaited<ReturnType<typeof meetingsHomeCard>>;
 
 const ROLE_COLOR: Record<Role, string> = {
   admin: "red",
@@ -141,6 +146,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     dues: { expected: number; paid: number; owed: number } | null;
     headcount: Headcount | null;
     schedule: ScheduleCard | null;
+    meetings: MeetingsCard | null;
   } | null = null;
   if (active && activeEdition) {
     const editionId = activeEdition.id;
@@ -305,6 +311,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       dues,
       headcount: seeFeature("roster") ? await headcountFor(editionId) : null,
       schedule,
+      meetings: seeFeature("meetings")
+        ? await meetingsHomeCard({
+            editionId,
+            membershipId: mid,
+            todayIso: todayIso(),
+          })
+        : null,
     };
   }
 
@@ -433,6 +446,17 @@ function CampOverview({
       key: "approvals",
       label: `${overview.pendingApprovals} map change${overview.pendingApprovals === 1 ? "" : "s"} need your approval`,
       to: "/map",
+    });
+  }
+  // A published write-up is a to-do until it's been read — that IS how a
+  // summary gets distributed (plans/camp-meetings.md). It isn't in the ask
+  // registry because it's per-meeting rather than one standing obligation.
+  for (const m of overview?.meetings?.unread ?? []) {
+    todos.push({
+      key: `meeting-summary-${m.occurrenceId}`,
+      label: `Read the summary from ${m.title}`,
+      hint: dateLabel(m.date),
+      to: `/meetings/${m.occurrenceId}`,
     });
   }
 
@@ -585,6 +609,53 @@ function CampOverview({
                     still need people.
                   </Text>
                 ) : null}
+              </Card>
+            ) : null}
+
+            {overview.meetings?.next ? (
+              <Card withBorder padding="lg" radius="md">
+                <Group justify="space-between" mb="xs">
+                  <Text fw={600}>Next meeting</Text>
+                  <Anchor component={Link} to="/meetings" size="xs">
+                    Meetings
+                  </Anchor>
+                </Group>
+                <Anchor
+                  component={Link}
+                  to={`/meetings/${overview.meetings.next.occurrenceId}`}
+                  size="sm"
+                  fw={600}
+                >
+                  {overview.meetings.next.title}
+                </Anchor>
+                <Text size="sm" c="dimmed">
+                  {dateLabel(overview.meetings.next.date)}
+                  {overview.meetings.next.startTime
+                    ? ` · ${timeRangeLabel(
+                        overview.meetings.next.startTime,
+                        overview.meetings.next.endTime,
+                      )}`
+                    : ""}
+                  {overview.meetings.next.location
+                    ? ` · ${overview.meetings.next.location}`
+                    : ""}
+                </Text>
+                <Text size="xs" c="dimmed" mt={6}>
+                  {overview.meetings.next.agendaCount === 0
+                    ? "Nothing on the agenda yet — add the first item."
+                    : `${overview.meetings.next.agendaCount} item${
+                        overview.meetings.next.agendaCount === 1 ? "" : "s"
+                      } on the agenda.`}
+                </Text>
+                {overview.meetings.next.mine === "signed_up" ? (
+                  <Badge size="xs" variant="light" color="green" mt="xs">
+                    you're coming
+                  </Badge>
+                ) : (
+                  <Text size="xs" c="dimmed" mt={4}>
+                    You haven't said whether you're coming.
+                  </Text>
+                )}
               </Card>
             ) : null}
           </SimpleGrid>

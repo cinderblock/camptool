@@ -582,6 +582,13 @@
       "when": 1787439451211,
       "tag": "0082_chilly_wolfpack",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1787466187373,
+      "tag": "0083_goofy_nekra",
+      "breakpoints": true
     }
   ]
 }

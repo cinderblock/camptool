@@ -44,6 +44,7 @@ import {
 } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
 import { isSuperAdmin } from "~/lib/instance.server";
+import { countUnreadSummaries } from "~/lib/meetings.server";
 import { hasAtLeast } from "~/lib/permissions";
 import type { PrivacyMode } from "~/lib/privacy";
 import { redact } from "~/lib/privacy.server";
@@ -164,6 +165,20 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? await countProspectsNeedingAttention(active.camp.id)
       : 0;
 
+  // Meeting write-ups this member hasn't read. Unlike the officer-only badges
+  // above, everyone pays for this one — it IS the distribution mechanism for a
+  // summary (plans/camp-meetings.md), so a member not seeing it defeats it.
+  const unreadSummaries =
+    active &&
+    activeEdition &&
+    features.meetings &&
+    featureVisibleTo(features.meetings, active.membership.role)
+      ? await countUnreadSummaries({
+          editionId: activeEdition.id,
+          membershipId: active.membership.id,
+        })
+      : 0;
+
   // The top-bar shortcut into the camp's bins app. Only the LABEL crosses the
   // wire — the access code stays server-side until /bins issues the redirect.
   const binsMenu =
@@ -185,6 +200,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     outstandingCount,
     faqPending,
     prospectsPending,
+    unreadSummaries,
     showPasskeyNag,
     privacyMode,
     canUsePrivacy,
@@ -235,6 +251,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     outstandingCount,
     faqPending,
     prospectsPending,
+    unreadSummaries,
     showPasskeyNag,
     impersonatedByName,
     privacyMode,
@@ -373,6 +390,12 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             ...(scheduleEmpty && !officer
               ? []
               : gated("schedule", "/schedule", "Schedule")),
+            // Badged with summaries this member hasn't read — the whole of how
+            // a write-up gets "distributed" without a mailer.
+            ...gated("meetings", "/meetings", "Meetings").map((item) => ({
+              ...item,
+              badge: unreadSummaries > 0 ? String(unreadSummaries) : null,
+            })),
             ...gated("programming", "/programming", "Programming"),
           ],
         },

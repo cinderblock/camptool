@@ -24,6 +24,7 @@
     "e2e:bins-stock": "bun e2e/bins-stock.ts",
     "e2e:prospects": "bun e2e/prospects.ts",
     "e2e:responses": "bun e2e/question-responses.ts",
+    "e2e:meetings": "node --experimental-strip-types e2e/meetings.ts",
     "lint": "biome check .",
     "format": "biome format --write .",
     "db:generate": "drizzle-kit generate",

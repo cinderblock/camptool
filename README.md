@@ -127,6 +127,21 @@ disturbs the people already signed up. What a shift *is* is explained on the
 page rather than assumed, and a schedule that's switched on but still empty
 hides itself from campers until there's something in it.
 
+**Meetings** is the same data seen the way a camp meeting actually works. An
+officer sets one up — once, or on a weekly or fortnightly cadence through a run
+of dates — and each one gets three things a work party doesn't. An **agenda**
+that *anyone who can see the meeting* may add to, recruits included, so items
+arrive during the fortnight rather than being remembered on the call; whoever
+added an item can edit or withdraw it, and officers can moderate any of them. A
+**join button** for the camp's standing meeting room: an admin pastes one link
+on the settings page — a Discord voice channel, or a Zoom, Meet, Teams or Jitsi
+room, recognized from the link itself — and every meeting offers it, so there is
+never a link to hunt for. And a **summary** afterwards, written by an officer as
+a draft that nobody else can see, then *published*, which is what distributes
+it: it becomes a to-do on every camper's home page until they've read it. A
+meeting scheduled here appears on the Schedule calendar and vice versa — one
+thing, two views, not two lists to keep in sync.
+
 A **Spares board** is where campers post a spare ticket or vehicle pass, or ask
 for one — asking price optional, with a way to mark it taken so nobody chases
 something already gone. Ticket and vehicle pass are separate kinds throughout,

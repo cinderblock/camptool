@@ -11,7 +11,7 @@
  */
 import { Button, Group, Select, Text, Textarea } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { prepareUpload } from "~/lib/images.client";
 import { type LinkTarget, linkSnippet } from "~/lib/wiki";
 
@@ -42,6 +42,10 @@ export function MarkupTextarea({
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // The label can't be Mantine's `label` prop — it shares a row with the
+  // picture and link controls — so tie it to the textarea by hand. Without
+  // this it's a floating <Text> a screen reader never connects to the field.
+  const fieldId = useId();
 
   const groups = [...new Set(targets.map((t) => t.group))].map((group) => ({
     group,
@@ -119,7 +123,7 @@ export function MarkupTextarea({
   return (
     <div>
       <Group justify="space-between" align="flex-end" mb={4}>
-        <Text size="sm" fw={500}>
+        <Text component="label" htmlFor={fieldId} size="sm" fw={500}>
           {label}
         </Text>
         <Group gap="xs">
@@ -165,6 +169,7 @@ export function MarkupTextarea({
       </Group>
       <Textarea
         ref={ref}
+        id={fieldId}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.currentTarget.value)}

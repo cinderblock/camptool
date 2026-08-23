@@ -33,6 +33,7 @@ export type FeatureKey =
   | "prospects"
   | "roster"
   | "schedule"
+  | "meetings"
   | "training"
   | "programming"
   | "groups";
@@ -180,6 +181,15 @@ export const FEATURES: CampFeatureDef[] = [
       "Work parties, camp meetings, and shifts — with sign-ups and a calendar.",
   },
   {
+    key: "meetings",
+    label: "Meetings",
+    description:
+      "Camp meetings on a repeating date, an agenda anyone can add to before the day, a one-click link into the camp's voice channel, and the write-up afterwards for everyone who missed it. Set the meeting-room link below once it's on.",
+    // A meeting IS a scheduled gathering — this feature is a purpose-built view
+    // over the same rows, so Schedule has to be on for it to work.
+    requires: ["schedule"],
+  },
+  {
     key: "training",
     label: "Training",
     description:
@@ -219,6 +229,7 @@ const ROUTE_FEATURES: Record<string, FeatureKey> = {
   prospects: "prospects",
   roster: "roster",
   schedule: "schedule",
+  meetings: "meetings",
   training: "training",
   programming: "programming",
 };

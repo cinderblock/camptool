@@ -623,6 +623,29 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   deviation, documented). Named `gathering` internally (avoids the event-layer
   `event`). In-app only; Discord/email reminders ride Phase 5. Full detail +
   per-phase commits/E2E: **`plans/events-scheduling.md`**.
+- [x] **Camp meetings — agendas, a standing meeting room, and summaries
+  (LANDED, E2E-tested on a scratch server; NOT yet deployed-verified).**
+  Cameron's ask (2026-08-22): a tab for camp meetings — setting dates, agendas
+  anyone can add to, automatic meeting rooms (Discord voice channel for now),
+  and distributing summaries. **Built on `gathering` with `kind="meeting"`, NOT
+  a second scheduling entity** — the parent plan's own "there is ONE versioning
+  entity, don't design a duplicate table" rule applied to scheduling, so dates,
+  recurrence, RSVP, attendance and the calendar all come from Schedule and a
+  meeting lives in one place shown two ways. Feature key `meetings` (default
+  off, `requires: ["schedule"]`). **Migration 0083** adds `camp_meeting_room`
+  (camp-scoped, one link an admin pastes once) / `meeting_agenda_item` /
+  `meeting_summary` / `meeting_summary_read`. `schedule.ts` gained
+  `datesEvery`, which is where weekly + fortnightly cadences come from (it was
+  a listed "later" item there). The meeting **provider is derived from the URL
+  hostname**, never stored — Discord, Zoom, Meet, Teams, Jitsi, or a generic
+  fallback — so "whatever meeting system is configured" needs no configuration
+  beyond the link. Agendas are open to **anyone who can see the page, recruits
+  included** (the FAQ ask-queue rule); the author edits or withdraws their own,
+  officers moderate any. A summary is an **officer-only draft until published**,
+  and publishing IS the distribution: it becomes an Overview to-do and a nav
+  badge for every camper until they mark it read. No Discord send, no mailer,
+  no public surface. Details + gotchas: **`plans/camp-meetings.md`**.
+
 - [x] **Camp features — per-camp opt-in feature gating (LANDED, E2E-tested on a
   scratch server; NOT yet deployed-verified).** User direction (2026-07-07):
   features are **opt-in plugins per camp** with states **off / preview / on** —

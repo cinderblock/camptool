@@ -38,6 +38,12 @@ import {
   isFeatureState,
 } from "~/lib/features";
 import { loadFeatureStates, setFeatureState } from "~/lib/features.server";
+import { meetingProvider, normalizeRoomUrl } from "~/lib/meetings";
+import {
+  clearMeetingRoom,
+  getMeetingRoom,
+  setMeetingRoom,
+} from "~/lib/meetings.server";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import type { Route } from "./+types/settings";
@@ -51,8 +57,16 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (active.membership.role !== "admin") throw redirect("/");
   const states = await loadFeatureStates(active.camp.id);
   const binsLink = await getBinsLink(active.camp.id);
+  const room = await getMeetingRoom(active.camp.id);
   return redact(privacy, {
     campName: active.camp.name,
+    // Not a secret — every member gets this link on every meeting — so unlike
+    // the bins code it can go over the wire whole.
+    meetingRoom: {
+      url: room?.url ?? "",
+      label: room?.label ?? "",
+      note: room?.note ?? "",
+    },
     // The access code itself never leaves the server — only whether one is set,
     // so the admin can tell a configured link from an unconfigured one.
     bins: {
@@ -105,6 +119,29 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "binsClear") {
     await clearBinsLink(active.camp.id);
+    return { ok: true };
+  }
+
+  if (intent === "meetingRoom") {
+    const url = normalizeRoomUrl(String(form.get("url") ?? ""));
+    if (!url) {
+      return data(
+        { error: "That doesn't look like a web link. Paste the whole thing." },
+        400,
+      );
+    }
+    await setMeetingRoom({
+      campId: active.camp.id,
+      url,
+      label: String(form.get("label") ?? "").trim() || null,
+      note: String(form.get("note") ?? "").trim() || null,
+      updatedByMembershipId: active.membership.id,
+    });
+    return { ok: true };
+  }
+
+  if (intent === "meetingRoomClear") {
+    await clearMeetingRoom(active.camp.id);
     return { ok: true };
   }
 
@@ -312,8 +349,103 @@ function BinsConfig({
   );
 }
 
+/**
+ * The camp's standing meeting room — one link, pasted once, that every meeting
+ * then offers a join button for (plans/camp-meetings.md). Deliberately just a
+ * link: no bot token, no channel permissions, and it works for whatever system
+ * the camp actually meets on.
+ */
+function MeetingRoomConfig({
+  room,
+}: {
+  room: { url: string; label: string; note: string };
+}) {
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const [url, setUrl] = useState(room.url);
+  const [label, setLabel] = useState(room.label);
+  const [note, setNote] = useState(room.note);
+  const saving = fetcher.state !== "idle";
+  const saved = fetcher.data?.ok && !saving;
+  const provider = meetingProvider(url);
+
+  return (
+    <Stack gap="sm">
+      <TextInput
+        size="xs"
+        label="Meeting room link"
+        description="In Discord, right-click your voice channel → Copy Link. A Zoom, Meet, Teams or Jitsi link works the same way."
+        placeholder="https://discord.com/channels/…"
+        value={url}
+        onChange={(e) => setUrl(e.currentTarget.value)}
+      />
+      {url.trim() ? (
+        <Text size="xs" c="dimmed">
+          {provider.key === "link"
+            ? "Not a service we recognize — the button will just say “Join the meeting”, which is fine."
+            : `Recognized as ${provider.label}; the button will offer to join the ${provider.place}.`}
+        </Text>
+      ) : null}
+      <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm" verticalSpacing="sm">
+        <TextInput
+          size="xs"
+          label="Call it"
+          description="Optional — defaults to naming the service."
+          placeholder="the Math Cave"
+          value={label}
+          onChange={(e) => setLabel(e.currentTarget.value)}
+        />
+        <TextInput
+          size="xs"
+          label="Note under the button"
+          description="Optional — a dial-in, or how the camp does it."
+          placeholder="We start with a mic check."
+          value={note}
+          onChange={(e) => setNote(e.currentTarget.value)}
+        />
+      </SimpleGrid>
+      {fetcher.data?.error ? (
+        <Text size="xs" c="red">
+          {fetcher.data.error}
+        </Text>
+      ) : null}
+      <Group justify="flex-end" gap="xs">
+        {saved ? (
+          <Text size="xs" c="dimmed" mr="auto">
+            Saved
+          </Text>
+        ) : null}
+        {room.url ? (
+          <Button
+            size="xs"
+            variant="subtle"
+            color="red"
+            loading={saving}
+            onClick={() =>
+              fetcher.submit({ intent: "meetingRoomClear" }, { method: "post" })
+            }
+          >
+            Remove
+          </Button>
+        ) : null}
+        <Button
+          size="xs"
+          loading={saving}
+          onClick={() =>
+            fetcher.submit(
+              { intent: "meetingRoom", url, label, note },
+              { method: "post" },
+            )
+          }
+        >
+          Save
+        </Button>
+      </Group>
+    </Stack>
+  );
+}
+
 export default function CampSettings({ loaderData }: Route.ComponentProps) {
-  const { campName, features, bins } = loaderData;
+  const { campName, features, bins, meetingRoom } = loaderData;
   const stateOf = (key: FeatureKey): FeatureState =>
     features.find((f) => f.key === key)?.state ?? "off";
   return (
@@ -330,6 +462,9 @@ export default function CampSettings({ loaderData }: Route.ComponentProps) {
         {features.map((f) => (
           <FeatureCard key={f.key} feature={f} stateOf={stateOf}>
             {f.key === "bins" ? <BinsConfig bins={bins} /> : null}
+            {f.key === "meetings" ? (
+              <MeetingRoomConfig room={meetingRoom} />
+            ) : null}
           </FeatureCard>
         ))}
       </Stack>

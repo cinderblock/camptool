@@ -84,11 +84,20 @@ export function isHhMm(value: string): boolean {
   return HHMM.test(value);
 }
 
-/** Every date from `start` to `end` inclusive (ISO strings in, ISO strings
- * out) — the "repeat daily" materializer. Pure string/UTC math, no local-tz
- * Date pitfalls. Caps at 100 days so a typo can't spawn thousands of rows. */
-export function dailyDatesBetween(start: string, end: string): string[] {
+/**
+ * Every `stepDays`-th date from `start` to `end` inclusive (ISO strings in, ISO
+ * strings out) — the recurrence materializer behind "repeat daily" and the
+ * meetings feature's weekly/fortnightly cadences. Pure string/UTC math, no
+ * local-tz Date pitfalls. Caps at 100 dates so a typo can't spawn thousands of
+ * rows.
+ */
+export function datesEvery(
+  start: string,
+  end: string,
+  stepDays: number,
+): string[] {
   if (!isIsoDate(start) || !isIsoDate(end)) return [];
+  if (!Number.isInteger(stepDays) || stepDays < 1) return [];
   const toUtc = (iso: string) => {
     const [y = 0, m = 1, d = 1] = iso.split("-").map(Number);
     return Date.UTC(y, m - 1, d);
@@ -99,10 +108,19 @@ export function dailyDatesBetween(start: string, end: string): string[] {
   if (endMs < startMs) return [];
   const out: string[] = [];
   const DAY = 24 * 60 * 60 * 1000;
-  for (let ms = startMs; ms <= endMs && out.length < 100; ms += DAY) {
+  for (
+    let ms = startMs;
+    ms <= endMs && out.length < 100;
+    ms += stepDays * DAY
+  ) {
     out.push(fromUtc(ms));
   }
   return out;
+}
+
+/** Every date from `start` to `end` inclusive — `datesEvery(…, 1)`. */
+export function dailyDatesBetween(start: string, end: string): string[] {
+  return datesEvery(start, end, 1);
 }
 
 /** "2026-08-25" → "Tue, Aug 25". UTC-anchored so the label never shifts a day
