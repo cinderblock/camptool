@@ -611,5 +611,107 @@ if (snapshot) {
   );
 }
 
+// 17. Guests must be assignable AND identifiable. A camp with a dozen guests
+//     cannot use a picker of bare first names — and reading the page must not
+//     disturb work already done, which is the thing that would actually hurt.
+const hostMid = mids.member as string;
+const adultGuest = crypto.randomUUID();
+const childGuest = crypto.randomUUID();
+await db.insert(attendee).values([
+  {
+    id: adultGuest,
+    campId,
+    editionId,
+    hostMembershipId: hostMid,
+    name: "Samwise Guestee",
+    status: "coming",
+    arrivalDate: `${YEAR}-08-26`,
+  },
+  {
+    id: childGuest,
+    campId,
+    editionId,
+    hostMembershipId: hostMid,
+    name: "Tiny Guestee",
+    status: "coming",
+    arrivalDate: `${YEAR}-08-26`,
+    ageBand: "under_13",
+  },
+]);
+
+// Everything imported so far is spoken for, so bring in one more to assign.
+await upload(
+  officer.cookie,
+  await buildOrder(YEAR, [
+    {
+      ticket: "990000005",
+      scan: "5050500005",
+      date: "8/24",
+      sec: "1/Zz/mmm+nnn/ooo555",
+    },
+  ]),
+  "guest-topup.pdf",
+);
+
+// Snapshot every pass BEFORE, so we can prove nothing already assigned or
+// released moved.
+const before = await db
+  .select()
+  .from(setupPassStock)
+  .where(eq(setupPassStock.editionId, editionId));
+
+const officerView = await (await get("/passes", officer.cookie)).text();
+check(
+  "17. an over-13 guest is offered for assignment",
+  officerView.includes("Samwise Guestee"),
+);
+check(
+  "17b. named by whoever brought them, not just a bare first name",
+  officerView.includes("guest of"),
+);
+check(
+  "17c. an under-13 guest is not offered — they need no pass",
+  !officerView.includes("Tiny Guestee"),
+);
+
+const spare3 = before.find((s) => s.status === "available");
+if (spare3) {
+  const res = await post("/passes", officer.cookie, {
+    intent: "assignStock",
+    id: spare3.id,
+    granteeRef: `a:${adultGuest}`,
+  });
+  check("17d. a pass can be set aside for a guest", res.status === 200);
+  const [now] = await db
+    .select()
+    .from(setupPassStock)
+    .where(eq(setupPassStock.id, spare3.id));
+  check(
+    "17e. and it lands on that guest",
+    now?.assignedAttendeeId === adultGuest && now?.status === "assigned",
+    `attendee=${now?.assignedAttendeeId}, status=${now?.status}`,
+  );
+}
+
+const after = await db
+  .select()
+  .from(setupPassStock)
+  .where(eq(setupPassStock.editionId, editionId));
+const untouched = before.every((b) => {
+  if (b.id === spare3?.id) return true; // the one we deliberately changed
+  const a = after.find((x) => x.id === b.id);
+  return (
+    a?.status === b.status &&
+    a?.assignedAttendeeId === b.assignedAttendeeId &&
+    a?.releasedAt?.getTime() === b.releasedAt?.getTime() &&
+    a?.scanCode === b.scanCode
+  );
+});
+check(
+  "17f. every pass assigned or released earlier is untouched",
+  untouched,
+  `${before.length} pre-existing rows`,
+);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

@@ -19,10 +19,11 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
+import { needsSetupPass } from "~/lib/age";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { eventStartIso } from "~/lib/brc";
 import { featureName, isBurningMan } from "~/lib/events";
@@ -97,6 +98,9 @@ type NeedRow = {
   attendeeId: string;
   ref: string;
   name: string;
+  /** Whose guest they are — a bare first name is not identifiable in a camp
+   * with a dozen of them. NULL for members. */
+  hostName: string | null;
   arrivalDate: string | null;
   /** They explicitly requested one, as opposed to us inferring it. */
   asked: boolean;
@@ -114,6 +118,8 @@ type StockRow = {
   voidReason: string | null;
   holderName: string | null;
   holderIsGuest: boolean;
+  /** Whose guest, when the holder is one. */
+  hostName: string | null;
   holderRef: string | null;
   assignedAttendeeId: string | null;
   /** In the viewer's party — their own, or anyone they host. */
@@ -182,12 +188,24 @@ export async function loader({ request }: Route.LoaderArgs) {
         .innerJoin(user, eq(membership.userId, user.id))
         .where(eq(membership.organizationId, active.camp.id))
     ).sort((a, b) => a.name.localeCompare(b.name));
+    // A GUEST is `membership_id IS NULL` — "has a host" is not the same test,
+    // because a party-linked MEMBER also has one. Using the host column alone
+    // listed those members twice: once under Campers and again under Guests.
     const guestRows = await db
-      .select({ id: attendee.id, name: attendee.name })
+      .select({
+        id: attendee.id,
+        name: attendee.name,
+        arrivalDate: attendee.arrivalDate,
+        ageBand: attendee.ageBand,
+        hostName: user.name,
+      })
       .from(attendee)
+      .leftJoin(membership, eq(attendee.hostMembershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
       .where(
         and(
           eq(attendee.editionId, editionId),
+          isNull(attendee.membershipId),
           isNotNull(attendee.hostMembershipId),
         ),
       );
@@ -200,10 +218,27 @@ export async function loader({ request }: Route.LoaderArgs) {
         ? [
             {
               group: "Guests",
-              items: guestRows.map((g) => ({
-                value: `a:${g.id}`,
-                label: `${g.name ?? "Guest"} (guest)`,
-              })),
+              items: guestRows
+                // Under-13s are admitted free and need no pass, so they are not
+                // offered here — the note under the picker says so, because a
+                // silently missing name reads as a bug.
+                .filter((g) => needsSetupPass(g.ageBand))
+                .map((g) => {
+                  // Whose guest, and when they arrive. A list of bare first
+                  // names is unusable once a camp has a dozen of them, and the
+                  // arrival is what decides which pass covers them.
+                  const whose = g.hostName
+                    ? ` — guest of ${g.hostName}`
+                    : " (guest)";
+                  const when = g.arrivalDate
+                    ? ` · arrives ${dayjs(g.arrivalDate).format("MMM D")}`
+                    : "";
+                  return {
+                    value: `a:${g.id}`,
+                    label: `${g.name ?? "Guest"}${whose}${when}`,
+                  };
+                })
+                .sort((a, b) => a.label.localeCompare(b.label)),
             },
           ]
         : []),
@@ -241,6 +276,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     holderName: s.guestName ?? s.memberName ?? null,
     holderIsGuest:
       s.assignedAttendeeId != null && s.attendeeMembershipId == null,
+    hostName: s.attendeeMembershipId ? null : (s.hostName ?? null),
     holderRef: s.attendeeMembershipId
       ? `m:${s.attendeeMembershipId}`
       : s.assignedAttendeeId
@@ -291,6 +327,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         attendeeId: r.id,
         ref: r.membershipId ? `m:${r.membershipId}` : `a:${r.id}`,
         name: r.guestName ?? r.memberName ?? "Unknown",
+        hostName: r.membershipId ? null : (r.hostName ?? null),
         arrivalDate: r.arrivalDate,
         asked: false,
         requestId: null,
@@ -313,6 +350,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         attendeeId: p.attendeeId,
         ref: p.holderRef ?? `a:${p.attendeeId}`,
         name: p.holderName ?? "Unknown",
+        hostName: null,
         arrivalDate: arrivals[p.attendeeId] ?? null,
         asked: true,
         requestId: p.id,
@@ -1101,6 +1139,12 @@ function NeedsPassCard({
               <div>
                 <Text size="sm">
                   {p.name}
+                  {p.hostName ? (
+                    <Text span size="xs" c="dimmed">
+                      {" "}
+                      — guest of {p.hostName}
+                    </Text>
+                  ) : null}
                   <Text span size="xs" c="dimmed">
                     {" "}
                     — arriving{" "}
@@ -1216,7 +1260,9 @@ function StockCard({
               <Text fw={600}>Pass stock · {stock.length}</Text>
               <Text size="xs" c="dimmed">
                 Setting a pass aside reveals nothing. Releasing it hands the
-                codes over and can't be undone.
+                codes over and can't be undone. Guests are listed under whoever
+                brought them; under-13s aren't listed at all, because they need
+                no pass.
               </Text>
             </div>
             {!locked && assigned.length > 0 ? (
@@ -1339,6 +1385,12 @@ function StockRowView({
               nobody yet
             </Text>
           )}
+          {row.hostName ? (
+            <Text span size="xs" c="dimmed">
+              {" "}
+              — guest of {row.hostName}
+            </Text>
+          ) : null}
         </Text>
         <Text size="xs" c="dimmed">
           #{row.vendorTicketId}

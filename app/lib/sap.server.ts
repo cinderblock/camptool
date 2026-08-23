@@ -21,6 +21,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../../db/client.server";
 import {
   attendee,
@@ -538,6 +539,8 @@ export async function stockWithCodes(editionId: string, ids: string[]) {
 /** Stock for an edition with holder details joined — the officer table. Codes
  * are NOT selected here; nothing that builds a list should carry them. */
 export async function stockForEdition(editionId: string) {
+  const hostMembership = alias(membership, "stock_host_membership");
+  const hostUser = alias(user, "stock_host_user");
   return db
     .select({
       id: setupPassStock.id,
@@ -552,6 +555,9 @@ export async function stockForEdition(editionId: string) {
       attendeeHostId: attendee.hostMembershipId,
       guestName: attendee.name,
       memberName: user.name,
+      // Whose guest, so a pass set aside for "Sam" is identifiable in a camp
+      // with several Sams and thirty guests.
+      hostName: hostUser.name,
       sourceDocumentId: setupPassStock.sourceDocumentId,
       sourcePageIndex: setupPassStock.sourcePageIndex,
     })
@@ -559,6 +565,8 @@ export async function stockForEdition(editionId: string) {
     .leftJoin(attendee, eq(setupPassStock.assignedAttendeeId, attendee.id))
     .leftJoin(membership, eq(attendee.membershipId, membership.id))
     .leftJoin(user, eq(membership.userId, user.id))
+    .leftJoin(hostMembership, eq(attendee.hostMembershipId, hostMembership.id))
+    .leftJoin(hostUser, eq(hostMembership.userId, hostUser.id))
     .where(eq(setupPassStock.editionId, editionId));
 }
 
@@ -584,6 +592,11 @@ export async function earlyArrivalsWithoutStock(
     );
   const covered = new Set(held.map((h) => h.attendeeId).filter(Boolean));
 
+  // Aliased joins so one query can name BOTH the attendee (via their own
+  // membership) and the person hosting them. A guest called "Sam" is unusable
+  // in a list of thirty; "Sam — guest of Devon" is the whole point.
+  const hostMembership = alias(membership, "host_membership");
+  const hostUser = alias(user, "host_user");
   const rows = await db
     .select({
       id: attendee.id,
@@ -591,6 +604,7 @@ export async function earlyArrivalsWithoutStock(
       hostMembershipId: attendee.hostMembershipId,
       guestName: attendee.name,
       memberName: user.name,
+      hostName: hostUser.name,
       arrivalDate: attendee.arrivalDate,
       status: attendee.status,
       ageBand: attendee.ageBand,
@@ -598,6 +612,8 @@ export async function earlyArrivalsWithoutStock(
     .from(attendee)
     .leftJoin(membership, eq(attendee.membershipId, membership.id))
     .leftJoin(user, eq(membership.userId, user.id))
+    .leftJoin(hostMembership, eq(attendee.hostMembershipId, hostMembership.id))
+    .leftJoin(hostUser, eq(hostMembership.userId, hostUser.id))
     .where(eq(attendee.editionId, editionId));
 
   return (
