@@ -558,6 +558,10 @@ export async function stockForEdition(editionId: string) {
       // Whose guest, so a pass set aside for "Sam" is identifiable in a camp
       // with several Sams and thirty guests.
       hostName: hostUser.name,
+      // Their RSVP. A pass held by somebody who has since said "not this year"
+      // is capacity the camp thinks it has spent — worth flagging, because
+      // nothing else will ever mention it again.
+      holderStatus: attendee.status,
       sourceDocumentId: setupPassStock.sourceDocumentId,
       sourcePageIndex: setupPassStock.sourcePageIndex,
     })

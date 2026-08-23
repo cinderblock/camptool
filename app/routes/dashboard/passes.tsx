@@ -19,7 +19,8 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
@@ -120,6 +121,9 @@ type StockRow = {
   holderIsGuest: boolean;
   /** Whose guest, when the holder is one. */
   hostName: string | null;
+  /** The holder's RSVP, so a pass held by someone who has since dropped out
+   * can be spotted and reclaimed. */
+  holderStatus: string | null;
   holderRef: string | null;
   assignedAttendeeId: string | null;
   /** In the viewer's party — their own, or anyone they host. */
@@ -181,13 +185,37 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Officer grant Select: camp members (m:) + all guests (a:), grouped.
   let grantGroups: GrantGroup[] = [];
   if (isOfficer) {
+    // Join THIS edition's attendee row so the picker knows who is actually
+    // coming. Without it the list was every membership the camp has ever had,
+    // and somebody who answered "not this year" was as selectable as anyone
+    // else — an easy way to hand a scarce pass to a person who won't use it.
+    const memberAttendee = alias(attendee, "member_attendee");
     const memberRows = (
       await db
-        .select({ id: membership.id, name: user.name })
+        .select({
+          id: membership.id,
+          name: user.name,
+          status: memberAttendee.status,
+          arrivalDate: memberAttendee.arrivalDate,
+          ageBand: memberAttendee.ageBand,
+        })
         .from(membership)
         .innerJoin(user, eq(membership.userId, user.id))
+        .leftJoin(
+          memberAttendee,
+          and(
+            eq(memberAttendee.membershipId, membership.id),
+            eq(memberAttendee.editionId, editionId),
+          ),
+        )
         .where(eq(membership.organizationId, active.camp.id))
-    ).sort((a, b) => a.name.localeCompare(b.name));
+    )
+      // "Not this year" is a no. Everything else stays, including people who
+      // haven't answered — an unanswered RSVP is not a refusal, and an officer
+      // may well be setting a pass aside for someone they've spoken to offline.
+      .filter((m) => m.status !== "not_coming")
+      .filter((m) => needsSetupPass(m.ageBand))
+      .sort((a, b) => a.name.localeCompare(b.name));
     // A GUEST is `membership_id IS NULL` — "has a host" is not the same test,
     // because a party-linked MEMBER also has one. Using the host column alone
     // listed those members twice: once under Campers and again under Guests.
@@ -207,12 +235,21 @@ export async function loader({ request }: Route.LoaderArgs) {
           eq(attendee.editionId, editionId),
           isNull(attendee.membershipId),
           isNotNull(attendee.hostMembershipId),
+          ne(attendee.status, "not_coming"),
         ),
       );
     grantGroups = [
       {
         group: "Campers",
-        items: memberRows.map((m) => ({ value: `m:${m.id}`, label: m.name })),
+        // Same detail as guests get: the arrival decides which pass covers
+        // them, and an unanswered RSVP is worth seeing before you spend one.
+        items: memberRows.map((m) => {
+          const when = m.arrivalDate
+            ? ` · arrives ${dayjs(m.arrivalDate).format("MMM D")}`
+            : " · no arrival date";
+          const doubt = m.status === "maybe" ? " (maybe)" : "";
+          return { value: `m:${m.id}`, label: `${m.name}${doubt}${when}` };
+        }),
       },
       ...(guestRows.length > 0
         ? [
@@ -277,6 +314,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     holderIsGuest:
       s.assignedAttendeeId != null && s.attendeeMembershipId == null,
     hostName: s.attendeeMembershipId ? null : (s.hostName ?? null),
+    holderStatus: s.holderStatus ?? null,
     holderRef: s.attendeeMembershipId
       ? `m:${s.attendeeMembershipId}`
       : s.assignedAttendeeId
@@ -1392,6 +1430,13 @@ function StockRowView({
             </Text>
           ) : null}
         </Text>
+        {row.holderStatus === "not_coming" ? (
+          // They took a pass and then dropped out. Nothing else would ever
+          // mention it, and it's a pass the camp could give to someone else.
+          <Badge size="sm" variant="light" color="red">
+            not coming — reclaim?
+          </Badge>
+        ) : null}
         <Text size="xs" c="dimmed">
           #{row.vendorTicketId}
         </Text>

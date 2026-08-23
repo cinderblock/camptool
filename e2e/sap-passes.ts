@@ -713,5 +713,40 @@ check(
   `${before.length} pre-existing rows`,
 );
 
+// 18. Somebody who said "not this year" must not be offered a pass, and a pass
+//     they already hold must be visibly reclaimable rather than silently lost.
+const quitterMid = mids.member2 as string;
+const quitterAttendee = await ensureMemberAttendee(
+  campId,
+  editionId,
+  quitterMid,
+);
+await db
+  .update(attendee)
+  .set({ status: "not_coming" })
+  .where(eq(attendee.id, quitterAttendee));
+
+const afterQuit = await (await get("/passes", officer.cookie)).text();
+check(
+  "18. a member who isn't coming is no longer offered a pass",
+  !afterQuit.includes("SAP stranger ·"),
+  "picker still lists them",
+);
+
+// The guest holding a pass drops out too.
+await db
+  .update(attendee)
+  .set({ status: "not_coming" })
+  .where(eq(attendee.id, adultGuest));
+const afterGuestQuit = await (await get("/passes", officer.cookie)).text();
+check(
+  "18b. and neither is a guest who dropped out",
+  !afterGuestQuit.includes("Samwise Guestee ·"),
+);
+check(
+  "18c. but the pass they already hold is flagged, not forgotten",
+  afterGuestQuit.includes("reclaim?"),
+);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
