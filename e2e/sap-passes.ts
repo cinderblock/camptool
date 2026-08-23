@@ -748,5 +748,64 @@ check(
   afterGuestQuit.includes("reclaim?"),
 );
 
+// 19. The camper-facing "your group" card: every person in the party, their
+//     dates, and whether a pass is sorted — with the buttons beside the answer.
+const groupCardPage = await (await get("/passes", holder.cookie)).text();
+check("19. the group card renders", groupCardPage.includes("Your group"));
+check(
+  "19b. it names the guests in their party, not only themselves",
+  groupCardPage.includes("Samwise Guestee"),
+);
+check(
+  "19c. and says plainly where each one stands on a pass",
+  groupCardPage.includes("no pass requested yet") ||
+    groupCardPage.includes("set aside") ||
+    groupCardPage.includes("Pass ready"),
+);
+
+// A host can set a guest's dates from here, on the event calendar.
+const stay = await post("/passes", holder.cookie, {
+  intent: "setStay",
+  attendeeId: adultGuest,
+  arrivalDate: `${YEAR}-08-25`,
+  departureDate: `${YEAR}-08-31`,
+});
+const [guestAfter] = await db
+  .select()
+  .from(attendee)
+  .where(eq(attendee.id, adultGuest));
+check("19d. a host can set a guest's stay", stay.status === 200);
+check(
+  "19e. and it saves both ends",
+  guestAfter?.arrivalDate === `${YEAR}-08-25` &&
+    guestAfter?.departureDate === `${YEAR}-08-31`,
+  `${guestAfter?.arrivalDate} → ${guestAfter?.departureDate}`,
+);
+
+const backwards = await post("/passes", holder.cookie, {
+  intent: "setStay",
+  attendeeId: adultGuest,
+  arrivalDate: `${YEAR}-08-28`,
+  departureDate: `${YEAR}-08-25`,
+});
+check(
+  "19f. a stay that ends before it starts is refused",
+  backwards.status === 400,
+  `HTTP ${backwards.status}`,
+);
+
+// And nobody can reach outside their own party.
+const notMine = await post("/passes", stranger.cookie, {
+  intent: "setStay",
+  attendeeId: adultGuest,
+  arrivalDate: `${YEAR}-08-24`,
+  departureDate: `${YEAR}-08-30`,
+});
+check(
+  "19g. someone else's guest is out of reach",
+  notMine.status === 403,
+  `HTTP ${notMine.status}`,
+);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

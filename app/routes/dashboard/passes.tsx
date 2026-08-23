@@ -24,7 +24,9 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
-import { needsSetupPass } from "~/lib/age";
+import { EventCalendar } from "~/components/EventCalendar";
+import { describe } from "~/components/StayRangeField";
+import { ageLabel, needsSetupPass } from "~/lib/age";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { eventStartIso } from "~/lib/brc";
 import { featureName, isBurningMan } from "~/lib/events";
@@ -32,6 +34,7 @@ import { requireFeature } from "~/lib/features.server";
 import { canManageAttendee, inMyParty, isMe } from "~/lib/party";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
+import type { EventRange } from "~/lib/questions";
 import {
   SapImportError,
   SapStateError,
@@ -108,6 +111,23 @@ type NeedRow = {
   /** The request row, when there is one — only an ask can be declined. */
   requestId: string | null;
   note: string | null;
+};
+/** One person in the viewer's party, as the "your group" card needs them. */
+type PartyRow = {
+  attendeeId: string;
+  name: string;
+  isSelf: boolean;
+  isGuest: boolean;
+  ageBand: string | null;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  notComing: boolean;
+  /** Arriving before gates open and old enough to need their own pass. */
+  needsPass: boolean;
+  requested: boolean;
+  requestId: string | null;
+  /** A pass already set aside for them, and how far along it is. */
+  passState: "assigned" | "released" | null;
 };
 /** An imported pass. Never carries codes — those travel separately, only for
  * released passes the viewer is entitled to, in `myCodes`. */
@@ -299,6 +319,28 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (r.membershipId === myMembershipId) myArrival = r.arrivalDate ?? null;
   }
 
+  // --- the viewer's party ------------------------------------------------
+  // Self plus everyone attending under them. This is the card a camper
+  // actually needs: who's in my group, when are they arriving, and has anybody
+  // sorted them a pass — in one place, with the buttons next to the answer.
+  const gateOpenIso = eventStartIso(activeEdition.year);
+  const partyRows = await db
+    .select({
+      id: attendee.id,
+      membershipId: attendee.membershipId,
+      hostMembershipId: attendee.hostMembershipId,
+      guestName: attendee.name,
+      memberName: user.name,
+      arrivalDate: attendee.arrivalDate,
+      departureDate: attendee.departureDate,
+      ageBand: attendee.ageBand,
+      status: attendee.status,
+    })
+    .from(attendee)
+    .leftJoin(membership, eq(attendee.membershipId, membership.id))
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(eq(attendee.editionId, editionId));
+
   // --- imported pass stock ----------------------------------------------
   // Two different reads, because they answer two different questions and only
   // one of them is allowed to carry secrets.
@@ -402,6 +444,47 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const coverage = isOfficer ? await sapCoverage(editionId, gateOpen) : null;
 
+  // Assembled after `stock`, because a person's row needs to know whether a
+  // pass is already set aside for them.
+  const myParty: PartyRow[] = partyRows
+    .filter((r) =>
+      inMyParty(
+        { membershipId: r.membershipId, hostMembershipId: r.hostMembershipId },
+        myMembershipId,
+      ),
+    )
+    .map((r) => {
+      const held = stock.find(
+        (s) => s.assignedAttendeeId === r.id && s.status !== "void",
+      );
+      const request = passes.find(
+        (p) => p.attendeeId === r.id && p.status !== "denied",
+      );
+      return {
+        attendeeId: r.id,
+        name: r.guestName ?? r.memberName ?? "Unknown",
+        isSelf: isMe({ membershipId: r.membershipId }, myMembershipId),
+        isGuest: r.membershipId == null,
+        ageBand: r.ageBand,
+        arrivalDate: r.arrivalDate,
+        departureDate: r.departureDate,
+        notComing: r.status === "not_coming",
+        // Under-13s are admitted free, so "needs one" is false for them however
+        // early they turn up.
+        needsPass:
+          needsSetupPass(r.ageBand) &&
+          !!r.arrivalDate &&
+          r.arrivalDate < gateOpenIso,
+        requested: Boolean(request) && request?.status === "requested",
+        requestId: request?.status === "requested" ? request.id : null,
+        passState: held ? (held.status as "assigned" | "released") : null,
+      };
+    })
+    .sort((a, b) => {
+      if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
   return redact(privacy, {
     isOfficer,
     locked: activeEdition.locked,
@@ -414,6 +497,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     arrivals: isOfficer ? arrivals : {},
     stock,
     myCodes,
+    myParty,
     needsPass,
     coverage,
   });
@@ -480,6 +564,72 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: "Request sent." });
   }
 
+  // Ask for a pass on behalf of anyone in my party — my guests, and members
+  // attending under me. `requestPass` above is the self-only shorthand the
+  // wizard uses; this is the same thing with a subject.
+  if (intent === "requestPassFor" || intent === "setStay") {
+    const attendeeId = String(form.get("attendeeId") ?? "");
+    const [row] = await db
+      .select({
+        id: attendee.id,
+        membershipId: attendee.membershipId,
+        hostMembershipId: attendee.hostMembershipId,
+        ageBand: attendee.ageBand,
+      })
+      .from(attendee)
+      .where(
+        and(eq(attendee.id, attendeeId), eq(attendee.editionId, editionId)),
+      )
+      .limit(1);
+    if (!row || !canManageAttendee(row, active.membership)) {
+      return data({ error: "Not someone you manage." }, { status: 403 });
+    }
+
+    if (intent === "setStay") {
+      const iso = (k: string) => {
+        const v = String(form.get(k) ?? "").trim();
+        return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+      };
+      const arrivalDate = iso("arrivalDate");
+      const departureDate = iso("departureDate");
+      // A departure before the arrival is a mis-tap, not a stay.
+      if (arrivalDate && departureDate && departureDate < arrivalDate) {
+        return data(
+          { error: "That leaves before it arrives." },
+          { status: 400 },
+        );
+      }
+      await db
+        .update(attendee)
+        .set({ arrivalDate, departureDate, updatedAt: new Date() })
+        .where(eq(attendee.id, attendeeId));
+      return data({ ok: "Dates saved." });
+    }
+
+    if (!needsSetupPass(row.ageBand)) {
+      return data(
+        { error: "Under-13s are admitted free — they need no pass." },
+        { status: 400 },
+      );
+    }
+    if (await activePassFor(attendeeId)) {
+      return data(
+        { error: "They already have a pass or a pending request." },
+        { status: 409 },
+      );
+    }
+    await db.insert(setupPass).values({
+      id: crypto.randomUUID(),
+      campId,
+      editionId,
+      attendeeId,
+      status: "requested",
+      note: str("note"),
+      createdById: actor.id,
+    });
+    return data({ ok: "Request sent." });
+  }
+
   if (intent === "cancelPass") {
     // A party host may cancel for their household; an officer for anyone.
     const passId = String(form.get("id"));
@@ -507,6 +657,28 @@ export async function action({ request }: Route.ActionArgs) {
   if (!isOfficer) {
     return data({ error: "Officers only." }, { status: 403 });
   }
+
+  // --- the viewer's party ------------------------------------------------
+  // Self plus everyone attending under them. This is the card a camper
+  // actually needs: who's in my group, when are they arriving, and has anybody
+  // sorted them a pass — in one place, with the buttons next to the answer.
+  const gateOpenIso = eventStartIso(activeEdition.year);
+  const partyRows = await db
+    .select({
+      id: attendee.id,
+      membershipId: attendee.membershipId,
+      hostMembershipId: attendee.hostMembershipId,
+      guestName: attendee.name,
+      memberName: user.name,
+      arrivalDate: attendee.arrivalDate,
+      departureDate: attendee.departureDate,
+      ageBand: attendee.ageBand,
+      status: attendee.status,
+    })
+    .from(attendee)
+    .leftJoin(membership, eq(attendee.membershipId, membership.id))
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(eq(attendee.editionId, editionId));
 
   // --- imported pass stock ------------------------------------------------
   const stockActor = { membershipId: myMid, name: actor.name ?? null };
@@ -681,6 +853,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
     grantGroups,
     stock,
     myCodes,
+    myParty,
     needsPass,
     coverage,
   } = loaderData;
@@ -786,6 +959,14 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
           </Stack>
         </Card>
 
+        {/* ----- Your group: dates and pass state, side by side ----- */}
+        <PartyCard
+          people={myParty}
+          year={year}
+          locked={locked}
+          fetcher={fetcher}
+        />
+
         {/* ----- The actual passes, once they exist ----- */}
         {myStock.length > 0 ? (
           <MyStockCard stock={myStock} codes={myCodes} />
@@ -829,6 +1010,258 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
  * PDFs. Nobody sees a code here who isn't entitled to it: the loader only ever
  * put released, in-my-party codes into `myCodes`.
  */
+/**
+ * Your group — who's coming with you, when they arrive, and whether anybody has
+ * sorted them a Setup Access Pass.
+ *
+ * This is the question a camper arrives at this page with, and it used to take
+ * three screens to answer: arrival dates lived on the roster, the request lived
+ * here, and whether a pass had been set aside was a card further down. One row
+ * per person, with the button that changes each fact next to the fact.
+ *
+ * Dates are picked on the event calendar, never a browser date box — see
+ * `StayRangeField` for why.
+ */
+function PartyCard({
+  people,
+  year,
+  locked,
+  fetcher,
+}: {
+  people: PartyRow[];
+  year: number;
+  locked: boolean;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const [editing, setEditing] = useState<PartyRow | null>(null);
+  if (people.length === 0) return null;
+
+  return (
+    <>
+      <Card withBorder padding="md" radius="md">
+        <Stack gap="sm">
+          <div>
+            <Text fw={600}>Your group</Text>
+            <Text size="xs" c="dimmed">
+              Arriving before gates open needs a Setup Access Pass. Under-13s
+              are admitted free and need none.
+            </Text>
+          </div>
+
+          {people.map((p) => (
+            <Paper key={p.attendeeId} withBorder p="sm" radius="sm">
+              <Group justify="space-between" wrap="wrap" align="center">
+                <div style={{ minWidth: 0 }}>
+                  <Group gap={6} wrap="wrap">
+                    <Text size="sm" fw={600}>
+                      {p.name}
+                      {p.isSelf ? (
+                        <Text span size="xs" c="dimmed">
+                          {" "}
+                          (you)
+                        </Text>
+                      ) : null}
+                    </Text>
+                    {ageLabel(p.ageBand) ? (
+                      <Badge size="xs" variant="light" color="gray">
+                        {ageLabel(p.ageBand)}
+                      </Badge>
+                    ) : null}
+                    {p.notComing ? (
+                      <Badge size="xs" variant="light" color="gray">
+                        not coming
+                      </Badge>
+                    ) : null}
+                  </Group>
+
+                  <Text size="sm" c={p.arrivalDate ? undefined : "dimmed"}>
+                    {describe({
+                      arrival: p.arrivalDate,
+                      departure: p.departureDate,
+                    })}
+                  </Text>
+
+                  <PassState person={p} />
+                </div>
+
+                {locked ? null : (
+                  <Group gap={4} wrap="nowrap">
+                    <Button
+                      size="compact-xs"
+                      variant="default"
+                      onClick={() => setEditing(p)}
+                    >
+                      {p.arrivalDate ? "Change dates" : "Set dates"}
+                    </Button>
+                    {p.passState === null && !p.requested && p.needsPass ? (
+                      <Button
+                        size="compact-xs"
+                        onClick={() =>
+                          fetcher.submit(
+                            {
+                              intent: "requestPassFor",
+                              attendeeId: p.attendeeId,
+                            },
+                            { method: "post" },
+                          )
+                        }
+                      >
+                        Request a pass
+                      </Button>
+                    ) : null}
+                    {p.requestId ? (
+                      <Button
+                        size="compact-xs"
+                        variant="subtle"
+                        color="red"
+                        onClick={() =>
+                          fetcher.submit(
+                            { intent: "cancelPass", id: p.requestId as string },
+                            { method: "post" },
+                          )
+                        }
+                      >
+                        Cancel request
+                      </Button>
+                    ) : null}
+                  </Group>
+                )}
+              </Group>
+            </Paper>
+          ))}
+        </Stack>
+      </Card>
+
+      <StayModal
+        person={editing}
+        year={year}
+        onClose={() => setEditing(null)}
+        fetcher={fetcher}
+      />
+    </>
+  );
+}
+
+/** One line saying exactly where this person stands, in plain words. */
+function PassState({ person }: { person: PartyRow }) {
+  if (person.passState === "released") {
+    return (
+      <Text size="xs" c="green">
+        ✓ Pass ready — codes are below
+      </Text>
+    );
+  }
+  if (person.passState === "assigned") {
+    return (
+      <Text size="xs" c="blue">
+        ✓ A pass is set aside — an officer will release the codes
+      </Text>
+    );
+  }
+  if (person.requested) {
+    return (
+      <Text size="xs" c="yellow">
+        Pass requested — waiting on an officer
+      </Text>
+    );
+  }
+  if (!needsSetupPass(person.ageBand)) {
+    return (
+      <Text size="xs" c="dimmed">
+        No pass needed — admitted free
+      </Text>
+    );
+  }
+  if (person.needsPass) {
+    return (
+      <Text size="xs" c="orange">
+        Arriving before gates open — no pass requested yet
+      </Text>
+    );
+  }
+  if (!person.arrivalDate) {
+    return (
+      <Text size="xs" c="dimmed">
+        No arrival date yet — set one and we'll say whether a pass is needed
+      </Text>
+    );
+  }
+  return (
+    <Text size="xs" c="dimmed">
+      Arriving after gates open — no pass needed
+    </Text>
+  );
+}
+
+/** The event calendar in a modal, saving through the party-scoped action. */
+function StayModal({
+  person,
+  year,
+  onClose,
+  fetcher,
+}: {
+  person: PartyRow | null;
+  year: number;
+  onClose: () => void;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const [range, setRange] = useState<EventRange>({
+    arrival: null,
+    departure: null,
+  });
+  // Re-seed whenever a different person is opened.
+  useEffect(() => {
+    setRange({
+      arrival: person?.arrivalDate ?? null,
+      departure: person?.departureDate ?? null,
+    });
+  }, [person]);
+
+  return (
+    <Modal
+      opened={person !== null}
+      onClose={onClose}
+      title={person ? `When is ${person.name} here?` : ""}
+      size="auto"
+    >
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">
+          Tap the day they arrive, then the day they head home.
+        </Text>
+        <EventCalendar
+          year={year}
+          mode="range"
+          range={range}
+          onRangeChange={setRange}
+        />
+        <Group justify="flex-end">
+          <Button variant="subtle" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            loading={fetcher.state !== "idle"}
+            onClick={() => {
+              if (!person) return;
+              fetcher.submit(
+                {
+                  intent: "setStay",
+                  attendeeId: person.attendeeId,
+                  arrivalDate: range.arrival ?? "",
+                  departureDate: range.departure ?? "",
+                },
+                { method: "post" },
+              );
+              onClose();
+            }}
+          >
+            Save
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
 function MyStockCard({
   stock,
   codes,

@@ -23,6 +23,7 @@ import { notifications } from "@mantine/notifications";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
 import { CampMapView } from "~/components/CampMapView";
+import { StayRangeField } from "~/components/StayRangeField";
 import { AGE_BANDS, ageLabel, bandOf, minorSummary } from "~/lib/age";
 import {
   arrivalDistribution,
@@ -57,6 +58,7 @@ import { canManageAttendee } from "~/lib/party";
 import { partyMapObjects } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
+import type { EventRange } from "~/lib/questions";
 import { dateLabel } from "~/lib/schedule";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/roster";
@@ -817,10 +819,18 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
   const promoteFetcher = useFetcher<FetcherData>();
   const addRef = useRef<HTMLFormElement>(null);
   const [edit, setEdit] = useState<PartyGuest | null>(null);
+  // The calendar is controlled, so `form.reset()` can't clear it — the range
+  // has to be cleared alongside the reset or the next guest inherits the last
+  // one's dates.
+  const [addStay, setAddStay] = useState<EventRange>({
+    arrival: null,
+    departure: null,
+  });
 
-  useFetcherNotifications(addFetcher.data, addFetcher.state, () =>
-    addRef.current?.reset(),
-  );
+  useFetcherNotifications(addFetcher.data, addFetcher.state, () => {
+    addRef.current?.reset();
+    setAddStay({ arrival: null, departure: null });
+  });
   useFetcherNotifications(rowFetcher.data, rowFetcher.state, () =>
     setEdit(null),
   );
@@ -1009,17 +1019,13 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
             maxLength={MAX_NAME}
             required
           />
-          <TextInput
-            name="arrivalDate"
-            type="date"
-            label="Arrives"
-            w={{ base: "48%", xs: 150 }}
-          />
-          <TextInput
-            name="departureDate"
-            type="date"
-            label="Departs"
-            w={{ base: "48%", xs: 150 }}
+          <StayRangeField
+            year={year}
+            label="When they're here"
+            value={addStay}
+            onChange={setAddStay}
+            names={{ arrival: "arrivalDate", departure: "departureDate" }}
+            w={230}
           />
           <Select
             name="ageBand"
@@ -1045,6 +1051,7 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
       >
         {edit ? (
           <EditGuestForm
+            year={year}
             guest={edit}
             fetcher={rowFetcher}
             onCancel={() => setEdit(null)}
@@ -1057,10 +1064,12 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
 
 function EditGuestForm({
   guest,
+  year,
   fetcher,
   onCancel,
 }: {
   guest: PartyGuest;
+  year: number;
   fetcher: ReturnType<typeof useFetcher<FetcherData>>;
   onCancel: () => void;
 }) {
@@ -1080,20 +1089,18 @@ function EditGuestForm({
         onChange={(e) => setName(e.currentTarget.value)}
         maxLength={MAX_NAME}
       />
-      <Group grow align="flex-start">
-        <TextInput
-          type="date"
-          label="Arrives"
-          value={arrivalDate}
-          onChange={(e) => setArrivalDate(e.currentTarget.value)}
-        />
-        <TextInput
-          type="date"
-          label="Departs"
-          value={departureDate}
-          onChange={(e) => setDepartureDate(e.currentTarget.value)}
-        />
-      </Group>
+      <StayRangeField
+        year={year}
+        label="When they're here"
+        value={{
+          arrival: arrivalDate || null,
+          departure: departureDate || null,
+        }}
+        onChange={(r) => {
+          setArrivalDate(r.arrival ?? "");
+          setDepartureDate(r.departure ?? "");
+        }}
+      />
       <Select
         label="Age"
         description="Under 13s need no ticket and no setup access pass"
