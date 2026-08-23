@@ -34,7 +34,8 @@
     "e2e:passkey-recovery": "node --experimental-strip-types e2e/passkey-recovery.ts",
     "e2e:member-merge": "bun e2e/member-merge.ts",
     "e2e:sap": "bun e2e/sap-passes.ts",
-    "e2e:account": "bun e2e/account-and-wizard.ts"
+    "e2e:account": "bun e2e/account-and-wizard.ts",
+    "e2e:passes-ui": "node --experimental-strip-types e2e/passes-ui.ts"
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.14",

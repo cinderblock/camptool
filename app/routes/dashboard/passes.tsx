@@ -900,64 +900,74 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
           </Paper>
         ) : null}
 
-        {/* ----- Member self-service: the ASK ----- */}
-        {/* Granted requests aren't shown here — a granted request IS a pass,
+        {/* ----- Member self-service: the ASK -----
+            Granted requests aren't shown here — a granted request IS a pass,
             and the card below shows the pass itself. Leaving both would be the
-            two-ledger confusion this screen just got rid of. */}
-        <Card withBorder padding="md" radius="md">
-          <Stack gap="sm">
-            <Text fw={600}>Early arrival</Text>
-            {myOpenRequests.length > 0 ? (
-              <Stack gap="xs">
-                {myOpenRequests.map((p) => (
-                  <Group key={p.id} gap="xs">
-                    {p.holderIsGuest ? (
-                      <Text size="sm" fw={500}>
-                        {p.holderName ?? "Guest"}
-                        <Text span c="dimmed" size="xs">
-                          {" "}
-                          (guest)
-                        </Text>
-                      </Text>
-                    ) : null}
-                    <Badge
-                      size="lg"
-                      variant="light"
-                      color={STATUS_COLOR[p.status] ?? "gray"}
-                    >
-                      {p.status === "requested"
-                        ? "Asked for a pass — an officer will set one aside"
-                        : "Not granted"}
-                    </Badge>
-                    {!locked && p.status === "requested" ? (
-                      <Button
-                        size="xs"
-                        variant="subtle"
-                        color="red"
-                        onClick={() =>
-                          fetcher.submit(
-                            { intent: "cancelPass", id: p.id },
-                            { method: "post" },
-                          )
-                        }
-                      >
-                        Cancel
-                      </Button>
-                    ) : null}
-                  </Group>
-                ))}
-              </Stack>
-            ) : myOwnStock.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                Nothing set aside for you yet.
-              </Text>
-            ) : null}
+            two-ledger confusion this screen just got rid of.
 
-            {!locked && !myOwnActive && myOwnStock.length === 0 ? (
-              <RequestPassForm fetcher={fetcher} myArrival={myArrival} />
-            ) : null}
-          </Stack>
-        </Card>
+            Rendered only when it has something to say. Someone who already
+            holds a pass and has no open request was getting a card containing
+            nothing but its own heading, which is worse than no card. The group
+            card above covers them; this one exists for the ask itself —
+            including "I want one anyway", which the group card's arrival-driven
+            button can't express. */}
+        {myOpenRequests.length > 0 ||
+        (!locked && !myOwnActive && myOwnStock.length === 0) ? (
+          <Card withBorder padding="md" radius="md">
+            <Stack gap="sm">
+              <Text fw={600}>Early arrival</Text>
+              {myOpenRequests.length > 0 ? (
+                <Stack gap="xs">
+                  {myOpenRequests.map((p) => (
+                    <Group key={p.id} gap="xs">
+                      {p.holderIsGuest ? (
+                        <Text size="sm" fw={500}>
+                          {p.holderName ?? "Guest"}
+                          <Text span c="dimmed" size="xs">
+                            {" "}
+                            (guest)
+                          </Text>
+                        </Text>
+                      ) : null}
+                      <Badge
+                        size="lg"
+                        variant="light"
+                        color={STATUS_COLOR[p.status] ?? "gray"}
+                      >
+                        {p.status === "requested"
+                          ? "Asked for a pass — an officer will set one aside"
+                          : "Not granted"}
+                      </Badge>
+                      {!locked && p.status === "requested" ? (
+                        <Button
+                          size="xs"
+                          variant="subtle"
+                          color="red"
+                          onClick={() =>
+                            fetcher.submit(
+                              { intent: "cancelPass", id: p.id },
+                              { method: "post" },
+                            )
+                          }
+                        >
+                          Cancel
+                        </Button>
+                      ) : null}
+                    </Group>
+                  ))}
+                </Stack>
+              ) : myOwnStock.length === 0 ? (
+                <Text size="sm" c="dimmed">
+                  Nothing set aside for you yet.
+                </Text>
+              ) : null}
+
+              {!locked && !myOwnActive && myOwnStock.length === 0 ? (
+                <RequestPassForm fetcher={fetcher} myArrival={myArrival} />
+              ) : null}
+            </Stack>
+          </Card>
+        ) : null}
 
         {/* ----- Your group: dates and pass state, side by side ----- */}
         <PartyCard

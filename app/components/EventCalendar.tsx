@@ -176,6 +176,10 @@ export function EventCalendar({
           return (
             <UnstyledButton
               key={ymd}
+              // The day's own ISO date, so a test can tap a specific day rather
+              // than guessing at grid coordinates. Cheap, and it makes the
+              // calendar checkable from outside.
+              data-date={ymd}
               disabled={!enabled}
               aria-label={dayLabel}
               aria-pressed={selected || between}

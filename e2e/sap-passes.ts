@@ -200,12 +200,14 @@ for (const [who, role] of [
     wizardStep: 1,
   });
 }
-await setFeatureState({
-  campId,
-  key: "passes",
-  state: "on",
-  updatedByMembershipId: mids.admin as string,
-});
+for (const key of ["passes", "roster"] as const) {
+  await setFeatureState({
+    campId,
+    key,
+    state: "on",
+    updatedByMembershipId: mids.admin as string,
+  });
+}
 
 // 1. Import a real multipart upload.
 const order = await buildOrder(YEAR, ORDER);
