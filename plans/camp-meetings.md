@@ -206,6 +206,11 @@ default `gathering_shift` and writes `gathering_signup` rows exactly as
       UI *and* 403 on a hand-rolled POST → unlock → bogus id 404s → no console
       errors. Dev server log clean (no SSR throw degraded to a 200).
 - [x] typecheck + build + biome + 408 unit tests green; README updated.
+- [x] **Shipped** — commit `0d0f7e1`, *Deploy to firefly* green (56s, migration
+      chain verified in CI), `/_version` on camptool.mathcamp.us reports the new
+      build. The feature key defaults to **off**, so Math Camp sees no change
+      until an admin turns Meetings on at `/settings` and pastes the camp's
+      voice-channel link there — that is the intended first step, not a bug.
 - [ ] Later: Announcements cross-post + Discord post of a summary (parent
       Phase 5 delivery); per-series room override; agenda ordering / carry-over;
       bot-created per-meeting channels; guest (attendee) RSVP.

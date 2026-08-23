@@ -624,7 +624,8 @@ Future: reminder DMs for upcoming sale open / un-purchased assigned tickets
   `event`). In-app only; Discord/email reminders ride Phase 5. Full detail +
   per-phase commits/E2E: **`plans/events-scheduling.md`**.
 - [x] **Camp meetings — agendas, a standing meeting room, and summaries
-  (LANDED, E2E-tested on a scratch server; NOT yet deployed-verified).**
+  (LANDED + DEPLOYED, commit 0d0f7e1, Deploy to firefly green,
+  `/_version` confirms the build is serving).**
   Cameron's ask (2026-08-22): a tab for camp meetings — setting dates, agendas
   anyone can add to, automatic meeting rooms (Discord voice channel for now),
   and distributing summaries. **Built on `gathering` with `kind="meeting"`, NOT
