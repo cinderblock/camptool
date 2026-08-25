@@ -36,6 +36,11 @@ jobs:
   # The repo is public, so hosted runners are free and have 16 GB.
   build:
     runs-on: ubuntu-latest
+    # Stated rather than inherited: the repo default is currently `read`, but
+    # that's a setting anyone can change, and this job needs nothing beyond the
+    # source it builds.
+    permissions:
+      contents: read
     defaults:
       run:
         shell: bash
@@ -128,10 +133,23 @@ jobs:
   deploy:
     needs: build
     runs-on: [self-hosted, firefly]
+    # `actions: read` is what download-artifact@v4 needs to fetch the build job's
+    # upload. Covered by the repo's current `read` default, but spelled out so a
+    # change to that default can't silently break deploys.
+    permissions:
+      contents: read
+      actions: read
     defaults:
       run:
         shell: bash
     steps:
+      # No `actions/checkout` — this job builds nothing, and the workspace on a
+      # self-hosted runner persists between runs. Clear the artifact from the
+      # previous deploy so a failed download can't quietly unpack a stale
+      # release over the top of this SHA's directory.
+      - name: Clear the previous run's artifact
+        run: rm -f release.tar.gz
+
       - name: Verify runtime secret is wired
         # The job shares the app container's env, so fail fast (before the
         # release is staged or activated) if the ops-managed env-file is missing
