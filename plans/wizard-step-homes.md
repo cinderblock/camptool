@@ -94,28 +94,44 @@ Three real gaps: **RSVP + stay dates**, **the free-text note**, and **occupants*
   import from a `.server` module, so `TripPlanner.tsx` exports its own copy of the
   union and `/trip` imports it from there.
 
-### Deploy is blocked on firefly, not on this change
+### Deploy is blocked: `bun run build` OOMs on firefly
 
-Pushed as `642a60d`. The `Deploy to firefly` run failed twice, and **not on
-anything in this commit**:
+Pushed as `642a60d` (+ `704923f`). **Three consecutive `Deploy to firefly` runs
+failed the same way, in `Build (Bun)`, before anything is staged or restarted:**
 
-1. First attempt — client bundle built fine in 21s, then the SSR bundle sat in
-   `transforming...` for 5½ minutes and was `SIGKILL`ed:
-   `error: script "build" was terminated by signal SIGKILL` → exit 137 (OOM).
-2. Re-run — `The self-hosted runner lost communication with the server.`
+| Run | What happened |
+| --- | --- |
+| 32823766725 | client bundle ✓ 21s → SSR bundle `transforming…` 5½ min → `SIGKILL`, exit 137 |
+| 32823766725 (re-run) | `The self-hosted runner lost communication with the server` |
+| 32825947347 | client bundle ✓ → SSR `transforming…` **10 min** → `SIGKILL`, exit 137 |
 
-The same build takes **17s wall, 3.8s for the SSR bundle** on this workstation
-at that exact commit, so it isn't a pathological module graph. And both
-firefly-served hosts are now unreachable while a non-firefly one is fine:
+`error: Failed to run "react-router" due to signal SIGKILL` /
+`645521 Killed  bun run build` — the OOM killer.
 
-    camptool.mathcamp.us   timeout
-    i.mathcamp.us          timeout
-    mathcamp.us            HTTP 200
+**It is not the commit.** The same build at that exact SHA takes **17s wall,
+3.8s for the SSR bundle** on this workstation, and the change adds two modules
+to a graph of hundreds. Deploys on 2026-08-23 completed end-to-end in 1m00s.
 
-That reads as firefly itself being down or wedged (probably memory). Needs
-Cameron — infrastructure is off-limits without per-change authorization, so
-nothing has been touched. Re-run the deploy once the box is healthy; the commit
-needs no changes.
+**The build appears to be starving the whole box.** During the failing window,
+both firefly-served hosts stopped answering while a non-firefly one was fine —
+and both recovered once the build was killed:
+
+    during                       after
+    camptool.mathcamp.us  timeout    HTTP 200 (serving c119cd5, the OLD release)
+    i.mathcamp.us         timeout    HTTP 200
+    mathcamp.us           HTTP 200   HTTP 200
+
+So production is **up and unharmed** — it's still on the previous release,
+because the deploy never got past the build step. Nothing was rolled back and
+nothing on the host was touched: infrastructure needs per-change authorization
+from Cameron, and knocking the site over a fourth time to learn the same thing
+isn't worth it.
+
+Likely fixes, for whoever has the authority to make them: give firefly more RAM
+or swap, cap the build (`NODE_OPTIONS=--max-old-space-size=…` won't bind Bun —
+a `systemd-run --scope -p MemoryMax=` around the build step would), or build
+the release elsewhere (a GitHub-hosted runner) and ship the artifact to firefly,
+which also stops a deploy from being able to take the live site down.
 
 ## Things not to do
 
