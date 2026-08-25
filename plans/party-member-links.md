@@ -368,6 +368,24 @@ second is hidden once you anchor a party.
       single e2e failure turned out to be my own assertion string: React's SSR
       escapes `'` to `&#x27;`, so a needle containing "you're" never matches the
       markup, and the banner had been rendering correctly all along.
+- [ ] 2026-08-25 — **Pushed (`ebe5c08`) but NOT deployed.** Run 32871165973
+      failed after 13 minutes in `Build (Bun)` with "the self-hosted runner lost
+      communication with the server" — the third consecutive OOM. Dropping
+      `--bun` (`60011eb`) bought margin but not enough; building on firefly at
+      all is the problem. Live is still serving `c119cd5` from 2026-08-23, and
+      is healthy — the site never went down, contrary to my first reading of a
+      client-side `Invoke-WebRequest` timeout.
+
+      The fix already exists as `06ee84e` ("Deploy: build on a hosted runner")
+      but is **unpushed and blocked on Cameron**: it moves the build to
+      `ubuntu-latest` and reads `CAMP_THEME` from a repo variable, which
+      `gh variable list` confirms is unset. Its own guard compares the host's
+      `CAMP_THEME` to the artifact's `BUILD_THEME` and refuses to activate on a
+      mismatch, so pushing it before the variable is set just fails differently.
+
+      Do NOT re-run the deploy to "try again": each attempt starves firefly for
+      ~11 minutes, taking the live site and the bins app with it, and cannot
+      succeed while the build runs on the box.
 
 ### How to drive the app locally
 
