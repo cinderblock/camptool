@@ -21,6 +21,7 @@ const settled: AskSnapshot = {
   bringingCount: 1,
   unplacedCount: 0,
   partyWithoutBed: 0,
+  hasNote: false,
   checklistRemaining: 0,
   hasTicket: true,
   ticketRequested: false,
@@ -269,6 +270,15 @@ describe("catalog integrity", () => {
     for (const a of ASKS) expect(a.route.startsWith("/")).toBe(true);
   });
 
+  // `/start` is a WIZARD — a guided first pass, not where the data lives. A
+  // to-do that sends you back into it is the bug from
+  // plans/wizard-step-homes.md: the camper wanted the setting, not the tour.
+  test("no ask routes into the wizard", () => {
+    for (const a of ASKS) {
+      expect(`${a.key} → ${a.route}`).not.toContain("/start");
+    }
+  });
+
   test("every ask has a distinct label and a hint", () => {
     expect(new Set(ASKS.map((a) => a.label)).size).toBe(ASKS.length);
     for (const a of ASKS) expect(a.hint.length).toBeGreaterThan(0);
@@ -360,6 +370,32 @@ describe("sharing ask", () => {
     expect(
       keys(snap({ rsvp: "not_coming", partyWithoutBed: 2 })),
     ).not.toContain("sharing");
+  });
+
+  test("points at the structures the beds hang off, not the wizard", () => {
+    expect(ASKS.find((a) => a.key === "sharing")?.route).toBe("/bringing");
+  });
+});
+
+describe("extras ask", () => {
+  test("a written note settles it without walking the wizard", () => {
+    // It used to be satisfiable ONLY by clicking through /start, which is the
+    // resolution-vs-satisfaction bug this registry exists to kill.
+    expect(keys(snap({ acknowledged: {}, hasNote: true }))).not.toContain(
+      "extras",
+    );
+  });
+
+  test("an explicit acknowledgement settles it too", () => {
+    expect(
+      keys(snap({ acknowledged: { extras: true }, hasNote: false })),
+    ).not.toContain("extras");
+  });
+
+  test("is outstanding with neither", () => {
+    expect(keys(snap({ acknowledged: {}, hasNote: false }))).toContain(
+      "extras",
+    );
   });
 });
 

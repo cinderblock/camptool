@@ -53,6 +53,7 @@ function emptySnapshot(role: string): AskSnapshot {
     bringingCount: 0,
     unplacedCount: 0,
     partyWithoutBed: 0,
+    hasNote: false,
     checklistRemaining: 0,
     hasTicket: false,
     ticketRequested: false,
@@ -122,6 +123,7 @@ export async function loadAskSnapshots(
       status: attendee.status,
       arrivalDate: attendee.arrivalDate,
       departureDate: attendee.departureDate,
+      note: attendee.note,
     })
     .from(attendee)
     .where(
@@ -137,6 +139,7 @@ export async function loadAskSnapshots(
     s.rsvp = (a.status as AskSnapshot["rsvp"]) ?? "unknown";
     s.hasArrivalDate = !!a.arrivalDate;
     s.hasDepartureDate = !!a.departureDate;
+    s.hasNote = (a.note ?? "").trim().length > 0;
     // A Setup Access Pass is only needed by someone arriving before gates open;
     // asking anyone else would be noise.
     s.needsSetupPass = !!a.arrivalDate && a.arrivalDate < gateOpen;

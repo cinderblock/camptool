@@ -210,6 +210,16 @@ and now routes to `/account`.)
       against every camp in the dev database before wiring any UI, which is how
       the feature-gating and season windows got confirmed against real feature
       states rather than assumed.
+- [x] 2026-08-25 — **Every ask now routes to a real page, never `/start`.** The
+      `sharing` to-do's Go button dropped Cameron into the wizard, because
+      occupants had no home outside it. Five asks were pointing at `/start`;
+      three of them had nothing else to point at. Fixed by giving RSVP, stay
+      dates and the note a page (`/trip`) and occupants a section on
+      `/bringing`, then re-pointing `profile` → `/account` too. `extras` is no
+      longer satisfiable only by walking the wizard: a written note settles it,
+      or an explicit "nothing else to add" on `/trip`. A catalog test now fails
+      if any ask ever routes into the wizard again. Full write-up:
+      `plans/wizard-step-homes.md`.
 - [x] 2026-08-18 — Two false to-dos Cameron hit on the live deploy, both from
       the same mistake: asking a question whose answer the app already had.
       - **`sharing` nagged solo campers.** It read

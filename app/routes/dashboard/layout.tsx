@@ -357,6 +357,9 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           id: "travel",
           label: "Getting there",
           items: [
+            // Ungated: RSVP and stay dates are core, and this is where the
+            // to-do list sends people (plans/wizard-step-homes.md).
+            { to: "/trip", label: "Your trip", end: false },
             // The event names these, not the core app — see `featureName`.
             ...gated(
               "tickets",

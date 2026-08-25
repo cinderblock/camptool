@@ -78,9 +78,13 @@ approves or rejects them.
 
 New campers get a guided, resumable **onboarding wizard** at `/start`: a
 full-screen walkthrough to set a playa name, declare what they're bringing, add
-who's sharing their tent/RV, and tick the camp's checklist — one step at a time,
-with the regular dashboard pages remaining the "advanced" way to do the same
-things. Next: RV pop-outs and group sub-maps.
+who's sharing their tent/RV, and tick the camp's checklist — one step at a time.
+It is only ever a *view*: every step it collects has a permanent home elsewhere
+(**Your trip** for the RSVP, stay dates and any note; **Bringing** for gear and
+who's sleeping in it; **Questions**, **Onboarding**, **Your account**), and the
+wizard posts into those pages' own actions. So the derived "Your to-do" list
+always links you to the setting, never back into the tour. Next: RV pop-outs and
+group sub-maps.
 
 The dashboard also tracks the camp's per-year ticket allocations (a Burning
 Man–event feature today). A **Tickets** page manages the camp's Direct Group Sale

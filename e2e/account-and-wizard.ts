@@ -183,7 +183,8 @@ check(
   coming.includes("Bringing"),
 );
 
-await post("/start", me.cookie, { intent: "rsvp", status: "not_coming" });
+// The RSVP's home is /trip now; the wizard posts there too.
+await post("/trip", me.cookie, { intent: "rsvp", status: "not_coming" });
 const notComing = await (await get("/start", me.cookie)).text();
 check(
   "8. saying 'not this year' stops the gear questions",
@@ -198,7 +199,7 @@ check(
   notComing.includes("Your info"),
 );
 
-await post("/start", me.cookie, { intent: "rsvp", status: "coming" });
+await post("/trip", me.cookie, { intent: "rsvp", status: "coming" });
 const backOn = await (await get("/start", me.cookie)).text();
 check(
   "9. changing back brings the gear questions with it",

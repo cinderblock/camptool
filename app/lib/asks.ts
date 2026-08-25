@@ -97,6 +97,9 @@ export type AskSnapshot = {
    */
   partyWithoutBed: number;
 
+  /** They've written something in the free-text "anything to add?" box. */
+  hasNote: boolean;
+
   // — camp checklist —
   checklistRemaining: number;
 
@@ -178,7 +181,7 @@ export const ASKS: AskDef[] = [
     key: "profile",
     label: "Tell us your name",
     hint: "Your name and playa name",
-    route: "/start",
+    route: "/account",
     audience: "all",
     importance: "recommended",
     opensWeeksBefore: null,
@@ -203,7 +206,7 @@ export const ASKS: AskDef[] = [
     key: "rsvp",
     label: "Say whether you're coming",
     hint: "Yes, no, or maybe",
-    route: "/start",
+    route: "/trip",
     audience: "all",
     importance: "required",
     opensWeeksBefore: null,
@@ -214,7 +217,7 @@ export const ASKS: AskDef[] = [
     key: "stay_dates",
     label: "Give your arrival and departure dates",
     hint: "So the camp can plan headcount and setup",
-    route: "/start",
+    route: "/trip",
     audience: "all",
     importance: "recommended",
     opensWeeksBefore: null,
@@ -248,7 +251,7 @@ export const ASKS: AskDef[] = [
     key: "sharing",
     label: "Say where the people with you are sleeping",
     hint: "Your guests, and anyone attending under you",
-    route: "/start",
+    route: "/bringing",
     audience: "all",
     importance: "optional",
     opensWeeksBefore: 12,
@@ -360,13 +363,15 @@ export const ASKS: AskDef[] = [
     key: "extras",
     label: "Anything else we should know?",
     hint: "Free-text, entirely optional",
-    route: "/start",
+    route: "/trip",
     audience: "all",
     importance: "optional",
     opensWeeksBefore: null,
     wizard: true,
-    // Nothing to derive — passing through it is the whole point.
-    isSatisfied: (s) => s.acknowledged.extras === true,
+    // Nearly nothing to derive: a written note settles it, and otherwise only
+    // an explicit "nothing else to add" can — offered on /trip as well as by
+    // walking the wizard, so this isn't clearable *only* from /start.
+    isSatisfied: (s) => s.hasNote || s.acknowledged.extras === true,
   },
 ];
 

@@ -41,6 +41,7 @@ import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useState } from "react";
 import {
+  Link,
   data,
   redirect,
   useFetcher,
@@ -784,13 +785,15 @@ function IdentityCard({
             <Text size="sm" c="dimmed">
               {rsvpLabel[identity.rsvp] ?? "Haven't said yet"}
             </Text>
+            {/* The RSVP's home is /trip, not the wizard — a link into /start
+                is a tour, not a setting (plans/wizard-step-homes.md). */}
             <Button
               size="compact-xs"
               variant="subtle"
-              component="a"
-              href="/start"
+              component={Link}
+              to="/trip"
             >
-              Update your answers
+              Update your trip
             </Button>
           </Group>
           <Button

@@ -98,6 +98,10 @@ export default [
     route("faq", "routes/dashboard/faq.tsx"),
     // A single answer, standalone — what a `[[/faq/…]]` deep link resolves to.
     route("faq/:slug", "routes/dashboard/faq.$slug.tsx"),
+    // "Am I coming, and when?" — the permanent home for the RSVP, stay dates
+    // and the free-text note the /start wizard collects
+    // (plans/wizard-step-homes.md). Core, never feature-gated.
+    route("trip", "routes/dashboard/trip.tsx"),
     route("tickets", "routes/dashboard/tickets.tsx"),
     route("passes", "routes/dashboard/passes.tsx"),
     route("swaps", "routes/dashboard/swaps.tsx"),

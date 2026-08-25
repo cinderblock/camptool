@@ -14,16 +14,24 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
+import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { requireFeature } from "~/lib/features.server";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
-import { ShapeSwatch, kindDef, kindHeight } from "~/lib/structures";
+import { ShapeSwatch, hasTag, kindDef, kindHeight } from "~/lib/structures";
 import { db } from "../../../db/client.server";
-import { campEdition, mapObject, membership, user } from "../../../db/schema";
+import {
+  attendee,
+  campEdition,
+  mapObject,
+  mapObjectOccupant,
+  membership,
+  user,
+} from "../../../db/schema";
 import type { Route } from "./+types/bringing";
 
 export function meta(_: Route.MetaArgs) {
@@ -47,6 +55,17 @@ type Item = {
 
 /** Someone this camper could ask to be placed near. */
 type Neighbour = { id: string; name: string };
+
+/** A body sleeping in one of the caller's structures. */
+type Occupant = {
+  objectId: string;
+  attendeeId: string;
+  membershipId: string | null;
+  name: string | null;
+};
+
+/** Someone the caller can put in a structure: a camp member, or their guest. */
+type OccupantOption = { value: string; label: string; group: string };
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition, privacy } =
@@ -113,7 +132,109 @@ export async function loader({ request }: Route.LoaderArgs) {
     .map((m) => ({ id: m.id, name: m.name as string }))
     .sort((a, b) => a.name.localeCompare(b.name)) satisfies Neighbour[];
 
+  // — who's sleeping in the caller's structures —
+  //
+  // This is the permanent home for the wizard's "sharing" step: occupants hang
+  // off the structures they sleep in, which is what this page is
+  // (plans/wizard-step-homes.md).
+  const occupants: Occupant[] = (
+    await db
+      .select({
+        objectId: mapObjectOccupant.objectId,
+        attendeeId: attendee.id,
+        membershipId: attendee.membershipId,
+        guestName: attendee.name,
+        memberName: user.name,
+      })
+      .from(mapObjectOccupant)
+      .innerJoin(mapObject, eq(mapObjectOccupant.objectId, mapObject.id))
+      .innerJoin(attendee, eq(mapObjectOccupant.attendeeId, attendee.id))
+      .leftJoin(membership, eq(attendee.membershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(
+        and(
+          eq(mapObject.ownerMembershipId, active.membership.id),
+          eq(mapObjectOccupant.editionId, activeEdition.id),
+        ),
+      )
+  ).map((o) => ({
+    objectId: o.objectId,
+    attendeeId: o.attendeeId,
+    membershipId: o.membershipId,
+    name: o.guestName ?? o.memberName,
+  }));
+
+  // The caller's own guests (attendee rows with no account of their own).
+  const myGuests = await db
+    .select({
+      attendeeId: attendee.id,
+      name: attendee.name,
+      status: attendee.status,
+    })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, activeEdition.id),
+        eq(attendee.hostMembershipId, active.membership.id),
+      ),
+    );
+
+  // Anyone attending UNDER this member — guests and party-linked members — who
+  // isn't listed as sleeping anywhere yet. Exactly what the `sharing` ask
+  // counts (`partyWithoutBed` in asks.server.ts), named rather than counted so
+  // the to-do says who it's about.
+  const bedded = new Set(
+    (
+      await db
+        .select({ attendeeId: mapObjectOccupant.attendeeId })
+        .from(mapObjectOccupant)
+        .where(eq(mapObjectOccupant.editionId, activeEdition.id))
+    ).map((r) => r.attendeeId),
+  );
+  const partyRows = await db
+    .select({
+      id: attendee.id,
+      name: attendee.name,
+      memberName: user.name,
+      membershipId: attendee.membershipId,
+      status: attendee.status,
+    })
+    .from(attendee)
+    .leftJoin(membership, eq(attendee.membershipId, membership.id))
+    .leftJoin(user, eq(membership.userId, user.id))
+    .where(
+      and(
+        eq(attendee.editionId, activeEdition.id),
+        eq(attendee.hostMembershipId, active.membership.id),
+        isNotNull(attendee.hostMembershipId),
+      ),
+    );
+  const withoutBed = partyRows
+    .filter(
+      (a) =>
+        a.status !== "not_coming" &&
+        a.membershipId !== active.membership.id &&
+        !bedded.has(a.id),
+    )
+    .map((a) => a.name ?? a.memberName ?? "Someone in your group");
+
+  const occupantOptions: OccupantOption[] = [
+    ...neighbours.map((n) => ({
+      value: `m:${n.id}`,
+      label: n.name,
+      group: "Campers",
+    })),
+    ...myGuests.map((g) => ({
+      value: `a:${g.attendeeId}`,
+      label: `${g.name ?? "Guest"} (guest)`,
+      group: "Your guests",
+    })),
+  ];
+
   return redact(privacy, {
+    occupants,
+    occupantOptions,
+    withoutBed,
     locked: activeEdition.locked,
     bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
     items: rows.map((r) => ({
@@ -300,11 +421,101 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true, added: src.length });
   }
 
+  // — occupants — who's sleeping in one of the caller's structures. The
+  // `/start` wizard's sharing step posts here too (plans/wizard-step-homes.md).
+  if (intent === "addOccupant" || intent === "removeOccupant") {
+    const objectId = String(form.get("objectId"));
+    const [own] = await db
+      .select({ id: mapObject.id })
+      .from(mapObject)
+      .where(ownItem(objectId))
+      .limit(1);
+    if (!own) return data({ error: "Not your item." }, { status: 403 });
+
+    if (intent === "removeOccupant") {
+      await db
+        .delete(mapObjectOccupant)
+        .where(
+          and(
+            eq(mapObjectOccupant.objectId, objectId),
+            eq(mapObjectOccupant.attendeeId, String(form.get("attendeeId"))),
+          ),
+        );
+      return data({ ok: true });
+    }
+
+    // The picker sends `m:<membershipId>` (a member) or `a:<attendeeId>` (a
+    // guest). Resolve either to the attendee the occupant references.
+    const ref = String(form.get("occupantRef"));
+    let attendeeId: string | null = null;
+    if (ref.startsWith("m:")) {
+      const targetMid = ref.slice(2);
+      const [tm] = await db
+        .select({ id: membership.id })
+        .from(membership)
+        .where(
+          and(
+            eq(membership.id, targetMid),
+            eq(membership.organizationId, campId),
+          ),
+        )
+        .limit(1);
+      if (!tm) return data({ error: "Unknown member." }, { status: 400 });
+      attendeeId = await ensureMemberAttendee(campId, editionId, targetMid);
+    } else if (ref.startsWith("a:")) {
+      const aid = ref.slice(2);
+      const [g] = await db
+        .select({ id: attendee.id })
+        .from(attendee)
+        .where(
+          and(
+            eq(attendee.id, aid),
+            eq(attendee.campId, campId),
+            eq(attendee.editionId, editionId),
+          ),
+        )
+        .limit(1);
+      if (!g) return data({ error: "Unknown guest." }, { status: 400 });
+      attendeeId = aid;
+    }
+    if (!attendeeId) return data({ error: "Pick someone." }, { status: 400 });
+
+    const [existing] = await db
+      .select({ id: mapObjectOccupant.id })
+      .from(mapObjectOccupant)
+      .where(
+        and(
+          eq(mapObjectOccupant.objectId, objectId),
+          eq(mapObjectOccupant.attendeeId, attendeeId),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      await db.insert(mapObjectOccupant).values({
+        id: crypto.randomUUID(),
+        campId,
+        editionId,
+        objectId,
+        attendeeId,
+      });
+    }
+    return data({ ok: true });
+  }
+
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
 export default function Bringing({ loaderData }: Route.ComponentProps) {
-  const { items, locked, lastYear, bannedKinds, neighbours } = loaderData;
+  const {
+    items,
+    locked,
+    lastYear,
+    bannedKinds,
+    neighbours,
+    occupants,
+    occupantOptions,
+    withoutBed,
+  } = loaderData;
   const fetcher = useFetcher();
 
   function add(kind: string, size?: AddSize) {
@@ -321,9 +532,28 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
           <Title order={2}>What you're bringing</Title>
           <Text c="dimmed" size="sm">
             List your structures and vehicles so officers can place them on the
-            camp map. Sizes are in feet — set them as accurately as you can.
+            camp map, and say who's sleeping in each one. Sizes are in feet —
+            set them as accurately as you can.
           </Text>
         </div>
+
+        {/* The "sharing" to-do, said out loud. Only ever about people attending
+            UNDER this member — an empty tent of your own already means "just
+            me", so a solo camper never sees this. */}
+        {!locked && withoutBed.length > 0 ? (
+          <Paper withBorder p="md" radius="md">
+            <Text fw={600} size="sm">
+              {withoutBed.length === 1
+                ? "One person with you has no bed yet"
+                : `${withoutBed.length} people with you have no bed yet`}
+            </Text>
+            <Text size="xs" c="dimmed" mt={2}>
+              {withoutBed.join(", ")} — add them to whatever they're sleeping in
+              below. If they're in someone else's tent, that person adds them
+              from their own Bringing page.
+            </Text>
+          </Paper>
+        ) : null}
 
         {/* A returning camper re-commits each year; this just makes re-declaring
         last year's gear one click. Shown only before they've added anything. */}
@@ -402,6 +632,8 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
                 key={item.id}
                 item={item}
                 neighbours={neighbours}
+                occupants={occupants.filter((o) => o.objectId === item.id)}
+                occupantOptions={occupantOptions}
                 fetcher={fetcher}
                 locked={locked}
               />
@@ -416,11 +648,15 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
 function ItemRow({
   item,
   neighbours,
+  occupants,
+  occupantOptions,
   fetcher,
   locked,
 }: {
   item: Item;
   neighbours: Neighbour[];
+  occupants: Occupant[];
+  occupantOptions: OccupantOption[];
   fetcher: ReturnType<typeof useFetcher>;
   locked: boolean;
 }) {
@@ -431,11 +667,16 @@ function ItemRow({
       { method: "post" },
     );
   }
+  // Only things people sleep in take occupants.
+  const holdsPeople =
+    hasTag(item.kind, "domicile") || hasTag(item.kind, "vehicle");
 
   return (
     <Paper withBorder p="md" radius="md">
       <Group justify="space-between" wrap="wrap" align="flex-start">
-        <Group gap="sm" wrap="nowrap" align="center">
+        {/* flex-start, not center: the occupant list can make this column tall,
+            and a centered swatch drifts away from the label it belongs to. */}
+        <Group gap="sm" wrap="nowrap" align="flex-start">
           <ShapeSwatch kind={def} size={22} />
           <div>
             <Group gap={6}>
@@ -582,6 +823,63 @@ function ItemRow({
                 }
               />
             ) : null}
+
+            {/* Who sleeps here. An empty list means "just me" — a complete
+                answer, which is why nothing nags a solo camper about it. */}
+            {holdsPeople ? (
+              <Stack gap={4} mt={8}>
+                <Text size="xs" fw={600}>
+                  Who's sleeping in it
+                </Text>
+                <Group gap={6}>
+                  {occupants.length === 0 ? (
+                    <Text size="xs" c="dimmed">
+                      Just you so far.
+                    </Text>
+                  ) : (
+                    occupants.map((o) => (
+                      <Badge
+                        key={o.attendeeId}
+                        variant="light"
+                        color={o.membershipId ? undefined : "grape"}
+                        rightSection={
+                          locked ? null : (
+                            <ActionIcon
+                              size="xs"
+                              variant="transparent"
+                              color="gray"
+                              aria-label={`Remove ${o.name ?? "person"} from ${item.name ?? def.label}`}
+                              onClick={() =>
+                                fetcher.submit(
+                                  {
+                                    intent: "removeOccupant",
+                                    objectId: item.id,
+                                    attendeeId: o.attendeeId,
+                                  },
+                                  { method: "post" },
+                                )
+                              }
+                            >
+                              <span aria-hidden="true">✕</span>
+                            </ActionIcon>
+                          )
+                        }
+                      >
+                        {o.name ?? "Person"}
+                      </Badge>
+                    ))
+                  )}
+                </Group>
+                {!locked ? (
+                  <OccupantPicker
+                    item={item}
+                    occupants={occupants}
+                    occupantOptions={occupantOptions}
+                    fetcher={fetcher}
+                  />
+                ) : null}
+              </Stack>
+            ) : null}
           </div>
         </Group>
 
@@ -660,6 +958,55 @@ function ItemRow({
         </Group>
       </Group>
     </Paper>
+  );
+}
+
+/** "Add someone…" for one structure, minus whoever is already in it. */
+function OccupantPicker({
+  item,
+  occupants,
+  occupantOptions,
+  fetcher,
+}: {
+  item: Item;
+  occupants: Occupant[];
+  occupantOptions: OccupantOption[];
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const taken = new Set([
+    ...occupants.map((o) => `a:${o.attendeeId}`),
+    ...occupants
+      .filter((o) => o.membershipId)
+      .map((o) => `m:${o.membershipId}`),
+  ]);
+  const available = occupantOptions.filter((o) => !taken.has(o.value));
+  if (available.length === 0) return null;
+  // Mantine's Select throws on duplicate option values, so group by label here
+  // rather than trusting the loader's ordering.
+  const groups = [...new Set(available.map((o) => o.group))].map((group) => ({
+    group,
+    items: available
+      .filter((o) => o.group === group)
+      .map((o) => ({ value: o.value, label: o.label })),
+  }));
+  return (
+    <Select
+      size="xs"
+      w={260}
+      placeholder="Add someone…"
+      aria-label={`Add someone to ${item.name ?? kindDef(item.kind).label}`}
+      searchable
+      data={groups}
+      value={null}
+      onChange={(v) =>
+        v &&
+        fetcher.submit(
+          { intent: "addOccupant", objectId: item.id, occupantRef: v },
+          { method: "post" },
+        )
+      }
+      comboboxProps={{ withinPortal: true }}
+    />
   );
 }
 

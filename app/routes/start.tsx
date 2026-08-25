@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Anchor,
   Badge,
   Button,
   Checkbox,
@@ -12,23 +13,28 @@ import {
   Stepper,
   Text,
   TextInput,
-  Textarea,
   Title,
   Tooltip,
 } from "@mantine/core";
-import dayjs from "dayjs";
 import { and, asc, eq } from "drizzle-orm";
 import { useState } from "react";
-import { data, useFetcher, useNavigate } from "react-router";
+import { Link, data, useFetcher, useNavigate } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { announce } from "~/components/Announcer";
-import { EventCalendar } from "~/components/EventCalendar";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
-import { ensureMemberAttendee } from "~/lib/attendee.server";
+import {
+  type ParticipationStatus,
+  RsvpButtons,
+  StayPicker,
+  type TripData,
+  TripNote,
+} from "~/components/TripPlanner";
 import { parseBannedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
 import { shownQuestions } from "~/lib/conditions";
+import { featureVisibleTo } from "~/lib/features";
+import { getFeatureState } from "~/lib/features.server";
 import { redact } from "~/lib/privacy.server";
 import type { QuestionType } from "~/lib/questions";
 import { isAnswered, parseOptions, surfacedInWizard } from "~/lib/questions";
@@ -44,12 +50,7 @@ import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
 import type { AskKey } from "~/lib/wizard";
 import { audienceForRole } from "~/lib/wizard";
-import {
-  type ParticipationStatus,
-  loadWizardState,
-  resolveAsk,
-  setParticipation,
-} from "~/lib/wizard.server";
+import { loadWizardState, resolveAsk } from "~/lib/wizard.server";
 import { db } from "../../db/client.server";
 import {
   attendee,
@@ -280,7 +281,22 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
   const myPass = passRows.find((p) => p.status !== "denied") ?? null;
 
-  const arrivalWindow = eventWindowFor(activeEdition.year);
+  // The trip controls are shared with `/trip`, which owns the writes — this
+  // just feeds them (plans/wizard-step-homes.md).
+  const trip = {
+    year: activeEdition.year,
+    locked: activeEdition.locked,
+    status: state.participation.status,
+    arrivalDate: state.participation.arrivalDate,
+    departureDate: state.participation.departureDate,
+    note: state.participation.note,
+    arrivalWindow: eventWindowFor(activeEdition.year),
+    myPass,
+    passesVisible: featureVisibleTo(
+      await getFeatureState(campId, "passes"),
+      role,
+    ),
+  } satisfies TripData;
 
   return redact(privacy, {
     locked: activeEdition.locked,
@@ -296,7 +312,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       priority: a.priority,
     })),
     resolved: state.resolved,
-    participation: state.participation,
+    trip,
     playaName: me?.playaName ?? null,
     items,
     occupants,
@@ -308,9 +324,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     answers,
     invitedByName,
     inviterOptions,
-    myPass,
-    // Gates open on `focus`; min/max bound the arrival picker.
-    arrivalWindow,
   });
 }
 
@@ -387,167 +400,9 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
-  // RSVP writes edition-scoped data, so a locked year is read-only.
-  if (intent === "rsvp") {
-    if (activeEdition.locked) {
-      return data({ error: "This year is locked." }, { status: 403 });
-    }
-    const status = String(form.get("status")) as ParticipationStatus;
-    if (!["unknown", "coming", "maybe", "not_coming"].includes(status)) {
-      return data({ error: "Bad status." }, { status: 400 });
-    }
-    const noteRaw = form.get("note");
-    // Absent field = leave unchanged; empty string = clear; else YYYY-MM-DD.
-    const readDay = (key: string): string | null | undefined => {
-      const raw = form.get(key);
-      if (raw == null) return undefined;
-      return String(raw) || null;
-    };
-    const arrivalDate = readDay("arrivalDate");
-    const departureDate = readDay("departureDate");
-    for (const day of [arrivalDate, departureDate]) {
-      if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-        return data({ error: "Bad date." }, { status: 400 });
-      }
-    }
-    if (arrivalDate && departureDate && departureDate < arrivalDate) {
-      return data(
-        { error: "Departure can't be before arrival." },
-        { status: 400 },
-      );
-    }
-    await setParticipation({
-      campId,
-      editionId,
-      membershipId: mid,
-      status,
-      arrivalDate,
-      departureDate,
-      note: noteRaw == null ? undefined : String(noteRaw) || null,
-    });
-    return data({ ok: true });
-  }
-
-  // Auto-request a Setup Access Pass (unbound — an officer assigns the
-  // "on or after" date on /passes) when the camper is arriving pre-event.
-  if (intent === "requestSetupPass") {
-    if (activeEdition.locked) {
-      return data({ error: "This year is locked." }, { status: 403 });
-    }
-    const myAttendeeId = await ensureMemberAttendee(campId, editionId, mid);
-    const existing = await db
-      .select({ id: setupPass.id, status: setupPass.status })
-      .from(setupPass)
-      .where(
-        and(
-          eq(setupPass.editionId, editionId),
-          eq(setupPass.attendeeId, myAttendeeId),
-        ),
-      );
-    if (existing.some((p) => p.status !== "denied")) {
-      return data({ ok: true }); // already requested/granted — idempotent
-    }
-    await db.insert(setupPass).values({
-      id: crypto.randomUUID(),
-      campId,
-      editionId,
-      attendeeId: myAttendeeId,
-      status: "requested",
-      note: "Requested during onboarding (arriving before gates open).",
-      createdById: authUser.id,
-    });
-    return data({ ok: true });
-  }
-
-  // Occupant edits touch edition-scoped data, so they respect the lock.
-  if (intent === "addOccupant" || intent === "removeOccupant") {
-    if (activeEdition.locked) {
-      return data({ error: "This year is locked." }, { status: 403 });
-    }
-    const objectId = String(form.get("objectId"));
-    // Confirm the structure is the caller's own item in this edition.
-    const [own] = await db
-      .select({ id: mapObject.id })
-      .from(mapObject)
-      .where(
-        and(
-          eq(mapObject.id, objectId),
-          eq(mapObject.editionId, editionId),
-          eq(mapObject.ownerMembershipId, mid),
-        ),
-      )
-      .limit(1);
-    if (!own) return data({ error: "Not your item." }, { status: 403 });
-
-    if (intent === "addOccupant") {
-      // The picker sends `m:<membershipId>` (a member) or `a:<attendeeId>` (a
-      // guest). Resolve either to the attendee the occupant references.
-      const ref = String(form.get("occupantRef"));
-      let attendeeId: string | null = null;
-      if (ref.startsWith("m:")) {
-        const targetMid = ref.slice(2);
-        const [tm] = await db
-          .select({ id: membership.id })
-          .from(membership)
-          .where(
-            and(
-              eq(membership.id, targetMid),
-              eq(membership.organizationId, campId),
-            ),
-          )
-          .limit(1);
-        if (!tm) return data({ error: "Unknown member." }, { status: 400 });
-        attendeeId = await ensureMemberAttendee(campId, editionId, targetMid);
-      } else if (ref.startsWith("a:")) {
-        const aid = ref.slice(2);
-        const [g] = await db
-          .select({ id: attendee.id })
-          .from(attendee)
-          .where(
-            and(
-              eq(attendee.id, aid),
-              eq(attendee.campId, campId),
-              eq(attendee.editionId, editionId),
-            ),
-          )
-          .limit(1);
-        if (!g) return data({ error: "Unknown guest." }, { status: 400 });
-        attendeeId = aid;
-      }
-      if (!attendeeId) return data({ error: "Pick someone." }, { status: 400 });
-
-      const [existing] = await db
-        .select({ id: mapObjectOccupant.id })
-        .from(mapObjectOccupant)
-        .where(
-          and(
-            eq(mapObjectOccupant.objectId, objectId),
-            eq(mapObjectOccupant.attendeeId, attendeeId),
-          ),
-        )
-        .limit(1);
-      if (!existing) {
-        await db.insert(mapObjectOccupant).values({
-          id: crypto.randomUUID(),
-          campId,
-          editionId,
-          objectId,
-          attendeeId,
-        });
-      }
-      return data({ ok: true });
-    }
-    await db
-      .delete(mapObjectOccupant)
-      .where(
-        and(
-          eq(mapObjectOccupant.objectId, objectId),
-          eq(mapObjectOccupant.attendeeId, String(form.get("attendeeId"))),
-        ),
-      );
-    return data({ ok: true });
-  }
-
+  // RSVP, stay dates and the Setup Access Pass request are owned by `/trip`;
+  // occupants by `/bringing`. The wizard posts there rather than keeping a
+  // second copy of those writes (plans/wizard-step-homes.md).
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
@@ -741,170 +596,21 @@ function AskBody({
   }
 }
 
-/** The "coming back?" RSVP, folded into the questionnaire step. */
-function RsvpButtons({ data: d }: { data: LoaderData }) {
-  const fetcher = useFetcher();
-  const current = d.participation.status;
-  const choices: {
-    value: ParticipationStatus;
-    label: string;
-    color: string;
-  }[] = [
-    { value: "coming", label: "I'm coming", color: "green" },
-    { value: "maybe", label: "Maybe", color: "yellow" },
-    { value: "not_coming", label: "Not this year", color: "gray" },
-  ];
-  const setStatus = (status: ParticipationStatus, label: string) => {
-    fetcher.submit({ intent: "rsvp", status }, { method: "post" });
-    // The reveal of the stay picker (and the save itself) is otherwise silent.
-    announce(
-      status === "coming" || status === "maybe"
-        ? `${label} saved — pick your stay dates below.`
-        : `${label} saved.`,
-    );
-  };
-  return (
-    <Stack gap="xs" maw={460}>
-      <Text size="sm" fw={600}>
-        Are you camping with us for {d.year}?
-      </Text>
-      <Text size="sm" c="dimmed">
-        This helps us plan tickets and space — you can change it anytime.
-      </Text>
-      <Group gap="xs">
-        {choices.map((c) => (
-          <Button
-            key={c.value}
-            variant={current === c.value ? "filled" : "default"}
-            color={c.color}
-            aria-pressed={current === c.value}
-            disabled={d.locked}
-            onClick={() => setStatus(c.value, c.label)}
-          >
-            {c.label}
-          </Button>
-        ))}
-      </Group>
-      {current === "coming" || current === "maybe" ? (
-        <StayAsk data={d} fetcher={fetcher} />
-      ) : null}
-    </Stack>
-  );
-}
-
-/** Booking-style stay ask (tap arrival day, tap last day) + the Setup Access
- * Pass prompt: arriving before gate-open needs a pass, which the camper can
- * auto-request right here (an officer picks the pass's "on or after" date on
- * /passes). */
-function StayAsk({
-  data: d,
-  fetcher,
-}: {
-  data: LoaderData;
-  fetcher: ReturnType<typeof useFetcher>;
-}) {
-  const arrival = d.participation.arrivalDate;
-  const departure = d.participation.departureDate;
-  const gateOpen = d.arrivalWindow.focus;
-  const gateOpenFmt = dayjs(gateOpen).format("dddd, MMM D");
-  const arrivingEarly = arrival != null && arrival < gateOpen;
-  const fmt = (day: string) => dayjs(day).format("ddd, MMM D");
-  const nights =
-    arrival && departure ? dayjs(departure).diff(dayjs(arrival), "day") : null;
-  const saveStay = (range: {
-    arrival: string | null;
-    departure: string | null;
-  }) =>
-    fetcher.submit(
-      {
-        intent: "rsvp",
-        status: d.participation.status,
-        arrivalDate: range.arrival ?? "",
-        departureDate: range.departure ?? "",
-      },
-      { method: "post" },
-    );
-  return (
-    <Stack gap="xs" mt="xs">
-      <div>
-        <Text size="sm" fw={600}>
-          When will you be there?
-        </Text>
-        <Text size="xs" c="dimmed">
-          Tap the day you'll arrive, then the day you'll head home. Gates open{" "}
-          {gateOpenFmt}.
-        </Text>
-      </div>
-      <EventCalendar
-        year={d.year}
-        mode="range"
-        range={{ arrival, departure }}
-        onRangeChange={saveStay}
-        disabled={d.locked}
-      />
-      <Text size="sm" c={arrival && departure ? undefined : "dimmed"}>
-        {arrival && departure
-          ? `${fmt(arrival)} → ${fmt(departure)} · ${nights} ${nights === 1 ? "night" : "nights"}`
-          : arrival
-            ? `Arriving ${fmt(arrival)} — now tap your last day.`
-            : "No stay picked yet."}
-      </Text>
-      {arrivingEarly ? (
-        <Paper withBorder p="sm" radius="md">
-          {d.myPass?.status === "granted" ? (
-            <Stack gap={4}>
-              <Text size="sm" c="green">
-                ✓ You have a Setup Access Pass
-                {d.myPass.date
-                  ? ` — it admits you on or after ${dayjs(d.myPass.date).format("ddd, MMM D")}`
-                  : ""}
-                .
-              </Text>
-              {d.myPass.date && arrival && d.myPass.date > arrival ? (
-                <Text size="sm" c="orange">
-                  Heads up: that's after your planned arrival — talk to an
-                  officer about an earlier pass.
-                </Text>
-              ) : null}
-            </Stack>
-          ) : d.myPass ? (
-            <Text size="sm" c="dimmed">
-              ✓ Setup Access Pass requested — an officer will assign you one
-              that covers your arrival.
-            </Text>
-          ) : (
-            <Stack gap="xs">
-              <Text size="sm">
-                Arriving before gates open requires a Setup Access Pass. Want us
-                to request one for you?
-              </Text>
-              <Group>
-                <Button
-                  size="xs"
-                  disabled={d.locked}
-                  loading={fetcher.state !== "idle"}
-                  onClick={() =>
-                    fetcher.submit(
-                      { intent: "requestSetupPass" },
-                      { method: "post" },
-                    )
-                  }
-                >
-                  Yes, request a pass
-                </Button>
-              </Group>
-            </Stack>
-          )}
-        </Paper>
-      ) : null}
-    </Stack>
-  );
-}
-
 function QuestionnaireStep({ data: d }: { data: LoaderData }) {
   return (
     <Stack gap="lg" mt="md" maw={520}>
-      <RsvpButtons data={d} />
+      {/* The RSVP and stay controls are the same ones `/trip` renders, and they
+          post to `/trip`'s action — the wizard is a view over that page's data,
+          not a second copy of it. */}
+      <Stack gap="xs">
+        <RsvpButtons trip={d.trip} />
+        {d.trip.status === "coming" || d.trip.status === "maybe" ? (
+          <StayPicker trip={d.trip} />
+        ) : null}
+        <Anchor component={Link} to="/trip" size="xs">
+          This lives on Your trip — you can change it there anytime.
+        </Anchor>
+      </Stack>
       <div>
         <Text size="sm" c="dimmed" mb="sm">
           {d.audience === "recruit"
@@ -940,8 +646,6 @@ function QuestionnaireStep({ data: d }: { data: LoaderData }) {
 /** The wrap-up step: questions an officer placed *after* the gear selection,
  * plus the free-text "anything to add?" (moved off the first page). */
 function ExtrasStep({ data: d }: { data: LoaderData }) {
-  const fetcher = useFetcher();
-  const current = d.participation.status;
   return (
     <Stack gap="lg" mt="md" maw={520}>
       {d.questionsAfter.length > 0 ? (
@@ -960,20 +664,9 @@ function ExtrasStep({ data: d }: { data: LoaderData }) {
           ))}
         </Stack>
       ) : null}
-      <Textarea
-        label="Anything to add?"
-        description="Anything else we should know — arriving late, bringing a friend, a question for us…"
-        autosize
-        minRows={2}
-        disabled={d.locked}
-        defaultValue={d.participation.note ?? ""}
-        onBlur={(e) =>
-          fetcher.submit(
-            { intent: "rsvp", status: current, note: e.currentTarget.value },
-            { method: "post" },
-          )
-        }
-      />
+      {/* Walking past this step is itself the acknowledgement, so no
+          "nothing to add" button here — that's `/trip`'s job. */}
+      <TripNote trip={d.trip} settled />
     </Stack>
   );
 }
@@ -1128,7 +821,11 @@ function BringingStep({ data: d }: { data: LoaderData }) {
 }
 
 function OccupantsStep({ data: d }: { data: LoaderData }) {
+  // Reuse the Bringing page's action — occupants live there now, so there is
+  // one write path (plans/wizard-step-homes.md).
   const fetcher = useFetcher();
+  const post = (fields: Record<string, string>) =>
+    fetcher.submit(fields, { method: "post", action: "/bringing" });
   // Only structures that hold people (domiciles + vehicles) take occupants.
   const holders = d.items.filter(
     (i) => hasTag(i.kind, "domicile") || hasTag(i.kind, "vehicle"),
@@ -1200,14 +897,11 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
                             color="gray"
                             aria-label={`Remove ${o.name ?? "person"} from ${item.name ?? kindDef(item.kind).label}`}
                             onClick={() =>
-                              fetcher.submit(
-                                {
-                                  intent: "removeOccupant",
-                                  objectId: item.id,
-                                  attendeeId: o.attendeeId,
-                                },
-                                { method: "post" },
-                              )
+                              post({
+                                intent: "removeOccupant",
+                                objectId: item.id,
+                                attendeeId: o.attendeeId,
+                              })
                             }
                           >
                             <span aria-hidden="true">✕</span>
@@ -1229,14 +923,11 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
                   value={null}
                   onChange={(v) =>
                     v &&
-                    fetcher.submit(
-                      {
-                        intent: "addOccupant",
-                        objectId: item.id,
-                        occupantRef: v,
-                      },
-                      { method: "post" },
-                    )
+                    post({
+                      intent: "addOccupant",
+                      objectId: item.id,
+                      occupantRef: v,
+                    })
                   }
                   comboboxProps={{ withinPortal: true }}
                 />
