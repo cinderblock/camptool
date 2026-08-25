@@ -51,12 +51,18 @@ jobs:
       - name: Build
         # CAMP_THEME (which camp-theme package Vite bakes into the bundle) is a
         # BUILD-TIME var, and it is deliberately NOT hardcoded — this workflow
-        # stays camp-agnostic. It used to come from the app container's
-        # ops-managed env-file, which a hosted runner can't see, so it is now the
-        # `CAMP_THEME` repo variable. Unset → the built-in @camptool/default-theme.
-        # The deploy job below cross-checks it against the host's env-file, so a
-        # missing variable fails loudly instead of silently shipping the wrong
-        # camp's branding.
+        # names no camp, so a fork gets the built-in @camptool/default-theme.
+        #
+        # It used to be inherited from the app container's env, which only worked
+        # while the build ran on the deployment host. It is now the `CAMP_THEME`
+        # repo variable, and ops — which is master for the deployment — is what
+        # sets it: declared in `servers/firefly/camptool-runner/build-vars.env`
+        # and pushed here by ops's `sync-camptool-repo-vars` job. So ops still
+        # owns the value; this repo just reads it.
+        #
+        # The deploy job below cross-checks it against the host's own CAMP_THEME,
+        # so drift (or a variable that was never synced) fails loudly instead of
+        # silently shipping the wrong camp's branding.
         env:
           CAMP_THEME: ${{ vars.CAMP_THEME }}
         run: |
