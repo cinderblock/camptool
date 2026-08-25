@@ -175,15 +175,64 @@ runner container*, so the build can kill the thing it's deploying.
 to the one its shebang asks for. **Output is byte-identical** — `sha256sum` over
 every file in `build/` matches exactly (`2502b14b9066…`). Peak drops 45%.
 
-That is not a complete fix on its own — it buys ~1 GB of margin on a box that
-had none. The infrastructure side is Cameron's call:
+That alone was treating the symptom. **The build should never have been on
+firefly at all.**
 
-- **`mem_limit` on `camptool-runner`** so a runaway build can only kill itself,
-  not the live site and its neighbours. Cheapest real safety net.
+#### Why it was there, and the split (applied)
+
+`ops/plans/camptool-firefly-deploy-runner.md`: the deploy was mirrored from the
+gate-manager/steamboat pattern — "the app's repo deploys itself via a dedicated
+self-hosted runner" — and the *entire* job (`bun install` → `bun run build` →
+stage → activate → health-check) was put on that runner. Nobody separated what
+must happen on the box from what merely could.
+
+The isolation the design *did* reason about was filesystem and docker-socket:
+"the camptool repo's CI (arbitrary code) can't mess with other things on
+firefly", app-inside-the-runner-container, no host mounts. It never bounded
+**memory or CPU** — and `camptool-runner/compose.yml` sets no `mem_limit`, so
+that's the one axis where CI *can* still reach out and break the rest of the
+box. Which is exactly what happened.
+
+The repo is **public**, so GitHub-hosted runners are free and come with 16 GB.
+There was never a cost reason. `.github/workflows/deploy.yml` is now two jobs:
+
+- **`build`** on `ubuntu-latest` — checkout, `oven-sh/setup-bun@v2` pinned to
+  1.3.0 (matching the runner image so `bun.lock` resolves identically), build,
+  `db:verify`, assemble the release tree, upload it as a **tarball** artifact
+  (`upload-artifact` drops the executable bit that `run` needs, and resolves
+  symlinks — tar preserves both).
+- **`deploy`** on `[self-hosted, firefly]` — unpack into the releases volume,
+  `bun install --production` (~6s, cheap, deliberately left on the host so it
+  resolves against the Bun the app actually runs), flip `current`, touch the
+  restart sentinel, poll `/_version` for this SHA, prune. Nothing here can
+  starve the app it is deploying.
+
+**⚠️ One action needed from Cameron.** `CAMP_THEME` used to be read from the app
+container's ops-managed env (it's hardcoded to `@camptool/mathcamp-theme` in
+`ops/servers/firefly/camptool-runner/compose.yml`). A hosted builder can't see
+that, so it is now the repo variable `vars.CAMP_THEME`, which is **not set**:
+
+    gh variable set CAMP_THEME --body '@camptool/mathcamp-theme'
+
+Not set by this session on purpose — repo/dashboard settings need per-change
+authorization, and it's the kind of change that's invisible afterwards. **Safe
+to forget:** the deploy job re-reads the host's own `CAMP_THEME` and compares it
+to a `BUILD_THEME` stamp in the artifact, refusing to activate on a mismatch. So
+a missing variable fails the deploy loudly instead of quietly serving another
+camp's branding.
+
+That split does mean one deployment-specific value now lives in the app repo's
+CI config rather than in ops. The honest long-term answer is to stop baking the
+theme at build time and resolve it at runtime, so the bundle is genuinely
+camp-agnostic and ops keeps owning deployment config. Not this change.
+
+#### Still worth doing on the ops side (Cameron's call)
+
+- **`mem_limit` on `camptool-runner`.** Moving the build off firefly removes
+  today's offender, but nothing stops the next one; a memory-capped container
+  can only kill itself, not the live site and its neighbours.
 - **Add swap** (the UOS updater already recommends ≥2 GiB) so pressure degrades
   instead of OOM-killing.
-- **Build on a GitHub-hosted runner** and ship the artifact, so deploying can
-  never contend with serving. The structurally right answer.
 
 ## Things not to do
 
