@@ -127,11 +127,63 @@ nothing on the host was touched: infrastructure needs per-change authorization
 from Cameron, and knocking the site over a fourth time to learn the same thing
 isn't worth it.
 
-Likely fixes, for whoever has the authority to make them: give firefly more RAM
-or swap, cap the build (`NODE_OPTIONS=--max-old-space-size=…` won't bind Bun —
-a `systemd-run --scope -p MemoryMax=` around the build step would), or build
-the release elsewhere (a GitHub-hosted runner) and ship the artifact to firefly,
-which also stops a deploy from being able to take the live site down.
+#### Why the build wanted that much memory — measured, not guessed
+
+Peak RSS of the whole build, same commit, sampled every 150 ms:
+
+| Build command | Peak | Wall |
+| --- | --- | --- |
+| `bun --bun react-router build` (what it was) | **2153 MB** | 17.4s |
+| `react-router build` (Node, via its `#!/usr/bin/env node`) | **1090 MB** | 16.3s |
+
+Ruled out along the way: `build.reportCompressedSize: false` changes nothing
+(2199 MB), and `CAMP_THEME=@camptool/mathcamp-theme` — which firefly sets and a
+local build doesn't — changes nothing (2164 MB, same 1207 modules).
+
+**It's the runtime.** The memory trace under Bun climbs monotonically and never
+comes back down:
+
+    0.3s  164 MB   ▏
+    4.0s  902 MB   ██████
+    8.2s 1135 MB   ████████
+   12.5s 1627 MB   ███████████      ← client transform done, SSR build starts
+   18.9s 2092 MB   ██████████████   ← still climbing at exit
+
+No sawtooth: Bun's JavaScriptCore heap grows instead of collecting, and Vite
+never drops the client build's module graph before starting the SSR one, so
+both live in the same heap. Bun also has no `--max-old-space-size` equivalent —
+nothing bounds it but the kernel. Under Node, V8's old-space cap forces the
+collection that keeps the same work at half the footprint. Note the three
+failures died at *different* points (end of client transform once, mid-SSR
+transform twice) — the signature of sitting at the ceiling, not of one bad
+module.
+
+And firefly has no headroom to absorb it: 8 GB, **no swap** (noted in
+`ops/plans/firefly-uosserver-update-disk-space.md`), shared with UniFi OS Server
+(Mongo + Java), Prometheus + Grafana, Caddy/FrankenPHP, nginx-cache, headscale,
+portainer and five runner containers. `ops/servers/firefly/camptool-runner/
+compose.yml` sets **no `mem_limit`**, so nothing bounds the build to its own
+cgroup — the host OOM killer picks globally, which is why `i.mathcamp.us` (a
+different container) went down too. And the live camptool app runs *inside the
+runner container*, so the build can kill the thing it's deploying.
+
+#### The repo-side fix (applied)
+
+`package.json`: `"build": "bun --bun react-router build"` → `"build":
+"react-router build"`. Still invoked as `bun run build`; `bun install` /
+`bun.lock` / `dev` / `start` are untouched — only Vite's own runtime changes,
+to the one its shebang asks for. **Output is byte-identical** — `sha256sum` over
+every file in `build/` matches exactly (`2502b14b9066…`). Peak drops 45%.
+
+That is not a complete fix on its own — it buys ~1 GB of margin on a box that
+had none. The infrastructure side is Cameron's call:
+
+- **`mem_limit` on `camptool-runner`** so a runaway build can only kill itself,
+  not the live site and its neighbours. Cheapest real safety net.
+- **Add swap** (the UOS updater already recommends ≥2 GiB) so pressure degrades
+  instead of OOM-killing.
+- **Build on a GitHub-hosted runner** and ship the artifact, so deploying can
+  never contend with serving. The structurally right answer.
 
 ## Things not to do
 

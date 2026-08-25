@@ -8,7 +8,7 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "dev": "bun --bun react-router dev",
-    "build": "bun --bun react-router build",
+    "build": "react-router build",
     "start": "bun server.ts",
     "typecheck": "react-router typegen && tsc --noEmit",
     "test": "bun test",

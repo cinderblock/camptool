@@ -41,6 +41,20 @@ jobs:
         # (the same source as BETTER_AUTH_SECRET above), so set CAMP_THEME there to
         # pick a theme; unset → the built-in @camptool/default-theme. Note: it's
         # read at build, so a change only takes effect on the next deploy.
+        #
+        # `bun run build` deliberately does NOT pass `--bun` (see package.json):
+        # Vite/Rollup runs under Node here. Measured on the same commit, same
+        # 1207 modules, byte-identical output:
+        #
+        #     bun --bun react-router build   peak 2153 MB   17.4s
+        #     react-router build (node)      peak 1090 MB   16.3s
+        #
+        # Bun's JSC heap climbs monotonically through both the client and SSR
+        # builds and never collects; V8's old-space cap forces it to. On firefly
+        # — 8 GB, no swap, shared with UniFi OS Server, Prometheus/Grafana,
+        # Caddy and five other runners — that difference is the whole margin.
+        # Three deploys were OOM-killed here (exit 137), taking the live site
+        # and the runner with them. See plans/wizard-step-homes.md.
         run: |
           set -euo pipefail
           bun install --frozen-lockfile
