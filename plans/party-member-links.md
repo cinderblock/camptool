@@ -34,9 +34,11 @@ double-count is cleaned up (see Findings).
    separate, orthogonal fact `membership_id IS NULL`. This also means a guest who
    later gets an account **keeps** the party edge through promotion instead of
    losing it.
-3. **Who can set it:** either person (Albert can add Grace to his party; Grace can
-   name Albert from her own RSVP), **and officers** on anyone's behalf while
-   cleaning up the roster. No confirmation handshake — small, high-trust camp.
+3. ~~**Who can set it:** either person … No confirmation handshake — small,
+   high-trust camp.~~ **Superseded 2026-08-25 by decision 6.** This was decided
+   while the link only *displayed* a household. Decision 5, taken later the same
+   day, turned it into a grant of authority, and the "no handshake" rationale was
+   never re-examined against that. See the escalation under Findings.
 4. **One level deep.** A member who is hosted cannot themselves host; you cannot
    host yourself. Keeps the party roll-up a single hop and matches how a household
    actually has one anchor.
@@ -54,7 +56,57 @@ double-count is cleaned up (see Findings).
    - `canManageAttendee(att, viewer)` — `inMyParty` **or** camp officer. Drives
      *mutation*.
 
+6. **Being taken into a party requires the taken person's consent; joining one
+   does not.** (2026-08-25, replacing decision 3.) The two directions are not
+   symmetric and the UI is built on that difference:
+
+   - *Join someone's party* — you write your **own** `host_membership_id`. You
+     are giving your tickets and passes away, which is yours to do. Immediate.
+   - *Take someone into yours* — you would write **their** row, taking their
+     tickets and passes. That is an invitation they answer.
+
+   Stated as an invariant: **the only non-officer who may write
+   `host_membership_id` on a member's row is that member.** Officers keep the
+   direct write; they already have reach over everyone, so it escalates nothing.
+
+   The invitation lives in `attendee.pending_host_membership_id` and is inert —
+   `party.ts` never reads it, so inviting the whole camp grabs nobody's things.
+
 ## Findings / gotchas
+
+### Privilege escalation: any member could take over any other member *(fixed)*
+
+Reported by the user on 2026-08-25 — "what if someone else in the camp wanted to
+mess with things and take my SAP?" — and it was not, as hoped, merely invisible
+to an admin. The gate in `roster.tsx` read:
+
+```ts
+const involved = subject === myMid || host === myMid;
+```
+
+`host === myMid` is true of *every* attempt to grab somebody, so it authorized
+exactly what it was meant to prevent. Any member could POST
+`intent=setPartyHost&membershipId=<victim>&hostMembershipId=<self>` — and did not
+need to forge it, since `CampingWith` rendered its "Add someone to your party"
+picker to every member behind nothing but `!locked`, populated with the whole
+camp. On success the attacker immediately gained, through `canManageAttendee`:
+
+| Route | Effect on the victim |
+|---|---|
+| `passes.tsx` `cancelPass` | **deletes** their pending setup-pass request |
+| `passes.tsx` `setStay` | rewrites their arrival/departure dates |
+| `passes.tsx` `requestPassFor` | files a pass request in their name |
+| `tickets.tsx` `markPurchased` | flips their ticket status |
+| `inMyParty` readers | reads their tickets and passes |
+
+Mitigations that existed but weren't enough: the grab was visible on the
+victim's own roster and self-serve reversible — but only after the fact, only if
+they looked, and a cancelled pass request was already gone.
+
+Root cause is a decision-ordering one worth remembering: decision 3 ("no
+confirmation handshake") was taken when the link was **display only**, and
+decision 5 turned it into a privilege grant later the same day without
+revisiting it. Fixed by decision 6 above.
 
 ### The invariant is prose-only — the DB would accept both columns set
 
@@ -190,6 +242,32 @@ Behavior changes to be aware of:
       currently has to ask one of the two people to do it.
 - [ ] `claimGuest` ("That's me") gains a **link instead of merge** option.
 
+### Phase 6 — consent before authority *(done, 2026-08-25)*
+
+- [x] `attendee.pending_host_membership_id` (migration `0084_kind_skin`), with
+      `ON DELETE SET NULL` **hand-added** to the generated SQL: drizzle-kit drops
+      the referential action from a SQLite `ADD COLUMN`, and cascade would have
+      been wrong anyway — deleting the *inviter's* membership must not delete the
+      invitee's whole attendee row. Same trap as `0065_fix_missing_on_delete`.
+- [x] `setPartyHost` gate narrowed to: the subject themselves, the subject's
+      current host (clearing only), or an officer. `checkPartyLink` extracted so
+      the one-level-deep rules are shared with the invite path.
+- [x] `invitePartyMember` / `acceptPartyInvite` / `clearPartyInvite`, plus
+      `loadPartyInvites` (scoped to the viewer, *not* hung off `RosterMember` —
+      the roster's member list is shipped to every browser in camp).
+- [x] `CampingWith` reworked: an invitation banner with both answers, sent
+      invites shown as "Waiting on them" with Withdraw, and the picker relabelled
+      "Ask someone to join your party".
+- [x] Ask-registry entry `party_invite`, so the question reaches the person
+      instead of sitting on a page they may not open. `required` — but saying
+      *no* satisfies it too, so it's a one-tap question, not a debt.
+- [x] `e2e/party-invites.ts` — 21 checks, including the original attack POST and
+      the pass-cancellation it used to enable.
+
+Deliberate non-goals here: a member with a pending invite is still listed in
+everyone's picker (the refusal explains it better than a silent omission would),
+and a second inviter is refused rather than allowed to overwrite the first.
+
 The authorization rule here is deliberately NOT `canManageAttendee`. That answers
 "does this viewer already have authority over that person?", and before the link
 exists a prospective host has none — the authority is what's being created. So
@@ -247,6 +325,15 @@ second is hidden once you anchor a party.
 - **Don't** infer the link from shared domicile. It was considered and rejected:
   it's empty before placement, and it can't express "coming because of Albert."
 
+- **Don't** let "I named myself as the host" count as authorization for writing
+  `host_membership_id`. That clause is true of every hostile attempt; it is the
+  exact bug fixed on 2026-08-25. Any future write path to that column must state
+  its rule as *who owns the row being written*, not who's named in the payload.
+
+- **Don't** read `pending_host_membership_id` in `party.ts` or any permission
+  check. Its whole value is being inert — the moment a pending invite grants
+  anything, sending one becomes an attack again.
+
 ## Progress log
 
 - [x] 2026-08-07 — Investigated. Established that the domicile half is modeled
@@ -274,8 +361,31 @@ second is hidden once you anchor a party.
          read "not placed" — Bob's objects were still keyed under Bob while the
          roster asked under Cameron. `partyMapObjects` now resolves every
          attachment, owner and occupant alike, through one `hostOf` map.
+- [x] 2026-08-25 — Phase 6. The user asked whether joining a group had a
+      permission hole. It did, and it was not admin-only — every member could
+      take over every other member. Decision 3 retired, decision 6 taken,
+      invitation flow built and driven end to end against a scratch DB. The
+      single e2e failure turned out to be my own assertion string: React's SSR
+      escapes `'` to `&#x27;`, so a needle containing "you're" never matches the
+      markup, and the banner had been rendering correctly all along.
 
-### How to drive the app locally (this cost an hour to work out)
+### How to drive the app locally
+
+The forged-session recipe below still works, but there is now a **much cheaper
+path** for anything server-side: sign up over HTTP against a scratch DB and post
+form-encoded intents, no browser and no cookie forging. See
+`e2e/party-invites.ts` (and `e2e/trip-and-occupants.ts`, which it's modelled on):
+
+    DATABASE_PATH=./data/verify/party.db \
+      PUBLIC_BASE_URL=http://localhost:17937 PORT=17937 bun run dev
+    DATABASE_PATH=./data/verify/party.db \
+      E2E_BASE_URL=http://localhost:17937 bun e2e/party-invites.ts
+
+Both processes need `DATABASE_PATH` — the suite reads the DB directly to assert
+on rows. Grep the dev log for errors afterwards regardless of the result: an SSR
+throw still returns HTTP 200, so a green run is not proof the page rendered.
+
+#### The forged-session recipe (this cost an hour to work out)
 
 `bun run dev` on port 17923 against a throwaway DB copy, with a forged session:
 

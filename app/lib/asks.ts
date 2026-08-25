@@ -97,6 +97,12 @@ export type AskSnapshot = {
    */
   partyWithoutBed: number;
 
+  /**
+   * Another member has asked to host this person's party and is waiting on an
+   * answer. Not a party *link* — the link is what saying yes creates.
+   */
+  partyInvitePending: boolean;
+
   /** They've written something in the free-text "anything to add?" box. */
   hasNote: boolean;
 
@@ -258,6 +264,22 @@ export const ASKS: AskDef[] = [
     feature: "bringing",
     wizard: true,
     isSatisfied: (s) => !attending(s) || s.partyWithoutBed === 0,
+  },
+  {
+    key: "party_invite",
+    label: "Someone says you're camping with them",
+    hint: "Confirm it, or say you're not — takes one tap",
+    route: "/roster",
+    audience: "all",
+    // `required`, so it can't be waved off while the question stays open. That
+    // reads harsh for an ask nobody in the camp is owed — but saying *no* also
+    // satisfies it, so it's a question with a one-click exit rather than a debt.
+    // Leaving it dismissible would let the notice be silenced with the ask still
+    // pending, and the person who sent it waiting on an answer that never comes.
+    importance: "required",
+    opensWeeksBefore: null,
+    feature: "roster",
+    isSatisfied: (s) => !s.partyInvitePending,
   },
   {
     key: "ticket",

@@ -21,6 +21,7 @@ const settled: AskSnapshot = {
   bringingCount: 1,
   unplacedCount: 0,
   partyWithoutBed: 0,
+  partyInvitePending: false,
   hasNote: false,
   checklistRemaining: 0,
   hasTicket: true,
@@ -47,6 +48,7 @@ const ctx: AskContext = {
     fuel: "on",
     onboarding: "on",
     dues: "on",
+    roster: "on",
   },
   capabilities: { discord: true },
 };
@@ -85,6 +87,29 @@ describe("the settled baseline", () => {
     expect(keys(fresh)).toContain("questionnaire");
     expect(keys(fresh)).toContain("dues");
     expect(keys(fresh).length).toBeGreaterThan(6);
+  });
+});
+
+describe("a pending party invitation", () => {
+  test("surfaces as a to-do while it is unanswered", () => {
+    expect(keys(snap({ partyInvitePending: true }))).toContain("party_invite");
+  });
+
+  test("cannot be dismissed — the other person is waiting on an answer", () => {
+    const out = outstandingAsks(
+      snap({ partyInvitePending: true, dismissed: { party_invite: true } }),
+      ctx,
+    );
+    expect(out.map((a) => a.key)).toContain("party_invite");
+    expect(out.find((a) => a.key === "party_invite")?.dismissible).toBe(false);
+  });
+
+  test("saying no settles it just as well as saying yes", () => {
+    // Both answers clear `pending_host_membership_id`; the ask reads the column,
+    // not which button was pressed.
+    expect(keys(snap({ partyInvitePending: false }))).not.toContain(
+      "party_invite",
+    );
   });
 });
 

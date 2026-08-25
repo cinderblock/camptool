@@ -33,10 +33,15 @@ import {
 } from "~/lib/arrival";
 import {
   type AttendeeStatus,
+  acceptPartyInvite,
   addGuest,
+  clearPartyInvite,
   getGuest,
   getPartyHostOf,
+  getPendingPartyHostOf,
+  invitePartyMember,
   listPartyHostCandidates,
+  loadPartyInvites,
   loadRoster,
   removeGuest,
   setPartyHost,
@@ -113,6 +118,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     activeEdition.id,
     myMembershipId,
   );
+  // Open "will you camp with me?" questions, both directions. Scoped to the
+  // viewer rather than folded into `members`, which goes to every browser.
+  const partyInvites = await loadPartyInvites(activeEdition.id, myMembershipId);
   return redact(privacy, {
     members: members.map((m) => {
       // `partyMapObjects` keys a whole household under its host, so someone
@@ -145,6 +153,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     myPartyHost: me?.partyHost ?? null,
     myPartyMembers: me?.partyMembers ?? [],
     partyHostCandidates,
+    partyInvites,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
     // Social groups, when the camp has them on. Purely a way to read the list —
     // nothing here consults them for permission (plans/social-groups.md).
@@ -322,8 +331,19 @@ export async function action({ request }: Route.ActionArgs) {
   //
   // `canManageAttendee` is deliberately NOT the gate here. It answers "does this
   // viewer already have authority over that person?", and before the link exists
-  // a prospective host has none — that authority is what's being created. So the
-  // rule is stated directly: either of the two people involved, or an officer.
+  // a prospective host has none — that authority is what's being created.
+  //
+  // Nor is "I named myself as the host" a qualification, which is the shape the
+  // rule used to have (`subject === myMid || host === myMid`). That clause is
+  // true of *every* attempt to grab someone, so any member could write
+  // themselves onto any other member's row and immediately read and cancel that
+  // person's tickets and setup passes — a host is an officer scoped to their
+  // party. Setting a host on someone else's row now requires being an officer;
+  // everyone else asks, via `invitePartyMember` below.
+  //
+  // So: you may set your own host (giving your things away is yours to do), the
+  // current host may clear it (letting someone go needs no ceremony), and
+  // officers may do either to anyone.
   if (intent === "setPartyHost") {
     const subject = String(form.get("membershipId") ?? "");
     const rawHost = String(form.get("hostMembershipId") ?? "").trim();
@@ -331,12 +351,17 @@ export async function action({ request }: Route.ActionArgs) {
     if (!subject) {
       return data({ error: "Who are we linking?" }, { status: 400 });
     }
-    const involved = subject === myMid || host === myMid;
-    if (!involved && !isOfficer) {
-      // Clearing: the current host is also entitled, and they aren't named in
-      // the form, so look them up before refusing.
+    if (subject !== myMid && !isOfficer) {
+      // The current host isn't named in the form, so look them up before
+      // refusing — this is the "remove them from my party" button.
       if ((await getPartyHostOf(editionId, subject)) !== myMid) {
         return data({ error: "That isn't your party." }, { status: 403 });
+      }
+      if (host !== null) {
+        return data(
+          { error: "Ask them to join your party instead." },
+          { status: 403 },
+        );
       }
     }
     const result = await setPartyHost({
@@ -347,6 +372,50 @@ export async function action({ request }: Route.ActionArgs) {
     });
     if (!result.ok) return data({ error: result.error }, { status: 400 });
     return data({ ok: host ? "Party updated." : "No longer linked." });
+  }
+
+  // Ask someone to join your party. Open to any member precisely because it
+  // grants nothing: the invitation is inert until they answer it.
+  if (intent === "invitePartyMember") {
+    const subject = String(form.get("membershipId") ?? "");
+    if (!subject) return data({ error: "Who are we asking?" }, { status: 400 });
+    const result = await invitePartyMember({
+      campId,
+      editionId,
+      membershipId: subject,
+      hostMembershipId: myMid,
+    });
+    if (!result.ok) return data({ error: result.error }, { status: 400 });
+    return data({ ok: "Asked. They'll see it on their to-do list." });
+  }
+
+  // Saying yes — the only place a non-officer's party authority is created.
+  if (intent === "acceptPartyInvite") {
+    const host = String(form.get("hostMembershipId") ?? "").trim();
+    if (!host) return data({ error: "Whose party?" }, { status: 400 });
+    const result = await acceptPartyInvite({
+      campId,
+      editionId,
+      membershipId: myMid,
+      expectedHostMembershipId: host,
+    });
+    if (!result.ok) return data({ error: result.error }, { status: 400 });
+    return data({ ok: "You're camping together." });
+  }
+
+  // Declining (the subject), withdrawing (the inviter), or an officer tidying.
+  if (intent === "clearPartyInvite") {
+    const subject = String(form.get("membershipId") ?? "");
+    if (!subject) {
+      return data({ error: "Which invitation?" }, { status: 400 });
+    }
+    if (subject !== myMid && !isOfficer) {
+      if ((await getPendingPartyHostOf(editionId, subject)) !== myMid) {
+        return data({ error: "That isn't your invitation." }, { status: 403 });
+      }
+    }
+    await clearPartyInvite(editionId, subject);
+    return data({ ok: subject === myMid ? "Declined." : "Withdrawn." });
   }
 
   return data({ error: "Unknown action." }, { status: 400 });
@@ -373,6 +442,7 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
     myPartyHost,
     myPartyMembers,
     partyHostCandidates,
+    partyInvites,
     groups,
   } = loaderData;
 
@@ -426,6 +496,7 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
             partyHost={myPartyHost}
             partyMembers={myPartyMembers}
             candidates={partyHostCandidates}
+            invites={partyInvites}
             myMembershipId={myMembershipId}
           />
         ) : null}
@@ -669,16 +740,23 @@ type PartyPerson = { membershipId: string; name: string };
  * either end, and because they're mutually exclusive: parties are one level
  * deep, so someone listed under another member can't also anchor a household.
  * Showing only the applicable half keeps that rule from having to be explained.
+ *
+ * The two directions are NOT symmetric, and the card is built around that.
+ * Joining someone's party gives your tickets and passes away, so you may just
+ * do it. Taking someone into yours takes theirs, so it's an invitation they
+ * answer — see the action, and `db/schema/attendee.ts`.
  */
 function CampingWith({
   partyHost,
   partyMembers,
   candidates,
+  invites,
   myMembershipId,
 }: {
   partyHost: PartyPerson | null;
   partyMembers: PartyPerson[];
   candidates: PartyPerson[];
+  invites: { received: PartyPerson | null; sent: PartyPerson[] };
   myMembershipId: string;
 }) {
   const fetcher = useFetcher<FetcherData>();
@@ -697,14 +775,33 @@ function CampingWith({
     label: c.name,
   }));
 
-  const link = (membershipId: string, hostMembershipId: string) =>
+  const join = (hostMembershipId: string) =>
     fetcher.submit(
-      { intent: "setPartyHost", membershipId, hostMembershipId },
+      {
+        intent: "setPartyHost",
+        membershipId: myMembershipId,
+        hostMembershipId,
+      },
       { method: "post" },
     );
   const unlink = (membershipId: string) =>
     fetcher.submit(
       { intent: "setPartyHost", membershipId, hostMembershipId: "" },
+      { method: "post" },
+    );
+  const invite = (membershipId: string) =>
+    fetcher.submit(
+      { intent: "invitePartyMember", membershipId },
+      { method: "post" },
+    );
+  const accept = (hostMembershipId: string) =>
+    fetcher.submit(
+      { intent: "acceptPartyInvite", hostMembershipId },
+      { method: "post" },
+    );
+  const clearInvite = (membershipId: string) =>
+    fetcher.submit(
+      { intent: "clearPartyInvite", membershipId },
       { method: "post" },
     );
 
@@ -719,6 +816,47 @@ function CampingWith({
         anchors the party can sort out tickets and setup passes for everyone in
         it, and each person can still manage their own.
       </Text>
+
+      {/* An invitation outranks the pickers: it's a question addressed to you,
+          and answering it either way is one click. Shown even when you already
+          anchor a party, so a stale ask can always be cleared. */}
+      {invites.received ? (
+        <Card
+          withBorder
+          radius="sm"
+          padding="sm"
+          mb="md"
+          bg="var(--mantine-color-blue-light)"
+        >
+          <Text size="sm" mb={4}>
+            <b>{invites.received.name}</b> says you're camping with them.
+          </Text>
+          <Text size="xs" c="dimmed" mb="sm">
+            If you agree, they'll be able to sort out your ticket and setup pass
+            — you keep yours either way. Nothing has changed yet.
+          </Text>
+          <Group gap="sm">
+            <Button
+              size="compact-sm"
+              loading={busy}
+              onClick={() =>
+                invites.received && accept(invites.received.membershipId)
+              }
+            >
+              Yes, we're together
+            </Button>
+            <Button
+              size="compact-sm"
+              variant="subtle"
+              color="red"
+              loading={busy}
+              onClick={() => clearInvite(myMembershipId)}
+            >
+              No
+            </Button>
+          </Group>
+        </Card>
+      ) : null}
 
       {partyHost ? (
         <Group gap="sm" wrap="wrap">
@@ -756,10 +894,37 @@ function CampingWith({
             </Stack>
           ) : null}
 
+          {/* Waiting on an answer. Listed next to the confirmed members so
+              "who's in my party" reads as one list with two states, rather than
+              an ask that vanishes until the other person acts. */}
+          {invites.sent.length > 0 ? (
+            <Stack gap="xs" mb="md">
+              {invites.sent.map((p) => (
+                <Group key={p.membershipId} gap="sm" wrap="wrap">
+                  <Text size="sm" c="dimmed">
+                    {p.name}
+                  </Text>
+                  <Badge size="sm" variant="outline" color="gray">
+                    Waiting on them
+                  </Badge>
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="red"
+                    loading={busy}
+                    onClick={() => clearInvite(p.membershipId)}
+                  >
+                    Withdraw
+                  </Button>
+                </Group>
+              ))}
+            </Stack>
+          ) : null}
+
           <Group gap="sm" align="flex-end" wrap="wrap">
             <Select
-              label="Add someone to your party"
-              description="You'll be able to sort out their ticket and setup pass"
+              label="Ask someone to join your party"
+              description="They confirm, then you can sort out their ticket and setup pass"
               placeholder="Pick a member"
               searchable
               clearable
@@ -772,17 +937,17 @@ function CampingWith({
             <Button
               disabled={!addPick}
               loading={busy}
-              onClick={() => addPick && link(addPick, myMembershipId)}
+              onClick={() => addPick && invite(addPick)}
             >
-              Add to my party
+              Ask them
             </Button>
           </Group>
 
-          {partyMembers.length === 0 ? (
+          {partyMembers.length === 0 && invites.sent.length === 0 ? (
             <Group gap="sm" align="flex-end" wrap="wrap" mt="md">
               <Select
                 label="Or join someone else's party"
-                description="They'll be able to sort out yours"
+                description="They'll be able to sort out yours — no confirmation needed, it's your call to make"
                 placeholder="Pick a member"
                 searchable
                 clearable
@@ -796,7 +961,7 @@ function CampingWith({
                 variant="light"
                 disabled={!joinPick}
                 loading={busy}
-                onClick={() => joinPick && link(myMembershipId, joinPick)}
+                onClick={() => joinPick && join(joinPick)}
               >
                 Join their party
               </Button>

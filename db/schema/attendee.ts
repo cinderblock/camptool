@@ -27,6 +27,11 @@
  * for what breaks otherwise. Party links are one level deep: a hosted member
  * hosts nobody, and nobody hosts themselves.
  *
+ * Because a host is *an officer scoped to their party*, `host_membership_id` on
+ * a member row is a **grant of authority over another account**, so it cannot be
+ * written onto that account's row by whoever fancies it. `pending_host_
+ * membership_id` is the proposal that precedes it; see its comment below.
+ *
  * Headcount = attendees with `status` = 'coming' for the edition (members + their
  * guests). Because map occupancy, tickets, and Setup Access Passes reference the
  * attendee (in later phases), a guest can be **promoted** to a real membership by
@@ -67,6 +72,34 @@ export const attendee = sqliteTable(
       () => membership.id,
       {
         onDelete: "cascade",
+      },
+    ),
+    /**
+     * A *proposal*, not a fact: "this member has been invited into that member's
+     * party", awaiting the subject's own confirmation. Set on the **subject's**
+     * row by the would-be host.
+     *
+     * It grants nothing. Only `host_membership_id` confers authority (see
+     * `app/lib/party.ts`), and the only non-officer who may write that column on
+     * a member's row is that member. Accepting moves the value across; declining
+     * clears it; either answer settles it.
+     *
+     * This column exists because a party host is an officer scoped to their
+     * party (`plans/party-member-links.md`, decision 5) — naming someone as
+     * your plus-one hands you their tickets and setup passes, so it can't be a
+     * unilateral write onto their row. Meaningless on a guest row: guests are
+     * accountless, so there is nobody there to consent.
+     *
+     * `set null`, NOT `cascade` like the columns around it: the row belongs to
+     * the *subject*, and an unanswered invitation is the only thing the inviter
+     * put there. Cascading would delete the invitee's whole attendee row — RSVP,
+     * ticket assignment, setup pass — because someone who once offered them a
+     * spot left the camp. Losing the invitation is the entire correct effect.
+     */
+    pendingHostMembershipId: text("pending_host_membership_id").references(
+      () => membership.id,
+      {
+        onDelete: "set null",
       },
     ),
     // Authoritative for a guest; NULL for a member row (resolve from `user.name`).
@@ -124,6 +157,8 @@ export const attendee = sqliteTable(
   (t) => [
     index("attendee_edition").on(t.editionId),
     index("attendee_host").on(t.hostMembershipId),
+    // "Invitations I've sent" is a scan by the *would-be* host, not the subject.
+    index("attendee_pending_host").on(t.pendingHostMembershipId),
     // One attendee row per member per edition (guests excluded — NULL membership).
     uniqueIndex("attendee_member")
       .on(t.editionId, t.membershipId)

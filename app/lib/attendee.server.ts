@@ -377,11 +377,15 @@ export async function removeGuest(guestId: string): Promise<{
   return { ticketsReleased, passesRevoked };
 }
 
+type PartyResult = { ok: true } | { ok: false; error: string };
+
 /**
- * Put a member into another member's party, or take them out of one (`host` =
- * NULL). The subject is identified by membership, not attendee id, because the
- * caller is picking a person off the roster; the row is created if they haven't
- * RSVP'd yet.
+ * Can `membershipId` sit under `hostMembershipId` at all?
+ *
+ * Shared by `setPartyHost` and `invitePartyMember` so an invitation that could
+ * never be accepted is refused when it's sent, rather than at the moment the
+ * other person tries to say yes. Re-run on acceptance too: an invitation can
+ * sit unanswered for weeks, and either party's household may have moved on.
  *
  * Refuses rather than silently repairing, because every refusal here means the
  * caller believes something about the roster that isn't true:
@@ -394,19 +398,102 @@ export async function removeGuest(guestId: string): Promise<{
  *   - **Subject already hosts people.** Same reason from the other side: their
  *     guests would end up a level deeper than the roll-up looks.
  *
- * Returns a human-readable reason on refusal so the caller can pass it straight
- * to the person, who is usually the one who can fix it.
+ * Returns a human-readable reason so the caller can pass it straight to the
+ * person, who is usually the one who can fix it.
+ */
+async function checkPartyLink(
+  campId: string,
+  editionId: string,
+  membershipId: string,
+  hostMembershipId: string,
+): Promise<PartyResult> {
+  if (hostMembershipId === membershipId) {
+    return { ok: false, error: "Someone can't be in their own party." };
+  }
+
+  const [host] = await db
+    .select({ id: membership.id, name: user.name })
+    .from(membership)
+    .innerJoin(user, eq(user.id, membership.userId))
+    .where(
+      and(
+        eq(membership.id, hostMembershipId),
+        eq(membership.organizationId, campId),
+      ),
+    )
+    .limit(1);
+  if (!host) return { ok: false, error: "That person isn't in this camp." };
+
+  const [hostRow] = await db
+    .select({ hostMembershipId: attendee.hostMembershipId })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        eq(attendee.membershipId, hostMembershipId),
+      ),
+    )
+    .limit(1);
+  if (hostRow?.hostMembershipId) {
+    return {
+      ok: false,
+      error: `${host.name} is already in someone else's party. Pick whoever anchors that household instead.`,
+    };
+  }
+
+  const [{ n: hosting } = { n: 0 }] = await db
+    .select({ n: count() })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        eq(attendee.hostMembershipId, membershipId),
+      ),
+    );
+  if (hosting > 0) {
+    return {
+      ok: false,
+      error:
+        "They have their own party. Move those people over first, then link them.",
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Put a member into another member's party, or take them out of one (`host` =
+ * NULL). The subject is identified by membership, not attendee id, because the
+ * caller is picking a person off the roster; the row is created if they haven't
+ * RSVP'd yet.
+ *
+ * **This is the write that grants authority** — a host is an officer scoped to
+ * their party — so callers must have established that the actor is the subject
+ * themselves, the subject's current host (removing someone), or a camp officer.
+ * Anyone else wanting to host a member sends an invitation instead; see
+ * `invitePartyMember`. This function does not check that, because the route
+ * knows who is asking and this doesn't.
+ *
+ * Any pending invitation is cleared either way: the question has been answered
+ * by other means, and leaving it would offer a "confirm" button for a link that
+ * already exists.
  */
 export async function setPartyHost(opts: {
   campId: string;
   editionId: string;
   membershipId: string;
   hostMembershipId: string | null;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<PartyResult> {
   const { campId, editionId, membershipId, hostMembershipId } = opts;
 
-  if (hostMembershipId === membershipId) {
-    return { ok: false, error: "Someone can't be in their own party." };
+  if (hostMembershipId) {
+    const check = await checkPartyLink(
+      campId,
+      editionId,
+      membershipId,
+      hostMembershipId,
+    );
+    if (!check.ok) return check;
   }
 
   // Guests are accountless, so this only ever moves member rows.
@@ -416,60 +503,137 @@ export async function setPartyHost(opts: {
     membershipId,
   );
 
-  if (hostMembershipId) {
-    const [host] = await db
-      .select({ id: membership.id, name: user.name })
-      .from(membership)
-      .innerJoin(user, eq(user.id, membership.userId))
-      .where(
-        and(
-          eq(membership.id, hostMembershipId),
-          eq(membership.organizationId, campId),
-        ),
-      )
-      .limit(1);
-    if (!host) return { ok: false, error: "That person isn't in this camp." };
+  await db
+    .update(attendee)
+    .set({
+      hostMembershipId,
+      pendingHostMembershipId: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(attendee.id, attendeeId));
+  return { ok: true };
+}
 
-    const [hostRow] = await db
-      .select({ hostMembershipId: attendee.hostMembershipId })
-      .from(attendee)
-      .where(
-        and(
-          eq(attendee.editionId, editionId),
-          eq(attendee.membershipId, hostMembershipId),
-        ),
-      )
-      .limit(1);
-    if (hostRow?.hostMembershipId) {
-      return {
-        ok: false,
-        error: `${host.name} is already in someone else's party. Pick whoever anchors that household instead.`,
-      };
-    }
+/**
+ * Offer to host a member: records the proposal on their row and grants nothing.
+ *
+ * This is the only route by which one member can involve *another* member's
+ * account in a party, and it deliberately stops short of the link itself. The
+ * invitation is inert — `party.ts` reads `host_membership_id` and never this —
+ * so a griefer who invites the whole camp has published some noise and taken
+ * nobody's tickets.
+ *
+ * Refuses if the subject already has a pending invitation from someone else,
+ * rather than overwriting it: a silent overwrite would let a second inviter
+ * displace the first, and the person answering would never know they'd been
+ * asked twice. Both the subject (decline) and the inviter (withdraw) can clear
+ * a stale one, so this cannot wedge.
+ */
+export async function invitePartyMember(opts: {
+  campId: string;
+  editionId: string;
+  membershipId: string;
+  hostMembershipId: string;
+}): Promise<PartyResult> {
+  const { campId, editionId, membershipId, hostMembershipId } = opts;
 
-    const [{ n: hosting } = { n: 0 }] = await db
-      .select({ n: count() })
-      .from(attendee)
-      .where(
-        and(
-          eq(attendee.editionId, editionId),
-          eq(attendee.hostMembershipId, membershipId),
-        ),
-      );
-    if (hosting > 0) {
-      return {
-        ok: false,
-        error:
-          "They have their own party. Move those people over first, then link them.",
-      };
-    }
+  const check = await checkPartyLink(
+    campId,
+    editionId,
+    membershipId,
+    hostMembershipId,
+  );
+  if (!check.ok) return check;
+
+  const attendeeId = await ensureMemberAttendee(
+    campId,
+    editionId,
+    membershipId,
+  );
+  const [row] = await db
+    .select({
+      hostMembershipId: attendee.hostMembershipId,
+      pendingHostMembershipId: attendee.pendingHostMembershipId,
+    })
+    .from(attendee)
+    .where(eq(attendee.id, attendeeId))
+    .limit(1);
+
+  if (row?.hostMembershipId) {
+    return { ok: false, error: "They're already in someone's party." };
+  }
+  if (row?.pendingHostMembershipId === hostMembershipId) {
+    return { ok: false, error: "You've already asked them." };
+  }
+  if (row?.pendingHostMembershipId) {
+    return {
+      ok: false,
+      error:
+        "Someone else has already asked them. They'll need to answer that first.",
+    };
   }
 
   await db
     .update(attendee)
-    .set({ hostMembershipId, updatedAt: new Date() })
+    .set({ pendingHostMembershipId: hostMembershipId, updatedAt: new Date() })
     .where(eq(attendee.id, attendeeId));
   return { ok: true };
+}
+
+/**
+ * Say yes to an invitation — the moment the authority is actually granted.
+ *
+ * `expectedHostMembershipId` is what the person was shown when they clicked,
+ * and it must still be what's on the row: an invitation that was withdrawn and
+ * replaced between page load and click must not be accepted as if it were the
+ * one they read. The link rules are re-checked here too, since the roster can
+ * have changed underneath a days-old invitation.
+ */
+export async function acceptPartyInvite(opts: {
+  campId: string;
+  editionId: string;
+  membershipId: string;
+  expectedHostMembershipId: string;
+}): Promise<PartyResult> {
+  const { campId, editionId, membershipId, expectedHostMembershipId } = opts;
+
+  const pending = await getPendingPartyHostOf(editionId, membershipId);
+  if (!pending) {
+    return { ok: false, error: "That invitation is no longer open." };
+  }
+  if (pending !== expectedHostMembershipId) {
+    return {
+      ok: false,
+      error: "That invitation changed while you were looking at it. Reload.",
+    };
+  }
+
+  return setPartyHost({
+    campId,
+    editionId,
+    membershipId,
+    hostMembershipId: pending,
+  });
+}
+
+/**
+ * Drop a pending invitation without linking anyone — the subject declining, the
+ * inviter withdrawing, or an officer tidying up. All three are the same write;
+ * who may perform it is the route's business.
+ */
+export async function clearPartyInvite(
+  editionId: string,
+  membershipId: string,
+): Promise<void> {
+  await db
+    .update(attendee)
+    .set({ pendingHostMembershipId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        eq(attendee.membershipId, membershipId),
+      ),
+    );
 }
 
 /** Who currently anchors this member's party, if anyone. */
@@ -488,6 +652,76 @@ export async function getPartyHostOf(
     )
     .limit(1);
   return row?.hostMembershipId ?? null;
+}
+
+/** Who has *asked* to anchor this member's party, if anyone. Grants nothing. */
+export async function getPendingPartyHostOf(
+  editionId: string,
+  membershipId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ pendingHostMembershipId: attendee.pendingHostMembershipId })
+    .from(attendee)
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        eq(attendee.membershipId, membershipId),
+      ),
+    )
+    .limit(1);
+  return row?.pendingHostMembershipId ?? null;
+}
+
+export type PartyPerson = { membershipId: string; name: string };
+
+/**
+ * The viewer's open invitations, both directions.
+ *
+ * Scoped to one person on purpose rather than hung off `RosterMember`: an
+ * unanswered "will you camp with me?" is between two people, and the roster
+ * loader ships its member list to every browser in camp.
+ */
+export async function loadPartyInvites(
+  editionId: string,
+  membershipId: string,
+): Promise<{ received: PartyPerson | null; sent: PartyPerson[] }> {
+  const rows = await db
+    .select({
+      subjectMembershipId: attendee.membershipId,
+      subjectName: user.name,
+      pendingHostMembershipId: attendee.pendingHostMembershipId,
+    })
+    .from(attendee)
+    .innerJoin(membership, eq(membership.id, attendee.membershipId))
+    .innerJoin(user, eq(user.id, membership.userId))
+    .where(
+      and(
+        eq(attendee.editionId, editionId),
+        isNotNull(attendee.pendingHostMembershipId),
+      ),
+    );
+
+  const sent: PartyPerson[] = [];
+  let receivedFrom: string | null = null;
+  for (const r of rows) {
+    if (!r.subjectMembershipId) continue;
+    if (r.pendingHostMembershipId === membershipId) {
+      sent.push({ membershipId: r.subjectMembershipId, name: r.subjectName });
+    }
+    if (r.subjectMembershipId === membershipId) {
+      receivedFrom = r.pendingHostMembershipId;
+    }
+  }
+  sent.sort((a, b) => a.name.localeCompare(b.name));
+
+  if (!receivedFrom) return { received: null, sent };
+  const [inviter] = await db
+    .select({ membershipId: membership.id, name: user.name })
+    .from(membership)
+    .innerJoin(user, eq(user.id, membership.userId))
+    .where(eq(membership.id, receivedFrom))
+    .limit(1);
+  return { received: inviter ?? null, sent };
 }
 
 /**

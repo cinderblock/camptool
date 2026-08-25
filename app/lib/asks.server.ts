@@ -53,6 +53,7 @@ function emptySnapshot(role: string): AskSnapshot {
     bringingCount: 0,
     unplacedCount: 0,
     partyWithoutBed: 0,
+    partyInvitePending: false,
     hasNote: false,
     checklistRemaining: 0,
     hasTicket: false,
@@ -124,6 +125,7 @@ export async function loadAskSnapshots(
       arrivalDate: attendee.arrivalDate,
       departureDate: attendee.departureDate,
       note: attendee.note,
+      pendingHostMembershipId: attendee.pendingHostMembershipId,
     })
     .from(attendee)
     .where(
@@ -143,6 +145,9 @@ export async function loadAskSnapshots(
     // A Setup Access Pass is only needed by someone arriving before gates open;
     // asking anyone else would be noise.
     s.needsSetupPass = !!a.arrivalDate && a.arrivalDate < gateOpen;
+    // Someone is waiting on them to confirm a party link — the same row, so no
+    // extra query. Answering either way clears it.
+    s.partyInvitePending = !!a.pendingHostMembershipId;
   }
 
   // — required questions still unanswered —
