@@ -76,6 +76,7 @@ Three real gaps: **RSVP + stay dates**, **the free-text note**, and **occupants*
 - [x] Nav: "Your trip" in the "Getting there" group.
 - [x] Test: no ask may route to `/start` (guards the regression).
 - [x] typecheck / lint / test green; driven in a real browser.
+- [ ] Deployed — blocked, see below.
 
 ## Findings / gotchas
 
@@ -92,6 +93,29 @@ Three real gaps: **RSVP + stay dates**, **the free-text note**, and **occupants*
 - `ParticipationStatus` lives in `wizard.server.ts`. The shared component can't
   import from a `.server` module, so `TripPlanner.tsx` exports its own copy of the
   union and `/trip` imports it from there.
+
+### Deploy is blocked on firefly, not on this change
+
+Pushed as `642a60d`. The `Deploy to firefly` run failed twice, and **not on
+anything in this commit**:
+
+1. First attempt — client bundle built fine in 21s, then the SSR bundle sat in
+   `transforming...` for 5½ minutes and was `SIGKILL`ed:
+   `error: script "build" was terminated by signal SIGKILL` → exit 137 (OOM).
+2. Re-run — `The self-hosted runner lost communication with the server.`
+
+The same build takes **17s wall, 3.8s for the SSR bundle** on this workstation
+at that exact commit, so it isn't a pathological module graph. And both
+firefly-served hosts are now unreachable while a non-firefly one is fine:
+
+    camptool.mathcamp.us   timeout
+    i.mathcamp.us          timeout
+    mathcamp.us            HTTP 200
+
+That reads as firefly itself being down or wedged (probably memory). Needs
+Cameron — infrastructure is off-limits without per-change authorization, so
+nothing has been touched. Re-run the deploy once the box is healthy; the commit
+needs no changes.
 
 ## Things not to do
 
