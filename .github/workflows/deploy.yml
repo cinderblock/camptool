@@ -83,23 +83,35 @@ jobs:
           CAMP_THEME: ${{ vars.CAMP_THEME }}
         run: |
           set -euo pipefail
-          rm -rf release && mkdir -p release
+          # Stamp the build SHA so the running app can report which release it is
+          # (server.ts serves it at /_version; the health check below verifies it),
+          # and the theme this bundle was actually built with, for the guard.
+          printf '%s' "$GITHUB_SHA" > BUILD_SHA
+          printf '%s' "${CAMP_THEME:-}" > BUILD_THEME
           # Ready-to-run tree: build output, server entry, the run wrapper, and
           # db/migrations (the app auto-migrates on boot from cwd). `packages/`
-          # ships too so the release-dir `bun install` can resolve the workspace
-          # (`workspace:*`) camp-theme deps in package.json.
-          cp -r build db server.ts run package.json bun.lock packages release/
-          # The build-step `bun install` created packages/*/node_modules; drop them
-          # so the production install on the host regenerates cleanly.
-          find release/packages -name node_modules -type d -prune -exec rm -rf {} + 2>/dev/null || true
-          # Stamp the build SHA so the running app can report which release it is
-          # (server.ts serves it at /_version; the health check below verifies it).
-          printf '%s' "$GITHUB_SHA" > release/BUILD_SHA
-          # Stamp the theme this bundle was actually built with, for the guard.
-          printf '%s' "${CAMP_THEME:-}" > release/BUILD_THEME
-          # Tar rather than upload the tree directly: actions/upload-artifact
-          # drops the executable bit (`run` must stay +x) and resolves symlinks.
-          tar -czf release.tar.gz -C release .
+          # ships too so the release-dir `bun install` on the host can resolve the
+          # workspace (`workspace:*`) camp-theme deps in package.json.
+          #
+          # Tar straight from the checkout rather than staging a copy first. The
+          # old cp-then-delete dragged the whole packages/*/node_modules tree
+          # along only to remove it, and `cp -r` chokes on the symlinks Bun puts
+          # there — under `set -e` that is a failed deploy, not a warning.
+          # `--exclude` also covers the root node_modules, which must NOT ship:
+          # the host reinstalls production-only into the release dir.
+          #
+          # Tar rather than uploading the tree directly, because
+          # actions/upload-artifact drops the executable bit that `run` needs
+          # (mode 100755 in git) and resolves symlinks.
+          tar -czf release.tar.gz \
+            --exclude=node_modules \
+            build db server.ts run package.json bun.lock packages \
+            BUILD_SHA BUILD_THEME
+          echo "--- release contents (top level)"
+          tar -tzf release.tar.gz | awk -F/ '{print $1}' | sort -u
+          # `run` must arrive executable or the supervisor can't start the app.
+          tar -tvzf release.tar.gz | grep -E ' run$' || {
+            echo "::error::run wrapper missing from the release tarball"; exit 1; }
 
       - uses: actions/upload-artifact@v4
         with:

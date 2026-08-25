@@ -226,6 +226,52 @@ CI config rather than in ops. The honest long-term answer is to stop baking the
 theme at build time and resolve it at runtime, so the bundle is genuinely
 camp-agnostic and ops keeps owning deployment config. Not this change.
 
+#### The artifact round-trip, verified before the first deploy
+
+The split introduces a step nobody had ever run: assembling the release on one
+machine and unpacking it on another. Simulated locally, end to end:
+
+- `tar` → **1.5 MB**, top level exactly `build db server.ts run package.json
+  bun.lock packages BUILD_SHA BUILD_THEME`, zero `node_modules` entries.
+- `run` arrives `-rwxr-xr-x` (it's mode 100755 in git, and tar preserves it) —
+  the supervisor can't start the app otherwise.
+- Theme guard passes on a match and refuses on a mismatch.
+- `bun install --frozen-lockfile --production` in the unpacked dir: **381
+  packages, 10.9s**. `packages/` has to ship for this to work — the lockfile's
+  `workspace:*` entries are unresolvable without it — even though the themes are
+  devDependencies and get pruned. They're baked into the bundle at build time,
+  so nothing needs them at runtime.
+
+Fixed while doing it: the assemble step was `cp -r … packages` followed by
+`find … -name node_modules -exec rm -rf`, i.e. copy the whole dependency tree
+just to delete it. `cp -r` also chokes on the symlinks Bun puts in
+`packages/*/node_modules` — and under `set -euo pipefail` that's a failed
+deploy, not a warning. Now it tars straight from the checkout with
+`--exclude=node_modules`, and asserts `run` is in the tarball.
+
+#### `CAMP_THEME` does change the artifact — and a local `.env` will lie to you
+
+Measured twice, wrongly, before getting this right. **`bun run` auto-loads
+`.env`**, this checkout has a gitignored one containing
+`CAMP_THEME=@camptool/mathcamp-theme`, and dotenv only fills vars that aren't
+already set — so `unset CAMP_THEME; bun run build` gets it straight back and
+builds the Math Camp theme anyway. Two "different" builds hashed identically and
+it looked like the whole theme seam was dead.
+
+To actually build the default theme locally, set it **empty** rather than
+unsetting it (an empty-but-set var beats dotenv):
+
+    CAMP_THEME= bun run build      → fad0a5fa…  0 × "Sierpinski Pyramid"
+    CAMP_THEME=@camptool/…-theme   → 2502b14b…  1 × "Sierpinski Pyramid"
+
+So the seam is fine, and the variable is load-bearing: without it the bundle is
+a *different artifact* with Math Camp's Sierpinski Pyramid and Hypar Shade
+missing from the palette. A hosted runner has no `.env`, so `vars.CAMP_THEME` is
+the only source there — which is exactly why the `BUILD_THEME` guard exists.
+
+(This does not affect the Bun-vs-Node memory numbers above: both sides of that
+comparison had the same theme, since both were contaminated identically.)
+
 #### Still worth doing on the ops side (Cameron's call)
 
 - **`mem_limit` on `camptool-runner`.** Moving the build off firefly removes
