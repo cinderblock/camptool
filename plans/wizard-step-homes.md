@@ -76,7 +76,7 @@ Three real gaps: **RSVP + stay dates**, **the free-text note**, and **occupants*
 - [x] Nav: "Your trip" in the "Getting there" group.
 - [x] Test: no ask may route to `/start` (guards the regression).
 - [x] typecheck / lint / test green; driven in a real browser.
-- [ ] Deployed — blocked, see below.
+- [x] Deployed — green on the first split run (see the deploy section).
 
 ## Findings / gotchas
 
@@ -271,6 +271,26 @@ the only source there — which is exactly why the `BUILD_THEME` guard exists.
 
 (This does not affect the Bun-vs-Node memory numbers above: both sides of that
 comparison had the same theme, since both were contaminated identically.)
+
+#### Landed 2026-08-26 — first green deploy since the split
+
+`ops@caec792` then `camptool@4490ab5`. Both clean on the first attempt:
+
+- ops `sync-camptool-repo-vars` → `+ CAMP_THEME = @camptool/mathcamp-theme`
+  (GET 404 → created). `install-camptool-runner` recreated the container:
+  `status=running restarts=0`, `CAMP_THEME` present at runtime.
+- camptool `build` on `ubuntu-latest`, `deploy` on firefly in **17s**, every
+  step green including `theme ok: @camptool/mathcamp-theme` — which proves the
+  hosted build baked the right theme from `vars.CAMP_THEME`, the one thing the
+  whole ops handoff exists to guarantee.
+- `https://camptool.mathcamp.us/_version` → `4490ab5da157…` = HEAD.
+
+**The Node-vs-Bun fix alone would NOT have been enough.** A push at 16:18 on
+2026-08-25 (`ebe5c08`, carried by another thread) already contained it and was
+still OOM-killed on firefly — client bundle 26s, then the SSR build hung ~15
+minutes and took SIGKILL. Fourth failure in a row. Halving the build's appetite
+bought nothing on that box; only getting the build off it worked. Worth knowing
+before anyone is tempted to move it back.
 
 #### Still worth doing on the ops side (Cameron's call)
 
