@@ -833,6 +833,8 @@ const CORE_KINDS = [
     controls: [ROOFTOP_TENT_CONTROL],
     shadowVolume: rooftopTentShadow(11),
   },
+  // "Van" spans a wide range — a minivan or Transit Connect is ~15ft, a Sprinter
+  // 144 ~19.5ft, a 170 EXT ~24ft. 17ft is only a default, so the length resizes.
   {
     value: "van",
     label: "Van",
@@ -841,7 +843,7 @@ const CORE_KINDS = [
     h: 17,
     shape: "rect",
     vehicle: true,
-    rigid: true,
+    rigid: false,
     group: "Vehicles",
     tags: ["vehicle"],
     personal: true,
