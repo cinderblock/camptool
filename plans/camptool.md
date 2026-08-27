@@ -1226,6 +1226,28 @@ placement page.)
       Fixed along the way: `/passes` was serialising the whole camp's stock —
       every holder's *name* — into every member's page; members now receive
       only their own party's rows.
+- [x] **The pass says who it's for (2026-08-27; verified against the real 2024
+      and 2026 orders and rendered in Chrome — task plan
+      `plans/sap-holder-name-on-pass.md`).** Every page of an order carries the
+      **purchaser's** name, so a camper's own pass named a stranger. The
+      download now rewrites that one field to the assignee. Replaced in the
+      content stream rather than painted over (a rectangle would leave the old
+      name in the text layer), written as a PDF hex string so a name containing
+      `(` or `\` can't corrupt the stream, identified **structurally** — the
+      leftmost upright block on the topmost line, which must also be first in
+      stream order — because the vendor's labels have already moved three times
+      in two years. Glyph coverage is checked against the embedded font's
+      `CIDToGIDMap` before writing, long names shrink to fit, and the finished
+      bytes are re-read to prove the ticket ID, date and security code survived.
+      Anything unverifiable falls back to the untouched vendor page: a pass with
+      the wrong name still opens the gate. New `app/lib/sap-rename.server.ts` +
+      `pdf-content.server.ts`; 14 unit tests, e2e assertion 8e covers the
+      fallback.
+
+      Cameron was asked first, since overwriting the identity line on a vendor
+      credential is a different act from slicing a page out of it and the pass
+      itself threatens cancelling a whole group's SAPs for misuse; he chose
+      outright replacement over an additive "Issued to" line. Don't re-litigate.
 - [x] Dark mode follows the system (2026-06-15, browser-verified) — `root.tsx` now
       passes `defaultColorScheme="auto"` to both `ColorSchemeScript` and
       `MantineProvider`, so a dark-mode device renders dark out of the box (and

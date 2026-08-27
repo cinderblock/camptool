@@ -121,6 +121,17 @@ other assignment, so it stops counting towards covering the camp's own early
 arrivals, and releasing it produces a PDF for the officer to send on, since
 there is no camper page for the codes to appear on.
 
+A pass comes from the vendor with the **purchaser's** name printed on it — one
+person, repeated on every page of the order, because one person bought the
+allocation. On the way out that field is rewritten to the person it's actually
+for. The old name is replaced in the page, not painted over, so it isn't left
+behind in the text layer; a long name shrinks to fit rather than colliding with
+the column beside it; and the finished file is read back to confirm the ticket
+ID, date and security code all still say what they did before. If any of that
+can't be verified — a font without the right glyphs, a layout the vendor has
+changed — the untouched vendor page is delivered instead, because a pass with
+the wrong name still opens the gate and a camper with no pass does not.
+
 Released passes are delivered two ways: the vendor's own page, cut out of the
 order on demand, and CampTool's own rendering that puts **a whole travel
 group's passes on one sheet** — one page for everyone arriving in the same

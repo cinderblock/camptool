@@ -363,6 +363,18 @@ check(
   strangerPdf.status === 404,
   `HTTP ${strangerPdf.status}`,
 );
+// The download puts the holder's name where the purchaser's is. This synthetic
+// order is drawn in a standard font with no name field at all, so the rename
+// CANNOT apply — which makes it the exact test worth having: a pass whose name
+// can't be rewritten must still be delivered, intact and scannable, rather than
+// failing on the one day it's needed.
+check(
+  "8e. a pass whose name can't be rewritten is still delivered, unaltered",
+  pdfRes.status === 200 &&
+    drawn.length === 1 &&
+    contained.length === 1 &&
+    (pdfRes.headers.get("content-type") ?? "").includes("pdf"),
+);
 
 // 9. Release is one-way.
 const takeBack = await post("/passes", officer.cookie, {

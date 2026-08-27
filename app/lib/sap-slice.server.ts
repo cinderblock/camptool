@@ -32,6 +32,7 @@ import {
   PDFRawStream,
   PDFRef,
 } from "pdf-lib";
+import { SapRenameError, renameHolderOnPage } from "./sap-rename.server";
 
 /** Thrown when the produced file would leak, or doesn't contain what it should.
  * Never caught to "carry on anyway" — a leaky pass must not reach a camper. */
@@ -48,6 +49,9 @@ export async function sliceSapPage(
   bytes: Uint8Array,
   pageIndex: number,
   expectedScanCode?: string,
+  /** Put this person's name where the purchaser's is. Omit to leave the
+   * vendor's page exactly as it came. */
+  holderName?: string,
 ): Promise<Uint8Array> {
   const src = await PDFDocument.load(bytes);
   if (pageIndex < 0 || pageIndex >= src.getPageCount()) {
@@ -60,6 +64,12 @@ export async function sliceSapPage(
   const drawn = drawnXObjectNames(src, page.node);
   pruneXObjects(page.node, drawn);
 
+  // Before the copy, so the edited stream is what gets copied and every check
+  // below runs against the bytes we actually hand over.
+  const renamed = holderName
+    ? renameHolderOnPage(src, pageIndex, holderName)
+    : null;
+
   const out = await PDFDocument.create();
   const [copied] = await out.copyPages(src, [pageIndex]);
   out.addPage(copied);
@@ -71,6 +81,7 @@ export async function sliceSapPage(
 
   await assertNoUndrawnImages(result);
   if (expectedScanCode) await assertScanCode(result, expectedScanCode);
+  if (renamed) await assertRename(result, renamed);
   return result;
 }
 
@@ -235,6 +246,51 @@ function isImage(obj: unknown): obj is PDFRawStream {
   if (!(obj instanceof PDFRawStream)) return false;
   const subtype = obj.dict.lookup(PDFName.of("Subtype"));
   return subtype instanceof PDFName && subtype.asString() === "/Image";
+}
+
+/**
+ * Confirm the rename did exactly what it claimed, by reading the finished file
+ * back the way anyone else would.
+ *
+ * Three separate things, because each has its own way of going wrong: the old
+ * name could survive somewhere we didn't look, the new one could have been
+ * written with glyphs that don't render, and the edit could have damaged a
+ * field that matters more than either — the ticket ID, the date, the security
+ * code. A pass whose date silently changed would be discovered at the gate.
+ */
+async function assertRename(
+  bytes: Uint8Array,
+  renamed: { from: string; to: string },
+): Promise<void> {
+  const { pageTextItems, parseTextFields } = await import("./sap-pdf.server");
+  const items = await pageTextItems(bytes, 0);
+  const text = items.join("\n");
+
+  // Only meaningful when the new name doesn't contain the old one. The camp
+  // lead who bought the allocation is also a camper: "Cameron Tacklind" being
+  // assigned a pass leaves their own name legitimately on the page, and so does
+  // "Cameron Tacklind Jr".
+  if (renamed.from && !renamed.to.includes(renamed.from)) {
+    if (text.includes(renamed.from)) {
+      throw new SapRenameError(
+        `Refusing to produce this pass: ${JSON.stringify(renamed.from)} is still in its text after being replaced.`,
+      );
+    }
+  }
+  if (!text.includes(renamed.to)) {
+    throw new SapRenameError(
+      `Refusing to produce this pass: ${JSON.stringify(renamed.to)} did not come back out of the finished file, so it would print blank.`,
+    );
+  }
+  const fields = parseTextFields(items);
+  const lost = (
+    ["vendorTicketId", "onOrAfterDate", "securityCode"] as const
+  ).filter((k) => !fields[k]);
+  if (lost.length > 0) {
+    throw new SapRenameError(
+      `Refusing to produce this pass: ${lost.join(", ")} no longer reads off the page after the name was changed.`,
+    );
+  }
 }
 
 /** Confirm the QR in a produced file is the pass we meant to produce. */

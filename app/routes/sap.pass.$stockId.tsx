@@ -40,13 +40,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     throw new Response("Not found", { status: 404 });
   }
 
-  const pdf = await slicedPassPdf(active.camp.id, pass);
-  const who = (
-    pass.guestName ??
-    pass.memberName ??
-    pass.externalHolder ??
-    "pass"
-  ).replace(/[^A-Za-z0-9]+/g, "-");
+  // The page comes with the *purchaser's* name on it — one person, on all 26
+  // pages of the order. The holder's goes on in their place.
+  const holder =
+    pass.guestName ?? pass.memberName ?? pass.externalHolder ?? null;
+  const pdf = await slicedPassPdf(active.camp.id, pass, holder);
+  const who = (holder ?? "pass").replace(/[^A-Za-z0-9]+/g, "-");
   return new Response(
     new Blob([new Uint8Array(pdf)], { type: "application/pdf" }),
     {

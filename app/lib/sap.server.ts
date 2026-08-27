@@ -38,6 +38,7 @@ import { uploadsRoot } from "./images.server";
 import { type PartyViewer, canManageAttendee } from "./party";
 import { hasAtLeast } from "./permissions";
 import { parseSapPdf } from "./sap-pdf.server";
+import { SapRenameError } from "./sap-rename.server";
 import { sliceSapPage } from "./sap-slice.server";
 
 export type StockStatus = "available" | "assigned" | "released" | "void";
@@ -555,6 +556,12 @@ export async function documentBytes(
  * The slicer verifies its own output against this pass's scan code, so a
  * mis-recorded page index surfaces here as a refusal rather than as somebody
  * turning up at the gate with a stranger's pass.
+ *
+ * `holderName` replaces the purchaser's name printed on the page — every page
+ * of an order carries whoever bought it, so without this a camper gets a pass
+ * with a stranger's name on it. If the edit can't be made *and verified*, the
+ * untouched vendor page is returned rather than nothing: a pass with the wrong
+ * name still opens the gate, and a camper with no pass at all does not.
  */
 export async function slicedPassPdf(
   campId: string,
@@ -563,6 +570,7 @@ export async function slicedPassPdf(
     sourcePageIndex: number | null;
     scanCode: string;
   },
+  holderName?: string | null,
 ): Promise<Uint8Array> {
   if (!stock.sourceDocumentId || stock.sourcePageIndex === null) {
     throw new SapStateError(
@@ -570,6 +578,23 @@ export async function slicedPassPdf(
     );
   }
   const bytes = await documentBytes(campId, stock.sourceDocumentId);
+  if (holderName?.trim()) {
+    try {
+      return await sliceSapPage(
+        bytes,
+        stock.sourcePageIndex,
+        stock.scanCode,
+        holderName,
+      );
+    } catch (e) {
+      if (!(e instanceof SapRenameError)) throw e;
+      // Worth saying out loud: it means the vendor's layout moved and every
+      // pass this year is going out under the purchaser's name.
+      console.warn(
+        `[sap] could not put the holder's name on a pass, sending the vendor's page as-is: ${(e as Error).message}`,
+      );
+    }
+  }
   return sliceSapPage(bytes, stock.sourcePageIndex, stock.scanCode);
 }
 

@@ -115,6 +115,27 @@ export async function parseSapPdf(bytes: Uint8Array): Promise<SapPageResult[]> {
   return out;
 }
 
+/**
+ * One page's text, read back the way any other tool would read it.
+ *
+ * Text only — no QR decode, so it costs milliseconds rather than the seconds a
+ * full parse spends decompressing the page's full-size background. Used to
+ * check a produced pass still says what it should after the holder's name has
+ * been rewritten into it (`sap-rename.server.ts`).
+ */
+export async function pageTextItems(
+  bytes: Uint8Array,
+  pageIndex: number,
+): Promise<string[]> {
+  const pdf = await getDocumentProxy(copyForPdfJs(bytes));
+  const page = await pdf.getPage(pageIndex + 1);
+  try {
+    return await textItems(page);
+  } finally {
+    page.cleanup();
+  }
+}
+
 /** Text strings on a page, in content-stream order — which is what lets the
  * value directly after a "Confirmation Id" label be read as that label's
  * value. */
