@@ -358,4 +358,5 @@ before anyone is tempted to move it back.
 - [x] 2026-08-27 — Gave the wizard doors back: `Guided setup` nav item, an
       Overview link under the to-dos, an always-shown `/guide` button, and
       first-visit-aware copy on `/start`. typecheck / lint / 416 unit tests /
-      21 e2e checks green. Not deployed yet.
+      21 e2e checks green. Shipped as `01d45ba`; deploy green in 18s and
+      `/_version` = HEAD.
