@@ -107,7 +107,11 @@ Two asks (Cameron, 2026-08-27):
 - [x] `e2e/trip-and-occupants.ts` (29), `e2e/account-and-wizard.ts` (16) and
       `e2e/party-invites.ts` (21) re-run against the same scratch server, since
       the `TripData` shape changed under them. All green, dev-server log clean.
-- [ ] Update `plans/camptool.md`; commit; push; watch CI; verify `/_version`.
+- [x] README + `plans/camptool.md` updated; commit **a476a80**; pushed;
+      "Deploy to firefly" green; `/_version` on camptool.mathcamp.us returns
+      `a476a808…`, so migration 0085 applied on startup and the build is live.
+- [ ] **Open:** click the switch and the "Outside camp" button once on the live
+      deploy (see the browser-automation note under Findings).
 
 ## Findings / gotchas
 
