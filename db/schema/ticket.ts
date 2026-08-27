@@ -151,7 +151,13 @@ export const setupPass = sqliteTable(
     attendeeId: text("attendee_id").references(() => attendee.id, {
       onDelete: "cascade",
     }),
-    // requested -> granted (counts against quota) | denied.
+    // requested -> granted (counts against quota) | denied | declined.
+    //
+    // `denied` is the officer's no. `declined` is the CAMPER's — the "requesting
+    // a Setup Access Pass" control on /trip, switched off. They are kept apart
+    // because only one of them is a decision the camper may reverse themselves,
+    // and because a required onboarding ask is settled by either (they told us
+    // either way), while only `denied` means the camp said no.
     status: text("status").notNull().default("requested"),
     note: text("note"),
     resolvedByMembershipId: text("resolved_by_membership_id").references(

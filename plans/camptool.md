@@ -1206,6 +1206,26 @@ placement page.)
       officer picks the on-or-after date at grant time — the `/passes` pending
       queue shows each requester's planned arrival and defaults to the latest
       date that still covers it. One active pass per member, enforced in code.
+- [x] **An explicit "requesting a SAP" switch, and allocating a pass outside
+      the camp (2026-08-27; code green, 80 e2e assertions, NOT browser-tested —
+      task plan `plans/sap-request-and-external-allocation.md`).** Cameron's
+      two asks. (1) On **Your trip**, the early-arrival prompt becomes a
+      **standing switch** that is always present while the camp runs passes:
+      picking an arrival before gate-open files the request **server-side, in
+      the same write that saves the date**, and turning it off records a
+      camper-side `setup_pass.status = "declined"` (distinct from the officer's
+      `denied`) so the next date edit doesn't quietly ask again. A pass already
+      set aside or released makes the switch read-only — that conversation goes
+      through an officer. No migration; `declined` settles the required
+      onboarding ask, because telling us "no" is an answer.
+      (2) **`setup_pass_stock.external_holder`** (migration **0085**) lets an
+      **admin** take a pass out of the pool for someone with no CampTool
+      account at all — a neighbour, a helper. Ordinary `assigned` → `released`
+      states, only from `available`, and release grows an officer-only
+      **Download PDF** because an outsider has no page to be handed codes on.
+      Fixed along the way: `/passes` was serialising the whole camp's stock —
+      every holder's *name* — into every member's page; members now receive
+      only their own party's rows.
 - [x] Dark mode follows the system (2026-06-15, browser-verified) — `root.tsx` now
       passes `defaultColorScheme="auto"` to both `ColorSchemeScript` and
       `MantineProvider`, so a dark-mode device renders dark out of the box (and

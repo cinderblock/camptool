@@ -1,4 +1,12 @@
-import { Button, Group, Paper, Stack, Text, Textarea } from "@mantine/core";
+import {
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Switch,
+  Text,
+  Textarea,
+} from "@mantine/core";
 import dayjs from "dayjs";
 import { useFetcher } from "react-router";
 import { announce } from "~/components/Announcer";
@@ -28,10 +36,17 @@ export type TripData = {
   note: string | null;
   /** Bounds and gate-open day for the stay picker — `eventWindowFor(year)`. */
   arrivalWindow: { min: string; max: string; focus: string };
-  /** The camper's Setup Access Pass, if they have one or asked for one. */
-  myPass: { status: string; date: string | null } | null;
-  /** False when the deployment/camp has no Setup Access Pass feature to offer. */
-  passesVisible: boolean;
+  /** The "requesting a Setup Access Pass" control's state — `loadMySapState`
+   * plus whether this camp runs passes at all. */
+  sap: {
+    /** False when the deployment/camp has no Setup Access Pass feature. */
+    visible: boolean;
+    requesting: boolean;
+    fixedReason: string | null;
+    onOrAfterDate: string | null;
+    held: "assigned" | "released" | null;
+    denied: boolean;
+  };
 };
 
 /** Every write goes to `/trip`, wherever these controls are rendered. */
@@ -84,16 +99,12 @@ export function RsvpButtons({ trip }: { trip: TripData }) {
 }
 
 /** Booking-style stay ask (tap arrival day, tap last day) + the Setup Access
- * Pass prompt: arriving before gate-open needs a pass, which the camper can
- * auto-request right here (an officer picks the pass's "on or after" date on
- * /passes). */
+ * Pass switch below it. */
 export function StayPicker({ trip }: { trip: TripData }) {
   const fetcher = useFetcher();
   const arrival = trip.arrivalDate;
   const departure = trip.departureDate;
   const gateOpen = trip.arrivalWindow.focus;
-  const gateOpenFmt = dayjs(gateOpen).format("dddd, MMM D");
-  const arrivingEarly = arrival != null && arrival < gateOpen;
   const fmt = (day: string) => dayjs(day).format("ddd, MMM D");
   const nights =
     arrival && departure ? dayjs(departure).diff(dayjs(arrival), "day") : null;
@@ -118,7 +129,7 @@ export function StayPicker({ trip }: { trip: TripData }) {
         </Text>
         <Text size="xs" c="dimmed">
           Tap the day you'll arrive, then the day you'll head home. Gates open{" "}
-          {gateOpenFmt}.
+          {longDay(gateOpen)}.
         </Text>
       </div>
       <EventCalendar
@@ -135,54 +146,110 @@ export function StayPicker({ trip }: { trip: TripData }) {
             ? `Arriving ${fmt(arrival)} — now tap your last day.`
             : "No stay picked yet."}
       </Text>
-      {arrivingEarly && trip.passesVisible ? (
-        <Paper withBorder p="sm" radius="md">
-          {trip.myPass?.status === "granted" ? (
-            <Stack gap={4}>
-              <Text size="sm" c="green">
-                ✓ You have a Setup Access Pass
-                {trip.myPass.date
-                  ? ` — it admits you on or after ${dayjs(trip.myPass.date).format("ddd, MMM D")}`
-                  : ""}
-                .
-              </Text>
-              {trip.myPass.date && arrival && trip.myPass.date > arrival ? (
-                <Text size="sm" c="orange">
-                  Heads up: that's after your planned arrival — talk to an
-                  officer about an earlier pass.
-                </Text>
-              ) : null}
-            </Stack>
-          ) : trip.myPass ? (
-            <Text size="sm" c="dimmed">
-              ✓ Setup Access Pass requested — an officer will assign you one
-              that covers your arrival.
-            </Text>
-          ) : (
-            <Stack gap="xs">
-              <Text size="sm">
-                Arriving before gates open requires a Setup Access Pass. Want us
-                to request one for you?
-              </Text>
-              <Group>
-                <Button
-                  size="xs"
-                  disabled={trip.locked}
-                  loading={fetcher.state !== "idle"}
-                  onClick={() =>
-                    fetcher.submit({ intent: "requestSetupPass" }, TRIP_ACTION)
-                  }
-                >
-                  Yes, request a pass
-                </Button>
-              </Group>
-            </Stack>
-          )}
-        </Paper>
-      ) : null}
+      <SetupPassSwitch trip={trip} />
     </Stack>
   );
 }
+
+/**
+ * "I'm requesting a Setup Access Pass" — a standing answer, not a one-time
+ * button.
+ *
+ * It is **always here** while the camp runs passes, rather than appearing only
+ * when the arrival happens to be early. The old prompt could only ever be
+ * answered *yes*, and only from one screen state: pick a later date and the
+ * question vanished along with any way to change your mind.
+ *
+ * The tick is not a client-side default. Saving an early arrival creates the
+ * request server-side, so the box being ticked and the officers' queue knowing
+ * about you are the same fact rather than two that can disagree. Turning it off
+ * records an explicit decline, which is what stops the next date edit quietly
+ * asking again.
+ *
+ * Once a pass is genuinely set aside the switch goes read-only: unticking would
+ * be either a lie or a silent hand-back of a scarce, possibly already-sent
+ * secret, so that goes through an officer.
+ */
+function SetupPassSwitch({ trip }: { trip: TripData }) {
+  const fetcher = useFetcher();
+  const { sap } = trip;
+  if (!sap.visible) return null;
+
+  const gateOpen = trip.arrivalWindow.focus;
+  const arrival = trip.arrivalDate;
+  const arrivingEarly = arrival != null && arrival < gateOpen;
+  const fmt = (day: string) => dayjs(day).format("ddd, MMM D");
+  // Optimistic, so the switch moves under the finger rather than after a round
+  // trip — the fetcher carries the intent it's mid-flight with.
+  const pending = fetcher.formData?.get("intent");
+  const checked = pending ? pending === "requestSetupPass" : sap.requesting;
+
+  return (
+    <Paper withBorder p="sm" radius="md">
+      <Stack gap={6}>
+        <Switch
+          checked={checked}
+          disabled={trip.locked || sap.fixedReason !== null}
+          label="I'm requesting a Setup Access Pass"
+          description={
+            arrivingEarly
+              ? `You're arriving ${fmt(arrival)}, before gates open — you need one.`
+              : `Only needed to get in before gates open on ${fmt(gateOpen)}.`
+          }
+          onChange={(e) =>
+            fetcher.submit(
+              {
+                intent: e.currentTarget.checked
+                  ? "requestSetupPass"
+                  : "declineSetupPass",
+              },
+              TRIP_ACTION,
+            )
+          }
+        />
+        {sap.fixedReason ? (
+          <Text size="sm" c={sap.held === "released" ? "green" : undefined}>
+            {sap.held === "released" ? "✓ " : ""}
+            {sap.fixedReason}
+            {sap.onOrAfterDate
+              ? ` It admits you on or after ${fmt(sap.onOrAfterDate)}.`
+              : ""}
+          </Text>
+        ) : checked ? (
+          <Text size="sm" c="dimmed">
+            An officer will set one aside that covers your arrival.
+          </Text>
+        ) : null}
+        {sap.onOrAfterDate && arrival && sap.onOrAfterDate > arrival ? (
+          <Text size="sm" c="orange">
+            Heads up: that's after your planned arrival — talk to an officer
+            about an earlier pass.
+          </Text>
+        ) : null}
+        {!checked && arrivingEarly && !sap.fixedReason ? (
+          <Text size="sm" c="orange">
+            Without one you won't be let in until gates open on{" "}
+            {longDay(gateOpen)}.
+          </Text>
+        ) : null}
+        {checked && !arrivingEarly && !sap.fixedReason ? (
+          <Text size="sm" c="dimmed">
+            Your arrival is after gates open, so you probably don't need one —
+            passes are scarce, so switch this off if you don't.
+          </Text>
+        ) : null}
+        {sap.denied ? (
+          <Text size="sm" c="dimmed">
+            An earlier request was declined by an officer.
+          </Text>
+        ) : null}
+      </Stack>
+    </Paper>
+  );
+}
+
+/** "Sunday, Aug 30" — the long form, for the one day everybody has to know. */
+const longDay = (day: string) => dayjs(day).format("dddd, MMM D");
 
 /**
  * The free-text "anything else?".

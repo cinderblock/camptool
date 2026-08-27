@@ -809,5 +809,341 @@ check(
   `HTTP ${notMine.status}`,
 );
 
+// ==========================================================================
+// 20. The "requesting a Setup Access Pass" switch on /trip
+//     (plans/sap-request-and-external-allocation.md)
+//
+// The point of this block is that the tick mark and the officers' queue are
+// the same fact, and that turning it off STAYS off — the failure it guards
+// against is a camper who declined being quietly re-asked by their next date
+// edit, or (worse) believing they asked when no row exists.
+// ==========================================================================
+/** A brand-new camper with an untouched pass slate. */
+async function camper(tag: string) {
+  const who = await account(tag);
+  const mid = crypto.randomUUID();
+  await db.insert(membership).values({
+    id: mid,
+    organizationId: campId,
+    userId: who.id,
+    role: "member",
+    wizardStep: 1,
+  });
+  return { ...who, mid };
+}
+
+/** Their setup_pass rows this edition — the ledger the switch reflects. */
+async function asksFor(mid: string) {
+  return db
+    .select({ id: setupPass.id, status: setupPass.status })
+    .from(setupPass)
+    .innerJoin(attendee, eq(setupPass.attendeeId, attendee.id))
+    .where(
+      and(eq(setupPass.editionId, editionId), eq(attendee.membershipId, mid)),
+    );
+}
+
+const early = await camper("early");
+const earlyRsvp = await post("/trip", early.cookie, {
+  intent: "rsvp",
+  status: "coming",
+  arrivalDate: `${YEAR}-08-25`,
+  departureDate: `${YEAR}-09-01`,
+});
+let earlyAsks = await asksFor(early.mid);
+check(
+  "20. saving an early arrival asks for a pass by itself",
+  earlyRsvp.status === 200 &&
+    earlyAsks.length === 1 &&
+    earlyAsks[0]?.status === "requested",
+  `HTTP ${earlyRsvp.status}, ${earlyAsks.length} row(s) ${earlyAsks[0]?.status}`,
+);
+
+const tripPage = await (await get("/trip", early.cookie)).text();
+check(
+  "20b. and /trip shows the switch, ticked",
+  tripPage.includes("I&#x27;m requesting a Setup Access Pass") &&
+    tripPage.includes("An officer will set one aside"),
+);
+
+// The officer's queue is the other half of the same fact.
+const queueHtml = await (await get("/passes", officer.cookie)).text();
+check(
+  "20c. the officers' queue already knows about them",
+  queueHtml.includes("SAP early"),
+);
+
+const declineRes = await post("/trip", early.cookie, {
+  intent: "declineSetupPass",
+});
+earlyAsks = await asksFor(early.mid);
+check(
+  "20d. switching it off records a decline rather than deleting the row",
+  declineRes.status === 200 &&
+    earlyAsks.length === 1 &&
+    earlyAsks[0]?.status === "declined",
+  `HTTP ${declineRes.status}, ${earlyAsks.map((a) => a.status).join()}`,
+);
+
+// THE assertion for "can be disabled": editing dates again must not re-ask.
+await post("/trip", early.cookie, {
+  intent: "rsvp",
+  status: "coming",
+  arrivalDate: `${YEAR}-08-24`,
+  departureDate: `${YEAR}-09-01`,
+});
+earlyAsks = await asksFor(early.mid);
+check(
+  "20e. a later date edit does NOT quietly ask again",
+  earlyAsks.length === 1 && earlyAsks[0]?.status === "declined",
+  earlyAsks.map((a) => a.status).join(),
+);
+
+// A decline is an answer, so the required onboarding ask is settled by it.
+const declinedSnap = (await loadAskSnapshots(campId, editionId, YEAR)).get(
+  early.mid,
+);
+check(
+  "20f. declining settles the setup-pass to-do (they told us either way)",
+  declinedSnap != null &&
+    !outstandingAsks(declinedSnap, {
+      weeksUntilEvent: 1,
+      featureStates: { passes: "on" },
+      role: "member",
+    }).some((a) => a.key === "setup_pass"),
+);
+
+const reRequest = await post("/trip", early.cookie, {
+  intent: "requestSetupPass",
+});
+earlyAsks = await asksFor(early.mid);
+check(
+  "20g. and they can switch it back on, in place",
+  reRequest.status === 200 &&
+    earlyAsks.length === 1 &&
+    earlyAsks[0]?.status === "requested",
+  earlyAsks.map((a) => a.status).join(),
+);
+
+// Someone arriving after gates open is not auto-asked — but the option is
+// still there, because "I want in early to help build" is a real answer.
+const late = await camper("late");
+await post("/trip", late.cookie, {
+  intent: "rsvp",
+  status: "coming",
+  arrivalDate: `${YEAR}-08-31`,
+  departureDate: `${YEAR}-09-02`,
+});
+check(
+  "20h. a normal-week arrival is not auto-asked",
+  (await asksFor(late.mid)).length === 0,
+);
+const latePage = await (await get("/trip", late.cookie)).text();
+check(
+  "20i. but the switch is offered anyway, with why",
+  latePage.includes("I&#x27;m requesting a Setup Access Pass") &&
+    latePage.includes("Only needed to get in before gates open"),
+);
+await post("/trip", late.cookie, { intent: "requestSetupPass" });
+check(
+  "20j. and asking outright works",
+  (await asksFor(late.mid)).some((a) => a.status === "requested"),
+);
+
+// Fresh stock for the rest of the run. Earlier blocks assigned, released and
+// voided everything imported at the top, and a check that quietly skips
+// because it found no spare is worse than one that fails.
+const EXTRA = [
+  {
+    ticket: "970000001",
+    scan: "7070700001",
+    date: "8/25",
+    sec: "1/Zz/x1+y1/z1",
+  },
+  {
+    ticket: "970000002",
+    scan: "7070700002",
+    date: "8/25",
+    sec: "1/Zz/x2+y2/z2",
+  },
+];
+await upload(officer.cookie, await buildOrder(YEAR, EXTRA), "extra.pdf");
+const extraRows = await db
+  .select()
+  .from(setupPassStock)
+  .where(
+    and(
+      eq(setupPassStock.editionId, editionId),
+      eq(setupPassStock.onOrAfterDate, `${YEAR}-08-25`),
+    ),
+  );
+const outward = extraRows[0];
+const outward2 = extraRows[1];
+if (!outward || !outward2)
+  throw new Error("no spare stock for sections 20k/21");
+
+// A pass really in hand is not something a checkbox may hand back.
+await post("/passes", officer.cookie, {
+  intent: "assignStock",
+  id: outward.id,
+  granteeRef: `m:${early.mid}`,
+});
+const declineHeld = await post("/trip", early.cookie, {
+  intent: "declineSetupPass",
+});
+const [stillHeld] = await db
+  .select()
+  .from(setupPassStock)
+  .where(eq(setupPassStock.id, outward.id));
+check(
+  "20k. once a pass is set aside, the switch can't hand it back",
+  declineHeld.status === 409 && stillHeld?.status === "assigned",
+  `HTTP ${declineHeld.status}, pass ${stillHeld?.status}`,
+);
+// Put it back, so section 21 starts from a spare.
+await post("/passes", officer.cookie, {
+  intent: "unassignStock",
+  id: outward.id,
+});
+
+// ==========================================================================
+// 21. Allocating a pass to somebody who isn't in CampTool at all
+// ==========================================================================
+
+const officerTries = await post("/passes", officer.cookie, {
+  intent: "allocateExternal",
+  id: outward.id,
+  holder: "Jamie Reyes",
+});
+check(
+  "21. an officer can't give a pass away outside the camp — admin only",
+  officerTries.status === 403,
+  `HTTP ${officerTries.status}`,
+);
+
+const nameless = await post("/passes", admin.cookie, {
+  intent: "allocateExternal",
+  id: outward.id,
+  holder: " ",
+});
+check(
+  "21b. a pass can't leave as 'someone' — the name is the only record",
+  nameless.status === 409,
+  `HTTP ${nameless.status}`,
+);
+
+const allocated = await post("/passes", admin.cookie, {
+  intent: "allocateExternal",
+  id: outward.id,
+  holder: "Jamie Reyes (Ranger HQ)",
+  note: "helping us build the shade Tuesday",
+});
+const [outAfter] = await db
+  .select()
+  .from(setupPassStock)
+  .where(eq(setupPassStock.id, outward.id));
+check(
+  "21c. an admin allocates it outside the camp",
+  allocated.status === 200 &&
+    outAfter?.status === "assigned" &&
+    outAfter?.externalHolder === "Jamie Reyes (Ranger HQ)" &&
+    outAfter?.assignedAttendeeId === null,
+  `HTTP ${allocated.status}, ${outAfter?.status}, holder ${outAfter?.externalHolder}`,
+);
+
+const doubleAllocate = await post("/passes", admin.cookie, {
+  intent: "allocateExternal",
+  id: outward.id,
+  holder: "Someone Else",
+});
+check(
+  "21d. it can't be handed on again without being taken back first",
+  doubleAllocate.status === 409,
+  `HTTP ${doubleAllocate.status}`,
+);
+
+const adminStock = await (await get("/passes", admin.cookie)).text();
+check(
+  "21e. the stock table names them and marks the pass as gone outside",
+  adminStock.includes("Jamie Reyes (Ranger HQ)") &&
+    adminStock.includes("outside the camp"),
+);
+check(
+  "21f. and still shows no codes, because it isn't released",
+  !adminStock.includes(outward.scanCode) &&
+    !adminStock.includes(outward.securityCode),
+);
+
+// Taking it back returns it to the pool AND forgets the outsider.
+await post("/passes", admin.cookie, {
+  intent: "unassignStock",
+  id: outward.id,
+});
+const [backIn] = await db
+  .select()
+  .from(setupPassStock)
+  .where(eq(setupPassStock.id, outward.id));
+check(
+  "21g. taking it back returns it to the pool and clears the name",
+  backIn?.status === "available" && backIn?.externalHolder === null,
+  `${backIn?.status}, holder ${backIn?.externalHolder}`,
+);
+
+// Release is how the pass actually reaches them — there's no camper page for
+// it to appear on, so the officer downloads the PDF and sends it.
+await post("/passes", admin.cookie, {
+  intent: "allocateExternal",
+  id: outward2.id,
+  holder: "Dana Okafor",
+});
+const relOut = await post("/passes", admin.cookie, {
+  intent: "releaseStock",
+  id: outward2.id,
+});
+check(
+  "21h. releasing a pass with no attendee still works",
+  relOut.status === 200,
+  `HTTP ${relOut.status}`,
+);
+const outDownload = await get(`/sap/pass/${outward2.id}`, officer.cookie);
+check(
+  "21i. an officer can download it — the only way to hand it over",
+  outDownload.status === 200 &&
+    outDownload.headers.get("content-type") === "application/pdf",
+  `HTTP ${outDownload.status}`,
+);
+const memberSteal = await get(`/sap/pass/${outward2.id}`, holder.cookie);
+check(
+  "21j. and a camper cannot",
+  memberSteal.status === 404,
+  `HTTP ${memberSteal.status}`,
+);
+const memberSees = await (await get("/passes", holder.cookie)).text();
+check(
+  "21k. an outsider's pass never lands in anybody's 'your passes' card",
+  !memberSees.includes("Dana Okafor") &&
+    !memberSees.includes(outward2.scanCode),
+);
+
+// The loader used to hand every viewer the whole camp's stock list — not the
+// codes, but every holder's name, in the page source. A member gets their own
+// party's rows and nothing else now, which is what makes the check above hold
+// for reasons other than luck.
+const strangerSees = await (await get("/passes", stranger.cookie)).text();
+check(
+  "21m. and a member's page carries no other holder's name at all",
+  !strangerSees.includes("Dana Okafor") &&
+    !strangerSees.includes("Samwise Guestee") &&
+    !strangerSees.includes("SAP holder"),
+);
+
+// The one arithmetic rule: gone outside means gone from the pool, and it must
+// never make a camper look served.
+const stillNeeds = await (await get("/passes", officer.cookie)).text();
+check(
+  "21l. an externally-held pass is not offered as spare to cover arrivals",
+  !stillNeeds.includes(`set aside for…" value="${outward2.id}`),
+);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

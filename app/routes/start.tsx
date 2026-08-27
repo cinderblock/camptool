@@ -46,6 +46,7 @@ import {
   loadInviterName,
   loadInviterOptions,
 } from "~/lib/questions.server";
+import { loadMySapState } from "~/lib/sap.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
 import type { AskKey } from "~/lib/wizard";
@@ -266,23 +267,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     inviterOptions = await loadInviterOptions(campId);
   }
 
-  // The camper's setup pass (if any) — drives the "arriving early needs a
-  // Setup Access Pass" prompt on the RSVP step. Denied rows don't count.
-  const passRows = await db
-    .select({
-      status: setupPass.status,
-      date: setupPassDate.date,
-    })
-    .from(setupPass)
-    .leftJoin(setupPassDate, eq(setupPass.passDateId, setupPassDate.id))
-    .innerJoin(attendee, eq(setupPass.attendeeId, attendee.id))
-    .where(
-      and(eq(setupPass.editionId, editionId), eq(attendee.membershipId, mid)),
-    );
-  const myPass = passRows.find((p) => p.status !== "denied") ?? null;
-
   // The trip controls are shared with `/trip`, which owns the writes — this
-  // just feeds them (plans/wizard-step-homes.md).
+  // just feeds them (plans/wizard-step-homes.md). That includes the "requesting
+  // a Setup Access Pass" switch, whose state comes from the same resolver both
+  // pages use, so the wizard and the page can't disagree about it.
   const trip = {
     year: activeEdition.year,
     locked: activeEdition.locked,
@@ -291,11 +279,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     departureDate: state.participation.departureDate,
     note: state.participation.note,
     arrivalWindow: eventWindowFor(activeEdition.year),
-    myPass,
-    passesVisible: featureVisibleTo(
-      await getFeatureState(campId, "passes"),
-      role,
-    ),
+    sap: {
+      visible: featureVisibleTo(await getFeatureState(campId, "passes"), role),
+      ...(await loadMySapState(editionId, mid)),
+    },
   } satisfies TripData;
 
   return redact(privacy, {

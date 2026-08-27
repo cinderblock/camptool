@@ -92,10 +92,18 @@ Man–event feature today). A **Tickets** page manages the camp's Direct Group S
 priced tickets (tier + price, any mix of free/cheap/expensive) that officers
 assign to members and mark paid; members can request one. A **Passes** page
 handles early-arrival **Setup Access Passes**: officers define "on or after"
-dates with a per-date quota (e.g. 2 valid from Monday, 4 from Wednesday);
-members request a pass (onboarding files the request automatically for anyone
-arriving before gates open) and an officer grants each one a date that covers
-the requester's planned arrival, quota-enforced.
+dates with a per-date quota (e.g. 2 valid from Monday, 4 from Wednesday), and
+an officer grants each request a date that covers the requester's planned
+arrival, quota-enforced.
+
+Asking is a **switch on Your trip**, not a one-time button. It sits there
+whenever the camp runs passes, and picking an arrival before gates open files
+the request in the same write that saves the date — so the tick mark and the
+officers' queue are the same fact rather than two that can disagree. Switching
+it off records an explicit "no thanks", which is what stops the next change of
+dates quietly asking again. Once a pass is actually set aside the switch goes
+read-only, because unticking it would either be a lie or a silent hand-back of
+something scarce.
 
 The passes themselves are **imported from the vendor's PDF** — the one that
 arrives with a pass per page. CampTool reads each page's date, ticket ID,
@@ -106,6 +114,12 @@ nothing at all — no codes, no download, not even to officers — and later
 **release** it, which hands the codes over and cannot be undone. A pass that
 has to be pulled after release is *voided* (admin, with a reason) rather than
 returned to the pool, because there is no un-sending a secret.
+
+An **admin** can also allocate a pass **outside the camp** — to a neighbour or
+a helper with no account here — by naming them. It leaves the pool like any
+other assignment, so it stops counting towards covering the camp's own early
+arrivals, and releasing it produces a PDF for the officer to send on, since
+there is no camper page for the codes to appear on.
 
 Released passes are delivered two ways: the vendor's own page, cut out of the
 order on demand, and CampTool's own rendering that puts **a whole travel

@@ -1,0 +1,1 @@
+ALTER TABLE `setup_pass_stock` ADD `external_holder` text;

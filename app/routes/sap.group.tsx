@@ -60,7 +60,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     const r = byId.get(id);
     if (!r) continue;
     passes.push({
-      holderName: r.guestName ?? r.memberName ?? "Unassigned",
+      holderName:
+        r.guestName ?? r.memberName ?? r.externalHolder ?? "Unassigned",
       onOrAfterDate: r.onOrAfterDate,
       scanCode: r.scanCode,
       securityCode: r.securityCode,
@@ -95,12 +96,18 @@ function groupLabel(
     hostMembershipId: string | null;
     memberName: string | null;
     guestName: string | null;
+    externalHolder: string | null;
   }[],
 ): string {
   const hosts = new Set(rows.map((r) => r.hostMembershipId ?? "—"));
   if (rows.length === 1) {
     const only = rows[0];
-    return only?.guestName ?? only?.memberName ?? "Setup Access Passes";
+    return (
+      only?.guestName ??
+      only?.memberName ??
+      only?.externalHolder ??
+      "Setup Access Passes"
+    );
   }
   if (hosts.size === 1 && !hosts.has("—")) {
     // Everyone here is hosted by the same person; that person is usually in the

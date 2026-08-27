@@ -41,10 +41,12 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   }
 
   const pdf = await slicedPassPdf(active.camp.id, pass);
-  const who = (pass.guestName ?? pass.memberName ?? "pass").replace(
-    /[^A-Za-z0-9]+/g,
-    "-",
-  );
+  const who = (
+    pass.guestName ??
+    pass.memberName ??
+    pass.externalHolder ??
+    "pass"
+  ).replace(/[^A-Za-z0-9]+/g, "-");
   return new Response(
     new Blob([new Uint8Array(pdf)], { type: "application/pdf" }),
     {

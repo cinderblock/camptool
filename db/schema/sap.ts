@@ -40,6 +40,15 @@
  * to `available` from it, because there is no way to un-send a secret — the only
  * backward move is `void`, which marks the pass unusable and does NOT return it
  * to the pool. A voided pass needs a replacement from the vendor.
+ *
+ * ## The holder may be outside the camp
+ *
+ * An assigned pass names EITHER an `attendee` or an `external_holder` — someone
+ * with no membership, no attendee row, nothing in the app (see
+ * `plans/sap-request-and-external-allocation.md`). It's the same `assigned`
+ * state either way, deliberately: the pass is still one of the camp's N passes
+ * and still has to stop counting as spare. Only the delivery differs, because
+ * an outsider has no page of their own to be handed the codes on.
  */
 import { sql } from "drizzle-orm";
 import {
@@ -146,6 +155,18 @@ export const setupPassStock = sqliteTable(
       () => attendee.id,
       { onDelete: "set null" },
     ),
+    /**
+     * A holder who is **not in CampTool at all** — a neighbour, a helper, a
+     * friend of the camp with no membership and no attendee row. Admin-only,
+     * and mutually exclusive with `assigned_attendee_id`: exactly one of the
+     * two is set on an assigned pass.
+     *
+     * Free text on purpose. The whole point of this path is the person the
+     * app has never heard of, so there is nothing to reference — which is also
+     * why the audit event carries the name too, and why release hands the PDF
+     * to an officer rather than to a camper's page.
+     */
+    externalHolder: text("external_holder"),
     /** The entitlement this pass satisfies, when it came from a request. */
     setupPassId: text("setup_pass_id"),
 

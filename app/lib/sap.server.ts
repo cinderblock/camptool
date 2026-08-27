@@ -28,6 +28,7 @@ import {
   membership,
   sapDocument,
   setupPass,
+  setupPassDate,
   setupPassStock,
   setupPassStockEvent,
   user,
@@ -248,6 +249,9 @@ export async function assignStock(
     .set({
       status: "assigned",
       assignedAttendeeId: attendeeId,
+      // An assigned pass names one holder. Clearing this is what makes the two
+      // columns mutually exclusive rather than merely conventionally so.
+      externalHolder: null,
       setupPassId: request?.id ?? null,
       assignedAt: new Date(),
       assignedByMembershipId: actor.membershipId,
@@ -272,6 +276,67 @@ export async function assignStock(
   });
 }
 
+/**
+ * Hand a pass to someone the app has never heard of.
+ *
+ * The escape hatch for a neighbour, a helper, a friend of the camp — a person
+ * with no membership and no attendee row, so there is nothing to reference and
+ * nothing to look up. The pass still leaves the pool the ordinary way
+ * (`assigned`), because it is still one of the camp's N passes and must stop
+ * counting as spare the moment it's promised.
+ *
+ * Only from `available`, on purpose: taking a pass off a camper and giving it
+ * to an outsider should be two deliberate acts, so their request visibly
+ * reopens instead of being reassigned out from under them.
+ */
+export async function allocateStockExternally(
+  editionId: string,
+  stockId: string,
+  holder: string,
+  note: string | null,
+  actor: Actor,
+): Promise<void> {
+  const name = holder.trim();
+  if (name.length < 2) {
+    throw new SapStateError("Say who this pass is going to.");
+  }
+  const row = await loadStock(editionId, stockId);
+  if (row.status !== "available") {
+    if (row.status === "assigned") {
+      throw new SapStateError(
+        "That pass is already set aside for someone. Take it back first, so " +
+          "their request reopens instead of quietly changing hands.",
+      );
+    }
+    throw new SapStateError(
+      row.status === "released"
+        ? "That pass has already been released — its codes are out."
+        : "That pass has been voided.",
+    );
+  }
+  await db
+    .update(setupPassStock)
+    .set({
+      status: "assigned",
+      assignedAttendeeId: null,
+      externalHolder: name,
+      setupPassId: null,
+      note: note?.trim() || null,
+      assignedAt: new Date(),
+      assignedByMembershipId: actor.membershipId,
+      updatedAt: new Date(),
+    })
+    .where(eq(setupPassStock.id, stockId));
+  await logStockEvent(stockId, "assigned", {
+    attendeeName: name,
+    actorMembershipId: actor.membershipId,
+    actorName: actor.name,
+    detail: note?.trim()
+      ? `Allocated outside the camp — ${note.trim()}`
+      : "Allocated outside the camp",
+  });
+}
+
 /** Take a pass back. Only before release — after it, the codes are already
  * somewhere else and pretending otherwise is the failure mode this whole design
  * exists to prevent. */
@@ -292,6 +357,7 @@ export async function unassignStock(
     .set({
       status: "available",
       assignedAttendeeId: null,
+      externalHolder: null,
       setupPassId: null,
       assignedAt: null,
       assignedByMembershipId: null,
@@ -303,6 +369,7 @@ export async function unassignStock(
   await reopenRequest(row.setupPassId);
   await logStockEvent(stockId, "unassigned", {
     attendeeId: row.assignedAttendeeId,
+    attendeeName: row.externalHolder,
     actorMembershipId: actor.membershipId,
     actorName: actor.name,
   });
@@ -324,7 +391,9 @@ export async function releaseStock(
   if (row.status === "void") {
     throw new SapStateError("That pass has been voided and can't be released.");
   }
-  if (!row.assignedAttendeeId) {
+  // Either kind of holder counts — a pass allocated outside the camp is as
+  // assigned as one set aside for a camper; only the delivery differs.
+  if (!row.assignedAttendeeId && !row.externalHolder) {
     throw new SapStateError("Assign the pass to someone before releasing it.");
   }
   await db
@@ -337,6 +406,7 @@ export async function releaseStock(
     })
     .where(eq(setupPassStock.id, stockId));
   await logStockEvent(stockId, "released", {
+    attendeeName: row.externalHolder,
     attendeeId: row.assignedAttendeeId,
     actorMembershipId: actor.membershipId,
     actorName: actor.name,
@@ -371,6 +441,7 @@ export async function voidStock(
   await reopenRequest(row.setupPassId);
   await logStockEvent(stockId, "voided", {
     attendeeId: row.assignedAttendeeId,
+    attendeeName: row.externalHolder,
     actorMembershipId: actor.membershipId,
     actorName: actor.name,
     detail: trimmed,
@@ -438,6 +509,11 @@ async function logStockEvent(
  * hand passes out at the gate and get asked "what's my code again?" — but note
  * that even an officer sees nothing before release, which is what makes
  * "assigned" a real state rather than a label.
+ *
+ * A pass allocated outside the camp joins to no attendee, so both membership
+ * columns are NULL and only the officer branch can ever match it. That is the
+ * intended reading: an outsider's pass is deliverable by officers and invisible
+ * to every camper, including whoever the officer is forwarding it on behalf of.
  */
 export function visibleCodesFor(
   pass: {
@@ -523,6 +599,10 @@ export async function stockWithCodes(editionId: string, ids: string[]) {
       hostMembershipId: attendee.hostMembershipId,
       guestName: attendee.name,
       memberName: user.name,
+      // NULL unless the pass went to someone outside the camp, in which case
+      // it is the only name there is — the PDF filename and the group sheet
+      // both fall back to it rather than printing "pass".
+      externalHolder: setupPassStock.externalHolder,
     })
     .from(setupPassStock)
     .leftJoin(attendee, eq(setupPassStock.assignedAttendeeId, attendee.id))
@@ -551,6 +631,7 @@ export async function stockForEdition(editionId: string) {
       voidReason: setupPassStock.voidReason,
       releasedAt: setupPassStock.releasedAt,
       assignedAttendeeId: setupPassStock.assignedAttendeeId,
+      externalHolder: setupPassStock.externalHolder,
       attendeeMembershipId: attendee.membershipId,
       attendeeHostId: attendee.hostMembershipId,
       guestName: attendee.name,
@@ -756,6 +837,174 @@ export async function sapCoverage(
     uncoverable,
     unknownArrival,
   };
+}
+
+// --- one camper's own pass, for /trip and /start ---------------------------
+
+/**
+ * The "requesting a Setup Access Pass" control's whole state, for one camper.
+ *
+ * Two tables answer this question and neither can answer it alone: `setup_pass`
+ * says what they asked for, `setup_pass_stock` says what they actually hold, and
+ * the second only ever exists because an officer acted on the first. Resolving
+ * them into one shape here — rather than in each of the two loaders that need it
+ * — is what keeps `/trip` and `/start` from disagreeing about whether somebody
+ * has a pass.
+ *
+ * See `plans/sap-request-and-external-allocation.md`.
+ */
+export type MySapState = {
+  /** Is the box ticked? True while an ask is live, or a pass is in hand. */
+  requesting: boolean;
+  /**
+   * Why the camper can't change it from here, if they can't — shown in place of
+   * the switch. Set only once a real pass is involved: unticking then would
+   * either be a lie or a silent hand-back of a scarce, possibly already-sent
+   * secret, so it goes through an officer instead.
+   */
+  fixedReason: string | null;
+  /** The day a pass in hand admits them, once one has been set aside. */
+  onOrAfterDate: string | null;
+  /** A pass really set aside for them, and how far along it is. */
+  held: "assigned" | "released" | null;
+  /** An officer turned an earlier ask down. Worth saying, since the box being
+   * clear otherwise reads as "you never asked". */
+  denied: boolean;
+};
+
+export async function loadMySapState(
+  editionId: string,
+  membershipId: string,
+): Promise<MySapState> {
+  const asks = await db
+    .select({ status: setupPass.status, date: setupPassDate.date })
+    .from(setupPass)
+    .leftJoin(setupPassDate, eq(setupPass.passDateId, setupPassDate.id))
+    .innerJoin(attendee, eq(setupPass.attendeeId, attendee.id))
+    .where(
+      and(
+        eq(setupPass.editionId, editionId),
+        eq(attendee.membershipId, membershipId),
+      ),
+    );
+  const held = (
+    await db
+      .select({
+        status: setupPassStock.status,
+        onOrAfterDate: setupPassStock.onOrAfterDate,
+      })
+      .from(setupPassStock)
+      .innerJoin(attendee, eq(setupPassStock.assignedAttendeeId, attendee.id))
+      .where(
+        and(
+          eq(setupPassStock.editionId, editionId),
+          eq(attendee.membershipId, membershipId),
+          ne(setupPassStock.status, "void"),
+        ),
+      )
+  )
+    // Released beats assigned: if any pass of theirs is out, that's the state
+    // that matters, and it's the one that can't be walked back.
+    .sort((a, b) =>
+      a.status === "released" ? -1 : b.status === "released" ? 1 : 0,
+    )
+    .at(0);
+
+  const live = asks.find(
+    (a) => a.status === "requested" || a.status === "granted",
+  );
+  const heldState =
+    held?.status === "released" || held?.status === "assigned"
+      ? held.status
+      : null;
+
+  return {
+    requesting: Boolean(live) || heldState !== null,
+    fixedReason:
+      heldState === "released"
+        ? "Your pass is ready — open Setup Access Passes for the codes."
+        : heldState === "assigned"
+          ? "A pass is already set aside for you. Tell an officer if your plans have changed."
+          : live?.status === "granted"
+            ? "An officer has granted you a pass."
+            : null,
+    onOrAfterDate: held?.onOrAfterDate ?? live?.date ?? null,
+    held: heldState,
+    denied:
+      !live && heldState === null && asks.some((a) => a.status === "denied"),
+  };
+}
+
+/**
+ * Ask for a pass on the camper's behalf when they say they're arriving before
+ * gates open.
+ *
+ * This is the "auto-fills if early arrival is selected" half, and it runs on the
+ * **server, inside the same write that saves the date** rather than as a ticked
+ * box the browser sends later. A control that only looks ticked is the failure
+ * mode worth designing out: the camper believes they asked, the officer queue
+ * has never heard of them, and the two only meet at the gate.
+ *
+ * Idempotent, and it never overrides an answer that already exists — a decline,
+ * a denial, a live request and a pass in hand all mean the question has been
+ * settled, so this only ever fills a genuine blank.
+ */
+export async function autoRequestSetupPass(opts: {
+  campId: string;
+  editionId: string;
+  attendeeId: string;
+  userId: string;
+  /** Their stated arrival, and the day gates open. Both ISO `YYYY-MM-DD`. */
+  arrivalDate: string | null;
+  gateOpenIso: string;
+  /** False when this camp doesn't run passes — then there's nothing to ask for. */
+  passesVisible: boolean;
+}): Promise<void> {
+  const { arrivalDate, gateOpenIso } = opts;
+  if (!opts.passesVisible) return;
+  // ISO dates compare correctly as plain strings.
+  if (!arrivalDate || arrivalDate >= gateOpenIso) return;
+
+  const [person] = await db
+    .select({ ageBand: attendee.ageBand })
+    .from(attendee)
+    .where(eq(attendee.id, opts.attendeeId))
+    .limit(1);
+  // Under-13s are admitted free however early they turn up.
+  if (person && !needsSetupPass(person.ageBand)) return;
+
+  const asks = await db
+    .select({ id: setupPass.id })
+    .from(setupPass)
+    .where(
+      and(
+        eq(setupPass.editionId, opts.editionId),
+        eq(setupPass.attendeeId, opts.attendeeId),
+      ),
+    );
+  if (asks.length > 0) return;
+
+  const stock = await db
+    .select({ id: setupPassStock.id })
+    .from(setupPassStock)
+    .where(
+      and(
+        eq(setupPassStock.editionId, opts.editionId),
+        eq(setupPassStock.assignedAttendeeId, opts.attendeeId),
+        ne(setupPassStock.status, "void"),
+      ),
+    );
+  if (stock.length > 0) return;
+
+  await db.insert(setupPass).values({
+    id: crypto.randomUUID(),
+    campId: opts.campId,
+    editionId: opts.editionId,
+    attendeeId: opts.attendeeId,
+    status: "requested",
+    note: "Asked for automatically — arriving before gates open.",
+    createdById: opts.userId,
+  });
 }
 
 /** The audit trail for one pass, newest first. */

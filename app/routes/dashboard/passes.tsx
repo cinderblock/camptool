@@ -38,6 +38,7 @@ import type { EventRange } from "~/lib/questions";
 import {
   SapImportError,
   SapStateError,
+  allocateStockExternally,
   assignStock,
   earlyArrivalsWithoutStock,
   importSapPdf,
@@ -138,6 +139,11 @@ type StockRow = {
   status: string;
   voidReason: string | null;
   holderName: string | null;
+  /** Set instead of `holderName` when the pass went to someone outside the camp
+   * entirely — see `plans/sap-request-and-external-allocation.md`. */
+  externalHolder: string | null;
+  /** Why it went outside, if whoever allocated it said. */
+  note: string | null;
   holderIsGuest: boolean;
   /** Whose guest, when the holder is one. */
   hostName: string | null;
@@ -345,13 +351,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Two different reads, because they answer two different questions and only
   // one of them is allowed to carry secrets.
   const rawStock = await stockForEdition(editionId);
-  const stock: StockRow[] = rawStock.map((s) => ({
+  const allStock: StockRow[] = rawStock.map((s) => ({
     id: s.id,
     onOrAfterDate: s.onOrAfterDate,
     vendorTicketId: s.vendorTicketId,
     status: s.status,
     voidReason: s.voidReason,
     assignedAttendeeId: s.assignedAttendeeId,
+    externalHolder: s.externalHolder,
+    note: s.note,
     holderName: s.guestName ?? s.memberName ?? null,
     holderIsGuest:
       s.assignedAttendeeId != null && s.attendeeMembershipId == null,
@@ -375,7 +383,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Codes for MY party's released passes only. Everyone else's stay on the
   // server: a code in a loader payload is a code in the browser, in the page
   // source, and in any screenshot.
-  const mineIds = stock.filter((s) => s.mine).map((s) => s.id);
+  const mineIds = allStock.filter((s) => s.mine).map((s) => s.id);
   const myCodes: Record<string, { scanCode: string; securityCode: string }> =
     {};
   for (const row of await stockWithCodes(editionId, mineIds)) {
@@ -386,6 +394,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     };
   }
 
+  // The same reasoning one level out: the officer table is the ONLY thing that
+  // reads the whole camp's stock, so only an officer is sent it. A member used
+  // to receive every holder's name in the loader payload — not a code, but not
+  // theirs either, and an outsider's name has no business travelling to a
+  // camper's browser at all. Members get their own party's rows and no more.
+  const stock = isOfficer ? allStock : allStock.filter((s) => s.mine);
+
   // Who still needs a pass? Two ways to land here, one list:
   //   - they set an arrival before gates open (the app worked it out), or
   //   - they asked for one outright (plans changed, or they want to help build
@@ -395,7 +410,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const needsPass: NeedRow[] = [];
   if (isOfficer) {
     const held = new Set(
-      stock
+      allStock
         .filter((s) => s.status !== "void")
         .map((s) => s.assignedAttendeeId)
         .filter(Boolean),
@@ -444,7 +459,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const coverage = isOfficer ? await sapCoverage(editionId, gateOpen) : null;
 
-  // Assembled after `stock`, because a person's row needs to know whether a
+  // Assembled after `allStock`, because a person's row needs to know whether a
   // pass is already set aside for them.
   const myParty: PartyRow[] = partyRows
     .filter((r) =>
@@ -454,7 +469,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       ),
     )
     .map((r) => {
-      const held = stock.find(
+      const held = allStock.find(
         (s) => s.assignedAttendeeId === r.id && s.status !== "void",
       );
       const request = passes.find(
@@ -487,6 +502,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   return redact(privacy, {
     isOfficer,
+    // Voiding a pass and handing one to somebody outside the camp are the two
+    // transitions nobody else can audit by recognising the name on it.
+    isAdmin: hasAtLeast(active.membership.role, "admin"),
     locked: activeEdition.locked,
     event: activeEdition.event,
     myMembershipId,
@@ -741,6 +759,16 @@ export async function action({ request }: Route.ActionArgs) {
         stockActor,
       );
     },
+    // Out of the pool and out of the camp — to a neighbour, a helper, anyone
+    // with no membership and no attendee row to point at.
+    allocateExternal: () =>
+      allocateStockExternally(
+        editionId,
+        String(form.get("id")),
+        str("holder") ?? "",
+        str("note"),
+        stockActor,
+      ),
     unassignStock: () =>
       unassignStock(editionId, String(form.get("id")), stockActor),
     releaseStock: () =>
@@ -756,11 +784,14 @@ export async function action({ request }: Route.ActionArgs) {
 
   const run = stockIntents[intent];
   if (run) {
-    if (
-      intent === "voidStock" &&
-      !hasAtLeast(active.membership.role, "admin")
-    ) {
-      return data({ error: "Only an admin can void a pass." }, { status: 403 });
+    const adminOnly: Record<string, string> = {
+      voidStock: "Only an admin can void a pass.",
+      allocateExternal:
+        "Only an admin can allocate a pass to someone outside the camp.",
+    };
+    const needsAdmin = adminOnly[intent];
+    if (needsAdmin && !hasAtLeast(active.membership.role, "admin")) {
+      return data({ error: needsAdmin }, { status: 403 });
     }
     try {
       await run();
@@ -773,6 +804,8 @@ export async function action({ request }: Route.ActionArgs) {
     const done: Record<string, string> = {
       assignStock:
         "Pass set aside. The codes stay hidden until you release it.",
+      allocateExternal:
+        "Allocated outside the camp. Release it to get the PDF you can send them.",
       unassignStock: "Pass returned to the pool.",
       releaseStock: "Released — the codes are now visible to them.",
       voidStock: "Pass voided. It has NOT gone back into the pool.",
@@ -844,6 +877,7 @@ type FetcherData = { ok?: string; error?: string };
 export default function Passes({ loaderData }: Route.ComponentProps) {
   const {
     isOfficer,
+    isAdmin,
     locked,
     event,
     myMembershipId,
@@ -1000,6 +1034,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
               grantGroups={grantGroups}
               fetcher={fetcher}
               locked={locked}
+              isAdmin={isAdmin}
             />
             {locked ? null : <ImportCard fetcher={fetcher} year={year} />}
           </>
@@ -1704,15 +1739,18 @@ function StockCard({
   grantGroups,
   fetcher,
   locked,
+  isAdmin,
 }: {
   stock: StockRow[];
   voided: StockRow[];
   grantGroups: GrantGroup[];
   fetcher: ReturnType<typeof useFetcher>;
   locked: boolean;
+  isAdmin: boolean;
 }) {
   const [releasing, setReleasing] = useState<StockRow[] | null>(null);
   const [voiding, setVoiding] = useState<StockRow | null>(null);
+  const [externalising, setExternalising] = useState<StockRow | null>(null);
 
   const dates = [...new Set(stock.map((s) => s.onOrAfterDate))].sort();
   const assigned = stock.filter((s) => s.status === "assigned");
@@ -1779,8 +1817,10 @@ function StockCard({
                       heldBy={heldBy}
                       fetcher={fetcher}
                       locked={locked}
+                      isAdmin={isAdmin}
                       onRelease={() => setReleasing([s])}
                       onVoid={() => setVoiding(s)}
+                      onAllocateExternally={() => setExternalising(s)}
                     />
                   ))}
                 </Stack>
@@ -1816,8 +1856,19 @@ function StockCard({
         onClose={() => setVoiding(null)}
         fetcher={fetcher}
       />
+      <ExternalModal
+        row={externalising}
+        onClose={() => setExternalising(null)}
+        fetcher={fetcher}
+      />
     </>
   );
+}
+
+/** The holder as it should read in a list: a camper's name, or the outsider's,
+ * or nothing yet. Kept in one place because three screens ask. */
+function holderLabel(row: StockRow): string | null {
+  return row.holderName ?? row.externalHolder ?? null;
 }
 
 function StockRowView({
@@ -1826,17 +1877,22 @@ function StockRowView({
   heldBy,
   fetcher,
   locked,
+  isAdmin,
   onRelease,
   onVoid,
+  onAllocateExternally,
 }: {
   row: StockRow;
   grantGroups: GrantGroup[];
   heldBy: Set<string | null>;
   fetcher: ReturnType<typeof useFetcher>;
   locked: boolean;
+  isAdmin: boolean;
   onRelease: () => void;
   onVoid: () => void;
+  onAllocateExternally: () => void;
 }) {
+  const external = row.externalHolder !== null;
   const assignable = grantGroups
     .map((g) => ({
       group: g.group,
@@ -1861,7 +1917,7 @@ function StockRowView({
           {row.status === "available" ? "spare" : row.status}
         </Badge>
         <Text size="sm">
-          {row.holderName ?? (
+          {holderLabel(row) ?? (
             <Text span size="sm" c="dimmed">
               nobody yet
             </Text>
@@ -1872,7 +1928,20 @@ function StockRowView({
               — guest of {row.hostName}
             </Text>
           ) : null}
+          {external && row.note ? (
+            <Text span size="xs" c="dimmed">
+              {" "}
+              — {row.note}
+            </Text>
+          ) : null}
         </Text>
+        {external ? (
+          // Nothing else on this screen would say so: the name is free text,
+          // and the row otherwise looks exactly like a camper's.
+          <Badge size="sm" variant="light" color="grape">
+            outside the camp
+          </Badge>
+        ) : null}
         {row.holderStatus === "not_coming" ? (
           // They took a pass and then dropped out. Nothing else would ever
           // mention it, and it's a pass the camp could give to someone else.
@@ -1888,21 +1957,33 @@ function StockRowView({
       {locked ? null : (
         <Group gap={4} wrap="nowrap">
           {row.status === "available" ? (
-            <Select
-              size="xs"
-              w={190}
-              placeholder="set aside for…"
-              data={assignable}
-              searchable
-              value={null}
-              onChange={(value) => {
-                if (value)
-                  fetcher.submit(
-                    { intent: "assignStock", id: row.id, granteeRef: value },
-                    { method: "post" },
-                  );
-              }}
-            />
+            <>
+              <Select
+                size="xs"
+                w={190}
+                placeholder="set aside for…"
+                data={assignable}
+                searchable
+                value={null}
+                onChange={(value) => {
+                  if (value)
+                    fetcher.submit(
+                      { intent: "assignStock", id: row.id, granteeRef: value },
+                      { method: "post" },
+                    );
+                }}
+              />
+              {isAdmin ? (
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="grape"
+                  onClick={onAllocateExternally}
+                >
+                  Outside camp
+                </Button>
+              ) : null}
+            </>
           ) : null}
           {row.status === "assigned" ? (
             <>
@@ -1927,6 +2008,20 @@ function StockRowView({
                 Take back
               </Button>
             </>
+          ) : null}
+          {row.status === "released" && external ? (
+            // The only way this pass can reach its holder: they have no page
+            // here to be handed the codes on. Without it we'd allocate a pass
+            // we could never deliver.
+            <Button
+              size="compact-xs"
+              variant="light"
+              component="a"
+              href={`/sap/pass/${row.id}`}
+              download
+            >
+              Download PDF
+            </Button>
           ) : null}
           {row.status === "released" ? (
             <Button
@@ -1967,7 +2062,8 @@ function ReleaseModal({
         <List size="sm">
           {(rows ?? []).map((r) => (
             <List.Item key={r.id}>
-              {r.holderName ?? "nobody"} —{" "}
+              {holderLabel(r) ?? "nobody"}
+              {r.externalHolder ? " (outside the camp)" : ""} —{" "}
               {dayjs(r.onOrAfterDate).format("ddd, MMM D")}
             </List.Item>
           ))}
@@ -2013,9 +2109,10 @@ function VoidModal({
     <Modal opened={row !== null} onClose={onClose} title="Void this pass?">
       <Stack gap="sm">
         <Alert color="red" variant="light">
-          The codes for {row?.holderName ?? "this pass"} are already out.
-          Voiding records that it must not be used — it does <b>not</b> go back
-          into the pool, and the camp needs a replacement from the vendor.
+          The codes for {row ? (holderLabel(row) ?? "this pass") : "this pass"}{" "}
+          are already out. Voiding records that it must not be used — it does{" "}
+          <b>not</b> go back into the pool, and the camp needs a replacement
+          from the vendor.
         </Alert>
         <Textarea
           label="Why?"
@@ -2044,6 +2141,88 @@ function VoidModal({
             }}
           >
             Void the pass
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+/**
+ * Give a pass to somebody the app has never heard of.
+ *
+ * The escape hatch, and it asks for a name because that name is the *only*
+ * record of where the pass went — there is no membership to look up later, no
+ * roster row, nothing but this and the audit event it writes. A pass that
+ * leaves as "someone" is a pass the camp cannot account for.
+ */
+function ExternalModal({
+  row,
+  onClose,
+  fetcher,
+}: {
+  row: StockRow | null;
+  onClose: () => void;
+  fetcher: ReturnType<typeof useFetcher>;
+}) {
+  const [holder, setHolder] = useState("");
+  const [note, setNote] = useState("");
+  const close = () => {
+    setHolder("");
+    setNote("");
+    onClose();
+  };
+  return (
+    <Modal
+      opened={row !== null}
+      onClose={close}
+      title="Allocate this pass outside the camp?"
+    >
+      <Stack gap="sm">
+        <Alert color="grape" variant="light">
+          For somebody with no CampTool account — a neighbour, a helper, a
+          friend of the camp. It leaves the pool immediately, so it stops
+          counting towards covering your own early arrivals. Release it
+          afterwards to get the PDF you can send them.
+        </Alert>
+        <TextInput
+          label="Who's getting it?"
+          description="The only record of where this pass went — a name someone will recognise in November."
+          placeholder="e.g. Jamie Reyes (Ranger HQ)"
+          value={holder}
+          onChange={(e) => setHolder(e.currentTarget.value)}
+        />
+        <Textarea
+          label="Why? (optional)"
+          placeholder="e.g. helping us build the shade structure Tuesday; agreed with the leads"
+          value={note}
+          onChange={(e) => setNote(e.currentTarget.value)}
+          minRows={2}
+          autosize
+        />
+        <Group justify="flex-end">
+          <Button variant="subtle" onClick={close}>
+            Cancel
+          </Button>
+          <Button
+            color="grape"
+            disabled={holder.trim().length < 2}
+            loading={fetcher.state !== "idle"}
+            onClick={() => {
+              if (!row) return;
+              fetcher.submit(
+                {
+                  intent: "allocateExternal",
+                  id: row.id,
+                  holder,
+                  note,
+                },
+                { method: "post" },
+              );
+              close();
+            }}
+          >
+            Allocate the pass
           </Button>
         </Group>
       </Stack>
