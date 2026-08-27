@@ -524,6 +524,22 @@ function CampOverview({
                   ))}
                 </Stack>
               )}
+              {/* Each row above goes to the datum's real page — that's the
+                  point of plans/wizard-step-homes.md. But the guided pass over
+                  the same set is still the easier way in for someone new, and
+                  since no to-do links to it any more, this is the only offer of
+                  it on the page a camper actually lands on. */}
+              {(overview.asks ?? []).length > 0 ? (
+                <Anchor
+                  component={Link}
+                  to="/start"
+                  size="xs"
+                  display="block"
+                  mt="sm"
+                >
+                  Or walk through them one at a time
+                </Anchor>
+              ) : null}
             </Card>
 
             {overview.features.announcements ? (

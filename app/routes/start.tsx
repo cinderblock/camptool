@@ -93,7 +93,13 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   // Visiting the wizard once is enough to stop the layout's one-time forced
   // redirect; per-ask resolution (below) drives everything after that.
-  if ((me?.wizardStep ?? 0) === 0) {
+  //
+  // Whether this is that first visit also decides the page's voice: someone who
+  // was *sent* here is being welcomed, someone who came back on purpose (via the
+  // "Guided setup" nav link, Overview, or /guide) already knows what this is and
+  // shouldn't be greeted as a stranger.
+  const firstVisit = (me?.wizardStep ?? 0) === 0;
+  if (firstVisit) {
     await db
       .update(membership)
       .set({ wizardStep: 1 })
@@ -286,6 +292,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   } satisfies TripData;
 
   return redact(privacy, {
+    firstVisit,
     locked: activeEdition.locked,
     bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
     userName: authUser.name,
@@ -396,7 +403,7 @@ export async function action({ request }: Route.ActionArgs) {
 type LoaderData = Route.ComponentProps["loaderData"];
 
 export default function StartWizard({ loaderData }: Route.ComponentProps) {
-  const { scheduled, resolved, locked, weeksToEvent } = loaderData;
+  const { scheduled, resolved, locked, weeksToEvent, firstVisit } = loaderData;
   const navigate = useNavigate();
   const fetcher = useFetcher();
   const steps = scheduled;
@@ -454,16 +461,20 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
       <Group justify="space-between" align="flex-end" mb="lg">
         <div>
           <Title order={1} size="h2">
-            Welcome — let's get you set up
+            {firstVisit
+              ? "Welcome — let's get you set up"
+              : "Your setup, step by step"}
           </Title>
           <Text c="dimmed" size="sm">
             We only ask for what's relevant right now
             {weeksToEvent > 0 ? ` (~${weeksToEvent} weeks to the event)` : ""}.
-            Stop anytime and pick up where you left off.
+            {firstVisit
+              ? " Stop anytime and pick up where you left off."
+              : " Everything here also has its own page — this is just the guided pass."}
           </Text>
         </div>
         <Button variant="subtle" size="xs" onClick={() => navigate("/")}>
-          Skip for now
+          {firstVisit ? "Skip for now" : "Back to dashboard"}
         </Button>
       </Group>
 

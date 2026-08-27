@@ -78,6 +78,44 @@ Three real gaps: **RSVP + stay dates**, **the free-text note**, and **occupants*
 - [x] typecheck / lint / test green; driven in a real browser.
 - [x] Deployed — green on the first split run (see the deploy section).
 
+### Follow-up: the wizard needed a door back in (2026-08-27)
+
+Pointing every to-do at its datum's real page was right, and it left `/start`
+with **no** entry point of its own. What was left led nowhere:
+
+- the forced redirect in `dashboard/layout.tsx` fires **at most once** per
+  member (`wizard_step` flips 0 → 1 the first time `/start` loads) and **never**
+  for officers;
+- the only link was "Continue setup" on `/guide`, itself hidden once
+  `pendingCount === 0`;
+- so anyone who hit "Skip for now", and every officer, was one click from
+  losing the guided pass permanently.
+
+Four small additions, all pointing at the same unchanged wizard:
+
+1. **`Guided setup` in the nav**, first item under "Getting set up". Ungated
+   core, but only rendered when `activeEditionId` is set — `/start` calls
+   `requireActiveEdition`, which throws `redirect("/editions")`, and a nav link
+   that bounces is worse than no link.
+2. **Overview to-do card** gets "Or walk through them one at a time" under the
+   rows, shown when `overview.asks` is non-empty. Deliberately *not* keyed on
+   `todos`, which also holds map approvals and unread meeting summaries — the
+   wizard covers none of those.
+3. **`/guide`'s button is now unconditional**, relabelled "Walk through setup
+   again" when nothing is pending.
+4. **`/start` knows how you got there.** The loader already computed the
+   first-visit condition to decide the `wizard_step` write; it now returns it as
+   `firstVisit`, and the page swaps its greeting ("Welcome — let's get you set
+   up" / "Your setup, step by step") and its escape hatch ("Skip for now" /
+   "Back to dashboard"). Being welcomed as a newcomer on your fifth deliberate
+   visit reads as the app not knowing you.
+
+Re-entry needed no other work: `StartWizard` already opens on the first
+unresolved ask and falls back to step 0 when everything is resolved.
+
+Covered by five new checks in `e2e/account-and-wizard.ts` (10, 10b, 11, 12,
+12b) — one per door plus the two greetings. 21/21 pass.
+
 ## Findings / gotchas
 
 - **`/start` was the only writer of `attendee.status`.** `grep 'intent === "rsvp"'`
@@ -305,9 +343,19 @@ before anyone is tempted to move it back.
 - **Don't** point an ask at `/start`. That's the whole defect. There's a test now.
 - **Don't** gate `/trip` behind a camp feature — see decision 1.
 - **Don't** leave a second copy of the RSVP write path in `start.tsx`.
+- **Don't** remove the last standing link to `/start` while doing so. Nothing
+  routes campers there automatically any more (see the follow-up above), so the
+  nav item, the Overview link and the `/guide` button are the entire way in.
+- **Don't** make the `Guided setup` nav item conditional on outstanding asks.
+  Hiding the wizard once you're caught up is what made it unfindable the first
+  time — it is also how you revisit an answer you half-remember giving.
 
 ## Progress log
 
 - [x] 2026-08-25 — Audited, built and driven. `/trip` created, occupants moved
       onto `/bringing`, all five `/start`-routed asks re-pointed, wizard reduced
       to a view that posts into the real pages' actions.
+- [x] 2026-08-27 — Gave the wizard doors back: `Guided setup` nav item, an
+      Overview link under the to-dos, an always-shown `/guide` button, and
+      first-visit-aware copy on `/start`. typecheck / lint / 416 unit tests /
+      21 e2e checks green. Not deployed yet.

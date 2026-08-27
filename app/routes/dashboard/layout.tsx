@@ -319,6 +319,16 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           id: "setup",
           label: "Getting set up",
           items: [
+            // The wizard's permanent door. It used to be reachable only by the
+            // one-time forced redirect (which officers never get, and which
+            // anyone who clicked "Skip for now" never sees again) — and now that
+            // every to-do points at the datum's real page rather than back into
+            // the wizard (plans/wizard-step-homes.md), nothing else led here.
+            // Ungated core, but only once there's a year to walk: /start
+            // requires an active edition and would bounce to /editions.
+            ...(activeEditionId
+              ? [{ to: "/start", label: "Guided setup", end: false }]
+              : []),
             ...gated("onboarding", "/onboarding", "Onboarding"),
             ...gated("questions", "/questions", "Questions"),
             ...gated("training", "/training", "Training"),

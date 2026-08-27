@@ -121,17 +121,18 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
               })}
             </Timeline>
           )}
-          {pendingCount > 0 ? (
-            <Button
-              component={Link}
-              to="/start"
-              mt="md"
-              variant="light"
-              w="fit-content"
-            >
-              Continue setup
-            </Button>
-          ) : null}
+          {/* Offered even when nothing is pending: the wizard is also how you
+              revisit what you said, and hiding it once you're caught up is how
+              someone who skipped it ends up unable to find it at all. */}
+          <Button
+            component={Link}
+            to="/start"
+            mt="md"
+            variant="light"
+            w="fit-content"
+          >
+            {pendingCount > 0 ? "Continue setup" : "Walk through setup again"}
+          </Button>
         </Card>
 
         <div>

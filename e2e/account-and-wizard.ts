@@ -206,5 +206,40 @@ check(
   backOn.includes("Bringing"),
 );
 
+// ------------------------------------------------- getting back INTO /start
+// Every to-do now points at the datum's own page, and the forced redirect fires
+// at most once — so if the UI stops offering the wizard anywhere, someone who
+// clicked "Skip for now" can never reach it again.
+const overview = await (await get("/", me.cookie)).text();
+check(
+  "10. the nav offers the wizard permanently",
+  overview.includes("Guided setup"),
+);
+check(
+  "10b. and the to-do card offers the guided pass over the same list",
+  overview.includes("Or walk through them one at a time"),
+);
+
+const guide = await (await get("/guide", me.cookie)).text();
+check("11. /guide links into the wizard", guide.includes('href="/start"'));
+
+// The page's voice depends on how you got here: sent (wizard_step 0) vs came
+// back on purpose.
+await db
+  .update(membership)
+  .set({ wizardStep: 0 })
+  .where(eq(membership.id, mid));
+const sent = await (await get("/start", me.cookie)).text();
+check(
+  "12. a first-timer is welcomed",
+  sent.includes("Skip for now") && !sent.includes("Your setup, step by step"),
+);
+const returned = await (await get("/start", me.cookie)).text();
+check(
+  "12b. someone coming back on purpose is not greeted as a stranger",
+  returned.includes("Your setup, step by step") &&
+    returned.includes("Back to dashboard"),
+);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
