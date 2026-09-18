@@ -304,11 +304,13 @@ migration from schema changes), `bun run db:migrate`, `bun run db:studio`.
 Production runs under Bun and serves over a **unix socket** (no TCP port) so a
 reverse proxy can terminate TLS in front of it. `bun run start` boots
 `server.ts`, which binds the React Router handler to `$SOCKET_PATH` (default
-`/run/camptool/camptool.sock`). The canonical deployment auto-deploys to firefly
-on push to `master` (a self-hosted runner stages a release tree that an
-in-container supervisor launches; Caddy proxies the public URL to the socket);
-for self-hosting elsewhere, a `Dockerfile` + `compose.yaml` build the same socket
-server into a container. Both are documented in
+`/run/camptool/camptool.sock`). The `Dockerfile` builds that socket server into
+an image; `compose.yaml` runs it for self-hosters.
+
+The canonical deployment (firefly, https://camptool.mathcamp.us) runs that same
+image, but **pushing to `master` does not deploy it**: CI publishes
+`ghcr.io/cinderblock/camptool:<sha>` and stops. Which build actually runs is
+pinned in the ops repo, and only an ops push changes it. Both paths are in
 [`docs/firefly-deploy.md`](docs/firefly-deploy.md).
 
 ## Design notes

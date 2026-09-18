@@ -1,0 +1,112 @@
+name: Build image
+
+# Push to master → build the image and push it to GHCR. That is the whole job:
+# this repo publishes a *candidate*, it does not deploy.
+#
+# What runs on firefly is decided in the ops repo (cinderblock/ops) by
+# servers/firefly/stacks/camptool/pin.json, which names an image digest.
+# Shipping a build is two steps: push here, then edit that pin and push ops.
+#
+# History worth keeping: this repo's build once ran on firefly itself and was
+# OOM-killed three deploys in a row (2026-08-25), taking the live site, the
+# unrelated bins app and the runner down with it — see plans/wizard-step-homes.md.
+# The build moved to a GitHub-hosted runner then; the *deploy* followed later,
+# when ops took ownership of versions. See ops plans/ops-owned-app-deploys.md.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }} # cinderblock/camptool
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.0
+
+      - run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Verify the migration chain
+        # The app migrates on boot, so a broken chain is a production crash with
+        # no rollback. Checked here, before an image exists to pin. Catches a
+        # missing SQL file and — the one that actually bit us — a non-monotonic
+        # journal `when`, which drizzle skips in silence (see
+        # plans/migration-timestamp-skip.md).
+        run: bun run db:verify
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          # CAMP_THEME is a BUILD-TIME input and is deliberately NOT hardcoded
+          # here — this workflow names no camp, so a fork builds the built-in
+          # @camptool/default-theme. The value is the `CAMP_THEME` repo
+          # variable, which ops owns: declared in ops at
+          # servers/firefly/stacks/camptool/build-vars.env and pushed here by
+          # ops's `sync-camptool-repo-vars` job.
+          #
+          # The Dockerfile turns it into an image LABEL, and ops' pin.json
+          # asserts that label at deploy time — so a variable that was never
+          # synced fails loudly instead of shipping the wrong camp's branding.
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            CAMP_THEME=${{ vars.CAMP_THEME }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}:latest
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summarize how to deploy this build
+        run: |
+          {
+            echo "### Image published"
+            echo
+            echo '```json'
+            echo '{'
+            echo '  "image": "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}",'
+            echo '  "digest": "${{ steps.push.outputs.digest }}",'
+            echo '  "source": {'
+            echo '    "repo": "${{ github.repository }}",'
+            echo '    "commit": "${{ github.sha }}"'
+            echo '  },'
+            echo '  "labels": {'
+            echo '    "us.mathcamp.camptool.theme": "${{ vars.CAMP_THEME }}"'
+            echo '  }'
+            echo '}'
+            echo '```'
+            echo
+            echo "Paste that into \`servers/firefly/stacks/camptool/pin.json\`"
+            echo "in cinderblock/ops and push. Nothing reaches firefly until you do."
+          } >> "$GITHUB_STEP_SUMMARY"

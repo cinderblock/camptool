@@ -27,4 +27,18 @@ COPY --from=build /app/build ./build
 COPY db ./db
 COPY server.ts ./
 
+# Stamp what this image is, for the two things that ask:
+#   BUILD_SHA   — server.ts serves it at /_version
+#   BUILD_THEME — which camp-theme Vite actually baked in
+ARG GIT_SHA=unknown
+ARG CAMP_THEME=@camptool/default-theme
+RUN printf '%s' "${GIT_SHA}" > /app/BUILD_SHA \
+	&& printf '%s' "${CAMP_THEME}" > /app/BUILD_THEME
+
+# The theme is a BUILD input, so it is invisible in a digest and in the
+# runtime env. Publishing it as a label lets ops assert it: the deployment's
+# pin.json carries the expected value and the deploy refuses a mismatch,
+# which is what the old on-host bundle-vs-container comparison did.
+LABEL us.mathcamp.camptool.theme="${CAMP_THEME}"
+
 CMD ["bun", "run", "server.ts"]

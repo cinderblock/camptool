@@ -5,54 +5,53 @@ terminate TLS in front of it. `bun run start` boots `server.ts`, which binds the
 React Router handler to `$SOCKET_PATH` (default `/run/camptool/camptool.sock`).
 There are two deployment paths.
 
-## firefly (the canonical auto-deploy)
+## firefly (the canonical deployment)
 
-CampTool auto-deploys to the **firefly** host and is served at
+CampTool runs on the **firefly** host and is served at
 **https://camptool.mathcamp.us/**. DNS, TLS (Cloudflare proxied, Full strict),
-the reverse proxy, the runner container, and the app supervisor are all owned by
-the **ops repo**. This repo only builds the app and stages a ready-to-run release
-for the supervisor to launch.
+the reverse proxy, the runtime composition and **which build is running** are all
+owned by the **ops repo** (`cinderblock/ops`). This repo builds an image and
+stops.
 
-How it works (frozen contract — see also the coordination notes in the ops repo):
+**Pushing to `master` does not deploy.** The two halves:
 
-- The app runs **inside** an isolated self-hosted-runner container on firefly
-  (`firefly-camptool`, labels `firefly,self-hosted`, root). The container's PID1
-  supervisor owns the app process; a GitHub Actions job can't own it directly
-  because Actions kills the job's process tree when the job ends.
-- On every push to `master`, `.github/workflows/deploy.yml` runs **on that
-  runner** and:
-  1. `bun install --frozen-lockfile` + `bun run build`,
-  2. stages a self-contained tree (build output, `server.ts`, `run`, prod
-     `node_modules`, and `db/migrations/`) to `/srv/camptool/releases/$GITHUB_SHA/`,
-  3. atomically flips `/srv/camptool/current` → that release,
-  4. `touch /srv/camptool/restart` — the supervisor watches this sentinel and
-     restarts the app (CI never touches supervisord's control socket).
-- The supervisor launches `/srv/camptool/current/run` with the release dir as
-  cwd; `run` does `exec bun server.ts`. The app binds
-  `/run/camptool/camptool.sock`, `chmod 0666`s it, and unlinks a stale socket on
-  boot. Caddy shares that socket via a named volume and proxies the public URL to
-  it. The SQLite DB lives at `/srv/camptool/data/camptool.db` (persistent volume,
-  outside the per-SHA release dir) and migrations apply on boot.
+- **This repo:** `.github/workflows/build.yml` runs on a GitHub-hosted runner —
+  `bun install`, typecheck, `db:verify`, `docker build`, push
+  `ghcr.io/cinderblock/camptool:<sha>` and `:latest`. The image is labelled with
+  the commit (`org.opencontainers.image.revision`) and with the camp theme it was
+  built against (`us.mathcamp.camptool.theme`). The job summary prints a
+  ready-to-paste `pin.json`.
+- **ops:** `servers/firefly/stacks/camptool/` holds `compose.yml` (how it runs),
+  `env.json` (which secrets it gets) and `pin.json` — the image **digest** that
+  runs, plus the commit and theme the deploy verifies the image against before
+  starting it. Editing `pin.json` and pushing ops is a deploy; reverting it is a
+  rollback.
 
-Until the first successful deploy the site returns **502** — expected.
+This repo has no self-hosted runner and no access to firefly. It used to: the app
+ran inside a runner container on the box and every push built, staged and
+restarted it there — which is how three deploys in a row got OOM-killed on
+2026-08-25 and took the live site down with them (see
+`plans/wizard-step-homes.md`). The build moved off the box then; the deploy
+followed when ops took ownership of versions.
 
-### Runtime config (ops-managed env-file)
+### Build-time theme
 
-CI writes **no** secrets. The ops stack injects an env-file into the app process
-with these keys:
+`CAMP_THEME` (which camp-theme package Vite bakes into the bundle) is a
+**build-time** input. This workflow deliberately names no camp — a fork builds
+`@camptool/default-theme`. The value is the repo's `CAMP_THEME` Actions variable,
+which **ops owns**: declared in ops at
+`servers/firefly/stacks/camptool/build-vars.env` and pushed here by ops's
+`sync-camptool-repo-vars` job. The Dockerfile turns it into an image label, and
+ops's `pin.json` asserts that label at deploy time, so a variable that was never
+synced fails loudly instead of shipping the wrong camp's branding.
 
-| Key | Required | Notes |
-|---|---|---|
-| `PUBLIC_BASE_URL` | yes | `https://camptool.mathcamp.us` — auth callbacks + links |
-| `BETTER_AUTH_SECRET` | yes | 32+ random chars (`openssl rand -base64 32`) |
-| `DATABASE_PATH` | yes | `/srv/camptool/data/camptool.db` (persistent, outside releases) |
-| `UPLOADS_PATH` | no | picture files; defaults to `uploads/` beside `DATABASE_PATH` → `/srv/camptool/data/uploads` |
-| `DISCORD_CLIENT_ID` / `_SECRET` | no | enables Discord login/link |
-| `DISCORD_BOT_TOKEN` / `_GUILD_ID` | no | enables DM/guild features |
-| `NODE_ENV` | no | `production` (conventional) |
-| `CAMP_THEME` | no | **build-time** — camp-theme package to bake in (default = built-in). See below. |
+### Runtime config
 
-`SOCKET_PATH` defaults to `/run/camptool/camptool.sock` — leave it unset.
+Everything the app reads at runtime comes from ops's `compose.yml` and
+`env.json` — `PUBLIC_BASE_URL`, `DATABASE_PATH`, `SOCKET_PATH`,
+`BETTER_AUTH_SECRET` (generated once by ops and reused across deploys, so
+sessions survive), the optional `DISCORD_*` set and `DEV_API_TOKEN`. There is
+no env-file in this repo and none on the box outside ops's persistent state.
 
 ## Backing it up
 
