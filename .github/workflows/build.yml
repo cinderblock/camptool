@@ -15,6 +15,8 @@ name: Build image
 on:
   push:
     branches: [master]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 env:
@@ -65,7 +67,8 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          push: true
+          # Build only on a pull request: nothing is published until it reaches master.
+          push: ${{ github.event_name != 'pull_request' }}
           # CAMP_THEME is a BUILD-TIME input and is deliberately NOT hardcoded
           # here — this workflow names no camp, so a fork builds the built-in
           # @camptool/default-theme. The value is the `CAMP_THEME` repo
@@ -89,6 +92,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Summarize how to deploy this build
+        if: github.event_name != 'pull_request'
         run: |
           {
             echo "### Image published"
