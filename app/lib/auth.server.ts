@@ -238,12 +238,15 @@ export const auth = betterAuth({
           // internalAdapter (not the raw adapter) so the user create hooks fire
           // — that's what promotes the first account to super admin and applies
           // the invite-only gate. It honors our supplied id (forceAllowId).
-          const created = await ctx.context.internalAdapter.createUser({
-            id: pending.userId,
-            name: pending.name,
-            email: pending.email,
-            emailVerified: false,
-          });
+          const created = await ctx.context.internalAdapter.createUser(
+            {
+              id: pending.userId,
+              name: pending.name,
+              email: pending.email,
+              emailVerified: false,
+            },
+            { method: "passkey" },
+          );
           if (!created) {
             throw new APIError("UNPROCESSABLE_ENTITY", {
               message: "Could not create your account.",
