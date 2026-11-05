@@ -26,6 +26,7 @@ import {
 import { attendee } from "./attendee";
 import { user } from "./auth";
 import { camp, campEdition, membership } from "./camp";
+import { campImage } from "./image";
 
 const now = sql`(unixepoch() * 1000)`;
 
@@ -422,4 +423,64 @@ export const mapSnapshot = sqliteTable(
       .default(now),
   },
   (t) => [index("map_snapshot_edition").on(t.editionId, t.kind, t.seq)],
+);
+
+/** An overhead photo (drone shot, gigapan, satellite tile) laid UNDER the
+ * edition's map, so the plan can be compared with what actually got built (see
+ * plans/map-aerial-photo.md).
+ *
+ * The bytes are an ordinary `camp_image` — uploaded, stored and served by the
+ * same private, camp-scoped pipeline as wiki pictures. This row is only the
+ * placement of that picture on the lot, kept as metadata so the original is
+ * never re-encoded to "bake in" a rotation or crop.
+ *
+ * Transform, in plot-local feet (see this file's header): the image's centre
+ * pixel sits at (`cx`, `cy`); one image pixel is `ftPerPx` feet; the image is
+ * turned `rotation` degrees clockwise on screen. `crop*` are fractions (0..1)
+ * of the image's own width/height — only that window is drawn.
+ *
+ * Deliberately NOT in `map_snapshot`: it's a reference layer, not the plan, and
+ * restoring an old version must not move the photo.
+ */
+export const mapAerial = sqliteTable(
+  "map_aerial",
+  {
+    id: text("id").primaryKey(),
+    campId: text("camp_id")
+      .notNull()
+      .references(() => camp.id, { onDelete: "cascade" }),
+    editionId: text("edition_id")
+      .notNull()
+      .references(() => campEdition.id, { onDelete: "cascade" }),
+    imageId: text("image_id")
+      .notNull()
+      .references(() => campImage.id, { onDelete: "cascade" }),
+    /** "Saturday gigapan" — tells several photos of one year apart. */
+    label: text("label"),
+    /** Pixel size of the original, copied from the image so the transform
+     * never depends on a picture having finished loading. */
+    pxWidth: integer("px_width").notNull(),
+    pxHeight: integer("px_height").notNull(),
+    cx: real("cx").notNull().default(0),
+    cy: real("cy").notNull().default(0),
+    ftPerPx: real("ft_per_px").notNull().default(0.1),
+    rotation: real("rotation").notNull().default(0),
+    opacity: real("opacity").notNull().default(0.85),
+    cropX0: real("crop_x0").notNull().default(0),
+    cropY0: real("crop_y0").notNull().default(0),
+    cropX1: real("crop_x1").notNull().default(1),
+    cropY1: real("crop_y1").notNull().default(1),
+    /** Shown by default. Each viewer can still hide it for themselves. */
+    visible: integer("visible", { mode: "boolean" }).notNull().default(true),
+    createdById: text("created_by_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [index("map_aerial_edition").on(t.editionId)],
 );

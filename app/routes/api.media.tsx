@@ -39,7 +39,7 @@ export async function action({ request }: Route.ActionArgs) {
   const { user: actor, active } = await requireActiveCamp(request);
 
   // Who may upload follows who may WRITE something that takes a picture, so
-  // there is no way to use this route to get around either feature's gate.
+  // there is no way to use this route to get around any feature's gate.
   const states = await loadFeatureStates(active.camp.id);
   const role = active.membership.role;
   const canWiki =
@@ -48,7 +48,11 @@ export async function action({ request }: Route.ActionArgs) {
   const canFaq =
     featureVisibleTo(states.get("faq") ?? "off", role) &&
     hasAtLeast(role, "officer");
-  if (!canWiki && !canFaq) {
+  // Officers lay aerial photos under the camp map (plans/map-aerial-photo.md).
+  const canMapAerial =
+    featureVisibleTo(states.get("map") ?? "off", role) &&
+    hasAtLeast(role, "officer");
+  if (!canWiki && !canFaq && !canMapAerial) {
     return data({ error: "You can't add pictures here." }, { status: 403 });
   }
 

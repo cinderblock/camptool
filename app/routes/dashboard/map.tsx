@@ -40,6 +40,14 @@ import {
 } from "react";
 import { Link, data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
+import {
+  AerialLayer,
+  AerialPanel,
+  type AerialPick,
+  addPickPoint,
+} from "~/components/map/AerialPhoto";
+import type { AerialRow } from "~/lib/aerial";
+import { AERIAL_INTENTS, aerialAction, loadAerials } from "~/lib/aerial.server";
 import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { BLOCKS, blockById } from "~/lib/blocks";
 import {
@@ -836,6 +844,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     .where(eq(mapRoad.editionId, editionId));
 
   const canManage = hasAtLeast(active.membership.role, "officer");
+  // Aerial photos of this year's camp (plans/map-aerial-photo.md).
+  const aerials = await loadAerials(active.camp.id, editionId);
   // Declared-but-unplaced items (the officer placement queue), with owner names.
   // Includes items parked in the staging apron: staging is a way to LOOK at
   // something's real size, not a decision about where it goes, so it must not
@@ -893,6 +903,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     // rejected on add, and flagged on any already-placed object.
     bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
     canManage: canManage && !activeEdition.locked,
+    // Aerial photos are a reference layer, not the plan, so a locked year
+    // doesn't stop an officer adding the photo of what actually got built.
+    canManageAerial: canManage,
+    aerials,
     // The viewer's own membership — used to decide which items they may adjust
     // (their own) and to drive the "My items" highlight.
     myMembershipId: active.membership.id,
@@ -986,6 +1000,28 @@ export async function action({ request }: Route.ActionArgs) {
   const myMembershipId = active.membership.id;
   const form = await request.formData();
   const intent = String(form.get("intent"));
+
+  // Aerial photos: officer-only, and allowed in a locked year (see
+  // aerialAction for why). Handled before the lock check on purpose.
+  if (AERIAL_INTENTS.has(intent)) {
+    if (!hasAtLeast(active.membership.role, "officer")) {
+      return data(
+        { error: "Only officers can change the aerial photo." },
+        { status: 403 },
+      );
+    }
+    const res = await aerialAction({
+      intent,
+      form,
+      campId,
+      editionId,
+      userId: user.id,
+    });
+    if ("error" in res) {
+      return data({ error: res.error }, { status: res.status });
+    }
+    return data({ aerialOk: true, aerialId: res.id ?? null });
+  }
 
   // Reading a saved version changes nothing, so a locked year must not block it —
   // a locked year is exactly when people most want to look back at what was
@@ -2881,8 +2917,12 @@ async function exportMapJpeg(opts: {
 
   // Drop all sun effects — the cast shadows AND the self-shading / Pi-sign
   // ground shadow — for a clean overhead plan, not the shade sim.
+  // ...and any aerial photo: a placement submission is the plan, not a
+  // picture of what got built (and its camp-private href can't load there).
   for (const el of Array.from(
-    clone.querySelectorAll("[data-map-shadow],[data-map-shade]"),
+    clone.querySelectorAll(
+      "[data-map-shadow],[data-map-shade],[data-map-aerial]",
+    ),
   )) {
     el.remove();
   }
@@ -3646,6 +3686,40 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   const [highlight, setHighlight] = useState<string>(party ? "party" : "none");
   // Global door visibility — master switch over each object's own showDoor flag.
   const [showDoors, setShowDoors] = useState(true);
+  // Aerial photos (plans/map-aerial-photo.md): live drafts while an officer
+  // drags a control, this viewer's own show/hide over the officer default,
+  // and a two-point alignment in progress.
+  const [aerialDrafts, setAerialDrafts] = useState<
+    Record<string, Partial<AerialRow>>
+  >({});
+  const [aerialShown, setAerialShown] = useState<Record<string, boolean>>({});
+  const [aerialPick, setAerialPick] = useState<AerialPick | null>(null);
+  const aerials = useMemo(
+    () => loaderData.aerials.map((a) => ({ ...a, ...aerialDrafts[a.id] })),
+    [loaderData.aerials, aerialDrafts],
+  );
+  // Once the server has the value a draft was holding, the draft is done.
+  // Field by field, so a newer edit still in flight isn't snapped back.
+  useEffect(() => {
+    setAerialDrafts((drafts) => {
+      const next: Record<string, Partial<AerialRow>> = {};
+      for (const [id, patch] of Object.entries(drafts)) {
+        const row = loaderData.aerials.find((a) => a.id === id);
+        if (!row) continue;
+        const left = Object.fromEntries(
+          Object.entries(patch).filter(([k, v]) => {
+            const server = row[k as keyof AerialRow];
+            return typeof v === "number" && typeof server === "number"
+              ? Math.abs(v - server) > 1e-6
+              : v !== server;
+          }),
+        );
+        if (Object.keys(left).length) next[id] = left;
+      }
+      return next;
+    });
+  }, [loaderData.aerials]);
+  const aerialIsShown = (a: AerialRow) => aerialShown[a.id] ?? a.visible;
   // Fire-access overlay: shade the lot by 125′ hose reach from the street/alley.
   const [showFire, setShowFire] = useState(false);
   // Uplink aiming: draw each uplink radio's path to the NOC tower and flag what
@@ -4260,6 +4334,16 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             windStrength={windStrength}
             windParticles={windParticles}
             fetcher={fetcher}
+            aerials={aerials.filter(
+              (a) => aerialIsShown(a) || a.id === aerialPick?.aerialId,
+            )}
+            aerialPick={aerialPick}
+            onAerialPoint={(p) =>
+              setAerialPick((cur) => {
+                const a = cur && aerials.find((x) => x.id === cur.aerialId);
+                return cur && a ? addPickPoint(cur, a, p) : cur;
+              })
+            }
           />
           <GridScaleNote lot={shownLot} />
         </div>
@@ -4292,6 +4376,28 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               diff={diff}
               canManage={canManage}
               fetcher={fetcher}
+            />
+            <AerialPanel
+              aerials={aerials}
+              lot={shownLot}
+              mapUpBearing={mapUpBearingFor(
+                shownLot.address,
+                shownLot.frontsToMan,
+              )}
+              burningMan={isBurningMan(event)}
+              canManage={loaderData.canManageAerial}
+              isShown={aerialIsShown}
+              setShown={(id, on) =>
+                setAerialShown((cur) => ({ ...cur, [id]: on }))
+              }
+              onDraft={(id, patch) =>
+                setAerialDrafts((cur) => ({
+                  ...cur,
+                  [id]: { ...cur[id], ...patch },
+                }))
+              }
+              pick={aerialPick}
+              setPick={setAerialPick}
             />
             <Paper withBorder p="sm" radius="md">
               <Text size="xs" fw={600} mb={6}>
@@ -4809,6 +4915,9 @@ function Editor({
   windStrength,
   windParticles,
   fetcher,
+  aerials,
+  aerialPick,
+  onAerialPoint,
 }: {
   lot: Lot;
   objects: ObjRow[];
@@ -4869,6 +4978,11 @@ function Editor({
   windStrength: number;
   windParticles: number;
   fetcher: ReturnType<typeof useFetcher>;
+  /** Aerial photos to draw under the map (already filtered to the shown ones). */
+  aerials: AerialRow[];
+  /** A two-point alignment in progress: clicks feed it instead of editing. */
+  aerialPick: AerialPick | null;
+  onAerialPoint: (plot: { x: number; y: number }) => void;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
   // Night-lighting sim: how far the sun is below the horizon drives a dusk→night
@@ -7082,6 +7196,18 @@ function Editor({
               touchAction: "pinch-zoom",
             }}
             onPointerDown={onCanvasDown}
+            // Aligning an aerial photo: every click is an alignment point, so
+            // catch it before any object's own drag handler sees it.
+            onPointerDownCapture={
+              aerialPick
+                ? (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const p = svgPoint(e);
+                    onAerialPoint({ x: fx(p.x), y: fy(p.y) });
+                  }
+                : undefined
+            }
             onDragOver={canManage ? (e) => e.preventDefault() : undefined}
             onDrop={canManage ? onDrop : undefined}
             role="img"
@@ -7286,6 +7412,31 @@ function Editor({
                 </>
               )}
             </g>
+            {/* Aerial photo of what actually got built, over the street and
+            neighbours (it shows them too) and under everything planned. The
+            lot outline is redrawn on top so the boundary stays readable. */}
+            {aerials.length ? (
+              <>
+                <AerialLayer
+                  aerials={aerials}
+                  originX={originX}
+                  originY={originY}
+                  ppf={ppf}
+                  zoom={zoom}
+                  pick={aerialPick}
+                />
+                <polygon
+                  data-map-aerial=""
+                  points={lotPoints}
+                  fill="none"
+                  stroke="#ffffff"
+                  strokeOpacity={0.85}
+                  strokeWidth={2}
+                  strokeDasharray="8 5"
+                  pointerEvents="none"
+                />
+              </>
+            ) : null}
             {/* Fire-access overlay (clipped to the lot): green = within 125′ hose
             reach of the street frontage or the rear alley; red = beyond both
             (an internal fire lane would be required). Measured by depth. */}

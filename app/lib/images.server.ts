@@ -9,7 +9,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../../db/client.server";
-import { campImage, faqEntry, wikiPage } from "../../db/schema";
+import { campImage, faqEntry, mapAerial, wikiPage } from "../../db/schema";
 import { type ImageMimeType, imageRefs } from "./images";
 
 export type CampImageRow = typeof campImage.$inferSelect;
@@ -170,7 +170,7 @@ export async function deleteImage(campId: string, id: string): Promise<void> {
  * answers, not millions.
  */
 export async function unusedImageIds(campId: string): Promise<Set<string>> {
-  const [images, pages, answers] = await Promise.all([
+  const [images, pages, answers, aerials] = await Promise.all([
     db
       .select({ id: campImage.id })
       .from(campImage)
@@ -183,8 +183,13 @@ export async function unusedImageIds(campId: string): Promise<Set<string>> {
       .select({ body: faqEntry.answer })
       .from(faqEntry)
       .where(eq(faqEntry.campId, campId)),
+    // An aerial photo under the map is a use too, with no body to scan.
+    db
+      .select({ id: mapAerial.imageId })
+      .from(mapAerial)
+      .where(eq(mapAerial.campId, campId)),
   ]);
-  const used = new Set<string>();
+  const used = new Set<string>(aerials.map((a) => a.id.toLowerCase()));
   for (const { body } of [...pages, ...answers]) {
     for (const ref of imageRefs(body)) used.add(ref);
   }

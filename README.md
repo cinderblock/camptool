@@ -76,6 +76,14 @@ ownership-aware: officers arrange the lot, while a camper can move/resize their
 own item — those changes apply live but stay **pending** until an officer
 approves or rejects them.
 
+Officers can lay an **aerial photo** (a drone shot, gigapan or satellite tile)
+under each year's map to compare the plan with what actually got built. The
+upload is turned to match the map from the lot's clock address ("12:00 up" or
+"north up"), then lined up by clicking two features in the photo and the same
+two on the map; turn, scale, position, crop and opacity can be fine-tuned. The
+photo stays camp-private, is left out of the Burning Man export, and isn't part
+of map undo or versions.
+
 New campers get a guided, resumable **onboarding wizard** at `/start`: a
 full-screen walkthrough to set a playa name, declare what they're bringing, add
 who's sharing their tent/RV, and tick the camp's checklist — one step at a time.
