@@ -45,6 +45,7 @@ export async function loadAerials(
     cropX1: a.cropX1,
     cropY1: a.cropY1,
     visible: a.visible,
+    clipToLot: a.clipToLot,
     hasDisplay: !!displayMimeType,
   }));
 }
@@ -131,6 +132,9 @@ export async function aerialAction(opts: {
   };
   if (form.has("label")) set.label = cleanLabel(form.get("label"));
   if (form.has("visible")) set.visible = form.get("visible") === "true";
+  if (form.has("clipToLot")) {
+    set.clipToLot = form.get("clipToLot") === "true";
+  }
   if (["cropX0", "cropY0", "cropX1", "cropY1"].some((k) => form.has(k))) {
     Object.assign(
       set,

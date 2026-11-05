@@ -45,6 +45,7 @@ import {
   AerialPanel,
   type AerialPick,
   addPickPoint,
+  pickWants,
 } from "~/components/map/AerialPhoto";
 import type { AerialRow } from "~/lib/aerial";
 import { AERIAL_INTENTS, aerialAction, loadAerials } from "~/lib/aerial.server";
@@ -7424,6 +7425,7 @@ function Editor({
                   ppf={ppf}
                   zoom={zoom}
                   pick={aerialPick}
+                  lotClipId={clipId}
                 />
                 <polygon
                   data-map-aerial=""
@@ -8685,6 +8687,21 @@ function Editor({
                   </text>
                 ))}
               </g>
+            ) : null}
+            {/* Aligning an aerial photo, on a "click the photo" step: draw it
+            again over everything, opaque, so the feature being clicked is the
+            one actually visible rather than a tent planned on top of it. */}
+            {aerialPick && pickWants(aerialPick) === "photo" ? (
+              <AerialLayer
+                aerials={aerials}
+                originX={originX}
+                originY={originY}
+                ppf={ppf}
+                zoom={zoom}
+                pick={aerialPick}
+                lotClipId={clipId}
+                over
+              />
             ) : null}
           </svg>
         </Box>

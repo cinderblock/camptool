@@ -470,6 +470,11 @@ export const mapAerial = sqliteTable(
     cropY0: real("crop_y0").notNull().default(0),
     cropX1: real("crop_x1").notNull().default(1),
     cropY1: real("crop_y1").notNull().default(1),
+    /** Draw only the part inside the lot outline. A photo is rarely square to
+     * the lot, so a rectangular crop can't do this on its own. */
+    clipToLot: integer("clip_to_lot", { mode: "boolean" })
+      .notNull()
+      .default(false),
     /** Shown by default. Each viewer can still hide it for themselves. */
     visible: integer("visible", { mode: "boolean" }).notNull().default(true),
     createdById: text("created_by_id").references(() => user.id, {

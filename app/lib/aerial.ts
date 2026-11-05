@@ -34,6 +34,8 @@ export type AerialRow = {
   cropX1: number;
   cropY1: number;
   visible: boolean;
+  /** Draw only what's inside the lot outline. */
+  clipToLot: boolean;
   /** A smaller display copy exists, so the map can draw that at low zoom. */
   hasDisplay: boolean;
 };

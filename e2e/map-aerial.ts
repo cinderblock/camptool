@@ -3,7 +3,8 @@
  * seeded rotation, a two-point alignment, and the per-viewer show/hide.
  *
  * Run under NODE, not bun (Playwright hangs under bun). Needs an officer
- * session on a camp whose lot has a clock address, and a picture to upload:
+ * session on a camp whose lot has a clock address and NO aerial photo yet
+ * (the checks read the first one), and a picture to upload:
  *   E2E_BASE_URL=http://localhost:17923 E2E_COOKIE='<name>=<value>' \
  *   E2E_AERIAL=path/to/photo.png E2E_EXPECT_ROTATION=83 \
  *     node --experimental-strip-types e2e/map-aerial.ts
@@ -39,7 +40,7 @@ type Placement = {
 async function placement(page: Page): Promise<Placement | null> {
   return page.evaluate(() => {
     const g = document.querySelector(
-      "#camp-map-svg [data-map-aerial] > g[transform]",
+      "#camp-map-svg [data-map-aerial] g[transform]",
     );
     const img = g?.querySelector("image");
     if (!g || !img) return null;
@@ -148,6 +149,10 @@ async function main() {
   const aT = { x: a0.x + 40, y: a0.y };
   const bT = { x: b0.x, y: b0.y + 30 };
   await page.getByRole("button", { name: "Align by two points" }).click();
+  check(
+    "photo step draws the photo over the map too",
+    (await page.locator("#camp-map-svg [data-map-aerial] image").count()) >= 2,
+  );
   for (const p of [a0, aT, b0, bT]) {
     const s = await toScreen(page, p.x, p.y);
     await page.mouse.click(s.x, s.y);
@@ -182,6 +187,24 @@ async function main() {
       Math.abs(pl2.rot - pl.rot) < 0.01 &&
       Math.abs(pl2.tx - pl.tx) < 0.5,
     JSON.stringify({ before: pl, after: pl2 }),
+  );
+
+  stage("clip to the lot");
+  await page.getByRole("button", { name: "Adjust" }).click();
+  await page.getByRole("checkbox", { name: "Clip to the lot" }).check();
+  await page.waitForTimeout(1200);
+  await page.reload();
+  await page
+    .locator("#camp-map-svg [data-map-aerial] image")
+    .first()
+    .waitFor({ state: "attached" });
+  check(
+    "clipped to the lot outline after a reload",
+    (await page
+      .locator(
+        '#camp-map-svg [data-map-aerial] > g[clip-path="url(#lot-clip)"]',
+      )
+      .count()) === 1,
   );
 
   if (SHOT) await page.screenshot({ path: SHOT, fullPage: false });

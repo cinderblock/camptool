@@ -1,0 +1,1 @@
+ALTER TABLE `map_aerial` ADD `clip_to_lot` integer DEFAULT false NOT NULL;

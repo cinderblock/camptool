@@ -39,16 +39,21 @@ Cameron's three asks (2026-11-05):
    `ftPerPx`, `rotation` (deg, clockwise on screen), `opacity`, plus a
    **crop** rect in image fractions. The original file is never re-encoded
    (full-res originals are a locked decision) — crop/rotate are metadata.
-4. **Alignment = two-point fit** (click a feature in the photo, then where it
+4. **Crop is a rectangle in the photo's own frame, plus "Clip to the lot".**
+   A photo is rarely square to the lot (the 2026 gigapan is ~11° off), so a
+   rectangle alone can't crop to "the area we got"; the lot clip reuses the
+   map's lot-outline clipPath. Off while aligning, so features just outside
+   the lot stay clickable.
+5. **Alignment = two-point fit** (click a feature in the photo, then where it
    is on the map, twice → similarity transform), plus numeric nudges.
    Rotation is seeded from the event's orientation ("12:00 up" for BRC, or
    "north up") and the lot address.
-5. **Not part of map undo/snapshots/versions.** It's a reference layer, not
+6. **Not part of map undo/snapshots/versions.** It's a reference layer, not
    the plan. Stripped from the Burning Man export.
-6. **Officers manage it, even in a locked year** — the photo of what got
+7. **Officers manage it, even in a locked year** — the photo of what got
    built arrives after the event, which is exactly when years get locked. It
    doesn't change the plan, so the lock doesn't need to block it.
-7. **Everyone who can see the map sees the photo** (camp-internal, private
+8. **Everyone who can see the map sees the photo** (camp-internal, private
    first — no new public surface), with a per-viewer show/hide toggle.
 
 ## Plan / steps
@@ -64,8 +69,11 @@ Cameron's three asks (2026-11-05):
 6. [x] Officer panel: upload, orientation seed, opacity, visible, crop,
        two-point align, nudge, delete. Viewer toggle.
 7. [x] Verify locally (typecheck, lint, tests, drive it).
-8. [ ] **(current)** Commit, deploy, confirm `/_version`.
-9. [ ] Upload the 2026 gigapan on live and align it.
+8. [x] Commit, deploy, confirm `/_version` — f8b524d live 2026-11-05 3:12 PM PST (23:12Z)
+       via ops Renovate (pin bump af9597a6).
+9. [x] Upload the 2026 gigapan on live and align it (2026-11-05).
+10. [ ] **(current)** Follow-up: "Clip to the lot" + the missing opaque photo
+        layer for the photo-click steps; deploy; turn the clip on for 2026.
 
 ## Findings / gotchas
 
@@ -85,10 +93,30 @@ Cameron's three asks (2026-11-05):
   served, two-point fit lands both points (< 2.5 view units), persists across
   reload, viewer hide, no page errors.
 
+- **Deploy path changed 2026-09-18**: camptool CI only builds
+  `ghcr.io/cinderblock/camptool:<sha>`; ops Renovate (daily 4:00 AM PST /
+  12:00Z, or `gh workflow run renovate.yml -f dry_run=false` on
+  cinderblock/ops) bumps `servers/firefly/stacks/camptool/pin.json`, tests it
+  on `renovate/**`, fast-forwards ops master, and that push deploys. A plain
+  `workflow_dispatch` defaults to **dry run** and ships nothing.
+- 2026 alignment, measured from the photo (not computed from the address):
+  hypar shade corners ≈ (1010,471) (1338,533) (1273,848) (941,773) px →
+  centre (1140,656), side ≈ 326 px for 40′ → **8.15 px/ft**; edges sit 10.7°
+  off the photo axes → **turn 79.3°** (the address seed says 83°; the camp was
+  built square to the lot, so the structures win). Hypar centre pinned to its
+  planned centre (39.5′, 116′) → cx 46.08′, cy 97.28′. Cross-check: the photo's
+  pyramid then lands at (41.9′, 25.6′) vs planned (38′, 25.3′) — within 4′.
+  The pyramid itself is too 3D/off-nadir to measure scale from.
+- An earlier eyeball estimate (≈10 px/ft, "pyramid→hypar 69′ vs 91′ planned")
+  was wrong — the scale was off, not the layout.
+
 ## Progress log
 
 - 2026-11-05: plan written; live lot + object data read.
 - 2026-11-05: feature built + verified locally (typecheck, lint, unit, e2e).
+- 2026-11-05: deployed (f8b524d); uploaded "Saturday gigapan (2026)" on live,
+  aligned from the hypar (above), opacity 80%.
+- 2026-11-05: clip-to-lot + opaque photo-step layer; e2e 9/9.
 
 ## Open questions for the user
 

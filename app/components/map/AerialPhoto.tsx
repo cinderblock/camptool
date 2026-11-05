@@ -66,6 +66,7 @@ export function AerialLayer({
   ppf,
   zoom,
   pick,
+  lotClipId,
   over = false,
 }: {
   aerials: AerialRow[];
@@ -74,6 +75,8 @@ export function AerialLayer({
   ppf: number;
   zoom: number;
   pick: AerialPick | null;
+  /** The map's own lot-outline clipPath, for photos set to clip to the lot. */
+  lotClipId: string;
   over?: boolean;
 }) {
   const sx = (x: number) => originX + x * ppf;
@@ -95,39 +98,44 @@ export function AerialLayer({
           : pick?.aerialId === a.id
             ? Math.min(a.opacity, 0.6)
             : a.opacity;
+        // The lot clip is in the map's frame, so it wraps the transformed
+        // group rather than sitting inside it. While aligning, the whole photo
+        // shows: the feature you need may be just outside the lot.
+        const lotClip = a.clipToLot && !pick ? `url(#${lotClipId})` : undefined;
         return (
-          <g
-            key={a.id}
-            transform={`translate(${sx(a.cx)} ${sy(a.cy)}) rotate(${a.rotation}) scale(${a.ftPerPx * ppf})`}
-            opacity={opacity}
-          >
-            <clipPath id={clip}>
-              <rect
-                x={-w / 2 + a.cropX0 * w}
-                y={-h / 2 + a.cropY0 * h}
-                width={(a.cropX1 - a.cropX0) * w}
-                height={(a.cropY1 - a.cropY0) * h}
-              />
-            </clipPath>
-            <g clipPath={`url(#${clip})`}>
-              <image
-                href={src(a, false)}
-                x={-w / 2}
-                y={-h / 2}
-                width={w}
-                height={h}
-                preserveAspectRatio="none"
-              />
-              {sharp && a.hasDisplay ? (
+          <g key={a.id} clipPath={lotClip}>
+            <g
+              transform={`translate(${sx(a.cx)} ${sy(a.cy)}) rotate(${a.rotation}) scale(${a.ftPerPx * ppf})`}
+              opacity={opacity}
+            >
+              <clipPath id={clip}>
+                <rect
+                  x={-w / 2 + a.cropX0 * w}
+                  y={-h / 2 + a.cropY0 * h}
+                  width={(a.cropX1 - a.cropX0) * w}
+                  height={(a.cropY1 - a.cropY0) * h}
+                />
+              </clipPath>
+              <g clipPath={`url(#${clip})`}>
                 <image
-                  href={src(a, true)}
+                  href={src(a, false)}
                   x={-w / 2}
                   y={-h / 2}
                   width={w}
                   height={h}
                   preserveAspectRatio="none"
                 />
-              ) : null}
+                {sharp && a.hasDisplay ? (
+                  <image
+                    href={src(a, true)}
+                    x={-w / 2}
+                    y={-h / 2}
+                    width={w}
+                    height={h}
+                    preserveAspectRatio="none"
+                  />
+                ) : null}
+              </g>
             </g>
           </g>
         );
@@ -453,6 +461,18 @@ export function AerialPanel({
                             ? "north up"
                             : "as the map"
                       }
+                    />
+                  ) : null}
+                  {adjusting ? (
+                    <Checkbox
+                      size="xs"
+                      label="Clip to the lot"
+                      checked={a.clipToLot}
+                      onChange={(e) => {
+                        const on = e.currentTarget.checked;
+                        onDraft(a.id, { clipToLot: on });
+                        save(a.id, { clipToLot: on });
+                      }}
                     />
                   ) : null}
                   {adjusting ? (
