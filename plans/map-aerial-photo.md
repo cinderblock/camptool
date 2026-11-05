@@ -72,8 +72,9 @@ Cameron's three asks (2026-11-05):
 8. [x] Commit, deploy, confirm `/_version` — f8b524d live 2026-11-05 3:12 PM PST (23:12Z)
        via ops Renovate (pin bump af9597a6).
 9. [x] Upload the 2026 gigapan on live and align it (2026-11-05).
-10. [ ] **(current)** Follow-up: "Clip to the lot" + the missing opaque photo
-        layer for the photo-click steps; deploy; turn the clip on for 2026.
+10. [x] Follow-up: "Clip to the lot" + the missing opaque photo layer for
+        the photo-click steps; 3e77899 live 2026-11-05 ~3:45 PM PST (23:45Z)
+        via ops pin ce24353b; clip turned on for 2026 (rect crop reset to full).
 
 ## Findings / gotchas
 
@@ -116,7 +117,8 @@ Cameron's three asks (2026-11-05):
 - 2026-11-05: feature built + verified locally (typecheck, lint, unit, e2e).
 - 2026-11-05: deployed (f8b524d); uploaded "Saturday gigapan (2026)" on live,
   aligned from the hypar (above), opacity 80%.
-- 2026-11-05: clip-to-lot + opaque photo-step layer; e2e 9/9.
+- 2026-11-05: clip-to-lot + opaque photo-step layer; e2e 9/9; deployed;
+  2026 photo clipped to the lot on live. All steps done.
 
 ## Open questions for the user
 
