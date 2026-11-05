@@ -10,6 +10,20 @@
 
 ## Open
 
+### `sap-pdf.test.ts` fails locally (4 tests)
+
+**Raised:** map-aerial thread, 2026-11-05. **Status:** not investigated.
+
+On Cameron's Windows box with Bun 1.4.2 and a fresh `bun install
+--frozen-lockfile`, `bun test` has 4 failures, all in `app/lib/sap-pdf.test.ts`:
+`parseSapPdf > reads one pass per page…` ("page 1 did not parse"), and three
+`sliceSapPage` cases where `scanCodesInPdf` finds 0 QR codes where 1 is
+expected. Every other suite passes (437). Untouched by the commit that noticed
+it. **Why it matters:** the SAP slice/scan code guards against a pass leaking
+another person's QR code; a red suite hides a real regression there. Could be
+the Bun version (the plan records 1.3.0) or a QR/PDF dependency behaving
+differently on Windows.
+
 ### The public programming schedule exposes the server to the open internet
 
 **Raised:** Cameron, 2026-08-16. **Status:** deferred, "that's for later".
