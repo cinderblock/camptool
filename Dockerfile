@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --- Build stage: install all deps and produce the React Router build ---
-FROM oven/bun:1.3 AS build
+FROM oven/bun:1.4 AS build
 WORKDIR /app
 # Workspace manifests must be present before install so `workspace:*` resolves.
 COPY package.json bun.lock ./
@@ -16,7 +16,7 @@ ENV CAMP_THEME=$CAMP_THEME
 RUN bun run build
 
 # --- Runtime stage: prod deps + build output + the socket server ---
-FROM oven/bun:1.3 AS runtime
+FROM oven/bun:1.4 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json bun.lock ./
