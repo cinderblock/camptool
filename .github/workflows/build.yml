@@ -45,6 +45,9 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Test
+        run: bun test
+
       - name: Verify the migration chain
         # The app migrates on boot, so a broken chain is a production crash with
         # no rollback. Checked here, before an image exists to pin. Catches a
