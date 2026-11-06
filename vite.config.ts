@@ -1,6 +1,5 @@
 import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig } from "vite";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 const publicHost = process.env.PUBLIC_BASE_URL
   ? new URL(process.env.PUBLIC_BASE_URL).hostname
@@ -17,8 +16,9 @@ const themeAlias =
     : {};
 
 export default defineConfig({
-  plugins: [reactRouter(), tsconfigPaths()],
-  resolve: { alias: themeAlias },
+  plugins: [reactRouter()],
+  // tsconfigPaths: Vite 8 resolves tsconfig "paths" natively (replaces vite-tsconfig-paths).
+  resolve: { alias: themeAlias, tsconfigPaths: true },
   server: {
     // Uncommon default on purpose (see app/lib/env.server.ts — keep in sync):
     // 3000/5173 collide with other dev apps, and Windows Hyper-V reserves
