@@ -71,7 +71,7 @@
     "@camptool/theme-contract": "workspace:*",
     "@react-router/dev": "^7.18.2",
     "@types/bun": "latest",
-    "@types/node": "^25.9.1",
+    "@types/node": "^26.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "drizzle-kit": "^0.31.10",
