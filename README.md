@@ -80,7 +80,9 @@ Officers can lay an **aerial photo** (a drone shot, gigapan or satellite tile)
 under each year's map to compare the plan with what actually got built. The
 upload is turned to match the map from the lot's clock address ("12:00 up" or
 "north up"), then lined up by clicking two features in the photo and the same
-two on the map; turn, scale, position, crop and opacity can be fine-tuned. The
+two on the map; turn, scale, position, crop, opacity and "clip to the lot" can
+be fine-tuned. A **swiper** (left | right or top / bottom) shows the photo on one
+side of a draggable line and the plain plan on the other. The
 photo stays camp-private, is left out of the Burning Man export, and isn't part
 of map undo or versions.
 

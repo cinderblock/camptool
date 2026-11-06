@@ -207,7 +207,68 @@ async function main() {
       .count()) === 1,
   );
 
+  stage("before/after swiper");
+  await page.getByText("Left | right", { exact: true }).click();
+  const swipe = page.locator("input.ct-swipe");
+  await swipe.waitFor({ state: "attached" });
+  const svgBox = await page.locator("#camp-map-svg").boundingBox();
+  if (!svgBox) throw new Error("no map box");
+  const setSwipe = (v: number) =>
+    swipe.evaluate((el, v) => {
+      (el as HTMLInputElement).value = String(v);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }, v);
+  // Two thin strips either side of centre, well inside the photo.
+  const strip = (dx: number) => ({
+    x: svgBox.x + svgBox.width / 2 + dx - 20,
+    y: svgBox.y + svgBox.height / 2 - 40,
+    width: 40,
+    height: 80,
+  });
+  const shots = async () => ({
+    L: await page.screenshot({ clip: strip(-70) }),
+    R: await page.screenshot({ clip: strip(70) }),
+  });
+  await setSwipe(1000);
+  await page.waitForTimeout(200);
+  const allPhoto = await shots();
+  await setSwipe(0);
+  await page.waitForTimeout(200);
+  const allPlan = await shots();
+  await setSwipe(500);
+  await page.waitForTimeout(200);
+  const half = await shots();
+  check("swiper actually changes what's drawn", !allPhoto.L.equals(allPlan.L));
+  check("left of the line is the photo", half.L.equals(allPhoto.L));
+  check("right of the line is the plan", half.R.equals(allPlan.R));
+  // A real drag on the divider (the thumb sits at the centre line).
+  const cx = svgBox.x + svgBox.width / 2;
+  const cy = svgBox.y + Math.min(svgBox.height, 700) / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx - 120, cy, { steps: 6 });
+  await page.mouse.up();
+  const after = Number(await swipe.inputValue());
+  check("dragging the line moves it", after < 450, `value ${after}`);
+  check(
+    "the BM export would drop the swiper copy too",
+    await page.evaluate(() => {
+      const c = document
+        .getElementById("camp-map-svg")
+        ?.cloneNode(true) as Element;
+      for (const el of Array.from(c.querySelectorAll("[data-map-aerial]")))
+        el.remove();
+      return c.querySelectorAll("image[href^='/media']").length === 0;
+    }),
+  );
   if (SHOT) await page.screenshot({ path: SHOT, fullPage: false });
+  await page.getByText("Top / bottom", { exact: true }).click();
+  await page.waitForTimeout(200);
+  if (SHOT) await page.screenshot({ path: SHOT.replace(/\.png$/, "-y.png") });
+  await page
+    .locator(".mantine-Paper-root", { hasText: "Add aerial photo" })
+    .getByText("Off", { exact: true })
+    .click();
 
   stage("viewer can hide it");
   const box = page

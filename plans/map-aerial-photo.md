@@ -76,7 +76,26 @@ Cameron's three asks (2026-11-05):
         the photo-click steps; 3e77899 live 2026-11-05 ~3:45 PM PST (23:45Z)
         via ops pin ce24353b; clip turned on for 2026 (rect crop reset to full).
 
+11. [x] Before/after **swiper** (Cameron, 2026-11-05: "needs a swiper…
+        pure css… super efficient"). Native range input over the map, thumb =
+        divider; its `input` event writes `--ct-swipe` on the host; an opaque
+        photo copy wears `clip-path: inset(…) view-box` reading it. No React
+        state while dragging. Underlay hidden while swiping so the plan side is
+        the plain plan. Top/bottom = same input with `writing-mode:
+        vertical-lr`.
+12. [ ] **(current)** Deploy the swiper.
+
 ## Findings / gotchas
+
+- Swiper: pure CSS can't read a range input's value, so one native `input`
+  handler writing a CSS variable is the minimum JS. The thumb's centre travels
+  T/2…(size−T/2), so the clip position is corrected by the thumb size (32 px)
+  or the line and the photo edge drift apart near the ends. The input lives in
+  a wrapper sized exactly to the SVG, so its % and the clip's `view-box` %
+  share a frame at every zoom. Pixel-checked in e2e (left strip at 50% ==
+  all-photo, right strip == all-plan).
+- `getByText("Off")` is ambiguous on the map page (another segmented control);
+  scope e2e locators to the Aerial photo card.
 
 - `exportMapJpeg` clones `#camp-map-svg`; anything not tagged and stripped
   lands in the BM submission. The photo layer is `data-map-aerial` and is

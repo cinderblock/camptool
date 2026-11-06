@@ -44,8 +44,11 @@ import {
   AerialLayer,
   AerialPanel,
   type AerialPick,
+  AerialSwipe,
+  type SwipeMode,
   addPickPoint,
   pickWants,
+  swipeClip,
 } from "~/components/map/AerialPhoto";
 import type { AerialRow } from "~/lib/aerial";
 import { AERIAL_INTENTS, aerialAction, loadAerials } from "~/lib/aerial.server";
@@ -3695,6 +3698,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
   >({});
   const [aerialShown, setAerialShown] = useState<Record<string, boolean>>({});
   const [aerialPick, setAerialPick] = useState<AerialPick | null>(null);
+  const [aerialSwipe, setAerialSwipe] = useState<SwipeMode>("off");
   const aerials = useMemo(
     () => loaderData.aerials.map((a) => ({ ...a, ...aerialDrafts[a.id] })),
     [loaderData.aerials, aerialDrafts],
@@ -4339,6 +4343,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               (a) => aerialIsShown(a) || a.id === aerialPick?.aerialId,
             )}
             aerialPick={aerialPick}
+            aerialSwipe={aerialSwipe}
             onAerialPoint={(p) =>
               setAerialPick((cur) => {
                 const a = cur && aerials.find((x) => x.id === cur.aerialId);
@@ -4399,6 +4404,8 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               }
               pick={aerialPick}
               setPick={setAerialPick}
+              swipe={aerialSwipe}
+              setSwipe={setAerialSwipe}
             />
             <Paper withBorder p="sm" radius="md">
               <Text size="xs" fw={600} mb={6}>
@@ -4918,6 +4925,7 @@ function Editor({
   fetcher,
   aerials,
   aerialPick,
+  aerialSwipe,
   onAerialPoint,
 }: {
   lot: Lot;
@@ -4983,6 +4991,8 @@ function Editor({
   aerials: AerialRow[];
   /** A two-point alignment in progress: clicks feed it instead of editing. */
   aerialPick: AerialPick | null;
+  /** Before/after swiper over the map (off while aligning). */
+  aerialSwipe: SwipeMode;
   onAerialPoint: (plot: { x: number; y: number }) => void;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
@@ -5452,6 +5462,7 @@ function Editor({
   // from there. Explicit px (not a CSS max) so zoom grows past the intrinsic
   // size, and getBoundingClientRect stays proportional for pointer math.
   const fitScale = Math.min(frame.w / VIEW_W, frame.h / viewH) || 1;
+  const swipeOn = aerialSwipe !== "off" && aerials.length > 0 && !aerialPick;
   const renderW = Math.max(1, VIEW_W * fitScale * zoom);
   const renderH = Math.max(1, viewH * fitScale * zoom);
 
@@ -7184,497 +7195,510 @@ function Editor({
           </Tooltip>
         </Group>
         <Box ref={frameRef} style={{ overflow: "auto", flex: 1, minHeight: 0 }}>
-          <svg
-            ref={svgRef}
-            id="camp-map-svg"
-            viewBox={`0 0 ${VIEW_W} ${viewH}`}
-            width={renderW}
-            height={renderH}
+          {/* Sized exactly to the SVG so the swiper's range input and the
+          clip's view-box percentages share one frame at every zoom. */}
+          <div
             style={{
-              display: "block",
+              position: "relative",
               width: `${renderW}px`,
               height: `${renderH}px`,
-              touchAction: "pinch-zoom",
             }}
-            onPointerDown={onCanvasDown}
-            // Aligning an aerial photo: every click is an alignment point, so
-            // catch it before any object's own drag handler sees it.
-            onPointerDownCapture={
-              aerialPick
-                ? (e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    const p = svgPoint(e);
-                    onAerialPoint({ x: fx(p.x), y: fy(p.y) });
-                  }
-                : undefined
-            }
-            onDragOver={canManage ? (e) => e.preventDefault() : undefined}
-            onDrop={canManage ? onDrop : undefined}
-            role="img"
-            aria-label="Camp layout"
           >
-            <title>Camp layout</title>
-            <defs>
-              {/* Path-light glow: warm pool of light fading out, for the night sim. */}
-              <radialGradient id="path-glow" cx="0.5" cy="0.5" r="0.5">
-                <stop offset="0" stopColor="#fff3bf" stopOpacity={0.4} />
-                <stop offset="0.4" stopColor="#ffe066" stopOpacity={0.14} />
-                <stop offset="1" stopColor="#ffe066" stopOpacity={0} />
-              </radialGradient>
-              <MapShapeDefs />
-              {/* Geodesic dome: a sphere highlight offset TOWARD the sun (fx,fy),
+            <svg
+              ref={svgRef}
+              id="camp-map-svg"
+              viewBox={`0 0 ${VIEW_W} ${viewH}`}
+              width={renderW}
+              height={renderH}
+              style={{
+                display: "block",
+                width: `${renderW}px`,
+                height: `${renderH}px`,
+                touchAction: "pinch-zoom",
+              }}
+              onPointerDown={onCanvasDown}
+              // Aligning an aerial photo: every click is an alignment point, so
+              // catch it before any object's own drag handler sees it.
+              onPointerDownCapture={
+                aerialPick
+                  ? (e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      const p = svgPoint(e);
+                      onAerialPoint({ x: fx(p.x), y: fy(p.y) });
+                    }
+                  : undefined
+              }
+              onDragOver={canManage ? (e) => e.preventDefault() : undefined}
+              onDrop={canManage ? onDrop : undefined}
+              role="img"
+              aria-label="Camp layout"
+            >
+              <title>Camp layout</title>
+              <defs>
+                {/* Path-light glow: warm pool of light fading out, for the night sim. */}
+                <radialGradient id="path-glow" cx="0.5" cy="0.5" r="0.5">
+                  <stop offset="0" stopColor="#fff3bf" stopOpacity={0.4} />
+                  <stop offset="0.4" stopColor="#ffe066" stopOpacity={0.14} />
+                  <stop offset="1" stopColor="#ffe066" stopOpacity={0} />
+                </radialGradient>
+                <MapShapeDefs />
+                {/* Geodesic dome: a sphere highlight offset TOWARD the sun (fx,fy),
               fading to a dark far side — so the dome reads as round and the lit
               side tracks the sun. */}
-              <radialGradient
-                id="dome-sphere"
-                cx="0.5"
-                cy="0.5"
-                r="0.62"
-                fx={domeFx}
-                fy={domeFy}
-              >
-                <stop offset="0" stopColor="#ffffff" stopOpacity={0.55} />
-                <stop offset="0.45" stopColor="#ffffff" stopOpacity={0} />
-                <stop offset="1" stopColor="#000000" stopOpacity={0.5} />
-              </radialGradient>
-            </defs>
-            <clipPath id={clipId}>
-              <polygon points={lotPoints} />
-            </clipPath>
-            {/* Shadows may fall past the lot onto the neighbors / roads, so clip
+                <radialGradient
+                  id="dome-sphere"
+                  cx="0.5"
+                  cy="0.5"
+                  r="0.62"
+                  fx={domeFx}
+                  fy={domeFy}
+                >
+                  <stop offset="0" stopColor="#ffffff" stopOpacity={0.55} />
+                  <stop offset="0.45" stopColor="#ffffff" stopOpacity={0} />
+                  <stop offset="1" stopColor="#000000" stopOpacity={0.5} />
+                </radialGradient>
+              </defs>
+              <clipPath id={clipId}>
+                <polygon points={lotPoints} />
+              </clipPath>
+              {/* Shadows may fall past the lot onto the neighbors / roads, so clip
             them to the whole ground view rather than the lot. */}
-            <clipPath id="ground-clip">
-              <rect
-                x={viewL}
-                y={MARGIN}
-                width={viewR - viewL}
-                height={viewH - 2 * MARGIN}
-              />
-            </clipPath>
-            {/* Ground surface for the lot — a theme-aware fill (lighter than the page
+              <clipPath id="ground-clip">
+                <rect
+                  x={viewL}
+                  y={MARGIN}
+                  width={viewR - viewL}
+                  height={viewH - 2 * MARGIN}
+                />
+              </clipPath>
+              {/* Ground surface for the lot — a theme-aware fill (lighter than the page
             in both schemes) so cast shadows read against it in dark mode too,
             instead of vanishing on the transparent dark page. */}
-            <polygon points={lotPoints} fill={groundFill} />
-            <g clipPath={`url(#${clipId})`}>
-              <Grid
-                frontageFt={lot.frontageFt}
-                depthFt={lot.depthFt}
-                rear={rear}
-                originX={originX}
-                originY={originY}
-                rearCenterX={rearCenterX}
-                ppf={ppf}
+              <polygon points={lotPoints} fill={groundFill} />
+              <g clipPath={`url(#${clipId})`}>
+                <Grid
+                  frontageFt={lot.frontageFt}
+                  depthFt={lot.depthFt}
+                  rear={rear}
+                  originX={originX}
+                  originY={originY}
+                  rearCenterX={rearCenterX}
+                  ppf={ppf}
+                />
+              </g>
+              <polygon
+                points={lotPoints}
+                fill="none"
+                stroke="#adb5bd"
+                strokeWidth={2}
               />
-            </g>
-            <polygon
-              points={lotPoints}
-              fill="none"
-              stroke="#adb5bd"
-              strokeWidth={2}
-            />
-            {/* Surroundings: the street the camp fronts (a wide swath, not a thin
+              {/* Surroundings: the street the camp fronts (a wide swath, not a thin
             line), the rear shared service road, and neighbor lots on each side —
             so the lot reads in its real context. The clock address marks the
             radial avenue along the street. */}
-            <g pointerEvents="none" clipPath="url(#ground-clip)">
-              {surround ? (
-                // Curved context: concentric annular sectors that follow the lot
-                // wedge's arc (clipped to the view), so the street/service road
-                // and neighbor lots match the BRC clock-section curvature.
-                <>
-                  <polygon
-                    points={surround.neighborL}
-                    fill={neighborFill}
-                    opacity={0.7}
-                  />
-                  <polygon
-                    points={surround.neighborR}
-                    fill={neighborFill}
-                    opacity={0.7}
-                  />
-                  <text
-                    x={surround.neighborLLabel.x}
-                    y={surround.neighborLLabel.y}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={12}
-                    fill="var(--mantine-color-dimmed)"
-                    style={{ userSelect: "none" }}
-                  >
-                    Neighbor
-                  </text>
-                  <text
-                    x={surround.neighborRLabel.x}
-                    y={surround.neighborRLabel.y}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={12}
-                    fill="var(--mantine-color-dimmed)"
-                    style={{ userSelect: "none" }}
-                  >
-                    Neighbor
-                  </text>
-                  <polygon points={surround.street} fill={pavementFill} />
-                  <text
-                    x={surround.streetLabel.x}
-                    y={surround.streetLabel.y}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={14}
-                    fontWeight={700}
-                    fill="var(--mantine-color-dimmed)"
-                    style={{ userSelect: "none" }}
-                  >
-                    {frontageStreet || "Street"}
-                    {lot.address ? ` · ${lot.address}` : ""}
-                  </text>
-                  <polygon points={surround.service} fill={pavementFill} />
-                  <text
-                    x={surround.serviceLabel.x}
-                    y={surround.serviceLabel.y}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={12}
-                    fill="var(--mantine-color-dimmed)"
-                    style={{ userSelect: "none" }}
-                  >
-                    Service road
-                  </text>
-                </>
-              ) : (
-                <>
-                  {neighbors.map((n) =>
-                    n.x1 - n.x0 > 8 ? (
-                      <g key={n.id}>
-                        <rect
-                          x={n.x0}
-                          y={originY}
-                          width={n.x1 - n.x0}
-                          height={yBot - originY}
-                          fill={neighborFill}
-                          opacity={0.7}
-                          rx={3}
-                        />
-                        <text
-                          x={(n.x0 + n.x1) / 2}
-                          y={(originY + yBot) / 2}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          fontSize={12}
-                          fill="var(--mantine-color-dimmed)"
-                          style={{ userSelect: "none" }}
-                        >
-                          Neighbor
-                        </text>
-                      </g>
-                    ) : null,
-                  )}
-                  <rect
-                    x={viewL}
-                    y={streetBandTop}
-                    width={viewR - viewL}
-                    height={streetBandBot - streetBandTop}
-                    fill={pavementFill}
-                    rx={3}
-                  />
-                  <text
-                    x={(viewL + viewR) / 2}
-                    y={(streetBandTop + streetBandBot) / 2}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={14}
-                    fontWeight={700}
-                    fill="var(--mantine-color-dimmed)"
-                    style={{ userSelect: "none" }}
-                  >
-                    {frontageStreet || "Street"}
-                    {lot.address ? ` · ${lot.address}` : ""}
-                  </text>
-                  <rect
-                    x={viewL}
-                    y={roadBandTop}
-                    width={viewR - viewL}
-                    height={roadBandBot - roadBandTop}
-                    fill={pavementFill}
-                    rx={3}
-                  />
-                  <text
-                    x={(viewL + viewR) / 2}
-                    y={(roadBandTop + roadBandBot) / 2}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={12}
-                    fill="var(--mantine-color-dimmed)"
-                    style={{ userSelect: "none" }}
-                  >
-                    Service road
-                  </text>
-                </>
-              )}
-            </g>
-            {/* Aerial photo of what actually got built, over the street and
+              <g pointerEvents="none" clipPath="url(#ground-clip)">
+                {surround ? (
+                  // Curved context: concentric annular sectors that follow the lot
+                  // wedge's arc (clipped to the view), so the street/service road
+                  // and neighbor lots match the BRC clock-section curvature.
+                  <>
+                    <polygon
+                      points={surround.neighborL}
+                      fill={neighborFill}
+                      opacity={0.7}
+                    />
+                    <polygon
+                      points={surround.neighborR}
+                      fill={neighborFill}
+                      opacity={0.7}
+                    />
+                    <text
+                      x={surround.neighborLLabel.x}
+                      y={surround.neighborLLabel.y}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={12}
+                      fill="var(--mantine-color-dimmed)"
+                      style={{ userSelect: "none" }}
+                    >
+                      Neighbor
+                    </text>
+                    <text
+                      x={surround.neighborRLabel.x}
+                      y={surround.neighborRLabel.y}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={12}
+                      fill="var(--mantine-color-dimmed)"
+                      style={{ userSelect: "none" }}
+                    >
+                      Neighbor
+                    </text>
+                    <polygon points={surround.street} fill={pavementFill} />
+                    <text
+                      x={surround.streetLabel.x}
+                      y={surround.streetLabel.y}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={14}
+                      fontWeight={700}
+                      fill="var(--mantine-color-dimmed)"
+                      style={{ userSelect: "none" }}
+                    >
+                      {frontageStreet || "Street"}
+                      {lot.address ? ` · ${lot.address}` : ""}
+                    </text>
+                    <polygon points={surround.service} fill={pavementFill} />
+                    <text
+                      x={surround.serviceLabel.x}
+                      y={surround.serviceLabel.y}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={12}
+                      fill="var(--mantine-color-dimmed)"
+                      style={{ userSelect: "none" }}
+                    >
+                      Service road
+                    </text>
+                  </>
+                ) : (
+                  <>
+                    {neighbors.map((n) =>
+                      n.x1 - n.x0 > 8 ? (
+                        <g key={n.id}>
+                          <rect
+                            x={n.x0}
+                            y={originY}
+                            width={n.x1 - n.x0}
+                            height={yBot - originY}
+                            fill={neighborFill}
+                            opacity={0.7}
+                            rx={3}
+                          />
+                          <text
+                            x={(n.x0 + n.x1) / 2}
+                            y={(originY + yBot) / 2}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fontSize={12}
+                            fill="var(--mantine-color-dimmed)"
+                            style={{ userSelect: "none" }}
+                          >
+                            Neighbor
+                          </text>
+                        </g>
+                      ) : null,
+                    )}
+                    <rect
+                      x={viewL}
+                      y={streetBandTop}
+                      width={viewR - viewL}
+                      height={streetBandBot - streetBandTop}
+                      fill={pavementFill}
+                      rx={3}
+                    />
+                    <text
+                      x={(viewL + viewR) / 2}
+                      y={(streetBandTop + streetBandBot) / 2}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={14}
+                      fontWeight={700}
+                      fill="var(--mantine-color-dimmed)"
+                      style={{ userSelect: "none" }}
+                    >
+                      {frontageStreet || "Street"}
+                      {lot.address ? ` · ${lot.address}` : ""}
+                    </text>
+                    <rect
+                      x={viewL}
+                      y={roadBandTop}
+                      width={viewR - viewL}
+                      height={roadBandBot - roadBandTop}
+                      fill={pavementFill}
+                      rx={3}
+                    />
+                    <text
+                      x={(viewL + viewR) / 2}
+                      y={(roadBandTop + roadBandBot) / 2}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={12}
+                      fill="var(--mantine-color-dimmed)"
+                      style={{ userSelect: "none" }}
+                    >
+                      Service road
+                    </text>
+                  </>
+                )}
+              </g>
+              {/* Aerial photo of what actually got built, over the street and
             neighbours (it shows them too) and under everything planned. The
-            lot outline is redrawn on top so the boundary stays readable. */}
-            {aerials.length ? (
-              <>
-                <AerialLayer
-                  aerials={aerials}
-                  originX={originX}
-                  originY={originY}
-                  ppf={ppf}
-                  zoom={zoom}
-                  pick={aerialPick}
-                  lotClipId={clipId}
-                />
-                <polygon
-                  data-map-aerial=""
-                  points={lotPoints}
-                  fill="none"
-                  stroke="#ffffff"
-                  strokeOpacity={0.85}
-                  strokeWidth={2}
-                  strokeDasharray="8 5"
-                  pointerEvents="none"
-                />
-              </>
-            ) : null}
-            {/* Fire-access overlay (clipped to the lot): green = within 125′ hose
+            lot outline is redrawn on top so the boundary stays readable.
+            Dropped while swiping, so the plan side of the line is the plain
+            plan rather than plan-over-photo. */}
+              {aerials.length && !swipeOn ? (
+                <>
+                  <AerialLayer
+                    aerials={aerials}
+                    originX={originX}
+                    originY={originY}
+                    ppf={ppf}
+                    zoom={zoom}
+                    pick={aerialPick}
+                    lotClipId={clipId}
+                  />
+                  <polygon
+                    data-map-aerial=""
+                    points={lotPoints}
+                    fill="none"
+                    stroke="#ffffff"
+                    strokeOpacity={0.85}
+                    strokeWidth={2}
+                    strokeDasharray="8 5"
+                    pointerEvents="none"
+                  />
+                </>
+              ) : null}
+              {/* Fire-access overlay (clipped to the lot): green = within 125′ hose
             reach of the street frontage or the rear alley; red = beyond both
             (an internal fire lane would be required). Measured by depth. */}
-            {showFire ? (
-              <g clipPath={`url(#${clipId})`} pointerEvents="none">
-                <rect
-                  x={viewL}
-                  y={originY}
-                  width={viewR - viewL}
-                  height={Math.min(FIRE_REACH_FT, lot.depthFt) * ppf}
-                  fill="#2f9e44"
-                  opacity={0.1}
-                />
-                {lot.depthFt > FIRE_REACH_FT ? (
+              {showFire ? (
+                <g clipPath={`url(#${clipId})`} pointerEvents="none">
                   <rect
                     x={viewL}
-                    y={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                    y={originY}
                     width={viewR - viewL}
-                    height={FIRE_REACH_FT * ppf}
+                    height={Math.min(FIRE_REACH_FT, lot.depthFt) * ppf}
                     fill="#2f9e44"
                     opacity={0.1}
                   />
-                ) : null}
-                {lot.depthFt > 2 * FIRE_REACH_FT ? (
-                  <rect
-                    x={viewL}
-                    y={originY + FIRE_REACH_FT * ppf}
-                    width={viewR - viewL}
-                    height={(lot.depthFt - 2 * FIRE_REACH_FT) * ppf}
-                    fill="#e03131"
-                    opacity={0.18}
-                  />
-                ) : null}
-                <line
-                  x1={viewL}
-                  y1={originY + FIRE_REACH_FT * ppf}
-                  x2={viewR}
-                  y2={originY + FIRE_REACH_FT * ppf}
-                  stroke="#e8590c"
-                  strokeWidth={1}
-                  strokeDasharray="5 4"
-                  opacity={0.7}
-                />
-                {lot.depthFt > FIRE_REACH_FT ? (
+                  {lot.depthFt > FIRE_REACH_FT ? (
+                    <rect
+                      x={viewL}
+                      y={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                      width={viewR - viewL}
+                      height={FIRE_REACH_FT * ppf}
+                      fill="#2f9e44"
+                      opacity={0.1}
+                    />
+                  ) : null}
+                  {lot.depthFt > 2 * FIRE_REACH_FT ? (
+                    <rect
+                      x={viewL}
+                      y={originY + FIRE_REACH_FT * ppf}
+                      width={viewR - viewL}
+                      height={(lot.depthFt - 2 * FIRE_REACH_FT) * ppf}
+                      fill="#e03131"
+                      opacity={0.18}
+                    />
+                  ) : null}
                   <line
                     x1={viewL}
-                    y1={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                    y1={originY + FIRE_REACH_FT * ppf}
                     x2={viewR}
-                    y2={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                    y2={originY + FIRE_REACH_FT * ppf}
                     stroke="#e8590c"
                     strokeWidth={1}
                     strokeDasharray="5 4"
                     opacity={0.7}
                   />
-                ) : null}
-              </g>
-            ) : null}
-            {/* In-camp roads / lanes: a width band around the centerline with 45°
+                  {lot.depthFt > FIRE_REACH_FT ? (
+                    <line
+                      x1={viewL}
+                      y1={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                      x2={viewR}
+                      y2={originY + (lot.depthFt - FIRE_REACH_FT) * ppf}
+                      stroke="#e8590c"
+                      strokeWidth={1}
+                      strokeDasharray="5 4"
+                      opacity={0.7}
+                    />
+                  ) : null}
+                </g>
+              ) : null}
+              {/* In-camp roads / lanes: a width band around the centerline with 45°
             corner cutbacks (BM's turn allowance). Ground features drawn under the
             structures + shadows; the dashed centerline shows the route. */}
-            {roads.map((r) => {
-              if (r.points.length < 2) return null;
-              const band = roadOutline(r.points, r.width, r.cutback);
-              if (band.length < 3) return null;
-              const pts = band
-                .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
-                .join(" ");
-              const center = r.points
-                .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
-                .join(" ");
-              const sel = r.id === selectedRoadId;
-              return (
-                <g key={`road-${r.id}`}>
-                  <polygon
-                    points={pts}
-                    fill={r.color}
-                    fillOpacity={sel ? 0.4 : 0.24}
-                    stroke={r.color}
-                    strokeWidth={sel ? 2 : 1.2}
-                    style={{ cursor: "pointer" }}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      selectRoad(r.id);
-                    }}
-                  />
-                  <polyline
-                    points={center}
-                    fill="none"
-                    stroke={r.color}
-                    strokeWidth={1}
-                    strokeDasharray="7 6"
-                    opacity={0.7}
-                    pointerEvents="none"
-                  />
-                </g>
-              );
-            })}
-            {/* Shade simulation: each object casts a shadow away from the sun,
+              {roads.map((r) => {
+                if (r.points.length < 2) return null;
+                const band = roadOutline(r.points, r.width, r.cutback);
+                if (band.length < 3) return null;
+                const pts = band
+                  .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                  .join(" ");
+                const center = r.points
+                  .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                  .join(" ");
+                const sel = r.id === selectedRoadId;
+                return (
+                  <g key={`road-${r.id}`}>
+                    <polygon
+                      points={pts}
+                      fill={r.color}
+                      fillOpacity={sel ? 0.4 : 0.24}
+                      stroke={r.color}
+                      strokeWidth={sel ? 2 : 1.2}
+                      style={{ cursor: "pointer" }}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        selectRoad(r.id);
+                      }}
+                    />
+                    <polyline
+                      points={center}
+                      fill="none"
+                      stroke={r.color}
+                      strokeWidth={1}
+                      strokeDasharray="7 6"
+                      opacity={0.7}
+                      pointerEvents="none"
+                    />
+                  </g>
+                );
+              })}
+              {/* Shade simulation: each object casts a shadow away from the sun,
             clipped to the whole ground view so it can fall onto neighbors/roads.
             Overlaps UNION (OR) at one opacity rather than adding up — the polygons
             are opaque inside a single group whose opacity flattens them, so two
             overlapping shadows look the same as one. */}
-            {mapUpBearing != null && sun.altitude > 0.5 ? (
-              <g
-                clipPath="url(#ground-clip)"
-                pointerEvents="none"
-                opacity={shadeOpacity}
-                // Tagged so the BM export can lighten the (near-black) cast
-                // shadows for a print-friendly layout — see exportMapJpeg.
-                data-map-shadow="1"
-              >
-                {objects.flatMap((o) =>
-                  shadowPolygon(o, sun, mapUpBearing).map((poly, i) => (
-                    <polygon
-                      key={`sh-${o.id}-${i}`}
-                      points={poly
-                        .map(
-                          (p) =>
-                            `${originX + p.x * ppf},${originY + p.y * ppf}`,
-                        )
-                        .join(" ")}
-                      fill={shadowFill}
-                    />
-                  )),
-                )}
-              </g>
-            ) : null}
-            {/* Prevailing-wind flow: animated particles streaming around the
+              {mapUpBearing != null && sun.altitude > 0.5 ? (
+                <g
+                  clipPath="url(#ground-clip)"
+                  pointerEvents="none"
+                  opacity={shadeOpacity}
+                  // Tagged so the BM export can lighten the (near-black) cast
+                  // shadows for a print-friendly layout — see exportMapJpeg.
+                  data-map-shadow="1"
+                >
+                  {objects.flatMap((o) =>
+                    shadowPolygon(o, sun, mapUpBearing).map((poly, i) => (
+                      <polygon
+                        key={`sh-${o.id}-${i}`}
+                        points={poly
+                          .map(
+                            (p) =>
+                              `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                          )
+                          .join(" ")}
+                        fill={shadowFill}
+                      />
+                    )),
+                  )}
+                </g>
+              ) : null}
+              {/* Prevailing-wind flow: animated particles streaming around the
             buildings, clipped to the ground view. */}
-            {windOn && windField ? (
-              <WindLayer
-                field={windField}
-                originX={originX}
-                originY={originY}
-                ppf={ppf}
-                dark={dark}
-                clipId="ground-clip"
-                count={windParticles}
-              />
-            ) : null}
-            {/* Zones: labeled regions drawn under the structures. */}
-            {zones.map((z) => {
-              if (z.points.length < 2) return null;
-              const pts = z.points
-                .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
-                .join(" ");
-              const cxFt =
-                z.points.reduce((s, p) => s + p.x, 0) / z.points.length;
-              const cyFt =
-                z.points.reduce((s, p) => s + p.y, 0) / z.points.length;
-              const inMulti = selectedZoneIds.includes(z.id);
-              const sel = z.id === selectedZoneId || inMulti;
-              // Vertex/insert handles only when this zone is the SOLE selection
-              // (a multi-selection shows the group box instead).
-              const soleZone =
-                z.id === selectedZoneId &&
-                selectedIds.length === 0 &&
-                selectedZoneIds.length === 0;
-              return (
-                <g key={z.id}>
-                  <polygon
-                    points={pts}
-                    fill={z.color}
-                    fillOpacity={sel ? 0.22 : 0.12}
-                    stroke={z.color}
-                    strokeWidth={sel ? 2.5 : 1.5}
-                    strokeDasharray="6 4"
-                    style={{
-                      cursor: sel && canManage ? "move" : "pointer",
-                    }}
-                    onPointerDown={(e) => startZoneMove(e, z)}
-                  />
-                  <text
-                    x={originX + cxFt * ppf}
-                    y={originY + cyFt * ppf}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={15}
-                    fontWeight={600}
-                    fill={z.color}
-                    style={{ pointerEvents: "none", userSelect: "none" }}
-                  >
-                    {z.name ?? zoneKindLabel(z.kind)}
-                  </text>
-                  {/* Edit handles on the selected zone (officers): midpoint "+"
+              {windOn && windField ? (
+                <WindLayer
+                  field={windField}
+                  originX={originX}
+                  originY={originY}
+                  ppf={ppf}
+                  dark={dark}
+                  clipId="ground-clip"
+                  count={windParticles}
+                />
+              ) : null}
+              {/* Zones: labeled regions drawn under the structures. */}
+              {zones.map((z) => {
+                if (z.points.length < 2) return null;
+                const pts = z.points
+                  .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                  .join(" ");
+                const cxFt =
+                  z.points.reduce((s, p) => s + p.x, 0) / z.points.length;
+                const cyFt =
+                  z.points.reduce((s, p) => s + p.y, 0) / z.points.length;
+                const inMulti = selectedZoneIds.includes(z.id);
+                const sel = z.id === selectedZoneId || inMulti;
+                // Vertex/insert handles only when this zone is the SOLE selection
+                // (a multi-selection shows the group box instead).
+                const soleZone =
+                  z.id === selectedZoneId &&
+                  selectedIds.length === 0 &&
+                  selectedZoneIds.length === 0;
+                return (
+                  <g key={z.id}>
+                    <polygon
+                      points={pts}
+                      fill={z.color}
+                      fillOpacity={sel ? 0.22 : 0.12}
+                      stroke={z.color}
+                      strokeWidth={sel ? 2.5 : 1.5}
+                      strokeDasharray="6 4"
+                      style={{
+                        cursor: sel && canManage ? "move" : "pointer",
+                      }}
+                      onPointerDown={(e) => startZoneMove(e, z)}
+                    />
+                    <text
+                      x={originX + cxFt * ppf}
+                      y={originY + cyFt * ppf}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={15}
+                      fontWeight={600}
+                      fill={z.color}
+                      style={{ pointerEvents: "none", userSelect: "none" }}
+                    >
+                      {z.name ?? zoneKindLabel(z.kind)}
+                    </text>
+                    {/* Edit handles on the selected zone (officers): midpoint "+"
                   inserts a vertex, vertex handles drag to reshape, double-click
                   removes. Segments wrap around the polygon close. */}
-                  {soleZone && canManage && drawMode === null ? (
-                    <>
-                      {z.points.map((p, i) => {
-                        const q = z.points[(i + 1) % z.points.length];
-                        if (!q) return null;
-                        return (
+                    {soleZone && canManage && drawMode === null ? (
+                      <>
+                        {z.points.map((p, i) => {
+                          const q = z.points[(i + 1) % z.points.length];
+                          if (!q) return null;
+                          return (
+                            <circle
+                              key={`${z.id}-add-${i}`}
+                              cx={originX + ((p.x + q.x) / 2) * ppf}
+                              cy={originY + ((p.y + q.y) / 2) * ppf}
+                              r={4}
+                              fill="#fff"
+                              stroke={z.color}
+                              strokeWidth={1.5}
+                              strokeDasharray="2 2"
+                              style={{ cursor: "copy" }}
+                              onPointerDown={(e) =>
+                                startZoneInsertDrag(e, z, i)
+                              }
+                            >
+                              <title>Drag to add a point</title>
+                            </circle>
+                          );
+                        })}
+                        {z.points.map((p, i) => (
                           <circle
-                            key={`${z.id}-add-${i}`}
-                            cx={originX + ((p.x + q.x) / 2) * ppf}
-                            cy={originY + ((p.y + q.y) / 2) * ppf}
-                            r={4}
+                            key={`${z.id}-vtx-${i}`}
+                            cx={originX + p.x * ppf}
+                            cy={originY + p.y * ppf}
+                            r={5}
                             fill="#fff"
                             stroke={z.color}
-                            strokeWidth={1.5}
-                            strokeDasharray="2 2"
-                            style={{ cursor: "copy" }}
-                            onPointerDown={(e) => startZoneInsertDrag(e, z, i)}
+                            strokeWidth={2.5}
+                            style={{ cursor: "grab" }}
+                            onPointerDown={(e) => startZoneVertexDrag(e, z, i)}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              deleteZoneVertex(z, i);
+                            }}
                           >
-                            <title>Drag to add a point</title>
+                            <title>
+                              Drag to reshape · double-click to remove
+                            </title>
                           </circle>
-                        );
-                      })}
-                      {z.points.map((p, i) => (
-                        <circle
-                          key={`${z.id}-vtx-${i}`}
-                          cx={originX + p.x * ppf}
-                          cy={originY + p.y * ppf}
-                          r={5}
-                          fill="#fff"
-                          stroke={z.color}
-                          strokeWidth={2.5}
-                          style={{ cursor: "grab" }}
-                          onPointerDown={(e) => startZoneVertexDrag(e, z, i)}
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            deleteZoneVertex(z, i);
-                          }}
-                        >
-                          <title>
-                            Drag to reshape · double-click to remove
-                          </title>
-                        </circle>
-                      ))}
-                    </>
-                  ) : null}
-                </g>
-              );
-            })}
-            {/* Uplink aiming at the NOC tower. Each uplink radio gets the cone
+                        ))}
+                      </>
+                    ) : null}
+                  </g>
+                );
+              })}
+              {/* Uplink aiming at the NOC tower. Each uplink radio gets the cone
             it needs kept clear — wide enough to cover the 100′ target area
             around the tower — with anything of ours tall enough to block it
             outlined in red. With no radio placed yet, a faint vector from the
@@ -7683,793 +7707,752 @@ function Editor({
             its own path says the same thing from a better place, and over
             ~4,900′ the two are near enough parallel to read as one line drawn
             twice. Drawn under the objects so it never hides them. */}
-            {uplink ? (
-              <g pointerEvents="none" clipPath="url(#ground-clip)">
-                {uplink.aims.length === 0 ? (
-                  <line
-                    x1={uplink.camp.px}
-                    y1={uplink.camp.py}
-                    x2={uplink.camp.px + uplink.camp.ux * uplink.camp.exit}
-                    y2={uplink.camp.py + uplink.camp.uy * uplink.camp.exit}
-                    stroke="#7048e8"
-                    strokeOpacity={0.3}
-                    strokeWidth={1.5}
-                    strokeDasharray="8 7"
-                  />
-                ) : null}
-                {uplink.aims.map((a) => {
-                  const blocked = a.blockers.length > 0;
-                  const color = blocked ? "#e8590c" : "#7048e8";
-                  // Long enough to leave the view from any angle; the clip trims it.
-                  const len = VIEW_W + viewH;
-                  const edge = (s: number) => {
-                    const ang = Math.atan2(a.uy, a.ux) + s * a.half;
-                    return `${a.px + Math.cos(ang) * len},${
-                      a.py + Math.sin(ang) * len
-                    }`;
-                  };
-                  return (
-                    <g key={`aim-${a.o.id}`}>
-                      {/* A 100′ target four-odd thousand feet out subtends only
+              {uplink ? (
+                <g pointerEvents="none" clipPath="url(#ground-clip)">
+                  {uplink.aims.length === 0 ? (
+                    <line
+                      x1={uplink.camp.px}
+                      y1={uplink.camp.py}
+                      x2={uplink.camp.px + uplink.camp.ux * uplink.camp.exit}
+                      y2={uplink.camp.py + uplink.camp.uy * uplink.camp.exit}
+                      stroke="#7048e8"
+                      strokeOpacity={0.3}
+                      strokeWidth={1.5}
+                      strokeDasharray="8 7"
+                    />
+                  ) : null}
+                  {uplink.aims.map((a) => {
+                    const blocked = a.blockers.length > 0;
+                    const color = blocked ? "#e8590c" : "#7048e8";
+                    // Long enough to leave the view from any angle; the clip trims it.
+                    const len = VIEW_W + viewH;
+                    const edge = (s: number) => {
+                      const ang = Math.atan2(a.uy, a.ux) + s * a.half;
+                      return `${a.px + Math.cos(ang) * len},${
+                        a.py + Math.sin(ang) * len
+                      }`;
+                    };
+                    return (
+                      <g key={`aim-${a.o.id}`}>
+                        {/* A 100′ target four-odd thousand feet out subtends only
                       ~1°, so near the radio this is a sliver and only fans out
                       into a visible wedge toward the edge of the map. That IS
                       the geometry — don't widen it to look better. */}
-                      <polygon
-                        points={`${a.px},${a.py} ${edge(-1)} ${edge(1)}`}
-                        fill={color}
-                        fillOpacity={blocked ? 0.3 : 0.22}
-                      />
-                      <line
-                        x1={a.px}
-                        y1={a.py}
-                        x2={a.px + a.ux * a.exit}
-                        y2={a.py + a.uy * a.exit}
-                        stroke={color}
-                        strokeOpacity={0.75}
-                        strokeWidth={1.5}
-                        strokeDasharray="4 3"
-                      />
-                      {a.blockers.map((b) => (
                         <polygon
-                          key={`blk-${a.o.id}-${b.id}`}
-                          points={objWorldCorners(
-                            b,
-                            b.x + b.width / 2,
-                            b.y + b.height / 2,
-                          )
-                            .map(
-                              (p) =>
-                                `${originX + p.x * ppf},${originY + p.y * ppf}`,
-                            )
-                            .join(" ")}
-                          fill="#e8590c"
-                          fillOpacity={0.16}
-                          stroke="#e8590c"
+                          points={`${a.px},${a.py} ${edge(-1)} ${edge(1)}`}
+                          fill={color}
+                          fillOpacity={blocked ? 0.3 : 0.22}
+                        />
+                        <line
+                          x1={a.px}
+                          y1={a.py}
+                          x2={a.px + a.ux * a.exit}
+                          y2={a.py + a.uy * a.exit}
+                          stroke={color}
+                          strokeOpacity={0.75}
                           strokeWidth={1.5}
                           strokeDasharray="4 3"
                         />
-                      ))}
-                    </g>
-                  );
-                })}
-              </g>
-            ) : null}
-            {/* Per-object radius rings. Safety separations: Burning Man requires
+                        {a.blockers.map((b) => (
+                          <polygon
+                            key={`blk-${a.o.id}-${b.id}`}
+                            points={objWorldCorners(
+                              b,
+                              b.x + b.width / 2,
+                              b.y + b.height / 2,
+                            )
+                              .map(
+                                (p) =>
+                                  `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                              )
+                              .join(" ")}
+                            fill="#e8590c"
+                            fillOpacity={0.16}
+                            stroke="#e8590c"
+                            strokeWidth={1.5}
+                            strokeDasharray="4 3"
+                          />
+                        ))}
+                      </g>
+                    );
+                  })}
+                </g>
+              ) : null}
+              {/* Per-object radius rings. Safety separations: Burning Man requires
             them around fuel storage (10′ no ignition sources, 20′ liquid↔propane,
             50′ to another fuel area) and around a ≥100 kWh battery bank. Plus
             Wi-Fi coverage, which is the same shape for a friendlier reason —
             seeing the circles overlap is how you find the camp's dead spots.
             Drawn under the object markers, in plot-local feet, so they print +
             export with the map. */}
-            {objects.flatMap((o) => {
-              const ccx = originX + (o.x + o.width / 2) * ppf;
-              const ccy = originY + (o.y + o.height / 2) * ppf;
-              const ring = (
-                rFt: number,
-                color: string,
-                label: string,
-                key: string,
-              ) =>
-                rFt > 0 ? (
-                  <g key={key} pointerEvents="none">
-                    <circle
-                      cx={ccx}
-                      cy={ccy}
-                      r={rFt * ppf}
-                      fill="none"
-                      stroke={color}
-                      strokeOpacity={0.55}
-                      strokeWidth={1.5}
-                      strokeDasharray="5 4"
-                    />
-                    <text
-                      x={ccx}
-                      // Sits at the top of the ring, but clamped into the view:
-                      // a Wi-Fi range can be bigger than the whole lot, which
-                      // would otherwise park its label far off-screen.
-                      y={Math.max(MARGIN + 11, ccy - rFt * ppf + 11)}
-                      textAnchor="middle"
-                      fontSize={10}
-                      fontWeight={600}
-                      fill={color}
-                      style={{ userSelect: "none" }}
-                    >
-                      {label}
-                    </text>
-                  </g>
-                ) : null;
-              if (o.kind === "fuel-storage") {
-                return [
-                  ring(10, "#e8590c", "10′ no ignition", `${o.id}-f10`),
-                  ring(20, "#e8590c", "20′ liquid↔propane", `${o.id}-f20`),
-                  ring(50, "#e8590c", "50′ to other fuel", `${o.id}-f50`),
-                ];
-              }
-              if (o.kind === "battery" && (o.config.kwh ?? 0) >= 100) {
-                return [
-                  ring(
-                    o.config.safetyFt ?? 20,
-                    "#2f9e44",
-                    `${Math.round(o.config.safetyFt ?? 20)}′ battery safety zone`,
-                    `${o.id}-bat`,
-                  ),
-                ];
-              }
-              if (o.kind === "wifi-ap") {
-                const rf = o.config.rangeFt ?? 100;
-                return [
-                  ring(
-                    rf,
-                    "#15aabf",
-                    `${Math.round(rf)}′ Wi-Fi`,
-                    `${o.id}-wifi`,
-                  ),
-                ];
-              }
-              if (o.kind === "fire-pit") {
-                const cf = o.config.clearFt ?? 20;
-                return [
-                  ring(
-                    cf,
-                    "#f03e3e",
-                    `${Math.round(cf)}′ clear — no combustibles`,
-                    `${o.id}-fire`,
-                  ),
-                ];
-              }
-              return [];
-            })}
-            {/* Placement wishes, drawn UNDER the objects so they read as a hint
+              {objects.flatMap((o) => {
+                const ccx = originX + (o.x + o.width / 2) * ppf;
+                const ccy = originY + (o.y + o.height / 2) * ppf;
+                const ring = (
+                  rFt: number,
+                  color: string,
+                  label: string,
+                  key: string,
+                ) =>
+                  rFt > 0 ? (
+                    <g key={key} pointerEvents="none">
+                      <circle
+                        cx={ccx}
+                        cy={ccy}
+                        r={rFt * ppf}
+                        fill="none"
+                        stroke={color}
+                        strokeOpacity={0.55}
+                        strokeWidth={1.5}
+                        strokeDasharray="5 4"
+                      />
+                      <text
+                        x={ccx}
+                        // Sits at the top of the ring, but clamped into the view:
+                        // a Wi-Fi range can be bigger than the whole lot, which
+                        // would otherwise park its label far off-screen.
+                        y={Math.max(MARGIN + 11, ccy - rFt * ppf + 11)}
+                        textAnchor="middle"
+                        fontSize={10}
+                        fontWeight={600}
+                        fill={color}
+                        style={{ userSelect: "none" }}
+                      >
+                        {label}
+                      </text>
+                    </g>
+                  ) : null;
+                if (o.kind === "fuel-storage") {
+                  return [
+                    ring(10, "#e8590c", "10′ no ignition", `${o.id}-f10`),
+                    ring(20, "#e8590c", "20′ liquid↔propane", `${o.id}-f20`),
+                    ring(50, "#e8590c", "50′ to other fuel", `${o.id}-f50`),
+                  ];
+                }
+                if (o.kind === "battery" && (o.config.kwh ?? 0) >= 100) {
+                  return [
+                    ring(
+                      o.config.safetyFt ?? 20,
+                      "#2f9e44",
+                      `${Math.round(o.config.safetyFt ?? 20)}′ battery safety zone`,
+                      `${o.id}-bat`,
+                    ),
+                  ];
+                }
+                if (o.kind === "wifi-ap") {
+                  const rf = o.config.rangeFt ?? 100;
+                  return [
+                    ring(
+                      rf,
+                      "#15aabf",
+                      `${Math.round(rf)}′ Wi-Fi`,
+                      `${o.id}-wifi`,
+                    ),
+                  ];
+                }
+                if (o.kind === "fire-pit") {
+                  const cf = o.config.clearFt ?? 20;
+                  return [
+                    ring(
+                      cf,
+                      "#f03e3e",
+                      `${Math.round(cf)}′ clear — no combustibles`,
+                      `${o.id}-fire`,
+                    ),
+                  ];
+                }
+                return [];
+              })}
+              {/* Placement wishes, drawn UNDER the objects so they read as a hint
             about the layout rather than as another thing on it. The label is
             held back until one end is selected: a dozen faint lines is a useful
             picture, a dozen labels is a mess. */}
-            {wishes.length > 0 ? (
-              <g pointerEvents="none">
-                {wishes.map((w) => {
-                  const x1 = originX + w.from.x * ppf;
-                  const y1 = originY + w.from.y * ppf;
-                  const x2 = originX + w.to.x * ppf;
-                  const y2 = originY + w.to.y * ppf;
-                  const on =
-                    selectedIds.includes(w.fromId) ||
-                    selectedIds.includes(w.toId);
-                  return (
-                    <g key={w.id}>
-                      <line
-                        x1={x1}
-                        y1={y1}
-                        x2={x2}
-                        y2={y2}
-                        stroke="#e64980"
-                        strokeWidth={on ? 1.75 : 1.25}
-                        strokeOpacity={on ? 0.75 : 0.35}
-                        strokeDasharray="3 5"
-                      />
-                      {on ? (
-                        <text
-                          x={(x1 + x2) / 2}
-                          y={(y1 + y2) / 2 - 4}
-                          fontSize={9}
-                          fontWeight={600}
-                          fill="#e64980"
-                          textAnchor="middle"
-                          stroke={groundFill}
-                          strokeWidth={2.5}
-                          paintOrder="stroke"
-                          style={{ userSelect: "none" }}
-                        >
-                          {w.label}
-                        </text>
-                      ) : null}
-                    </g>
-                  );
-                })}
-              </g>
-            ) : null}
-            {/* Canopies (shade/carport/popup/…) render last so they sit over the
+              {wishes.length > 0 ? (
+                <g pointerEvents="none">
+                  {wishes.map((w) => {
+                    const x1 = originX + w.from.x * ppf;
+                    const y1 = originY + w.from.y * ppf;
+                    const x2 = originX + w.to.x * ppf;
+                    const y2 = originY + w.to.y * ppf;
+                    const on =
+                      selectedIds.includes(w.fromId) ||
+                      selectedIds.includes(w.toId);
+                    return (
+                      <g key={w.id}>
+                        <line
+                          x1={x1}
+                          y1={y1}
+                          x2={x2}
+                          y2={y2}
+                          stroke="#e64980"
+                          strokeWidth={on ? 1.75 : 1.25}
+                          strokeOpacity={on ? 0.75 : 0.35}
+                          strokeDasharray="3 5"
+                        />
+                        {on ? (
+                          <text
+                            x={(x1 + x2) / 2}
+                            y={(y1 + y2) / 2 - 4}
+                            fontSize={9}
+                            fontWeight={600}
+                            fill="#e64980"
+                            textAnchor="middle"
+                            stroke={groundFill}
+                            strokeWidth={2.5}
+                            paintOrder="stroke"
+                            style={{ userSelect: "none" }}
+                          >
+                            {w.label}
+                          </text>
+                        ) : null}
+                      </g>
+                    );
+                  })}
+                </g>
+              ) : null}
+              {/* Canopies (shade/carport/popup/…) render last so they sit over the
             items beneath them. */}
-            {[...objects]
-              .sort(
-                (a, b) =>
-                  Number(!!kindDef(a.kind).canopyShade) -
-                  Number(!!kindDef(b.kind).canopyShade),
-              )
-              .map((o) => (
-                <MapObjectShape
-                  key={o.id}
-                  o={o}
-                  originX={originX}
-                  originY={originY}
-                  ppf={ppf}
-                  selected={selectedIds.includes(o.id)}
-                  soleSelected={
-                    selectedIds.length === 1 && selectedIds[0] === o.id
-                  }
-                  editable={editable(o)}
-                  resizable={resizable(o)}
-                  rotateArmed={rotateArmedId === o.id}
-                  dim={highlight !== "none" && !matches(o)}
-                  showDoors={showDoors}
-                  overflow={objectOverflowsLot(
-                    o,
-                    lot.frontageFt,
-                    lot.depthFt,
-                    rear,
-                  )}
-                  staged={isStaged(o, lot.frontageFt, lot.depthFt, rear)}
-                  night={isNight}
-                  onBodyDown={(e) => startDrag(e, o, "move")}
-                  onResizeDown={(e) => startDrag(e, o, "resize")}
-                  onRotateDown={(e) => startDrag(e, o, "rotate")}
-                />
-              ))}
-            {/* Staged items get a dashed ring around their real outline. Fading
+              {[...objects]
+                .sort(
+                  (a, b) =>
+                    Number(!!kindDef(a.kind).canopyShade) -
+                    Number(!!kindDef(b.kind).canopyShade),
+                )
+                .map((o) => (
+                  <MapObjectShape
+                    key={o.id}
+                    o={o}
+                    originX={originX}
+                    originY={originY}
+                    ppf={ppf}
+                    selected={selectedIds.includes(o.id)}
+                    soleSelected={
+                      selectedIds.length === 1 && selectedIds[0] === o.id
+                    }
+                    editable={editable(o)}
+                    resizable={resizable(o)}
+                    rotateArmed={rotateArmedId === o.id}
+                    dim={highlight !== "none" && !matches(o)}
+                    showDoors={showDoors}
+                    overflow={objectOverflowsLot(
+                      o,
+                      lot.frontageFt,
+                      lot.depthFt,
+                      rear,
+                    )}
+                    staged={isStaged(o, lot.frontageFt, lot.depthFt, rear)}
+                    night={isNight}
+                    onBodyDown={(e) => startDrag(e, o, "move")}
+                    onResizeDown={(e) => startDrag(e, o, "resize")}
+                    onRotateDown={(e) => startDrag(e, o, "rotate")}
+                  />
+                ))}
+              {/* Staged items get a dashed ring around their real outline. Fading
             them alone reads as "far away" more than "not decided", and the whole
             point of parking something out here is to judge its true size — so the
             marker goes AROUND the footprint rather than shrinking or hiding it. */}
-            <g pointerEvents="none">
-              {objects
-                .filter((o) => isStaged(o, lot.frontageFt, lot.depthFt, rear))
-                .map((o) => (
-                  <polygon
-                    key={`${o.id}-staged`}
-                    points={footprintPoints(o)
-                      .map(
-                        (p) => `${originX + p.x * ppf},${originY + p.y * ppf}`,
-                      )
-                      .join(" ")}
-                    fill="none"
-                    stroke="var(--mantine-color-dimmed)"
-                    strokeWidth={1.25}
-                    strokeDasharray="5 4"
-                    strokeOpacity={0.85}
-                  />
-                ))}
-            </g>
-            {/* Uplink labels ride ABOVE the objects — the aim path runs across
+              <g pointerEvents="none">
+                {objects
+                  .filter((o) => isStaged(o, lot.frontageFt, lot.depthFt, rear))
+                  .map((o) => (
+                    <polygon
+                      key={`${o.id}-staged`}
+                      points={footprintPoints(o)
+                        .map(
+                          (p) =>
+                            `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                        )
+                        .join(" ")}
+                      fill="none"
+                      stroke="var(--mantine-color-dimmed)"
+                      strokeWidth={1.25}
+                      strokeDasharray="5 4"
+                      strokeOpacity={0.85}
+                    />
+                  ))}
+              </g>
+              {/* Uplink labels ride ABOVE the objects — the aim path runs across
             the camp by definition, so a label drawn under the structures ends up
             hidden behind whichever one it's warning you about. Each radio's
             verdict sits close to the radio, not out at the end of its beam. */}
-            {uplink ? (
-              <g pointerEvents="none" clipPath="url(#ground-clip)">
-                {/* How far the tower is and on what bearing — pinned to
+              {uplink ? (
+                <g pointerEvents="none" clipPath="url(#ground-clip)">
+                  {/* How far the tower is and on what bearing — pinned to
                 whichever path is actually drawn: the camp-wide vector while no
                 radio is placed, otherwise the first radio's own beam. */}
-                {(() => {
-                  const lead = uplink.aims[0] ?? uplink.camp;
-                  return (
-                    <text
-                      x={lead.px + lead.ux * lead.exit * 0.85}
-                      y={lead.py + lead.uy * lead.exit * 0.85}
-                      fontSize={10}
-                      fontWeight={600}
-                      fill="#7048e8"
-                      fillOpacity={0.6}
-                      textAnchor="middle"
-                      style={{ userSelect: "none" }}
-                    >
-                      {`NOC ${Math.round(lead.distFt).toLocaleString()}′${
-                        uplink.bearingDeg == null
-                          ? ""
-                          : ` · ${Math.round(uplink.bearingDeg)}°`
-                      }`}
-                    </text>
-                  );
-                })()}
-                {uplink.aims.map((a) => {
-                  const blocked = a.blockers.length > 0;
-                  // Just up the beam from the radio, nudged off the line so the
-                  // text doesn't sit on top of the dashes.
-                  const d = Math.min(a.exit * 0.5, 74);
-                  return (
-                    <text
-                      key={`aimlabel-${a.o.id}`}
-                      x={a.px + a.ux * d - a.uy * 9}
-                      y={a.py + a.uy * d + a.ux * 9}
-                      fontSize={10}
-                      fontWeight={700}
-                      fill={blocked ? "#e8590c" : "#7048e8"}
-                      textAnchor="middle"
-                      stroke={MAP_GROUND}
-                      strokeWidth={3}
-                      strokeOpacity={0.85}
-                      paintOrder="stroke"
-                      style={{ userSelect: "none" }}
-                    >
-                      {blocked
-                        ? `Blocked by ${a.blockers
-                            .slice(0, 2)
-                            .map((b) => b.name || kindDef(b.kind).label)
-                            .join(", ")}${
-                            a.blockers.length > 2
-                              ? ` +${a.blockers.length - 2}`
-                              : ""
-                          }`
-                        : `Clear · ${Math.round(a.mastFt)}′ mast`}
-                    </text>
-                  );
-                })}
-              </g>
-            ) : null}
-            {/* Version diff: what this layout does that the official map doesn't.
+                  {(() => {
+                    const lead = uplink.aims[0] ?? uplink.camp;
+                    return (
+                      <text
+                        x={lead.px + lead.ux * lead.exit * 0.85}
+                        y={lead.py + lead.uy * lead.exit * 0.85}
+                        fontSize={10}
+                        fontWeight={600}
+                        fill="#7048e8"
+                        fillOpacity={0.6}
+                        textAnchor="middle"
+                        style={{ userSelect: "none" }}
+                      >
+                        {`NOC ${Math.round(lead.distFt).toLocaleString()}′${
+                          uplink.bearingDeg == null
+                            ? ""
+                            : ` · ${Math.round(uplink.bearingDeg)}°`
+                        }`}
+                      </text>
+                    );
+                  })()}
+                  {uplink.aims.map((a) => {
+                    const blocked = a.blockers.length > 0;
+                    // Just up the beam from the radio, nudged off the line so the
+                    // text doesn't sit on top of the dashes.
+                    const d = Math.min(a.exit * 0.5, 74);
+                    return (
+                      <text
+                        key={`aimlabel-${a.o.id}`}
+                        x={a.px + a.ux * d - a.uy * 9}
+                        y={a.py + a.uy * d + a.ux * 9}
+                        fontSize={10}
+                        fontWeight={700}
+                        fill={blocked ? "#e8590c" : "#7048e8"}
+                        textAnchor="middle"
+                        stroke={MAP_GROUND}
+                        strokeWidth={3}
+                        strokeOpacity={0.85}
+                        paintOrder="stroke"
+                        style={{ userSelect: "none" }}
+                      >
+                        {blocked
+                          ? `Blocked by ${a.blockers
+                              .slice(0, 2)
+                              .map((b) => b.name || kindDef(b.kind).label)
+                              .join(", ")}${
+                              a.blockers.length > 2
+                                ? ` +${a.blockers.length - 2}`
+                                : ""
+                            }`
+                          : `Clear · ${Math.round(a.mastFt)}′ mast`}
+                      </text>
+                    );
+                  })}
+                </g>
+              ) : null}
+              {/* Version diff: what this layout does that the official map doesn't.
             A list in the rail tells you fifteen things changed; only the map
             tells you they all shuffled toward the road. Each moved item keeps a
             faint outline where it officially sits, with a line to where this
             version puts it; things missing here are outlined in red where they
             officially are, and things only here get a green ring. */}
-            {diff ? (
-              <g pointerEvents="none">
-                {diff.changed.map(({ was, now }) => {
-                  const wcx = was.x + was.width / 2;
-                  const wcy = was.y + was.height / 2;
-                  const ncx = now.x + now.width / 2;
-                  const ncy = now.y + now.height / 2;
-                  const pts = footprintOutline(
-                    was.kind,
-                    was.width,
-                    was.height,
-                    was.config,
-                    was.mirrored,
-                  )
-                    .map(([lx, ly]) => {
-                      const v = rotateVec(lx, ly, was.rotation);
-                      return `${originX + (wcx + v.x) * ppf},${originY + (wcy + v.y) * ppf}`;
-                    })
-                    .join(" ");
-                  return (
-                    <g key={`diff-${was.id}`}>
-                      <polygon
-                        points={pts}
-                        fill="#868e96"
-                        fillOpacity={0.08}
-                        stroke="#868e96"
-                        strokeWidth={1.25}
-                        strokeDasharray="3 3"
-                      />
-                      <line
-                        x1={originX + wcx * ppf}
-                        y1={originY + wcy * ppf}
-                        x2={originX + ncx * ppf}
-                        y2={originY + ncy * ppf}
-                        stroke="#7048e8"
-                        strokeWidth={1.5}
-                        strokeDasharray="2 3"
-                      />
-                      <circle
-                        cx={originX + ncx * ppf}
-                        cy={originY + ncy * ppf}
-                        r={3}
-                        fill="#7048e8"
-                      />
-                    </g>
-                  );
-                })}
-                {diff.removed.map((o) => {
-                  const cx = o.x + o.width / 2;
-                  const cy = o.y + o.height / 2;
-                  const pts = footprintOutline(
-                    o.kind,
-                    o.width,
-                    o.height,
-                    o.config,
-                    o.mirrored,
-                  )
-                    .map(([lx, ly]) => {
-                      const v = rotateVec(lx, ly, o.rotation);
-                      return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
-                    })
-                    .join(" ");
-                  return (
-                    <polygon
-                      key={`gone-${o.id}`}
-                      points={pts}
-                      fill="#fa5252"
-                      fillOpacity={0.06}
-                      stroke="#fa5252"
-                      strokeWidth={1.25}
-                      strokeDasharray="5 3"
-                    />
-                  );
-                })}
-                {diff.added.map((o) => (
-                  <circle
-                    key={`new-${o.id}`}
-                    cx={originX + (o.x + o.width / 2) * ppf}
-                    cy={originY + (o.y + o.height / 2) * ppf}
-                    r={Math.max(o.width, o.height) * ppf * 0.6}
-                    fill="none"
-                    stroke="#0ca678"
-                    strokeWidth={1.5}
-                    strokeDasharray="4 3"
-                  />
-                ))}
-              </g>
-            ) : null}
-            {/* Suggested-edit "ghosts": each camper's proposed geometry for an
-            object, drawn as a translucent footprint at the proposed spot + the
-            suggester's first name. The official item stays where it is. */}
-            {suggestions.map((sg) => {
-              const o = objects.find((x) => x.id === sg.objectId);
-              if (!o) return null;
-              const cx = sg.x + sg.width / 2;
-              const cy = sg.y + sg.height / 2;
-              const pts = footprintOutline(
-                o.kind,
-                sg.width,
-                sg.height,
-                o.config,
-                o.mirrored,
-              )
-                .map(([lx, ly]) => {
-                  const v = rotateVec(lx, ly, sg.rotation);
-                  return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
-                })
-                .join(" ");
-              const who = sg.memberName?.split(" ")[0] ?? "?";
-              return (
-                <g key={sg.id} pointerEvents="none">
-                  <polygon
-                    points={pts}
-                    fill="#4263eb"
-                    fillOpacity={0.12}
-                    stroke="#4263eb"
-                    strokeWidth={1.5}
-                    strokeDasharray="4 3"
-                  />
-                  <text
-                    x={originX + cx * ppf}
-                    y={originY + cy * ppf}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={11}
-                    fontWeight={600}
-                    fill="#3b5bdb"
-                    style={{ userSelect: "none" }}
-                  >
-                    ✎ {who}
-                  </text>
-                </g>
-              );
-            })}
-            {/* Flag any placed object whose kind is disallowed this year (banned
-            after it was placed): a small amber "!" badge so an officer can resolve
-            it, rather than silently deleting the object. */}
-            {bannedKinds.length > 0
-              ? objects
-                  .filter((o) => bannedKinds.includes(o.kind))
-                  .map((o) => {
-                    const bx = originX + (o.x + o.width / 2) * ppf;
-                    const by = originY + o.y * ppf;
+              {diff ? (
+                <g pointerEvents="none">
+                  {diff.changed.map(({ was, now }) => {
+                    const wcx = was.x + was.width / 2;
+                    const wcy = was.y + was.height / 2;
+                    const ncx = now.x + now.width / 2;
+                    const ncy = now.y + now.height / 2;
+                    const pts = footprintOutline(
+                      was.kind,
+                      was.width,
+                      was.height,
+                      was.config,
+                      was.mirrored,
+                    )
+                      .map(([lx, ly]) => {
+                        const v = rotateVec(lx, ly, was.rotation);
+                        return `${originX + (wcx + v.x) * ppf},${originY + (wcy + v.y) * ppf}`;
+                      })
+                      .join(" ");
                     return (
-                      <g key={`ban-${o.id}`} pointerEvents="none">
-                        <title>{`${kindDef(o.kind).label} isn't allowed this year`}</title>
-                        <circle
-                          cx={bx}
-                          cy={by}
-                          r={7}
-                          fill="#e8590c"
-                          stroke="#fff"
+                      <g key={`diff-${was.id}`}>
+                        <polygon
+                          points={pts}
+                          fill="#868e96"
+                          fillOpacity={0.08}
+                          stroke="#868e96"
+                          strokeWidth={1.25}
+                          strokeDasharray="3 3"
+                        />
+                        <line
+                          x1={originX + wcx * ppf}
+                          y1={originY + wcy * ppf}
+                          x2={originX + ncx * ppf}
+                          y2={originY + ncy * ppf}
+                          stroke="#7048e8"
                           strokeWidth={1.5}
-                        />
-                        <text
-                          x={bx}
-                          y={by}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          fontSize={10}
-                          fontWeight={800}
-                          fill="#fff"
-                        >
-                          !
-                        </text>
-                      </g>
-                    );
-                  })
-              : null}
-            {/* Self-shading: tint the faces of a 3D structure that are turned away
-            from the sun (its shady/lee side), drawn over the structure. Only kinds
-            that declare `shadedFaces` (e.g. the Sierpinski pyramid) participate. */}
-            {mapUpBearing != null && sun.altitude > 0.5 ? (
-              // Tagged so the BM export drops all sun shading — the lee-face
-              // tints AND the pyramid's Pi-sign ground shadow — for a clean
-              // overhead plan.
-              <g data-map-shade="1">
-                {objects.flatMap((o) => {
-                  const def = kindDef(o.kind);
-                  const sd = sunDirLocal(o, sun, mapUpBearing);
-                  if (!sd) return [];
-                  // Mirror reflects the structure about its vertical axis; that's
-                  // equivalent to lighting it with an x-reflected sun and drawing
-                  // each face at its mirrored position (see toPx).
-                  const lit = o.mirrored ? { ...sd, x: -sd.x } : sd;
-                  // A camp-theme structure supplies its own faces; otherwise core
-                  // handles facet-roofed core kinds (the hexayurt).
-                  const faces = def.shadedFaces
-                    ? def.shadedFaces(o.width, o.height, lit)
-                    : coreShadedFaces(
-                        o.kind,
-                        o.width,
-                        o.height,
-                        lit,
-                        o.tallFt || kindHeight(o.kind),
-                      );
-                  if (!faces.length) return [];
-                  const cx = o.x + o.width / 2;
-                  const cy = o.y + o.height / 2;
-                  const toPx = (p: { x: number; y: number }) => {
-                    const lx = o.mirrored
-                      ? o.width / 2 - p.x
-                      : p.x - o.width / 2;
-                    const v = rotateVec(lx, p.y - o.height / 2, o.rotation);
-                    return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
-                  };
-                  return faces.map((face, i) => (
-                    <polygon
-                      key={`sf-${o.id}-${i}`}
-                      points={face.points.map(toPx).join(" ")}
-                      fill="#1c1c1c"
-                      fillOpacity={face.shade}
-                      pointerEvents="none"
-                    />
-                  ));
-                })}
-              </g>
-            ) : null}
-            {/* Geodesic domes: a spherical shading overlay whose lit side tracks
-            the sun, so a dome reads as a 3D sphere. */}
-            {domeShadeOn
-              ? objects.flatMap((o) =>
-                  kindDef(o.kind).shape === "dome"
-                    ? [
-                        <ellipse
-                          key={`sphere-${o.id}`}
-                          cx={originX + (o.x + o.width / 2) * ppf}
-                          cy={originY + (o.y + o.height / 2) * ppf}
-                          rx={(o.width / 2) * ppf}
-                          ry={(o.height / 2) * ppf}
-                          fill="url(#dome-sphere)"
-                          pointerEvents="none"
-                        />,
-                      ]
-                    : [],
-                )
-              : null}
-            {/* Power lines: open polylines drawn over the structures (a planning
-            overlay), each labeled with its total run length. */}
-            {cables.map((c) => {
-              if (c.points.length < 2) return null;
-              const pts = c.points
-                .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
-                .join(" ");
-              const mid =
-                c.points[Math.floor((c.points.length - 1) / 2)] ?? c.points[0];
-              if (!mid) return null;
-              const ends = [c.points[0], c.points[c.points.length - 1]].filter(
-                (p): p is ZonePt => p != null,
-              );
-              const sel = c.id === selectedCableId;
-              const lenFt = pathLengthFt(c.points);
-              return (
-                <g key={c.id}>
-                  <polyline
-                    points={pts}
-                    fill="none"
-                    stroke={c.color}
-                    strokeWidth={sel ? 4 : 2.5}
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    style={{ cursor: "pointer" }}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      selectCable(c.id);
-                    }}
-                  />
-                  {/* Endpoint dots mark the connected nodes. */}
-                  {ends.map((p, i) => (
-                    <circle
-                      key={`${c.id}-end-${i}`}
-                      cx={originX + p.x * ppf}
-                      cy={originY + p.y * ppf}
-                      r={sel ? 4 : 3}
-                      fill={c.color}
-                      stroke="#fff"
-                      strokeWidth={1}
-                      pointerEvents="none"
-                    />
-                  ))}
-                  <text
-                    x={originX + mid.x * ppf}
-                    y={originY + mid.y * ppf - 6}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={14}
-                    fontWeight={600}
-                    fill={c.color}
-                    stroke="#fff"
-                    strokeWidth={2.5}
-                    paintOrder="stroke"
-                    style={{ pointerEvents: "none", userSelect: "none" }}
-                  >
-                    {c.name ? `${c.name} · ` : ""}
-                    {feetInches(lenFt)}
-                    {c.amps ? ` · ${c.amps}A` : ""}
-                  </text>
-                  {/* Edit handles on the selected cable: midpoint "+" adds a point,
-                  vertex handles drag (snapping to nodes); double-click removes. */}
-                  {sel && canManage && drawMode === null ? (
-                    <>
-                      {c.points.slice(0, -1).map((p, i) => {
-                        const q = c.points[i + 1];
-                        if (!q) return null;
-                        return (
-                          <circle
-                            key={`${c.id}-add-${i}`}
-                            cx={originX + ((p.x + q.x) / 2) * ppf}
-                            cy={originY + ((p.y + q.y) / 2) * ppf}
-                            r={4}
-                            fill="#fff"
-                            stroke={c.color}
-                            strokeWidth={1.5}
-                            strokeDasharray="2 2"
-                            style={{ cursor: "copy" }}
-                            onPointerDown={(e) => startCableInsertDrag(e, c, i)}
-                          >
-                            <title>Drag to add a point</title>
-                          </circle>
-                        );
-                      })}
-                      {c.points.map((p, i) => (
-                        <circle
-                          key={`${c.id}-vtx-${i}`}
-                          cx={originX + p.x * ppf}
-                          cy={originY + p.y * ppf}
-                          r={5}
-                          fill="#fff"
-                          stroke={c.color}
-                          strokeWidth={2.5}
-                          style={{ cursor: "grab" }}
-                          onPointerDown={(e) => startCableVertexDrag(e, c, i)}
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            deleteCableVertex(c, i);
-                          }}
-                        >
-                          <title>
-                            Drag to move (snaps to power nodes) · double-click
-                            to remove
-                          </title>
-                        </circle>
-                      ))}
-                    </>
-                  ) : null}
-                </g>
-              );
-            })}
-            {/* Night-lighting sim: a dusk→night wash over the whole map, then path
-            lights glow warmly on top of it (and the pyramid's apex rainbow, drawn
-            inside the structure, shows through). */}
-            {isNight ? (
-              <>
-                <rect
-                  x={0}
-                  y={0}
-                  width={VIEW_W}
-                  height={viewH}
-                  fill="#0a1230"
-                  opacity={nightFactor * 0.6}
-                  pointerEvents="none"
-                />
-                {objects
-                  .filter((o) => o.kind === "path-light")
-                  .map((o) => {
-                    const gx = originX + (o.x + o.width / 2) * ppf;
-                    const gy = originY + (o.y + o.height / 2) * ppf;
-                    const rad = Math.max(7, 4 * ppf); // ~4ft dim pool
-                    return (
-                      <g key={`glow-${o.id}`} pointerEvents="none">
-                        <circle
-                          cx={gx}
-                          cy={gy}
-                          r={rad}
-                          fill="url(#path-glow)"
-                          opacity={nightFactor * 0.65}
+                          strokeDasharray="2 3"
                         />
                         <circle
-                          cx={gx}
-                          cy={gy}
-                          r={1.4}
-                          fill="#fff9db"
-                          opacity={0.8}
+                          cx={originX + ncx * ppf}
+                          cy={originY + ncy * ppf}
+                          r={3}
+                          fill="#7048e8"
                         />
                       </g>
                     );
                   })}
-              </>
-            ) : null}
-            {/* Linked blocks: a faint dashed hull around each set of "stuck"
-            objects, so the blocks read even when nothing is selected. */}
-            {(() => {
-              const groups = new Map<string, ObjRow[]>();
-              for (const o of objects) {
-                if (!o.groupId) continue;
-                const arr = groups.get(o.groupId);
-                if (arr) arr.push(o);
-                else groups.set(o.groupId, [o]);
-              }
-              const out = [];
-              for (const [gid, members] of groups) {
-                if (members.length < 2) continue;
-                let xLo = Number.POSITIVE_INFINITY;
-                let xHi = Number.NEGATIVE_INFINITY;
-                let yLo = Number.POSITIVE_INFINITY;
-                let yHi = Number.NEGATIVE_INFINITY;
-                for (const o of members) {
-                  for (const p of objWorldCorners(
-                    o,
-                    o.x + o.width / 2,
-                    o.y + o.height / 2,
-                  )) {
-                    if (p.x < xLo) xLo = p.x;
-                    if (p.x > xHi) xHi = p.x;
-                    if (p.y < yLo) yLo = p.y;
-                    if (p.y > yHi) yHi = p.y;
-                  }
-                }
-                const pad = 1.5;
-                out.push(
-                  <rect
-                    key={`grp-${gid}`}
-                    x={originX + (xLo - pad) * ppf}
-                    y={originY + (yLo - pad) * ppf}
-                    width={(xHi - xLo + 2 * pad) * ppf}
-                    height={(yHi - yLo + 2 * pad) * ppf}
-                    rx={6}
-                    fill="none"
-                    stroke="#7048e8"
-                    strokeOpacity={0.5}
-                    strokeWidth={1}
-                    strokeDasharray="2 4"
-                    pointerEvents="none"
-                  />,
+                  {diff.removed.map((o) => {
+                    const cx = o.x + o.width / 2;
+                    const cy = o.y + o.height / 2;
+                    const pts = footprintOutline(
+                      o.kind,
+                      o.width,
+                      o.height,
+                      o.config,
+                      o.mirrored,
+                    )
+                      .map(([lx, ly]) => {
+                        const v = rotateVec(lx, ly, o.rotation);
+                        return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
+                      })
+                      .join(" ");
+                    return (
+                      <polygon
+                        key={`gone-${o.id}`}
+                        points={pts}
+                        fill="#fa5252"
+                        fillOpacity={0.06}
+                        stroke="#fa5252"
+                        strokeWidth={1.25}
+                        strokeDasharray="5 3"
+                      />
+                    );
+                  })}
+                  {diff.added.map((o) => (
+                    <circle
+                      key={`new-${o.id}`}
+                      cx={originX + (o.x + o.width / 2) * ppf}
+                      cy={originY + (o.y + o.height / 2) * ppf}
+                      r={Math.max(o.width, o.height) * ppf * 0.6}
+                      fill="none"
+                      stroke="#0ca678"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                    />
+                  ))}
+                </g>
+              ) : null}
+              {/* Suggested-edit "ghosts": each camper's proposed geometry for an
+            object, drawn as a translucent footprint at the proposed spot + the
+            suggester's first name. The official item stays where it is. */}
+              {suggestions.map((sg) => {
+                const o = objects.find((x) => x.id === sg.objectId);
+                if (!o) return null;
+                const cx = sg.x + sg.width / 2;
+                const cy = sg.y + sg.height / 2;
+                const pts = footprintOutline(
+                  o.kind,
+                  sg.width,
+                  sg.height,
+                  o.config,
+                  o.mirrored,
+                )
+                  .map(([lx, ly]) => {
+                    const v = rotateVec(lx, ly, sg.rotation);
+                    return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
+                  })
+                  .join(" ");
+                const who = sg.memberName?.split(" ")[0] ?? "?";
+                return (
+                  <g key={sg.id} pointerEvents="none">
+                    <polygon
+                      points={pts}
+                      fill="#4263eb"
+                      fillOpacity={0.12}
+                      stroke="#4263eb"
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                    />
+                    <text
+                      x={originX + cx * ppf}
+                      y={originY + cy * ppf}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={11}
+                      fontWeight={600}
+                      fill="#3b5bdb"
+                      style={{ userSelect: "none" }}
+                    >
+                      ✎ {who}
+                    </text>
+                  </g>
                 );
-              }
-              return out;
-            })()}
-            {/* Multi-select group box + a single rotate handle (rotates the whole
-            selection about its centroid). Per-object handles are hidden while >1
-            is selected (see soleSelected). */}
-            {selectedIds.length + selectedZoneIds.length > 1
-              ? (() => {
-                  const sel = objects.filter((o) => selectedIds.includes(o.id));
-                  const selZns = zones.filter((z) =>
-                    selectedZoneIds.includes(z.id),
-                  );
-                  if (sel.length + selZns.length < 2) return null;
+              })}
+              {/* Flag any placed object whose kind is disallowed this year (banned
+            after it was placed): a small amber "!" badge so an officer can resolve
+            it, rather than silently deleting the object. */}
+              {bannedKinds.length > 0
+                ? objects
+                    .filter((o) => bannedKinds.includes(o.kind))
+                    .map((o) => {
+                      const bx = originX + (o.x + o.width / 2) * ppf;
+                      const by = originY + o.y * ppf;
+                      return (
+                        <g key={`ban-${o.id}`} pointerEvents="none">
+                          <title>{`${kindDef(o.kind).label} isn't allowed this year`}</title>
+                          <circle
+                            cx={bx}
+                            cy={by}
+                            r={7}
+                            fill="#e8590c"
+                            stroke="#fff"
+                            strokeWidth={1.5}
+                          />
+                          <text
+                            x={bx}
+                            y={by}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fontSize={10}
+                            fontWeight={800}
+                            fill="#fff"
+                          >
+                            !
+                          </text>
+                        </g>
+                      );
+                    })
+                : null}
+              {/* Self-shading: tint the faces of a 3D structure that are turned away
+            from the sun (its shady/lee side), drawn over the structure. Only kinds
+            that declare `shadedFaces` (e.g. the Sierpinski pyramid) participate. */}
+              {mapUpBearing != null && sun.altitude > 0.5 ? (
+                // Tagged so the BM export drops all sun shading — the lee-face
+                // tints AND the pyramid's Pi-sign ground shadow — for a clean
+                // overhead plan.
+                <g data-map-shade="1">
+                  {objects.flatMap((o) => {
+                    const def = kindDef(o.kind);
+                    const sd = sunDirLocal(o, sun, mapUpBearing);
+                    if (!sd) return [];
+                    // Mirror reflects the structure about its vertical axis; that's
+                    // equivalent to lighting it with an x-reflected sun and drawing
+                    // each face at its mirrored position (see toPx).
+                    const lit = o.mirrored ? { ...sd, x: -sd.x } : sd;
+                    // A camp-theme structure supplies its own faces; otherwise core
+                    // handles facet-roofed core kinds (the hexayurt).
+                    const faces = def.shadedFaces
+                      ? def.shadedFaces(o.width, o.height, lit)
+                      : coreShadedFaces(
+                          o.kind,
+                          o.width,
+                          o.height,
+                          lit,
+                          o.tallFt || kindHeight(o.kind),
+                        );
+                    if (!faces.length) return [];
+                    const cx = o.x + o.width / 2;
+                    const cy = o.y + o.height / 2;
+                    const toPx = (p: { x: number; y: number }) => {
+                      const lx = o.mirrored
+                        ? o.width / 2 - p.x
+                        : p.x - o.width / 2;
+                      const v = rotateVec(lx, p.y - o.height / 2, o.rotation);
+                      return `${originX + (cx + v.x) * ppf},${originY + (cy + v.y) * ppf}`;
+                    };
+                    return faces.map((face, i) => (
+                      <polygon
+                        key={`sf-${o.id}-${i}`}
+                        points={face.points.map(toPx).join(" ")}
+                        fill="#1c1c1c"
+                        fillOpacity={face.shade}
+                        pointerEvents="none"
+                      />
+                    ));
+                  })}
+                </g>
+              ) : null}
+              {/* Geodesic domes: a spherical shading overlay whose lit side tracks
+            the sun, so a dome reads as a 3D sphere. */}
+              {domeShadeOn
+                ? objects.flatMap((o) =>
+                    kindDef(o.kind).shape === "dome"
+                      ? [
+                          <ellipse
+                            key={`sphere-${o.id}`}
+                            cx={originX + (o.x + o.width / 2) * ppf}
+                            cy={originY + (o.y + o.height / 2) * ppf}
+                            rx={(o.width / 2) * ppf}
+                            ry={(o.height / 2) * ppf}
+                            fill="url(#dome-sphere)"
+                            pointerEvents="none"
+                          />,
+                        ]
+                      : [],
+                  )
+                : null}
+              {/* Power lines: open polylines drawn over the structures (a planning
+            overlay), each labeled with its total run length. */}
+              {cables.map((c) => {
+                if (c.points.length < 2) return null;
+                const pts = c.points
+                  .map((p) => `${originX + p.x * ppf},${originY + p.y * ppf}`)
+                  .join(" ");
+                const mid =
+                  c.points[Math.floor((c.points.length - 1) / 2)] ??
+                  c.points[0];
+                if (!mid) return null;
+                const ends = [
+                  c.points[0],
+                  c.points[c.points.length - 1],
+                ].filter((p): p is ZonePt => p != null);
+                const sel = c.id === selectedCableId;
+                const lenFt = pathLengthFt(c.points);
+                return (
+                  <g key={c.id}>
+                    <polyline
+                      points={pts}
+                      fill="none"
+                      stroke={c.color}
+                      strokeWidth={sel ? 4 : 2.5}
+                      strokeLinejoin="round"
+                      strokeLinecap="round"
+                      style={{ cursor: "pointer" }}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        selectCable(c.id);
+                      }}
+                    />
+                    {/* Endpoint dots mark the connected nodes. */}
+                    {ends.map((p, i) => (
+                      <circle
+                        key={`${c.id}-end-${i}`}
+                        cx={originX + p.x * ppf}
+                        cy={originY + p.y * ppf}
+                        r={sel ? 4 : 3}
+                        fill={c.color}
+                        stroke="#fff"
+                        strokeWidth={1}
+                        pointerEvents="none"
+                      />
+                    ))}
+                    <text
+                      x={originX + mid.x * ppf}
+                      y={originY + mid.y * ppf - 6}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={14}
+                      fontWeight={600}
+                      fill={c.color}
+                      stroke="#fff"
+                      strokeWidth={2.5}
+                      paintOrder="stroke"
+                      style={{ pointerEvents: "none", userSelect: "none" }}
+                    >
+                      {c.name ? `${c.name} · ` : ""}
+                      {feetInches(lenFt)}
+                      {c.amps ? ` · ${c.amps}A` : ""}
+                    </text>
+                    {/* Edit handles on the selected cable: midpoint "+" adds a point,
+                  vertex handles drag (snapping to nodes); double-click removes. */}
+                    {sel && canManage && drawMode === null ? (
+                      <>
+                        {c.points.slice(0, -1).map((p, i) => {
+                          const q = c.points[i + 1];
+                          if (!q) return null;
+                          return (
+                            <circle
+                              key={`${c.id}-add-${i}`}
+                              cx={originX + ((p.x + q.x) / 2) * ppf}
+                              cy={originY + ((p.y + q.y) / 2) * ppf}
+                              r={4}
+                              fill="#fff"
+                              stroke={c.color}
+                              strokeWidth={1.5}
+                              strokeDasharray="2 2"
+                              style={{ cursor: "copy" }}
+                              onPointerDown={(e) =>
+                                startCableInsertDrag(e, c, i)
+                              }
+                            >
+                              <title>Drag to add a point</title>
+                            </circle>
+                          );
+                        })}
+                        {c.points.map((p, i) => (
+                          <circle
+                            key={`${c.id}-vtx-${i}`}
+                            cx={originX + p.x * ppf}
+                            cy={originY + p.y * ppf}
+                            r={5}
+                            fill="#fff"
+                            stroke={c.color}
+                            strokeWidth={2.5}
+                            style={{ cursor: "grab" }}
+                            onPointerDown={(e) => startCableVertexDrag(e, c, i)}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              deleteCableVertex(c, i);
+                            }}
+                          >
+                            <title>
+                              Drag to move (snaps to power nodes) · double-click
+                              to remove
+                            </title>
+                          </circle>
+                        ))}
+                      </>
+                    ) : null}
+                  </g>
+                );
+              })}
+              {/* Night-lighting sim: a dusk→night wash over the whole map, then path
+            lights glow warmly on top of it (and the pyramid's apex rainbow, drawn
+            inside the structure, shows through). */}
+              {isNight ? (
+                <>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={VIEW_W}
+                    height={viewH}
+                    fill="#0a1230"
+                    opacity={nightFactor * 0.6}
+                    pointerEvents="none"
+                  />
+                  {objects
+                    .filter((o) => o.kind === "path-light")
+                    .map((o) => {
+                      const gx = originX + (o.x + o.width / 2) * ppf;
+                      const gy = originY + (o.y + o.height / 2) * ppf;
+                      const rad = Math.max(7, 4 * ppf); // ~4ft dim pool
+                      return (
+                        <g key={`glow-${o.id}`} pointerEvents="none">
+                          <circle
+                            cx={gx}
+                            cy={gy}
+                            r={rad}
+                            fill="url(#path-glow)"
+                            opacity={nightFactor * 0.65}
+                          />
+                          <circle
+                            cx={gx}
+                            cy={gy}
+                            r={1.4}
+                            fill="#fff9db"
+                            opacity={0.8}
+                          />
+                        </g>
+                      );
+                    })}
+                </>
+              ) : null}
+              {/* Linked blocks: a faint dashed hull around each set of "stuck"
+            objects, so the blocks read even when nothing is selected. */}
+              {(() => {
+                const groups = new Map<string, ObjRow[]>();
+                for (const o of objects) {
+                  if (!o.groupId) continue;
+                  const arr = groups.get(o.groupId);
+                  if (arr) arr.push(o);
+                  else groups.set(o.groupId, [o]);
+                }
+                const out = [];
+                for (const [gid, members] of groups) {
+                  if (members.length < 2) continue;
                   let xLo = Number.POSITIVE_INFINITY;
                   let xHi = Number.NEGATIVE_INFINITY;
                   let yLo = Number.POSITIVE_INFINITY;
                   let yHi = Number.NEGATIVE_INFINITY;
-                  for (const o of sel) {
+                  for (const o of members) {
                     for (const p of objWorldCorners(
                       o,
                       o.x + o.width / 2,
@@ -8481,229 +8464,302 @@ function Editor({
                       if (p.y > yHi) yHi = p.y;
                     }
                   }
-                  for (const z of selZns) {
-                    for (const p of z.points) {
-                      if (p.x < xLo) xLo = p.x;
-                      if (p.x > xHi) xHi = p.x;
-                      if (p.y < yLo) yLo = p.y;
-                      if (p.y > yHi) yHi = p.y;
+                  const pad = 1.5;
+                  out.push(
+                    <rect
+                      key={`grp-${gid}`}
+                      x={originX + (xLo - pad) * ppf}
+                      y={originY + (yLo - pad) * ppf}
+                      width={(xHi - xLo + 2 * pad) * ppf}
+                      height={(yHi - yLo + 2 * pad) * ppf}
+                      rx={6}
+                      fill="none"
+                      stroke="#7048e8"
+                      strokeOpacity={0.5}
+                      strokeWidth={1}
+                      strokeDasharray="2 4"
+                      pointerEvents="none"
+                    />,
+                  );
+                }
+                return out;
+              })()}
+              {/* Multi-select group box + a single rotate handle (rotates the whole
+            selection about its centroid). Per-object handles are hidden while >1
+            is selected (see soleSelected). */}
+              {selectedIds.length + selectedZoneIds.length > 1
+                ? (() => {
+                    const sel = objects.filter((o) =>
+                      selectedIds.includes(o.id),
+                    );
+                    const selZns = zones.filter((z) =>
+                      selectedZoneIds.includes(z.id),
+                    );
+                    if (sel.length + selZns.length < 2) return null;
+                    let xLo = Number.POSITIVE_INFINITY;
+                    let xHi = Number.NEGATIVE_INFINITY;
+                    let yLo = Number.POSITIVE_INFINITY;
+                    let yHi = Number.NEGATIVE_INFINITY;
+                    for (const o of sel) {
+                      for (const p of objWorldCorners(
+                        o,
+                        o.x + o.width / 2,
+                        o.y + o.height / 2,
+                      )) {
+                        if (p.x < xLo) xLo = p.x;
+                        if (p.x > xHi) xHi = p.x;
+                        if (p.y < yLo) yLo = p.y;
+                        if (p.y > yHi) yHi = p.y;
+                      }
                     }
-                  }
-                  const bx = originX + xLo * ppf;
-                  const by = originY + yLo * ppf;
-                  const bw = (xHi - xLo) * ppf;
-                  const bh = (yHi - yLo) * ppf;
-                  const hx = bx + bw / 2;
-                  return (
-                    <g>
-                      <rect
-                        x={bx}
-                        y={by}
-                        width={bw}
-                        height={bh}
-                        fill="none"
-                        stroke="#1971c2"
-                        strokeWidth={1.5}
-                        strokeDasharray="6 4"
-                        pointerEvents="none"
-                      />
-                      {canManage ? (
-                        <>
-                          <line
-                            x1={hx}
-                            y1={by}
-                            x2={hx}
-                            y2={by - 22}
-                            stroke="#1971c2"
+                    for (const z of selZns) {
+                      for (const p of z.points) {
+                        if (p.x < xLo) xLo = p.x;
+                        if (p.x > xHi) xHi = p.x;
+                        if (p.y < yLo) yLo = p.y;
+                        if (p.y > yHi) yHi = p.y;
+                      }
+                    }
+                    const bx = originX + xLo * ppf;
+                    const by = originY + yLo * ppf;
+                    const bw = (xHi - xLo) * ppf;
+                    const bh = (yHi - yLo) * ppf;
+                    const hx = bx + bw / 2;
+                    return (
+                      <g>
+                        <rect
+                          x={bx}
+                          y={by}
+                          width={bw}
+                          height={bh}
+                          fill="none"
+                          stroke="#1971c2"
+                          strokeWidth={1.5}
+                          strokeDasharray="6 4"
+                          pointerEvents="none"
+                        />
+                        {canManage ? (
+                          <>
+                            <line
+                              x1={hx}
+                              y1={by}
+                              x2={hx}
+                              y2={by - 22}
+                              stroke="#1971c2"
+                              strokeWidth={1}
+                              pointerEvents="none"
+                            />
+                            <circle
+                              cx={hx}
+                              cy={by - 22}
+                              r={6}
+                              fill="#fff"
+                              stroke="#1971c2"
+                              strokeWidth={1.5}
+                              style={{ cursor: "grab" }}
+                              onPointerDown={startGroupRotate}
+                            />
+                          </>
+                        ) : null}
+                      </g>
+                    );
+                  })()
+                : null}
+              {/* Marquee (rubber-band) selection box. */}
+              {marqueeRect ? (
+                <rect
+                  x={originX + Math.min(marqueeRect.x0, marqueeRect.x1) * ppf}
+                  y={originY + Math.min(marqueeRect.y0, marqueeRect.y1) * ppf}
+                  width={Math.abs(marqueeRect.x1 - marqueeRect.x0) * ppf}
+                  height={Math.abs(marqueeRect.y1 - marqueeRect.y0) * ppf}
+                  fill="#1971c2"
+                  fillOpacity={0.1}
+                  stroke="#1971c2"
+                  strokeWidth={1}
+                  strokeDasharray="4 3"
+                  pointerEvents="none"
+                />
+              ) : null}
+              {/* Shade-snap hint: a ring on the structure vertex/edge the dragged
+            shade is snapping to. */}
+              {snapHint ? (
+                <g pointerEvents="none">
+                  <circle
+                    cx={originX + snapHint.x * ppf}
+                    cy={originY + snapHint.y * ppf}
+                    r={6}
+                    fill="none"
+                    stroke="#2f9e44"
+                    strokeWidth={2}
+                  />
+                  <circle
+                    cx={originX + snapHint.x * ppf}
+                    cy={originY + snapHint.y * ppf}
+                    r={2}
+                    fill="#2f9e44"
+                  />
+                </g>
+              ) : null}
+              {/* Draw mode: a full overlay captures every click as a vertex. */}
+              {drawMode ? (
+                <>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={VIEW_W}
+                    height={viewH}
+                    fill="transparent"
+                    style={{ cursor: "crosshair" }}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      addDraftPoint(e);
+                    }}
+                  />
+                  {/* Road draft: preview the width band with its 45° corner cutbacks
+                so the officer sees the real footprint as they route it. */}
+                  {drawMode === "road" && draftPoints.length > 1
+                    ? (() => {
+                        const rk = roadKindDef(roadDraftKind);
+                        const band = roadOutline(
+                          draftPoints,
+                          rk.width,
+                          DEFAULT_ROAD_CUTBACK,
+                        );
+                        if (band.length < 3) return null;
+                        return (
+                          <polygon
+                            points={band
+                              .map(
+                                (p) =>
+                                  `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                              )
+                              .join(" ")}
+                            fill={rk.color}
+                            fillOpacity={0.18}
+                            stroke={rk.color}
                             strokeWidth={1}
                             pointerEvents="none"
                           />
-                          <circle
-                            cx={hx}
-                            cy={by - 22}
-                            r={6}
-                            fill="#fff"
-                            stroke="#1971c2"
-                            strokeWidth={1.5}
-                            style={{ cursor: "grab" }}
-                            onPointerDown={startGroupRotate}
-                          />
-                        </>
-                      ) : null}
-                    </g>
-                  );
-                })()
-              : null}
-            {/* Marquee (rubber-band) selection box. */}
-            {marqueeRect ? (
-              <rect
-                x={originX + Math.min(marqueeRect.x0, marqueeRect.x1) * ppf}
-                y={originY + Math.min(marqueeRect.y0, marqueeRect.y1) * ppf}
-                width={Math.abs(marqueeRect.x1 - marqueeRect.x0) * ppf}
-                height={Math.abs(marqueeRect.y1 - marqueeRect.y0) * ppf}
-                fill="#1971c2"
-                fillOpacity={0.1}
-                stroke="#1971c2"
-                strokeWidth={1}
-                strokeDasharray="4 3"
-                pointerEvents="none"
-              />
-            ) : null}
-            {/* Shade-snap hint: a ring on the structure vertex/edge the dragged
-            shade is snapping to. */}
-            {snapHint ? (
-              <g pointerEvents="none">
-                <circle
-                  cx={originX + snapHint.x * ppf}
-                  cy={originY + snapHint.y * ppf}
-                  r={6}
-                  fill="none"
-                  stroke="#2f9e44"
-                  strokeWidth={2}
-                />
-                <circle
-                  cx={originX + snapHint.x * ppf}
-                  cy={originY + snapHint.y * ppf}
-                  r={2}
-                  fill="#2f9e44"
-                />
-              </g>
-            ) : null}
-            {/* Draw mode: a full overlay captures every click as a vertex. */}
-            {drawMode ? (
-              <>
-                <rect
-                  x={0}
-                  y={0}
-                  width={VIEW_W}
-                  height={viewH}
-                  fill="transparent"
-                  style={{ cursor: "crosshair" }}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    addDraftPoint(e);
-                  }}
-                />
-                {/* Road draft: preview the width band with its 45° corner cutbacks
-                so the officer sees the real footprint as they route it. */}
-                {drawMode === "road" && draftPoints.length > 1
-                  ? (() => {
-                      const rk = roadKindDef(roadDraftKind);
-                      const band = roadOutline(
-                        draftPoints,
-                        rk.width,
-                        DEFAULT_ROAD_CUTBACK,
-                      );
-                      if (band.length < 3) return null;
-                      return (
-                        <polygon
-                          points={band
-                            .map(
-                              (p) =>
-                                `${originX + p.x * ppf},${originY + p.y * ppf}`,
-                            )
-                            .join(" ")}
-                          fill={rk.color}
-                          fillOpacity={0.18}
-                          stroke={rk.color}
-                          strokeWidth={1}
-                          pointerEvents="none"
-                        />
-                      );
-                    })()
-                  : null}
-                {draftPoints.length > 1 ? (
-                  <polyline
-                    points={draftPoints
-                      .map(
-                        (p) => `${originX + p.x * ppf},${originY + p.y * ppf}`,
-                      )
-                      .join(" ")}
-                    fill={
-                      drawMode === "cable" || drawMode === "road"
-                        ? "none"
-                        : "#fa5252"
-                    }
-                    fillOpacity={0.1}
-                    stroke={
-                      drawMode === "cable"
-                        ? "#fab005"
-                        : drawMode === "road"
-                          ? "#495057"
+                        );
+                      })()
+                    : null}
+                  {draftPoints.length > 1 ? (
+                    <polyline
+                      points={draftPoints
+                        .map(
+                          (p) =>
+                            `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                        )
+                        .join(" ")}
+                      fill={
+                        drawMode === "cable" || drawMode === "road"
+                          ? "none"
                           : "#fa5252"
-                    }
-                    strokeWidth={drawMode === "cable" ? 2.5 : 2}
-                    strokeDasharray="4 3"
-                    strokeLinejoin="round"
-                    pointerEvents="none"
-                  />
-                ) : null}
-                {draftPoints.map((p, i) => (
-                  <circle
-                    key={`${p.x}-${p.y}-${i}`}
-                    cx={originX + p.x * ppf}
-                    cy={originY + p.y * ppf}
-                    r={3}
-                    fill={
-                      drawMode === "cable"
-                        ? "#fab005"
-                        : drawMode === "road"
-                          ? "#495057"
-                          : "#fa5252"
-                    }
-                    pointerEvents="none"
-                  />
-                ))}
-              </>
-            ) : null}
-            {/* Doneness watermark (officer-set): a big translucent diagonal label
+                      }
+                      fillOpacity={0.1}
+                      stroke={
+                        drawMode === "cable"
+                          ? "#fab005"
+                          : drawMode === "road"
+                            ? "#495057"
+                            : "#fa5252"
+                      }
+                      strokeWidth={drawMode === "cable" ? 2.5 : 2}
+                      strokeDasharray="4 3"
+                      strokeLinejoin="round"
+                      pointerEvents="none"
+                    />
+                  ) : null}
+                  {draftPoints.map((p, i) => (
+                    <circle
+                      key={`${p.x}-${p.y}-${i}`}
+                      cx={originX + p.x * ppf}
+                      cy={originY + p.y * ppf}
+                      r={3}
+                      fill={
+                        drawMode === "cable"
+                          ? "#fab005"
+                          : drawMode === "road"
+                            ? "#495057"
+                            : "#fa5252"
+                      }
+                      pointerEvents="none"
+                    />
+                  ))}
+                </>
+              ) : null}
+              {/* Doneness watermark (officer-set): a big translucent diagonal label
             so a viewer instantly reads the map's status. Drawn last (on top) but
             click-through, and repeated top/center/bottom so it reads even when the
             middle is busy. Part of the SVG so it prints AND exports. */}
-            {mapStatus ? (
-              <g pointerEvents="none">
-                {[0.22, 0.5, 0.78].map((fy) => (
-                  <text
-                    key={fy}
-                    x={VIEW_W / 2}
-                    y={viewH * fy}
-                    transform={`rotate(-28 ${VIEW_W / 2} ${viewH * fy})`}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={Math.max(28, Math.min(VIEW_W, viewH) * 0.11)}
-                    fontWeight={800}
-                    fill="#e03131"
-                    fillOpacity={0.14}
-                    stroke="#e03131"
-                    strokeOpacity={0.1}
-                    strokeWidth={1}
-                    style={{
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                      userSelect: "none",
-                    }}
-                  >
-                    {mapStatus}
-                  </text>
-                ))}
-              </g>
-            ) : null}
-            {/* Aligning an aerial photo, on a "click the photo" step: draw it
+              {mapStatus ? (
+                <g pointerEvents="none">
+                  {[0.22, 0.5, 0.78].map((fy) => (
+                    <text
+                      key={fy}
+                      x={VIEW_W / 2}
+                      y={viewH * fy}
+                      transform={`rotate(-28 ${VIEW_W / 2} ${viewH * fy})`}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={Math.max(28, Math.min(VIEW_W, viewH) * 0.11)}
+                      fontWeight={800}
+                      fill="#e03131"
+                      fillOpacity={0.14}
+                      stroke="#e03131"
+                      strokeOpacity={0.1}
+                      strokeWidth={1}
+                      style={{
+                        textTransform: "uppercase",
+                        letterSpacing: "0.06em",
+                        userSelect: "none",
+                      }}
+                    >
+                      {mapStatus}
+                    </text>
+                  ))}
+                </g>
+              ) : null}
+              {/* Aligning an aerial photo, on a "click the photo" step: draw it
             again over everything, opaque, so the feature being clicked is the
             one actually visible rather than a tent planned on top of it. */}
-            {aerialPick && pickWants(aerialPick) === "photo" ? (
-              <AerialLayer
-                aerials={aerials}
-                originX={originX}
-                originY={originY}
-                ppf={ppf}
-                zoom={zoom}
-                pick={aerialPick}
-                lotClipId={clipId}
-                over
+              {/* Before/after swiper: an opaque copy of the photo over the whole
+            map, clipped to one side of the line by a CSS variable the range
+            input writes (see AerialSwipe). */}
+              {swipeOn ? (
+                <g style={{ clipPath: swipeClip(aerialSwipe as "x" | "y") }}>
+                  <AerialLayer
+                    aerials={aerials}
+                    originX={originX}
+                    originY={originY}
+                    ppf={ppf}
+                    zoom={zoom}
+                    pick={null}
+                    lotClipId={clipId}
+                    over
+                  />
+                </g>
+              ) : null}
+              {aerialPick && pickWants(aerialPick) === "photo" ? (
+                <AerialLayer
+                  aerials={aerials}
+                  originX={originX}
+                  originY={originY}
+                  ppf={ppf}
+                  zoom={zoom}
+                  pick={aerialPick}
+                  lotClipId={clipId}
+                  over
+                />
+              ) : null}
+            </svg>
+            {swipeOn ? (
+              <AerialSwipe
+                mode={aerialSwipe as "x" | "y"}
+                size={{ w: renderW, h: renderH }}
               />
             ) : null}
-          </svg>
+          </div>
         </Box>
       </Box>
     </Paper>

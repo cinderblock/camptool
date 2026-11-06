@@ -20,6 +20,7 @@ import {
   NumberInput,
   Paper,
   RangeSlider,
+  SegmentedControl,
   Select,
   Slider,
   Stack,
@@ -81,7 +82,10 @@ export function AerialLayer({
 }) {
   const sx = (x: number) => originX + x * ppf;
   const sy = (y: number) => originY + y * ppf;
-  const shown = over ? aerials.filter((a) => a.id === pick?.aerialId) : aerials;
+  // While aligning, only the photo being aligned; otherwise (the swiper) all
+  // the shown ones.
+  const shown =
+    over && pick ? aerials.filter((a) => a.id === pick.aerialId) : aerials;
   // Past 2× the 1600px display copy is visibly soft; layer the original on top
   // (the display copy stays underneath so nothing blanks while it loads).
   const sharp = zoom >= 2;
@@ -195,6 +199,114 @@ export function AerialLayer({
   );
 }
 
+export type SwipeMode = "off" | "x" | "y";
+
+/** Hit-area thickness of the swipe divider, in screen px. The range thumb is
+ * this wide, and its centre travels from T/2 to (size − T/2), so the clip has
+ * to follow the same path for the line and the edge to coincide. */
+const SWIPE_T = 32;
+
+const SWIPE_CSS = `
+.ct-swipe {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+  -webkit-appearance: none; appearance: none; background: none;
+  /* Only the thumb takes the pointer: the map underneath stays usable. */
+  pointer-events: none; outline: none; z-index: 2;
+}
+.ct-swipe[data-mode="y"] { writing-mode: vertical-lr; direction: ltr; }
+.ct-swipe::-webkit-slider-runnable-track { width: 100%; height: 100%; background: none; }
+.ct-swipe::-moz-range-track { width: 100%; height: 100%; background: none; }
+.ct-swipe::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; pointer-events: auto;
+  width: ${SWIPE_T}px; height: 100%; border: 0; border-radius: 0;
+  cursor: ew-resize; background: var(--ct-swipe-line);
+}
+.ct-swipe::-moz-range-thumb {
+  pointer-events: auto; width: ${SWIPE_T}px; height: 100%; border: 0;
+  border-radius: 0; cursor: ew-resize; background: var(--ct-swipe-line);
+}
+.ct-swipe[data-mode="y"]::-webkit-slider-thumb { width: 100%; height: ${SWIPE_T}px; cursor: ns-resize; }
+.ct-swipe[data-mode="y"]::-moz-range-thumb { width: 100%; height: ${SWIPE_T}px; cursor: ns-resize; }
+.ct-swipe { --ct-swipe-line:
+  linear-gradient(to right, transparent calc(50% - 2.5px),
+    rgba(0,0,0,.55) calc(50% - 2.5px), rgba(0,0,0,.55) calc(50% - 1.5px),
+    #fff calc(50% - 1.5px), #fff calc(50% + 1.5px),
+    rgba(0,0,0,.55) calc(50% + 1.5px), rgba(0,0,0,.55) calc(50% + 2.5px),
+    transparent calc(50% + 2.5px)); }
+.ct-swipe[data-mode="y"] { --ct-swipe-line:
+  linear-gradient(to bottom, transparent calc(50% - 2.5px),
+    rgba(0,0,0,.55) calc(50% - 2.5px), rgba(0,0,0,.55) calc(50% - 1.5px),
+    #fff calc(50% - 1.5px), #fff calc(50% + 1.5px),
+    rgba(0,0,0,.55) calc(50% + 1.5px), rgba(0,0,0,.55) calc(50% + 2.5px),
+    transparent calc(50% + 2.5px)); }
+.ct-swipe:focus-visible::-webkit-slider-thumb { filter: drop-shadow(0 0 3px #22b8cf); }
+.ct-swipe:focus-visible::-moz-range-thumb { filter: drop-shadow(0 0 3px #22b8cf); }
+`;
+
+/**
+ * The before/after swiper: photo on one side of a draggable line, the plan on
+ * the other.
+ *
+ * Deliberately outside React's render loop. It's a native range input whose
+ * `input` event writes one CSS variable (`--ct-swipe`) on its host; the photo
+ * copy drawn over the map reads that variable in a `clip-path`. Dragging is a
+ * single style write per frame — no state, no re-render of a 10k-line map.
+ * (Pure CSS can't read a range's value, so that one write is the whole of
+ * the JavaScript.)
+ *
+ * Must sit in the same box as the map SVG, sized to it, so its percentages and
+ * the clip's `view-box` percentages mean the same thing at any zoom.
+ */
+export function AerialSwipe({
+  mode,
+  size,
+}: {
+  mode: "x" | "y";
+  /** Rendered map size in px — the thumb-travel correction depends on it. */
+  size: { w: number; h: number };
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  const apply = () => {
+    const el = ref.current;
+    const host = el?.parentElement;
+    if (!el || !host) return;
+    const f = Number(el.value) / 1000;
+    const len = mode === "x" ? size.w : size.h;
+    const pos = len > SWIPE_T ? (SWIPE_T / 2 + f * (len - SWIPE_T)) / len : f;
+    host.style.setProperty("--ct-swipe", `${(pos * 100).toFixed(3)}%`);
+  };
+  // Re-derive when zoom resizes the map or the direction flips.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: apply reads these
+  useEffect(apply, [mode, size.w, size.h]);
+  return (
+    <>
+      <style>{SWIPE_CSS}</style>
+      <input
+        ref={ref}
+        type="range"
+        className="ct-swipe"
+        data-mode={mode}
+        min={0}
+        max={1000}
+        defaultValue={500}
+        onInput={apply}
+        aria-label={
+          mode === "x"
+            ? "Compare: photo on the left, plan on the right"
+            : "Compare: photo above, plan below"
+        }
+      />
+    </>
+  );
+}
+
+/** The clip the swiper's photo copy wears: photo left of / above the line. */
+export function swipeClip(mode: "x" | "y"): string {
+  return mode === "x"
+    ? "inset(0 calc(100% - var(--ct-swipe, 50%)) 0 0) view-box"
+    : "inset(0 0 calc(100% - var(--ct-swipe, 50%)) 0) view-box";
+}
+
 type Orientation = "twelve" | "north" | "map";
 
 /** Compass bearing a photo's "up" points at, or null = "already matches". */
@@ -215,6 +327,8 @@ export function AerialPanel({
   onDraft,
   pick,
   setPick,
+  swipe,
+  setSwipe,
 }: {
   aerials: AerialRow[];
   lot: { frontageFt: number; depthFt: number };
@@ -228,6 +342,8 @@ export function AerialPanel({
   onDraft: (id: string, patch: Partial<AerialRow>) => void;
   pick: AerialPick | null;
   setPick: (p: AerialPick | null) => void;
+  swipe: SwipeMode;
+  setSwipe: (m: SwipeMode) => void;
 }) {
   const fetcher = useFetcher<{ error?: string }>();
   const [orientation, setOrientation] = useState<Orientation>(
@@ -516,6 +632,24 @@ export function AerialPanel({
             </Stack>
           );
         })}
+        {aerials.some(isShown) ? (
+          <Stack gap={2}>
+            <Text size="xs" c="dimmed">
+              Compare with the plan — drag the line on the map
+            </Text>
+            <SegmentedControl
+              size="xs"
+              fullWidth
+              value={swipe}
+              onChange={(v) => setSwipe(v as SwipeMode)}
+              data={[
+                { label: "Off", value: "off" },
+                { label: "Left | right", value: "x" },
+                { label: "Top / bottom", value: "y" },
+              ]}
+            />
+          </Stack>
+        ) : null}
         {canManage ? (
           <Stack gap={6}>
             <Select
