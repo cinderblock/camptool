@@ -83,7 +83,8 @@ Cameron's three asks (2026-11-05):
         state while dragging. Underlay hidden while swiping so the plan side is
         the plain plan. Top/bottom = same input with `writing-mode:
         vertical-lr`.
-12. [ ] **(current)** Deploy the swiper.
+12. [x] Swiper deployed: 1da9ffa live 2026-11-05 ~4:20 PM PST (00:20Z) via ops
+        pin ce181ad5; checked on the live 2026 map.
 
 ## Findings / gotchas
 
