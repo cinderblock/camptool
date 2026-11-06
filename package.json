@@ -65,7 +65,7 @@
     "unpdf": "^1.8.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.0.0",
     "@camptool/default-theme": "workspace:*",
     "@camptool/mathcamp-theme": "workspace:*",
     "@camptool/theme-contract": "workspace:*",
