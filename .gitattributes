@@ -1,3 +1,5 @@
+* text=auto
+
 # Shell scripts must stay LF or they break on the Linux deploy host
 # (a CRLF shebang -> "/bin/sh\r: bad interpreter").
 run text eol=lf
