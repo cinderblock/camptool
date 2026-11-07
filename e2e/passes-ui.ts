@@ -22,7 +22,7 @@
  * Deliberately NOT named *.spec.ts (bun test would try to run it serverless),
  * and run under node, not bun — `chromium.launch()` never returns under Bun.
  */
-import { type Browser, type Page, chromium } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17936";
 const PW = process.env.E2E_PASSWORD ?? "sap-tester-pw-1";

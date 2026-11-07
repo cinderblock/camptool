@@ -1,9 +1,9 @@
 import {
+  closestCenter,
   DndContext,
   type DragEndEvent,
   KeyboardSensor,
   PointerSensor,
-  closestCenter,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -12,8 +12,8 @@ import {
   restrictToVerticalAxis,
 } from "@dnd-kit/modifiers";
 import {
-  SortableContext,
   arrayMove,
+  SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -30,8 +30,8 @@ import {
   Progress,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -42,7 +42,7 @@ import { QuestionField } from "~/components/QuestionField";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
-import { type QuestionType, parseOptions } from "~/lib/questions";
+import { parseOptions, type QuestionType } from "~/lib/questions";
 import {
   filterByAudience,
   loadAnswers,

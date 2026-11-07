@@ -10,10 +10,10 @@
  * structures to light up, which the parent owns.
  */
 import {
-  type MapLot,
-  VIEW_W,
   layoutFor,
   lotPointsFor,
+  type MapLot,
+  VIEW_W,
 } from "~/lib/map-geometry";
 import { MapObjectShape, MapShapeDefs, type ObjRow } from "~/lib/map-shapes";
 

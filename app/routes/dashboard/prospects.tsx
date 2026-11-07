@@ -22,17 +22,17 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, data, useFetcher } from "react-router";
+import { data, Link, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
   CHANNEL_OPTIONS,
-  STATUS_OPTIONS,
   channelLabel,
   followUpDue,
   isProspectChannel,
   isProspectStatus,
+  STATUS_OPTIONS,
   statusDef,
 } from "~/lib/prospects";
 import { loadProspects, unlinkedApplications } from "~/lib/prospects.server";

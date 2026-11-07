@@ -17,29 +17,29 @@ import {
   Select,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect } from "react";
-import { Link, data, redirect, useFetcher } from "react-router";
+import { data, Link, redirect, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
   AUDIENCE_OPTIONS,
+  audienceLabel,
   DURATION_OPTIONS,
+  durationLabel,
+  isOfferingAudience,
+  isOfferingKind,
   OFFERING_KINDS,
   OFFERING_STATUS_COLOR,
   OFFERING_STATUS_LABEL,
   type OfferingStatus,
-  audienceLabel,
-  durationLabel,
-  isOfferingAudience,
-  isOfferingKind,
   offeringKindColor,
   offeringKindLabel,
   presenterName,

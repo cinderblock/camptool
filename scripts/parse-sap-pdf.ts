@@ -11,7 +11,7 @@
  *
  * See `plans/sap-import-and-distribution.md`.
  */
-import { type SapPageResult, parseSapPdf } from "../app/lib/sap-pdf.server";
+import { parseSapPdf, type SapPageResult } from "../app/lib/sap-pdf.server";
 
 const args = process.argv.slice(2);
 const json = args.includes("--json");

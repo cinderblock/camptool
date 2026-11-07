@@ -90,7 +90,6 @@ export function EventCalendar({
   return (
     <Box maw={320}>
       <Box
-        // biome-ignore lint/a11y/useSemanticElements: a <fieldset> can't reliably be a CSS grid container (browsers special-case its layout), so the grid keeps role="group" instead.
         role="group"
         aria-label={
           mode === "range"

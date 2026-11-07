@@ -9,10 +9,10 @@ import { redirect } from "react-router";
 import { db } from "../../db/client.server";
 import { campFeature } from "../../db/schema";
 import {
+  defaultFeatureState,
   FEATURES,
   type FeatureKey,
   type FeatureState,
-  defaultFeatureState,
   featureDef,
   featureVisibleTo,
 } from "./features";

@@ -24,7 +24,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
-import { Link, data, useFetcher } from "react-router";
+import { data, Link, useFetcher } from "react-router";
 import { MarkupTextarea } from "~/components/MarkupTextarea";
 import { WikiBody } from "~/components/WikiBody";
 import { featureVisibleTo } from "~/lib/features";
@@ -46,7 +46,7 @@ import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { dateLabel, timeRangeLabel, todayIso } from "~/lib/schedule";
 import { requireActiveEdition } from "~/lib/session.server";
-import { type LinkTarget, appLinkTargets, parseWikiBody } from "~/lib/wiki";
+import { appLinkTargets, type LinkTarget, parseWikiBody } from "~/lib/wiki";
 import { existingSlugs, listPages } from "~/lib/wiki.server";
 import type { Route } from "./+types/meetings.$occurrenceId";
 import { JoinButton } from "./meetings";

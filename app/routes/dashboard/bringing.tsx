@@ -22,7 +22,7 @@ import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { requireFeature } from "~/lib/features.server";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
-import { ShapeSwatch, hasTag, kindDef, kindHeight } from "~/lib/structures";
+import { hasTag, kindDef, kindHeight, ShapeSwatch } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import {
   attendee,

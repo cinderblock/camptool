@@ -26,7 +26,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
-import { Link, data, redirect, useFetcher } from "react-router";
+import { data, Link, redirect, useFetcher } from "react-router";
 import {
   InstantDateInput,
   InstantDateTimePicker,
@@ -41,23 +41,23 @@ import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
   CHANNEL_OPTIONS,
-  DIRECTION_OPTIONS,
-  STATUS_OPTIONS,
   channelLabel,
+  DIRECTION_OPTIONS,
   directionLead,
   isDirection,
   isProspectChannel,
   isProspectStatus,
+  STATUS_OPTIONS,
   statusDef,
 } from "~/lib/prospects";
 import {
-  loadProspectThread,
   loadProspects,
+  loadProspectThread,
   officerNames,
 } from "~/lib/prospects.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import { displayUrl, normalizeUrl } from "~/lib/url";
-import { type LinkTarget, appLinkTargets, parseWikiBody } from "~/lib/wiki";
+import { appLinkTargets, type LinkTarget, parseWikiBody } from "~/lib/wiki";
 import { db } from "../../../db/client.server";
 import {
   campInvite,

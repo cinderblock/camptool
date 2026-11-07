@@ -16,8 +16,8 @@
  * error instead.
  */
 import { requireFeature } from "~/lib/features.server";
-import { type SheetPass, renderGroupSheet } from "~/lib/sap-render.server";
 import { stockWithCodes, visibleCodesFor } from "~/lib/sap.server";
+import { renderGroupSheet, type SheetPass } from "~/lib/sap-render.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/sap.group";
 

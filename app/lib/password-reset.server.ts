@@ -29,13 +29,13 @@ import { PUBLIC_BASE_URL } from "./env.server";
 import { startPasskeyRecovery } from "./passkey-recovery.server";
 import {
   MAX_RESET_ATTEMPTS,
+  maskEmail,
   RESET_TTL_MS,
   type ResetLinkState,
-  maskEmail,
   resetLinkState,
 } from "./password-reset";
 
-export { maskEmail, resetLinkState, type ResetLinkState };
+export { maskEmail, type ResetLinkState, resetLinkState };
 
 /** 192 bits, same generator as invite tokens (`app/lib/invite.server.ts`). */
 function newToken(): string {

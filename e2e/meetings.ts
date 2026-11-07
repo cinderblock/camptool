@@ -18,8 +18,8 @@
 import {
   type Browser,
   type BrowserContext,
-  type Page,
   chromium,
+  type Page,
 } from "playwright";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17924";

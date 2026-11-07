@@ -8,8 +8,8 @@ import {
   Select,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   VisuallyHidden,
 } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
@@ -17,9 +17,9 @@ import { useFetcher } from "react-router";
 import { announce } from "~/components/Announcer";
 import { EventCalendar } from "~/components/EventCalendar";
 import {
-  type QuestionType,
   parseEventRange,
   parseMultiValue,
+  type QuestionType,
   stringifyEventRange,
 } from "~/lib/questions";
 

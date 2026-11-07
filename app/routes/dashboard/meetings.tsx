@@ -21,22 +21,22 @@ import {
   SegmentedControl,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
-import { Link, data, redirect, useFetcher } from "react-router";
+import { data, Link, redirect, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import {
-  MEETING_CADENCES,
-  MEETING_KIND,
-  type MeetingCadence,
   cadenceRule,
   isMeetingCadence,
   joinLabel,
+  MEETING_CADENCES,
+  MEETING_KIND,
+  type MeetingCadence,
   meetingDates,
   meetingProvider,
 } from "~/lib/meetings";

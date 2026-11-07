@@ -13,9 +13,9 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
-  SapRenameError,
   hexString,
   purchaserNameBlock,
+  SapRenameError,
   textBlocks,
 } from "./sap-rename.server";
 

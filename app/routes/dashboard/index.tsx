@@ -15,8 +15,8 @@ import { notifications } from "@mantine/notifications";
 import { and, count, eq, isNotNull, sql } from "drizzle-orm";
 import { useState } from "react";
 import {
-  Link,
   data,
+  Link,
   useFetcher,
   useNavigate,
   useRevalidator,
@@ -24,14 +24,14 @@ import {
 import { type OutstandingAsk, outstandingAsks } from "~/lib/asks";
 import { loadAskSnapshots } from "~/lib/asks.server";
 import { type Headcount, headcountFor } from "~/lib/attendee.server";
-import { authClient } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
+import { authClient } from "~/lib/auth-client";
 import { weeksUntilEvent } from "~/lib/brc";
 import { featureVisibleTo } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
 import { meetingsHomeCard } from "~/lib/meetings.server";
-import { type Role, hasAtLeast } from "~/lib/permissions";
+import { hasAtLeast, type Role } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { pendingApplicationWhere } from "~/lib/recruits.server";
 import { dateLabel, timeRangeLabel, todayIso } from "~/lib/schedule";

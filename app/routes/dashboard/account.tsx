@@ -41,15 +41,15 @@ import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useState } from "react";
 import {
-  Link,
   data,
+  Link,
   redirect,
   useFetcher,
   useRevalidator,
   useSearchParams,
 } from "react-router";
-import { authClient } from "~/lib/auth-client";
 import { auth, discordEnabled } from "~/lib/auth.server";
+import { authClient } from "~/lib/auth-client";
 import { addToGroup, listGroups, removeFromGroup } from "~/lib/groups.server";
 import { redact } from "~/lib/privacy.server";
 import { resolveActiveCamp } from "~/lib/session.server";
@@ -63,11 +63,12 @@ import {
 } from "../../../db/schema";
 import type { Route } from "./+types/account";
 
-type SerializedIdentity = Awaited<ReturnType<typeof loader>> extends {
-  identity: infer I;
-}
-  ? I
-  : never;
+type SerializedIdentity =
+  Awaited<ReturnType<typeof loader>> extends {
+    identity: infer I;
+  }
+    ? I
+    : never;
 
 /** better-auth keeps the password hash on the account row whose providerId is
  * "credential"; OAuth accounts share the table with their own providerIds. */

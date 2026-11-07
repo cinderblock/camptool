@@ -19,7 +19,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq, sql } from "drizzle-orm";
 import { useEffect, useState } from "react";
-import { Form, data, redirect, useFetcher } from "react-router";
+import { data, Form, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";

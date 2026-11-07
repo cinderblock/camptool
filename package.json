@@ -5,7 +5,9 @@
   "type": "module",
   "license": "MIT",
   "description": "Self-hosted Burning Man theme-camp registration & management.",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "bun --bun react-router dev",
     "build": "react-router build",
@@ -65,7 +67,7 @@
     "unpdf": "^2.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.0.0",
     "@camptool/default-theme": "workspace:*",
     "@camptool/mathcamp-theme": "workspace:*",
     "@camptool/theme-contract": "workspace:*",

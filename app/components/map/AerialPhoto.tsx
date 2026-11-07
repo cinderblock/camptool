@@ -31,10 +31,10 @@ import { useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import {
   type AerialRow,
-  type Pt,
   fitTwoPoints,
   imageToPlot,
   initialTransform,
+  type Pt,
   plotToImage,
   seedRotation,
 } from "~/lib/aerial";
@@ -276,7 +276,6 @@ export function AerialSwipe({
     host.style.setProperty("--ct-swipe", `${(pos * 100).toFixed(3)}%`);
   };
   // Re-derive when zoom resizes the map or the direction flips.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: apply reads these
   useEffect(apply, [mode, size.w, size.h]);
   return (
     <>

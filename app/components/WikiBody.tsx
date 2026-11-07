@@ -6,7 +6,7 @@
 import { Anchor, Blockquote, Code, List, Text, Title } from "@mantine/core";
 import { Link } from "react-router";
 import { fullSizeHref, resolveImageSrc } from "~/lib/images";
-import { type WikiBlock, type WikiInline, loneImage } from "~/lib/wiki";
+import { loneImage, type WikiBlock, type WikiInline } from "~/lib/wiki";
 
 /**
  * `knownSlugs` — pages that exist, so `[[links]]` to unwritten ones render as
@@ -77,13 +77,7 @@ function Picture({
   );
 }
 
-function InlineNodes({
-  nodes,
-  ctx,
-}: {
-  nodes: WikiInline[];
-  ctx: Ctx;
-}) {
+function InlineNodes({ nodes, ctx }: { nodes: WikiInline[]; ctx: Ctx }) {
   return (
     <>
       {nodes.map((node, i) => {

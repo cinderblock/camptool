@@ -4,8 +4,8 @@ import {
   Modal,
   Select,
   Stack,
-  TextInput,
   Textarea,
+  TextInput,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";

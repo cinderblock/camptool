@@ -8,7 +8,7 @@ import {
   Title,
 } from "@mantine/core";
 import { and, eq, ne } from "drizzle-orm";
-import { Link, data } from "react-router";
+import { data, Link } from "react-router";
 import {
   type ParticipationStatus,
   RsvpButtons,

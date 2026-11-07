@@ -17,8 +17,8 @@ import {
   Stack,
   Table,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
@@ -32,8 +32,8 @@ import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import {
   ANNUAL_VALIDITY_MS,
-  VALIDITY_OPTIONS,
   isValidSignoff,
+  VALIDITY_OPTIONS,
   validityLabel,
 } from "~/lib/training";
 import { loadSignoffs, loadTrainings } from "~/lib/training.server";

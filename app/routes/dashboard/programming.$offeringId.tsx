@@ -16,27 +16,27 @@ import {
   Select,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect } from "react";
-import { Link, data, useFetcher } from "react-router";
+import { data, Link, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
   AUDIENCE_OPTIONS,
   DURATION_OPTIONS,
+  durationLabel,
+  isOfferingAudience,
+  isOfferingKind,
   OFFERING_KINDS,
   OFFERING_STATUS_COLOR,
   OFFERING_STATUS_LABEL,
   type OfferingStatus,
-  durationLabel,
-  isOfferingAudience,
-  isOfferingKind,
   offeringKindColor,
   offeringKindLabel,
   presenterName,
@@ -607,7 +607,9 @@ function SessionSection({
 
 function EditForm({
   o,
-}: { o: Route.ComponentProps["loaderData"]["offering"] }) {
+}: {
+  o: Route.ComponentProps["loaderData"]["offering"];
+}) {
   const fetcher = useFetcher<{ error?: string; ok?: string }>();
   useActionToast(fetcher.data);
 

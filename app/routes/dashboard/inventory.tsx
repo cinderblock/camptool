@@ -13,7 +13,7 @@ import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
-import { ShapeSwatch, kindDef } from "~/lib/structures";
+import { kindDef, ShapeSwatch } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { mapObject, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/inventory";

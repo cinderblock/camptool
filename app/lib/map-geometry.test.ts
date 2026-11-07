@@ -10,12 +10,12 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
-  PAD_FT,
   fitCenterInsideLot,
   fitCenterOutsideLot,
   fitCenterToLot,
   layoutFor,
   lotExitPoint,
+  PAD_FT,
   pointInLot,
   polygonOutsideLot,
 } from "./map-geometry";

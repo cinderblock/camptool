@@ -9,7 +9,7 @@
  *   E2E_AERIAL=path/to/photo.png E2E_EXPECT_ROTATION=83 \
  *     node --experimental-strip-types e2e/map-aerial.ts
  */
-import { type Page, chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17923";
 const COOKIE = process.env.E2E_COOKIE ?? "";

@@ -8,7 +8,7 @@
  * Core surfaces (Overview, guide, members, invite, years, /start, site admin)
  * are deliberately NOT in this catalog — they can't be turned off.
  */
-import { type Role, hasAtLeast } from "./permissions";
+import { hasAtLeast, type Role } from "./permissions";
 
 export type FeatureState = "off" | "preview" | "on";
 

@@ -35,19 +35,19 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
-import { Link, data, useFetcher } from "react-router";
+import { data, Link, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import {
+  defaultUnitFor,
   FUEL_TYPES,
   FUEL_UNITS,
-  NO_FUEL,
-  defaultUnitFor,
   fuelColor,
   fuelLabel,
   fuelTotals,
   isFuelType,
   isFuelUnit,
   isNoFuel,
+  NO_FUEL,
   needsPhaseSeparation,
   noFuelCount,
   totalLabel,

@@ -12,7 +12,7 @@ import {
   parsePrivacyMode,
   serializePrivacyMode,
 } from "./privacy";
-import { type PrivacyLens, buildPrivacyLens } from "./privacy.server";
+import { buildPrivacyLens, type PrivacyLens } from "./privacy.server";
 
 export type Camp = typeof camp.$inferSelect;
 export type Membership = typeof membership.$inferSelect;

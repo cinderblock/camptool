@@ -15,7 +15,7 @@
  *   E2E_MEMBER_COOKIE='<name>=<value>' \
  *     node --experimental-strip-types e2e/map-versions.ts
  */
-import { type Browser, type Page, chromium } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17923";
 const COOKIE = process.env.E2E_COOKIE ?? "";

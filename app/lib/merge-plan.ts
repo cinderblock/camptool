@@ -95,7 +95,7 @@ export type MergePlan = {
 /** Picks a human made for conflicts, keyed by field, holding the chosen value. */
 export type MergePicks = Partial<Record<MergeConflict["field"], string>>;
 
-const blank = (v: string | null | undefined) => !v || !v.trim();
+const blank = (v: string | null | undefined) => !v?.trim();
 
 /**
  * Order the pair deterministically. Earliest join wins because that is when the

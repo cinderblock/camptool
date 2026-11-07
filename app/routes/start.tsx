@@ -18,13 +18,12 @@ import {
 } from "@mantine/core";
 import { and, asc, eq } from "drizzle-orm";
 import { useState } from "react";
-import { Link, data, useFetcher, useNavigate } from "react-router";
+import { data, Link, useFetcher, useNavigate } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { announce } from "~/components/Announcer";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
 import {
-  type ParticipationStatus,
   RsvpButtons,
   StayPicker,
   type TripData,
@@ -48,7 +47,7 @@ import {
 } from "~/lib/questions.server";
 import { loadMySapState } from "~/lib/sap.server";
 import { requireActiveEdition } from "~/lib/session.server";
-import { ShapeSwatch, hasTag, kindDef } from "~/lib/structures";
+import { hasTag, kindDef, ShapeSwatch } from "~/lib/structures";
 import type { AskKey } from "~/lib/wizard";
 import { audienceForRole } from "~/lib/wizard";
 import { loadWizardState, resolveAsk } from "~/lib/wizard.server";
@@ -60,8 +59,6 @@ import {
   membership,
   onboardingCompletion,
   onboardingTask,
-  setupPass,
-  setupPassDate,
   user,
 } from "../../db/schema";
 import type { Route } from "./+types/start";
@@ -409,7 +406,7 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
   const steps = scheduled;
   // Start at the first unresolved ask so returning campers land on what's left.
   const firstPending = steps.findIndex((s) => !resolved[s.key]);
-  const [active, setActive] = useState(firstPending < 0 ? 0 : firstPending);
+  const [active, setActive] = useState(Math.max(firstPending, 0));
   const last = steps.length - 1;
 
   // A questionnaire step holds its Next/Skip until every required question on

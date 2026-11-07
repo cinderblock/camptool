@@ -13,7 +13,7 @@ import {
   Title,
 } from "@mantine/core";
 import { and, eq } from "drizzle-orm";
-import { Form, data, redirect } from "react-router";
+import { data, Form, redirect } from "react-router";
 import {
   defaultBannedKinds,
   parseBannedKinds,
@@ -29,7 +29,7 @@ import {
   requireActiveCamp,
   setEditionCookie,
 } from "~/lib/session.server";
-import { KIND_GROUPS, isKind } from "~/lib/structures";
+import { isKind, KIND_GROUPS } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { campEdition, placement } from "../../../db/schema";
 import type { Route } from "./+types/editions";
