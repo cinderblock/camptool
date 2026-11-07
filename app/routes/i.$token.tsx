@@ -29,7 +29,7 @@ import { db } from "../../db/client.server";
 import { attendee, camp, campInvite, membership, user } from "../../db/schema";
 import type { Route } from "./+types/i.$token";
 
-export function meta({ data: d }: Route.MetaArgs) {
+export function meta({ loaderData: d }: Route.MetaArgs) {
   const name = d?.campName ?? "Camp";
   return [{ title: `Join ${name} · CampTool` }];
 }

@@ -67,7 +67,7 @@ function cleanPdfName(raw: string): string {
   return base.replace(/\s+/g, " ").trim().slice(0, 120) || "passes.pdf";
 }
 
-export function meta({ data }: Route.MetaArgs) {
+export function meta({ loaderData: data }: Route.MetaArgs) {
   // Match the nav, which the event names — a tab reading "Passes" while the
   // sidebar says "Setup Access Passes" is a small translation tax on every
   // glance.

@@ -39,7 +39,7 @@ import { db } from "../../../db/client.server";
 import { mapObject, wikiPage } from "../../../db/schema";
 import type { Route } from "./+types/wiki.$slug";
 
-export function meta({ data: d }: Route.MetaArgs) {
+export function meta({ loaderData: d }: Route.MetaArgs) {
   return [{ title: `${d?.page?.title ?? "Wiki"} · CampTool` }];
 }
 

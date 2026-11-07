@@ -73,7 +73,7 @@ import {
 } from "../../../db/schema";
 import type { Route } from "./+types/schedule.$gatheringId";
 
-export function meta({ data: d }: Route.MetaArgs) {
+export function meta({ loaderData: d }: Route.MetaArgs) {
   return [{ title: `${d?.gathering.title ?? "Gathering"} · CampTool` }];
 }
 
