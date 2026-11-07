@@ -277,7 +277,7 @@ function WhatIsThis({
           {open ? "Less" : "What's this?"}
         </Button>
       </Group>
-      <Collapse in={open}>
+      <Collapse expanded={open}>
         <Stack gap={6} mt="xs">
           <Text size="xs" c="dimmed">
             A <b>gathering</b> is one thing the camp does — it can happen once,
@@ -565,7 +565,7 @@ function NewGatheringForm() {
           {opened ? "Close" : "Create"}
         </Button>
       </Group>
-      <Collapse in={opened}>
+      <Collapse expanded={opened}>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="createGathering" />
           <input type="hidden" name="repeat" value={repeat} />

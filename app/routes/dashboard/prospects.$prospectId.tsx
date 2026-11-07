@@ -23,11 +23,14 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { DateInput, DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { Link, data, redirect, useFetcher } from "react-router";
+import {
+  InstantDateInput,
+  InstantDateTimePicker,
+} from "~/components/InstantPickers";
 import { MarkupTextarea } from "~/components/MarkupTextarea";
 import { WikiBody } from "~/components/WikiBody";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
@@ -421,7 +424,7 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
                   searchable
                   clearable
                 />
-                <DateInput
+                <InstantDateInput
                   name="nextFollowUpAt"
                   label="Follow up on"
                   description="Shows in Needs a nudge once it's due"
@@ -563,7 +566,7 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
                   defaultValue="inbound"
                   allowDeselect={false}
                 />
-                <DateTimePicker
+                <InstantDateTimePicker
                   name="occurredAt"
                   label="When it happened"
                   description="Not when you're typing it up"

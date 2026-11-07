@@ -291,7 +291,7 @@ function AddTraining() {
           {opened ? "Close" : "Add"}
         </Button>
       </Group>
-      <Collapse in={opened}>
+      <Collapse expanded={opened}>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="addTraining" />
           <Stack gap="sm" mt="sm">
