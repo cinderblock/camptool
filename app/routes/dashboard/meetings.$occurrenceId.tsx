@@ -51,7 +51,7 @@ import { existingSlugs, listPages } from "~/lib/wiki.server";
 import type { Route } from "./+types/meetings.$occurrenceId";
 import { JoinButton } from "./meetings";
 
-export function meta({ data: d }: Route.MetaArgs) {
+export function meta({ loaderData: d }: Route.MetaArgs) {
   return [{ title: `${d?.meeting.title ?? "Meeting"} · CampTool` }];
 }
 

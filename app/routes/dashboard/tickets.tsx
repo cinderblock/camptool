@@ -41,7 +41,7 @@ import {
 } from "../../../db/schema";
 import type { Route } from "./+types/tickets";
 
-export function meta({ data }: Route.MetaArgs) {
+export function meta({ loaderData: data }: Route.MetaArgs) {
   return [
     { title: `${featureName("tickets", data?.event, "Tickets")} · CampTool` },
   ];

@@ -29,7 +29,7 @@ import {
 import { existingSlugs, getPageBySlug, savePage } from "~/lib/wiki.server";
 import type { Route } from "./+types/wiki.$slug.edit";
 
-export function meta({ data: d }: Route.MetaArgs) {
+export function meta({ loaderData: d }: Route.MetaArgs) {
   return [{ title: `Editing ${d?.title ?? "page"} · Wiki · CampTool` }];
 }
 

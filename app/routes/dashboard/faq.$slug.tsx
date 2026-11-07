@@ -29,7 +29,7 @@ import { parseWikiBody } from "~/lib/wiki";
 import { existingSlugs } from "~/lib/wiki.server";
 import type { Route } from "./+types/faq.$slug";
 
-export function meta({ data: d }: Route.MetaArgs) {
+export function meta({ loaderData: d }: Route.MetaArgs) {
   return [{ title: `${d?.entry?.question ?? "Answer"} · FAQ · CampTool` }];
 }
 
