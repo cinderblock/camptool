@@ -31,7 +31,7 @@ import { db } from "../../db/client.server";
 import { camp, recruitApplication } from "../../db/schema";
 import type { Route } from "./+types/c.$slug";
 
-export function meta({ data: d }: Route.MetaArgs) {
+export function meta({ loaderData: d }: Route.MetaArgs) {
   const name = d?.campName ?? "Camp";
   return [{ title: `Join ${name} · CampTool` }];
 }

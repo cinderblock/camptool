@@ -67,7 +67,7 @@ import {
 } from "../../../db/schema";
 import type { Route } from "./+types/prospects.$prospectId";
 
-export function meta({ data: d }: Route.MetaArgs) {
+export function meta({ loaderData: d }: Route.MetaArgs) {
   return [{ title: `${d?.thread.prospect.name ?? "Prospect"} · CampTool` }];
 }
 
