@@ -23,8 +23,7 @@
     "types": ["@react-router/node", "vite/client", "bun", "node"],
     "paths": {
       "~/*": ["./app/*"]
-    },
-    "baseUrl": "."
+    }
   },
   "include": [
     "db/**/*.ts",
