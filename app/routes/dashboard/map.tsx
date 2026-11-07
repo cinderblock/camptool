@@ -9976,7 +9976,7 @@ function SidePanel({
       ) : null}
 
       {canManage ? (
-        <Collapse in={lotOpen}>
+        <Collapse expanded={lotOpen}>
           <Paper withBorder p="md" radius="md">
             <Text fw={600} size="sm" mb="sm">
               Lot settings

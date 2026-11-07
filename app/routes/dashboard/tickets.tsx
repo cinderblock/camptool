@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import { data, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
+import { pickerValueToDate } from "~/lib/date-value";
 import { featureName, isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import { canManageAttendee, inMyParty } from "~/lib/party";
@@ -939,7 +940,7 @@ function SaleWindowForm({
         label="Sale opens"
         placeholder="not set"
         value={start}
-        onChange={setStart as (v: Date | null) => void}
+        onChange={(v) => setStart(pickerValueToDate(v))}
         clearable
         w={200}
         valueFormat="MMM D, YYYY h:mm A"
@@ -948,7 +949,7 @@ function SaleWindowForm({
         label="Sale closes"
         placeholder="not set"
         value={end}
-        onChange={setEnd as (v: Date | null) => void}
+        onChange={(v) => setEnd(pickerValueToDate(v))}
         clearable
         w={200}
         valueFormat="MMM D, YYYY h:mm A"

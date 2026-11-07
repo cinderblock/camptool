@@ -22,6 +22,7 @@ import { notifications } from "@mantine/notifications";
 import { and, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
 import { Link, data, useFetcher } from "react-router";
+import { pickerValueToDate } from "~/lib/date-value";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
@@ -345,7 +346,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
                   size="xs"
                   label="Date"
                   value={occurred}
-                  onChange={(v) => setOccurred(v ? new Date(v) : null)}
+                  onChange={(v) => setOccurred(pickerValueToDate(v))}
                   valueFormat="MMM D, YYYY"
                   w={150}
                   clearable

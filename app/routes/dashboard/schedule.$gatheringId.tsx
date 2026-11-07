@@ -806,7 +806,7 @@ function WhatIsAShift() {
           {open ? "Less" : "More"}
         </Button>
       </Group>
-      <Collapse in={open}>
+      <Collapse expanded={open}>
         <Stack gap={4} mt="xs">
           <Text size="xs" c="dimmed">
             Each day below is broken into shifts. A shift has a <b>role</b>{" "}
@@ -879,7 +879,7 @@ function BulkRoles({
           {open ? "Close" : "Set up"}
         </Button>
       </Group>
-      <Collapse in={open}>
+      <Collapse expanded={open}>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="applyTemplate" />
           <Stack gap="sm" mt="sm">
@@ -1085,7 +1085,7 @@ function EditGathering({ g }: { g: LoaderData["gathering"] }) {
           </Button>
         </Group>
       </Group>
-      <Collapse in={opened}>
+      <Collapse expanded={opened}>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="updateGathering" />
           <Stack gap="sm" mt="sm">

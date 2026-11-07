@@ -1,7 +1,10 @@
 import {
   ColorSchemeScript,
   MantineProvider,
+  Switch,
+  createTheme,
   mantineHtmlProps,
+  v8CssVariablesResolver,
 } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { useEffect, useRef } from "react";
@@ -43,6 +46,16 @@ html[data-mantine-color-scheme="light"] { background-color: #ffffff; }
 html[data-mantine-color-scheme="dark"] { background-color: #242424; }
 `;
 
+// Mantine 8 and 9 changed some visual defaults; keep the 7.x look: 4px radius
+// (9 defaults to 8px), translucent `light` variants (via the resolver) and
+// Switch thumbs without the checked indicator 8 added.
+const theme = createTheme({
+  defaultRadius: "sm",
+  components: {
+    Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
+  },
+});
+
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" {...mantineHtmlProps}>
@@ -55,9 +68,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <style>{earlyColorSchemeCss}</style>
       </head>
       <body>
-        <MantineProvider defaultColorScheme="auto">
+        <MantineProvider
+          defaultColorScheme="auto"
+          theme={theme}
+          cssVariablesResolver={v8CssVariablesResolver}
+        >
           <SkipLink />
-          <Notifications position="top-right" />
+          <Notifications
+            position="top-right"
+            pauseResetOnHover="notification"
+          />
           {children}
           <Announcer />
         </MantineProvider>

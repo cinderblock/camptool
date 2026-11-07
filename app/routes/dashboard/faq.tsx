@@ -578,7 +578,7 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
                           </Group>
                         ) : null}
                       </Group>
-                      <Collapse in={isOpen(e.id)}>
+                      <Collapse expanded={isOpen(e.id)}>
                         <div style={{ paddingTop: 8, paddingLeft: 18 }}>
                           <Answer body={e.answer} />
                           <Anchor

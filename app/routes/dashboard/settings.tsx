@@ -234,7 +234,7 @@ function FeatureCard({
         />
       </Group>
       {children ? (
-        <Collapse in={state !== "off"} transitionDuration={220}>
+        <Collapse expanded={state !== "off"} transitionDuration={220}>
           <Divider my="md" />
           {children}
         </Collapse>

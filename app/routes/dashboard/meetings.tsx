@@ -273,7 +273,7 @@ function WhatIsThis({
           {open ? "Less" : "What's this?"}
         </Button>
       </Group>
-      <Collapse in={open}>
+      <Collapse expanded={open}>
         <Stack gap={6} mt="xs">
           <Text size="xs" c="dimmed">
             Every meeting has its own <b>agenda</b>. Add an item any time before
@@ -464,7 +464,7 @@ function NewMeetingForm() {
           {opened ? "Close" : "Schedule"}
         </Button>
       </Group>
-      <Collapse in={opened}>
+      <Collapse expanded={opened}>
         <fetcher.Form method="post">
           <input type="hidden" name="intent" value="createMeeting" />
           <input type="hidden" name="cadence" value={cadence} />

@@ -269,8 +269,8 @@ export function QuestionField({
           description={description}
           valueFormat="YYYY-MM-DD"
           disabled={locked}
-          defaultValue={value ? new Date(value) : null}
-          onChange={(d) => save(d ? formatDate(d) : "")}
+          defaultValue={value || null}
+          onChange={(d) => save(d ?? "")}
           popoverProps={{ withinPortal: true }}
           maw={260}
         />
@@ -285,8 +285,8 @@ export function QuestionField({
           description={description}
           valueFormat="YYYY-MM-DD"
           disabled={locked}
-          defaultValue={value ? parseLocalDate(value) : null}
-          onChange={(d) => save(d ? formatDate(d) : "")}
+          defaultValue={value || null}
+          onChange={(d) => save(d ?? "")}
           popoverProps={{ withinPortal: true }}
           maw={260}
         />
@@ -314,14 +314,12 @@ export function QuestionField({
                 label="Arrival"
                 valueFormat="YYYY-MM-DD"
                 disabled={locked}
-                defaultValue={
-                  range.arrival ? parseLocalDate(range.arrival) : null
-                }
+                defaultValue={range.arrival}
                 onChange={(d) =>
                   save(
                     stringifyEventRange({
                       ...range,
-                      arrival: d ? formatDate(d) : null,
+                      arrival: d,
                     }),
                   )
                 }
@@ -332,14 +330,12 @@ export function QuestionField({
                 label="Departure"
                 valueFormat="YYYY-MM-DD"
                 disabled={locked}
-                defaultValue={
-                  range.departure ? parseLocalDate(range.departure) : null
-                }
+                defaultValue={range.departure}
                 onChange={(d) =>
                   save(
                     stringifyEventRange({
                       ...range,
-                      departure: d ? formatDate(d) : null,
+                      departure: d,
                     }),
                   )
                 }
@@ -407,19 +403,4 @@ export function QuestionField({
         />
       );
   }
-}
-
-/** Parse a `YYYY-MM-DD` string as a LOCAL date (avoids the UTC-midnight day-shift
- * `new Date("YYYY-MM-DD")` causes in negative-offset timezones). */
-function parseLocalDate(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
-}
-
-/** @mantine/dates may hand back a Date or a string depending on version; coerce
- * to a YYYY-MM-DD string for storage either way. */
-function formatDate(d: Date | string): string {
-  const date = typeof d === "string" ? new Date(d) : d;
-  if (Number.isNaN(date.getTime())) return typeof d === "string" ? d : "";
-  return date.toISOString().slice(0, 10);
 }

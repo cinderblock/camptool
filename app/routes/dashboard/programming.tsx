@@ -485,7 +485,7 @@ function ProposeForm() {
           {opened ? "Cancel" : "Propose"}
         </Button>
       </Group>
-      <Collapse in={opened}>
+      <Collapse expanded={opened}>
         <fetcher.Form
           method="post"
           style={{ marginTop: "var(--mantine-spacing-md)" }}
