@@ -25,7 +25,7 @@ import {
   Title,
 } from "@mantine/core";
 import { useMemo, useState } from "react";
-import { Link, data } from "react-router";
+import { data, Link } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";

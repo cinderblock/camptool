@@ -31,9 +31,9 @@ import {
 } from "@mantine/core";
 import { useState } from "react";
 import {
+  data,
   Form,
   Link,
-  data,
   redirect,
   useNavigate,
   useNavigation,
@@ -41,8 +41,8 @@ import {
 } from "react-router";
 import { authClient } from "~/lib/auth-client";
 import {
-  type ResetLinkState,
   inspectPasswordReset,
+  type ResetLinkState,
   redeemPasswordReset,
 } from "~/lib/password-reset.server";
 import type { Route } from "./+types/reset.$token";

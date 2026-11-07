@@ -35,7 +35,7 @@ import {
 } from "../../db/schema";
 import { needsSetupPass } from "./age";
 import { uploadsRoot } from "./images.server";
-import { type PartyViewer, canManageAttendee } from "./party";
+import { canManageAttendee, type PartyViewer } from "./party";
 import { hasAtLeast } from "./permissions";
 import { parseSapPdf } from "./sap-pdf.server";
 import { SapRenameError } from "./sap-rename.server";

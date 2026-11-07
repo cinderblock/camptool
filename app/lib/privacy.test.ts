@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { classifyKey, parsePrivacyMode, serializePrivacyMode } from "./privacy";
 import {
-  type PersonRow,
   buildPrivacyLens,
   fakePerson,
+  type PersonRow,
   redact,
 } from "./privacy.server";
 

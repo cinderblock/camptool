@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   MAX_RESET_ATTEMPTS,
-  RESET_TTL_MS,
   maskEmail,
+  RESET_TTL_MS,
   resetLinkState,
 } from "./password-reset";
 

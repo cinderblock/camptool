@@ -71,6 +71,7 @@ function tankFootprint(w: number, h: number): Array<{ x: number; y: number }> {
  * translucent lid ring, and a center fill cap — color-coded by `base` (blue =
  * fresh, grey = greywater). */
 function tankRenderFootprint(base: string) {
+  // biome-ignore lint/correctness/noComponentHookFactories: called once per tank kind in the static STRUCTURES table, so each component's identity is stable
   return function TankFootprint({ w, h, selected }: FootprintCtx): ReactNode {
     const cx = w / 2;
     const cy = h / 2;
@@ -1479,7 +1480,10 @@ export function hexPoints(x: number, y: number, w: number, h: number): string {
 export function ShapeSwatch({
   kind,
   size = 16,
-}: { kind: Kind; size?: number }) {
+}: {
+  kind: Kind;
+  size?: number;
+}) {
   const s = size;
   return (
     <svg
@@ -1544,7 +1548,10 @@ function starPoints(cx: number, cy: number, r: number): string {
 export function KindIcon({
   kind,
   size = 30,
-}: { kind: CampStructure; size?: number }) {
+}: {
+  kind: CampStructure;
+  size?: number;
+}) {
   // A camp-theme structure can ship its own legend/tray icon.
   if (kind.renderIcon) return <>{kind.renderIcon(size)}</>;
   const S = size;
@@ -1559,7 +1566,9 @@ export function KindIcon({
   const c = kind.color;
   const dark = "#1c1c1c";
   const glass = "#cfe0ff";
+  // biome-ignore lint/correctness/noComponentHookFactories: a coordinate helper, not a component
   const X = (f: number) => px + w * f;
+  // biome-ignore lint/correctness/noComponentHookFactories: a coordinate helper, not a component
   const Y = (f: number) => py + h * f;
   const minWH = Math.min(w, h);
   const isCanopy = kind.canopyShade === true;

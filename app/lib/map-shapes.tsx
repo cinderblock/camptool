@@ -18,11 +18,11 @@
 import { memo } from "react";
 import { clamp } from "~/lib/num";
 import {
-  type StructureConfig,
   hasTag,
   hexPoints,
   hexVertices,
   kindDef,
+  type StructureConfig,
 } from "~/lib/structures";
 
 /** Last-approved geometry an officer can revert a pending change back to. */
@@ -253,7 +253,9 @@ function KindGlyph({
 }) {
   const dark = "#1c1c1c";
   const glass = "#cfe0ff";
+  // biome-ignore lint/correctness/noComponentHookFactories: a coordinate helper, not a component
   const X = (f: number) => px + w * f;
+  // biome-ignore lint/correctness/noComponentHookFactories: a coordinate helper, not a component
   const Y = (f: number) => py + h * f;
   const line = { stroke: dark, strokeOpacity: 0.55, fill: "none" } as const;
   const pane = { fill: glass, fillOpacity: 0.55, stroke: "none" } as const;

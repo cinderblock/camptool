@@ -24,14 +24,14 @@ import {
   Select,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
   UnstyledButton,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useEffect, useMemo, useState } from "react";
-import { Link, data, useFetcher } from "react-router";
+import { type ComponentProps, useEffect, useMemo, useState } from "react";
+import { data, Link, useFetcher } from "react-router";
 import { MarkupTextarea } from "~/components/MarkupTextarea";
 import { WikiBody } from "~/components/WikiBody";
 import {
@@ -59,7 +59,7 @@ import { loadFeatureStates, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
-import { type LinkTarget, appLinkTargets, parseWikiBody } from "~/lib/wiki";
+import { appLinkTargets, type LinkTarget, parseWikiBody } from "~/lib/wiki";
 import { existingSlugs, listPages } from "~/lib/wiki.server";
 import type { Route } from "./+types/faq";
 
@@ -361,20 +361,6 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
 
   const categoryData = categories.map((c) => ({ value: c.id, label: c.name }));
 
-  function Answer({ body }: { body: string }) {
-    return body.trim() ? (
-      <WikiBody
-        blocks={parseWikiBody(body)}
-        knownSlugs={knownSlugs}
-        wikiEnabled={wikiEnabled}
-      />
-    ) : (
-      <Text size="sm" c="dimmed" fs="italic">
-        Not answered yet.
-      </Text>
-    );
-  }
-
   return (
     <Container size="sm">
       <Stack gap="lg">
@@ -580,7 +566,11 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
                       </Group>
                       <Collapse expanded={isOpen(e.id)}>
                         <div style={{ paddingTop: 8, paddingLeft: 18 }}>
-                          <Answer body={e.answer} />
+                          <FaqAnswer
+                            body={e.answer}
+                            knownSlugs={knownSlugs}
+                            wikiEnabled={wikiEnabled}
+                          />
                           <Anchor
                             component={Link}
                             to={`/faq/${e.slug}`}
@@ -731,7 +721,11 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
                     Preview
                   </Text>
                   <Card withBorder padding="md" radius="md">
-                    <Answer body={draft.answer} />
+                    <FaqAnswer
+                      body={draft.answer}
+                      knownSlugs={knownSlugs}
+                      wikiEnabled={wikiEnabled}
+                    />
                   </Card>
                 </div>
               ) : null}
@@ -848,5 +842,30 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
         </Modal>
       </Stack>
     </Container>
+  );
+}
+
+/** An entry's answer, rendered as wiki markup. Module-level so it keeps its
+ * identity across renders: defined inside the page, every keystroke in the
+ * editor would remount the preview. */
+function FaqAnswer({
+  body,
+  knownSlugs,
+  wikiEnabled,
+}: {
+  body: string;
+  knownSlugs: ComponentProps<typeof WikiBody>["knownSlugs"];
+  wikiEnabled: ComponentProps<typeof WikiBody>["wikiEnabled"];
+}) {
+  return body.trim() ? (
+    <WikiBody
+      blocks={parseWikiBody(body)}
+      knownSlugs={knownSlugs}
+      wikiEnabled={wikiEnabled}
+    />
+  ) : (
+    <Text size="sm" c="dimmed" fs="italic">
+      Not answered yet.
+    </Text>
   );
 }

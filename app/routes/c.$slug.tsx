@@ -23,7 +23,7 @@ import {
   setSignupUnlockCookie,
 } from "~/lib/instance.server";
 import { linkApplicationToProspect } from "~/lib/prospects.server";
-import { type QuestionType, isAnswered, parseOptions } from "~/lib/questions";
+import { isAnswered, parseOptions, type QuestionType } from "~/lib/questions";
 import { loadApplicationQuestions } from "~/lib/questions.server";
 import { isMemberOf, pendingApplicationWhere } from "~/lib/recruits.server";
 import { getSession } from "~/lib/session.server";

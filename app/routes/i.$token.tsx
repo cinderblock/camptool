@@ -9,7 +9,7 @@ import {
   Text,
 } from "@mantine/core";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { Form, data, redirect } from "react-router";
+import { data, Form, redirect } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { CampHero } from "~/components/CampHero";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";

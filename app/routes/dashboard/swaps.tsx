@@ -23,8 +23,8 @@ import {
   Select,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -36,9 +36,6 @@ import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import {
-  SWAP_DIRECTIONS,
-  SWAP_KINDS,
-  type SwapKind,
   compareListings,
   directionColor,
   isSwapDirection,
@@ -46,6 +43,9 @@ import {
   kindColor,
   listingSummary,
   parsePrice,
+  SWAP_DIRECTIONS,
+  SWAP_KINDS,
+  type SwapKind,
 } from "~/lib/swaps";
 import { db } from "../../../db/client.server";
 import { membership, swapListing, user } from "../../../db/schema";

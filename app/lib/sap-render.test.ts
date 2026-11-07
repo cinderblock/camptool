@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { PDFDocument } from "pdf-lib";
 import { scanCodesInPdf } from "./sap-qr.server";
-import { type SheetPass, renderGroupSheet } from "./sap-render.server";
+import { renderGroupSheet, type SheetPass } from "./sap-render.server";
 
 const pass = (n: number): SheetPass => ({
   holderName: `Camper ${n}`,

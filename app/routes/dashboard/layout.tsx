@@ -20,17 +20,17 @@ import {
   Form,
   NavLink,
   Outlet,
+  redirect,
   useFetcher,
   useLocation,
   useNavigate,
 } from "react-router";
-import { redirect } from "react-router";
 import { FeedbackButton } from "~/components/FeedbackButton";
 import { ShellBanner } from "~/components/ShellBanner";
 import { outstandingAsks } from "~/lib/asks";
 import { loadAskSnapshots } from "~/lib/asks.server";
-import { authClient, signOut } from "~/lib/auth-client";
 import { discordEnabled } from "~/lib/auth.server";
+import { authClient, signOut } from "~/lib/auth-client";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
 import { featureName } from "~/lib/events";

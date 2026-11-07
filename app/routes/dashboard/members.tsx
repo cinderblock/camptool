@@ -16,23 +16,23 @@ import {
   Stack,
   Table,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, data, useFetcher, useSubmit } from "react-router";
+import { data, Link, useFetcher, useSubmit } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState } from "~/lib/features.server";
 import {
-  type TreeNode,
   buildForest,
   flattenForest,
   subtreeOf,
+  type TreeNode,
 } from "~/lib/forest";
 import {
   addToGroup,
@@ -46,18 +46,18 @@ import {
   setGroupParent,
 } from "~/lib/groups.server";
 import { buildInviteTree, subtreeIds } from "~/lib/invite-tree";
-import type { MergePicks } from "~/lib/merge-plan";
 import {
   type MergeOutcome,
   mergeMembers,
   planMemberMerge,
 } from "~/lib/merge.server";
+import type { MergePicks } from "~/lib/merge-plan";
 import { issuePasswordReset } from "~/lib/password-reset.server";
 import {
-  ROLES,
-  type Role,
   hasAtLeast,
   isRole,
+  ROLES,
+  type Role,
   rankOf,
 } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";

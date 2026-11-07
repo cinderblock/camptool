@@ -21,7 +21,7 @@
  *
  * Deliberately NOT named *.spec.ts: `bun test` globs that pattern.
  */
-import { type Browser, type Page, chromium } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17934";
 

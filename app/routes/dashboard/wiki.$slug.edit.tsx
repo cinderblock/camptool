@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useState } from "react";
-import { Link, data, redirect, useFetcher } from "react-router";
+import { data, Link, redirect, useFetcher } from "react-router";
 import { MarkupTextarea } from "~/components/MarkupTextarea";
 import { WikiBody } from "~/components/WikiBody";
 import { faqLinkTargets } from "~/lib/faq.server";
@@ -21,8 +21,8 @@ import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
 import {
-  type LinkTarget,
   appLinkTargets,
+  type LinkTarget,
   parseWikiBody,
   wikiSlug,
 } from "~/lib/wiki";

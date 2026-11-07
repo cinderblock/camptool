@@ -18,32 +18,32 @@ import {
   Select,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import { and, count, eq } from "drizzle-orm";
 import { useEffect, useState } from "react";
-import { Link, data, redirect, useFetcher } from "react-router";
+import { data, Link, redirect, useFetcher } from "react-router";
 import {
+  emptyRole,
   type RoleDraft,
   ShiftRoleBuilder,
-  emptyRole,
 } from "~/components/ShiftRoleBuilder";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
-  GATHERING_KINDS,
-  MAX_TEMPLATE_ROLES,
-  STAFFING_OPTIONS,
   dateLabel,
+  GATHERING_KINDS,
   isIsoDate,
   kindColor,
   kindLabel,
+  MAX_TEMPLATE_ROLES,
+  STAFFING_OPTIONS,
   staffingLabel,
   timeRangeLabel,
 } from "~/lib/schedule";

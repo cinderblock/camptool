@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
-  type FuelRow,
-  NO_FUEL,
   amountLabel,
   defaultUnitFor,
+  type FuelRow,
   fuelLabel,
   fuelPhase,
   fuelTotals,
   isFuelType,
   isFuelUnit,
   isNoFuel,
+  NO_FUEL,
   needsPhaseSeparation,
   noFuelCount,
   totalLabel,

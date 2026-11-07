@@ -14,7 +14,7 @@
  * Deliberately NOT named *.spec.ts: `bun test` globs that pattern and would try
  * to run this without a live server.
  */
-import { type Browser, type Page, chromium } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 
 // Must be "localhost", not an IP: a WebAuthn RP ID has to be a DOMAIN, so
 // http://127.0.0.1 / http://[::1] can't host a passkey ceremony at all. The dev

@@ -9,6 +9,7 @@ import { campImage, mapAerial } from "../../db/schema";
 import { type AerialRow, cleanCrop, normDeg } from "./aerial";
 
 export type { AerialRow };
+
 import { getImage } from "./images.server";
 
 export async function loadAerials(

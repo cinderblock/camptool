@@ -3,8 +3,8 @@ import {
   ASKS,
   type AskContext,
   type AskSnapshot,
-  IMPORTANCE_RANK,
   askProgress,
+  IMPORTANCE_RANK,
   outstandingAsks,
 } from "./asks";
 

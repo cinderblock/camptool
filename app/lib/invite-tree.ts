@@ -6,7 +6,7 @@
  * you can read. The traversal itself — and the cycle guard it needs — lives in
  * `forest.ts`, shared with the social-group tree.
  */
-import { type TreeNode, buildForest, flattenForest, subtreeOf } from "./forest";
+import { buildForest, flattenForest, subtreeOf, type TreeNode } from "./forest";
 
 type Idish = { membershipId: string; invitedByMembershipId: string | null };
 

@@ -1,9 +1,9 @@
 import {
+  closestCenter,
   DndContext,
   type DragEndEvent,
   KeyboardSensor,
   PointerSensor,
-  closestCenter,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -12,8 +12,8 @@ import {
   restrictToVerticalAxis,
 } from "@dnd-kit/modifiers";
 import {
-  SortableContext,
   arrayMove,
+  SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -36,7 +36,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
 import { memo, useEffect, useRef, useState } from "react";
-import { Link, data, useFetcher } from "react-router";
+import { data, Link, useFetcher } from "react-router";
 import { QuestionField } from "~/components/QuestionField";
 import {
   checkCondition,
@@ -47,6 +47,8 @@ import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
+  isSelectType,
+  parseOptions,
   QUESTION_AUDIENCES,
   QUESTION_PLACEMENTS,
   QUESTION_SCOPES,
@@ -57,12 +59,9 @@ import {
   type QuestionScope,
   type QuestionSurface,
   type QuestionType,
-  isSelectType,
-  parseOptions,
   surfacedInWizard,
 } from "~/lib/questions";
 import {
-  filterByAudience,
   importApplicationAnswers,
   loadAnswers,
   loadCampQuestions,

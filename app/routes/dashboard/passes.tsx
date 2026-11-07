@@ -13,8 +13,8 @@ import {
   Select,
   Stack,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -36,13 +36,13 @@ import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import type { EventRange } from "~/lib/questions";
 import {
-  SapImportError,
-  SapStateError,
   allocateStockExternally,
   assignStock,
   earlyArrivalsWithoutStock,
   importSapPdf,
   releaseStock,
+  SapImportError,
+  SapStateError,
   sapCoverage,
   stockForEdition,
   stockWithCodes,

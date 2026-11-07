@@ -1,20 +1,20 @@
 import {
   ColorSchemeScript,
-  MantineProvider,
-  Switch,
   createTheme,
+  MantineProvider,
   mantineHtmlProps,
+  Switch,
   v8CssVariablesResolver,
 } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { useEffect, useRef } from "react";
 import {
+  isRouteErrorResponse,
   Links,
   Meta,
   Outlet,
   Scripts,
   ScrollRestoration,
-  isRouteErrorResponse,
   useLocation,
 } from "react-router";
 

@@ -11,7 +11,7 @@
  *     PORT=17925 bun run dev
  *   node --experimental-strip-types e2e/passkey-nag.ts
  */
-import { type Browser, type Page, chromium } from "playwright";
+import { type Browser, chromium, type Page } from "playwright";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17925";
 

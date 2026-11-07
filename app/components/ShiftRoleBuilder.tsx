@@ -25,7 +25,6 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { useState } from "react";
 import { STAFFING_OPTIONS } from "~/lib/schedule";
 
 export type RoleDraft = {

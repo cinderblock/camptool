@@ -1,5 +1,5 @@
-import { Text } from "@mantine/core";
 import type { MantineSpacing, StyleProp } from "@mantine/core";
+import { Text } from "@mantine/core";
 
 /**
  * Trademark disclaimer for the app's Burning Man–related features (the Black Rock

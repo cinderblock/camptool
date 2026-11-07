@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
-  GENERAL_CATEGORY,
   faqMatches,
   faqSlug,
+  GENERAL_CATEGORY,
   groupFaqEntries,
   isFaqStatus,
 } from "./faq";

@@ -342,6 +342,7 @@ function renderFootprint({
               <g strokeLinecap="round">
                 {sticks.map((s, i) => (
                   <line
+                    // biome-ignore lint/suspicious/noArrayIndexKey: derived geometry, rebuilt each render; position is its identity
                     key={`tetra-${i}-${s[0][0].toFixed(1)}`}
                     x1={s[0][0]}
                     y1={s[0][1]}

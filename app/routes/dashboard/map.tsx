@@ -21,8 +21,8 @@ import {
   Stack,
   Switch,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
   Tooltip,
   useComputedColorScheme,
@@ -31,23 +31,23 @@ import { useLocalStorage, useMediaQuery } from "@mantine/hooks";
 import { and, desc, eq, gt, inArray, isNotNull, lt, or } from "drizzle-orm";
 import {
   type ReactNode,
-  memo,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { Link, data, useFetcher } from "react-router";
+import { data, Link, useFetcher } from "react-router";
 import { BurningManDisclaimer } from "~/components/BurningManDisclaimer";
 import {
   AerialLayer,
   AerialPanel,
   type AerialPick,
   AerialSwipe,
-  type SwipeMode,
   addPickPoint,
   pickWants,
+  type SwipeMode,
   swipeClip,
 } from "~/components/map/AerialPhoto";
 import type { AerialRow } from "~/lib/aerial";
@@ -56,13 +56,13 @@ import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { BLOCKS, blockById } from "~/lib/blocks";
 import {
   CURRENT_EVENT_YEAR,
-  NOC_LANDMARK,
   clockOptions,
   eventYearOptions,
   hasGeometry,
   landmarkRadiusFt,
   landmarkSightLine,
   mapUpBearingFor,
+  NOC_LANDMARK,
   parseClock,
   radiusForStreet,
   streetLabel,
@@ -71,36 +71,35 @@ import {
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
 import {
-  MARGIN,
-  PAD_FT,
-  VIEW_W,
-  cityPhi,
-  fitCenterInsideLot,
-  fitCenterToLot,
-  frontageRadiusOf,
-  layoutFor,
-  lotExitPoint,
-  lotHalfWidthAt,
-  pointInLot,
-  polygonOutsideLot,
-  rearWidthOf,
-  straightLotPoints,
-  wedgeFor,
-} from "~/lib/map-geometry";
-import {
-  MapObjectShape,
-  MapShapeDefs,
-  type ObjRow,
-  type PendingPrev,
-  footprintOutline,
-} from "~/lib/map-shapes";
-import {
   type ObjSelectRow,
   objSelect,
   parseConfig,
   parsePending,
   toObjRow,
 } from "~/lib/map.server";
+import {
+  cityPhi,
+  fitCenterInsideLot,
+  fitCenterToLot,
+  frontageRadiusOf,
+  layoutFor,
+  lotExitPoint,
+  MARGIN,
+  PAD_FT,
+  pointInLot,
+  polygonOutsideLot,
+  rearWidthOf,
+  straightLotPoints,
+  VIEW_W,
+  wedgeFor,
+} from "~/lib/map-geometry";
+import {
+  footprintOutline,
+  MapObjectShape,
+  MapShapeDefs,
+  type ObjRow,
+  type PendingPrev,
+} from "~/lib/map-shapes";
 import { clamp, round } from "~/lib/num";
 import { partyMapObjects, partyMapObjectsFor } from "~/lib/party-map.server";
 import { hasAtLeast } from "~/lib/permissions";
@@ -113,27 +112,25 @@ import {
   roadOutline,
 } from "~/lib/roads";
 import { requireActiveEdition } from "~/lib/session.server";
+import type { StructureConfig } from "~/lib/structures";
 import {
   AMP_OPTIONS,
   CONTAINER_FULL,
   CONTAINER_HALF,
   CONTAINER_WIDTH,
   GAUGE_OPTIONS,
-  KINDS,
-  KIND_GROUPS,
-  KindIcon,
   hasTag,
-  hexPoints,
   hexVertices,
   isKind,
-  kindColor,
+  KIND_GROUPS,
+  KINDS,
+  KindIcon,
   kindDef,
   kindHasDoor,
   kindHeight,
 } from "~/lib/structures";
-import type { StructureConfig } from "~/lib/structures";
 import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
-import { type SightLine, blocksSightLine } from "~/lib/uplink-los";
+import { blocksSightLine, type SightLine } from "~/lib/uplink-los";
 import { wikiTiesFor } from "~/lib/wiki.server";
 import {
   BRC_WIND_FROM_BEARING,
@@ -4840,6 +4837,7 @@ function Legend({ bannedKinds }: { bannedKinds: string[] }) {
                   withArrow
                   openDelay={150}
                 >
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: the map editor is pointer-only for now; keyboard parity is plans/accessibility.md Phase D */}
                   <div
                     draggable
                     onDragStart={(e) => {
@@ -5197,10 +5195,14 @@ function Editor({
   // While dragging, listen on window so the pointer can leave the SVG without
   // dropping the gesture. (Pointer capture + an svg `pointerleave` handler ends
   // the drag on the very first move, so we avoid both.)
+  // Effect events: subscribed once per gesture, but always call this render's
+  // handlers.
+  const onDraggingMove = useEffectEvent((e: PointerEvent) => onMove(e));
+  const onDraggingUp = useEffectEvent(() => endDrag());
   useEffect(() => {
     if (!dragging) return;
-    const move = (e: PointerEvent) => onMove(e);
-    const up = () => endDrag();
+    const move = (e: PointerEvent) => onDraggingMove(e);
+    const up = () => onDraggingUp();
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
@@ -5212,10 +5214,16 @@ function Editor({
   }, [dragging]);
 
   // Window-driven marquee (rubber-band) selection gesture.
+  // Effect events: subscribed once per gesture, but always call this render's
+  // handlers.
+  const onMarqueeingMove = useEffectEvent((e: PointerEvent) =>
+    onMarqueeMove(e),
+  );
+  const onMarqueeingUp = useEffectEvent(() => endMarquee());
   useEffect(() => {
     if (!marqueeing) return;
-    const move = (e: PointerEvent) => onMarqueeMove(e);
-    const up = () => endMarquee();
+    const move = (e: PointerEvent) => onMarqueeingMove(e);
+    const up = () => onMarqueeingUp();
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
@@ -5227,10 +5235,16 @@ function Editor({
   }, [marqueeing]);
 
   // Same window-driven gesture, for dragging a selected cable's vertex handle.
+  // Effect events: subscribed once per gesture, but always call this render's
+  // handlers.
+  const onCableDraggingMove = useEffectEvent((e: PointerEvent) =>
+    onCableVertexMove(e),
+  );
+  const onCableDraggingUp = useEffectEvent(() => endCableDrag());
   useEffect(() => {
     if (!cableDragging) return;
-    const move = (e: PointerEvent) => onCableVertexMove(e);
-    const up = () => endCableDrag();
+    const move = (e: PointerEvent) => onCableDraggingMove(e);
+    const up = () => onCableDraggingUp();
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
@@ -5241,10 +5255,14 @@ function Editor({
     };
   }, [cableDragging]);
 
+  // Effect events: subscribed once per gesture, but always call this render's
+  // handlers.
+  const onZoneDraggingMove = useEffectEvent((e: PointerEvent) => onZoneMove(e));
+  const onZoneDraggingUp = useEffectEvent(() => endZoneDrag());
   useEffect(() => {
     if (!zoneDragging) return;
-    const move = (e: PointerEvent) => onZoneMove(e);
-    const up = () => endZoneDrag();
+    const move = (e: PointerEvent) => onZoneDraggingMove(e);
+    const up = () => onZoneDraggingUp();
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
@@ -5830,18 +5848,7 @@ function Editor({
       bearingDeg: sight?.bearingDeg ?? null,
       aims,
     };
-  }, [
-    showUplink,
-    wedge,
-    lot,
-    objects,
-    originX,
-    originY,
-    ppf,
-    viewL,
-    viewR,
-    viewH,
-  ]);
+  }, [showUplink, wedge, lot, objects, originX, originY, ppf, viewR, viewH]);
 
   // ---- Wind flow field (plot-local feet). Solved when the wind layer is on and
   // the lot is oriented; buildings become solid obstacles the flow goes around.
@@ -5895,7 +5902,6 @@ function Editor({
     originY,
     ppf,
     viewH,
-    viewL,
     viewR,
   ]);
 
@@ -7575,6 +7581,7 @@ function Editor({
                   {objects.flatMap((o) =>
                     shadowPolygon(o, sun, mapUpBearing).map((poly, i) => (
                       <polygon
+                        // biome-ignore lint/suspicious/noArrayIndexKey: derived geometry, rebuilt each render; position is its identity
                         key={`sh-${o.id}-${i}`}
                         points={poly
                           .map(
@@ -7655,6 +7662,7 @@ function Editor({
                           if (!q) return null;
                           return (
                             <circle
+                              // biome-ignore lint/suspicious/noArrayIndexKey: points have no ids; vertex i is the handle's identity
                               key={`${z.id}-add-${i}`}
                               cx={originX + ((p.x + q.x) / 2) * ppf}
                               cy={originY + ((p.y + q.y) / 2) * ppf}
@@ -7673,7 +7681,9 @@ function Editor({
                           );
                         })}
                         {z.points.map((p, i) => (
+                          // biome-ignore lint/a11y/noStaticElementInteractions: the map editor is pointer-only for now; keyboard parity is plans/accessibility.md Phase D
                           <circle
+                            // biome-ignore lint/suspicious/noArrayIndexKey: points have no ids; vertex i is the handle's identity
                             key={`${z.id}-vtx-${i}`}
                             cx={originX + p.x * ppf}
                             cy={originY + p.y * ppf}
@@ -8250,6 +8260,7 @@ function Editor({
                     };
                     return faces.map((face, i) => (
                       <polygon
+                        // biome-ignore lint/suspicious/noArrayIndexKey: derived geometry, rebuilt each render; position is its identity
                         key={`sf-${o.id}-${i}`}
                         points={face.points.map(toPx).join(" ")}
                         fill="#1c1c1c"
@@ -8314,6 +8325,7 @@ function Editor({
                     {/* Endpoint dots mark the connected nodes. */}
                     {ends.map((p, i) => (
                       <circle
+                        // biome-ignore lint/suspicious/noArrayIndexKey: points have no ids; vertex i is the handle's identity
                         key={`${c.id}-end-${i}`}
                         cx={originX + p.x * ppf}
                         cy={originY + p.y * ppf}
@@ -8350,6 +8362,7 @@ function Editor({
                           if (!q) return null;
                           return (
                             <circle
+                              // biome-ignore lint/suspicious/noArrayIndexKey: points have no ids; vertex i is the handle's identity
                               key={`${c.id}-add-${i}`}
                               cx={originX + ((p.x + q.x) / 2) * ppf}
                               cy={originY + ((p.y + q.y) / 2) * ppf}
@@ -8368,7 +8381,9 @@ function Editor({
                           );
                         })}
                         {c.points.map((p, i) => (
+                          // biome-ignore lint/a11y/noStaticElementInteractions: the map editor is pointer-only for now; keyboard parity is plans/accessibility.md Phase D
                           <circle
+                            // biome-ignore lint/suspicious/noArrayIndexKey: points have no ids; vertex i is the handle's identity
                             key={`${c.id}-vtx-${i}`}
                             cx={originX + p.x * ppf}
                             cy={originY + p.y * ppf}
@@ -8672,6 +8687,7 @@ function Editor({
                   ) : null}
                   {draftPoints.map((p, i) => (
                     <circle
+                      // biome-ignore lint/suspicious/noArrayIndexKey: points have no ids; vertex i is the handle's identity
                       key={`${p.x}-${p.y}-${i}`}
                       cx={originX + p.x * ppf}
                       cy={originY + p.y * ppf}
