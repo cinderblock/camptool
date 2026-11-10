@@ -31,6 +31,7 @@ import {
   InstantDateInput,
   InstantDateTimePicker,
 } from "~/components/InstantPickers";
+import { LocalTime } from "~/components/LocalTime";
 import { MarkupTextarea } from "~/components/MarkupTextarea";
 import { WikiBody } from "~/components/WikiBody";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
@@ -640,7 +641,7 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
                       {directionLead(i.direction)}
                     </Badge>
                     <Text size="xs" c="dimmed">
-                      {i.occurredAt.slice(0, 16).replace("T", " ")} · logged by{" "}
+                      <LocalTime iso={i.occurredAt} /> · logged by{" "}
                       {i.authorName}
                     </Text>
                   </Group>
