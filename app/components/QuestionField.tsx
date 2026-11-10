@@ -268,6 +268,7 @@ export function QuestionField({
           label={label}
           description={description}
           valueFormat="YYYY-MM-DD"
+          clearable
           disabled={locked}
           defaultValue={value || null}
           onChange={(d) => save(d ?? "")}
@@ -284,6 +285,7 @@ export function QuestionField({
           label={label}
           description={description}
           valueFormat="YYYY-MM-DD"
+          clearable
           disabled={locked}
           defaultValue={value || null}
           onChange={(d) => save(d ?? "")}
@@ -313,6 +315,7 @@ export function QuestionField({
               <DateInput
                 label="Arrival"
                 valueFormat="YYYY-MM-DD"
+                clearable
                 disabled={locked}
                 defaultValue={range.arrival}
                 onChange={(d) =>
@@ -329,6 +332,7 @@ export function QuestionField({
               <DateInput
                 label="Departure"
                 valueFormat="YYYY-MM-DD"
+                clearable
                 disabled={locked}
                 defaultValue={range.departure}
                 onChange={(d) =>
