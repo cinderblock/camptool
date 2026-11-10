@@ -162,7 +162,9 @@ export async function action({ request }: Route.ActionArgs) {
       return data({ error: "Enter an amount." }, { status: 400 });
     }
     const memberId = String(form.get("memberId") ?? "");
-    const occurredRaw = Number(form.get("occurredAt"));
+    // An empty field is "no date": Number("") is 0, which would be Jan 1 1970.
+    const occurredStr = String(form.get("occurredAt") ?? "").trim();
+    const occurredRaw = occurredStr === "" ? Number.NaN : Number(occurredStr);
     const str = (k: string) => {
       const v = form.get(k);
       const s = v == null ? "" : String(v).trim();
