@@ -19,6 +19,7 @@ import {
 } from "react-router";
 
 import "@mantine/core/styles.css";
+import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 
 import { Announcer, SkipLink } from "~/components/Announcer";
