@@ -4,6 +4,8 @@
 .env.*.local
 
 # deps / build
+.d1-migrations/
+.wrangler/
 node_modules/
 dist/
 build/

@@ -1,0 +1,38 @@
+// CampTool on Cloudflare Workers + D1 + R2 (plans/hosting-other-camps.md).
+// The Bun path (server.ts, Dockerfile) doesn't read this file.
+//
+//   bun run cf:dev       local, with a local D1 and R2 (no account needed)
+//   bun run cf:deploy    build, apply D1 migrations, deploy
+//
+// No resource IDs here: `wrangler deploy` creates the D1 database and R2
+// bucket on first deploy and remembers them, so a fork deploys as-is.
+// Settings and secrets (see docs/cloudflare-deploy.md):
+//   PUBLIC_BASE_URL        var, e.g. https://camptool.org
+//   CAMP_SUBDOMAINS        var, "1" to give each camp <slug>.<domain>
+//   BETTER_AUTH_SECRET     secret (wrangler secret put)
+//   DISCORD_*              optional secrets
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "camptool",
+  "main": "./workers/app.ts",
+  "compatibility_date": "2026-11-01",
+  // node:crypto, node:zlib, node:stream, process.env.
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  // Run near the database rather than near each visitor: a page makes many
+  // small queries, and each one is a round trip to D1.
+  "placement": { "mode": "smart" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "camptool",
+      // Prepared by `bun run cf:migrations` from db/migrations (D1 can't turn
+      // foreign keys off; see scripts/d1-migrations.ts).
+      "migrations_dir": ".d1-migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "camptool-uploads" }],
+  "vars": {
+    "PUBLIC_BASE_URL": "http://localhost:17940"
+  }
+}

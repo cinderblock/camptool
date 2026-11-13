@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { cloudflare } from "@cloudflare/vite-plugin";
 import { reactRouter } from "@react-router/dev/vite";
 import { defineConfig, type Plugin } from "vite";
 
@@ -50,8 +51,18 @@ function campThemePacks(): Plugin {
   };
 }
 
+// Which host the server build targets (plans/hosting-other-camps.md). Default:
+// Bun (server.ts). `CAMPTOOL_TARGET=cloudflare`: a Worker (workers/app.ts),
+// with the SSR environment running in workerd, where the `workerd` import
+// condition picks D1/R2 for `#host/db` and `#host/blobs`.
+const onCloudflare = process.env.CAMPTOOL_TARGET === "cloudflare";
+
 export default defineConfig({
-  plugins: [campThemePacks(), reactRouter()],
+  plugins: [
+    campThemePacks(),
+    ...(onCloudflare ? [cloudflare({ viteEnvironment: { name: "ssr" } })] : []),
+    reactRouter(),
+  ],
   // tsconfigPaths: Vite 8 resolves tsconfig "paths" natively (replaces vite-tsconfig-paths).
   resolve: { tsconfigPaths: true },
   server: {

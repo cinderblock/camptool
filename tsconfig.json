@@ -27,6 +27,7 @@
   },
   "include": [
     "db/**/*.ts",
+    "workers/**/*.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
     "packages/**/*.ts",

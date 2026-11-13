@@ -16,10 +16,10 @@ events (see the four-layer architecture in the plan).
 
 ## Stack
 
-- **Runtime:** Bun
+- **Runtime:** Bun, or Cloudflare Workers (see Deploy)
 - **Framework:** React Router v7 (framework mode, SSR) + React 19
 - **UI:** Mantine
-- **Database:** SQLite via `bun:sqlite` + Drizzle ORM
+- **Database:** SQLite via Drizzle ORM: `bun:sqlite` on Bun, D1 on Cloudflare
 - **Auth:** better-auth (Discord, email/password, passkeys; magic link is wired
   but hidden — see "No mail transport" below)
 - **Format/lint:** Biome
@@ -322,6 +322,13 @@ image, but **pushing to `master` does not deploy it**: CI publishes
 `ghcr.io/cinderblock/camptool:<sha>` and stops. Which build actually runs is
 pinned in the ops repo, and only an ops push changes it. Both paths are in
 [`docs/firefly-deploy.md`](docs/firefly-deploy.md).
+
+It also runs on **Cloudflare** (Workers + D1 + R2, about $5/month for a whole
+multi-camp site): `bun run cf:preview` to try it locally with no account,
+`bun run cf:deploy` to ship it. See
+[`docs/cloudflare-deploy.md`](docs/cloudflare-deploy.md). The host is chosen at
+build time through the `#host/db` and `#host/blobs` imports in `package.json`,
+so neither build carries the other's code.
 
 ## Design notes
 

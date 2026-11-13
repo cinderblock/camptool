@@ -9,6 +9,8 @@
 import { env } from "cloudflare:workers";
 import { is, SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { SQLiteAsyncDialect } from "drizzle-orm/sqlite-core";
+import journal from "../migrations/meta/_journal.json";
 import * as schema from "../schema";
 import type { AtomicStatement, Db, DbSnapshot } from "./types";
 
@@ -17,13 +19,24 @@ const d1Db = drizzle(d1, { schema });
 
 export const db = d1Db as unknown as Db;
 
-/** Run writes together: a D1 batch is one transaction, all or nothing. */
+const dialect = new SQLiteAsyncDialect();
+
+/**
+ * Run writes together: a D1 batch is one transaction, all or nothing.
+ *
+ * Goes straight to D1's `batch()` rather than Drizzle's: Drizzle 0.45's D1
+ * batch assumes every item carries a prepared statement, and a raw
+ * `db.run(sql)` item doesn't ("Cannot read properties of undefined (reading
+ * 'bind')"). Rendering each statement to SQL + params ourselves works for
+ * builders and raw SQL alike.
+ */
 export async function atomic(statements: AtomicStatement[]): Promise<void> {
   if (statements.length === 0) return;
-  const items = statements.map((s) => (is(s, SQL) ? d1Db.run(s) : s));
-  // The builders are D1 builders at runtime; the shared `Db` type just can't
-  // say so.
-  await d1Db.batch(items as unknown as Parameters<typeof d1Db.batch>[0]);
+  const prepared = statements.map((s) => {
+    const q = is(s, SQL) ? dialect.sqlToQuery(s) : s.toSQL();
+    return d1.prepare(q.sql).bind(...q.params);
+  });
+  await d1.batch(prepared);
 }
 
 /**
@@ -59,11 +72,38 @@ export async function dbSnapshot(): Promise<DbSnapshot> {
   for (const o of objects.filter((o) => o.type !== "table")) {
     lines.push(`${o.sql};`);
   }
+  lines.push(...(await drizzleMigrationRecord()));
   lines.push("COMMIT;", "");
   return {
     name: "camptool.sql",
     bytes: new TextEncoder().encode(lines.join("\n")),
   };
+}
+
+/**
+ * The Bun host's record of applied migrations, for the dump. Wrangler records
+ * them in `d1_migrations`; Drizzle's migrator (the Bun host) reads
+ * `__drizzle_migrations` and runs every migration newer than its newest
+ * `created_at`. Without this, a dump restored onto a Bun host would try to
+ * create every table again. Only `created_at` (the journal's `when`) is
+ * compared, so the hash just says where the row came from.
+ */
+async function drizzleMigrationRecord(): Promise<string[]> {
+  const applied = await d1
+    .prepare("SELECT name FROM d1_migrations")
+    .all<{ name: string }>()
+    .then((r) => new Set(r.results.map((m) => m.name.replace(/\.sql$/, ""))))
+    .catch(() => new Set<string>());
+  const lines = [
+    'CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (id INTEGER PRIMARY KEY AUTOINCREMENT, hash text NOT NULL, created_at numeric);',
+  ];
+  for (const e of journal.entries) {
+    if (!applied.has(e.tag)) continue;
+    lines.push(
+      `INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES ('d1:${e.tag}', ${e.when});`,
+    );
+  }
+  return lines;
 }
 
 /** A value as a SQLite literal. */

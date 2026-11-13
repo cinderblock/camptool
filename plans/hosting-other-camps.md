@@ -136,15 +136,33 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    unit tests, e2e merge 16/16, backup 13/13, pictures 17/17, FAQ 34/34,
    prospects 37/38 (9g is stale, logged in `plans/issues.md`), production
    build boots and serves.
-5. [ ] Cloudflare target: `wrangler.jsonc`, Workers entry, Vite plugin under
-   a build flag, D1 migration folder + safety check, local `wrangler dev`
-   smoke test (no account needed).
+5. [x] Cloudflare target: `wrangler.jsonc`, `workers/app.ts`, Vite's
+   Cloudflare plugin when `CAMPTOOL_TARGET=cloudflare`, `cf:*` scripts,
+   `scripts/d1-migrations.ts` (pragma rewrite + `db:verify` safety check),
+   `db/migrations-d1/` overrides. Verified locally under `wrangler dev`: all
+   90 migrations apply to a fresh D1; sign-up, camp creation, feature toggles,
+   a prospect merge (atomic batch), R2 upload/download and the backup all
+   pass (10/10). A D1 backup restores onto the Bun host and boots.
 6. [ ] Self-host docs: the Docker walkthrough and the Cloudflare walkthrough /
    deploy button.
 7. [ ] Deploy to Cameron's Cloudflare account: **needs his yes for each
    change** (account, D1, R2, domain, secrets).
 
 ## Findings / gotchas
+
+- **D1 caps compound SELECTs** ("too many terms in compound SELECT"):
+  migration 0060's 12-way `UNION ALL` failed; `db/migrations-d1/0060…` uses a
+  `VALUES` list (exempt) and was checked to produce identical rows.
+- **Drizzle 0.45's D1 `batch()` breaks on raw `db.run(sql)` items**
+  ("Cannot read properties of undefined (reading 'bind')"). `atomic()` on D1
+  renders each statement itself and calls D1's own `batch()`.
+- React Router refuses an action whose `Origin` doesn't match the request URL;
+  under `wrangler dev`, use `localhost` consistently (not `127.0.0.1`).
+- A D1 dump needs a `__drizzle_migrations` record to boot on Bun (Drizzle
+  only compares `created_at`); `dbSnapshot()` writes it from `d1_migrations`.
+- `--since N` on `scripts/d1-migrations.ts --check` shows 0055 and 0065 would
+  have destroyed data on a populated D1 (0065 rebuilt `membership`). They're
+  safe only because a new D1 database applies them empty.
 
 - Running several `bun run dev` at once in one checkout races on
   `.react-router/types` (ENOENT in typegen). Start them a few seconds apart.

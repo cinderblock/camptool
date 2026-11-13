@@ -32,7 +32,9 @@ export type Db = Omit<
  * One write inside `atomic`: a Drizzle insert/update/delete builder, or raw
  * `sql`. Built but not yet run.
  */
-export type AtomicStatement = SQL | { run: () => unknown };
+export type AtomicStatement =
+  | SQL
+  | { run: () => unknown; toSQL: () => { sql: string; params: unknown[] } };
 
 /** A whole-database backup, in the form this host can produce. */
 export type DbSnapshot = {
