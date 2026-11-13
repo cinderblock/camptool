@@ -42,7 +42,8 @@ jackson, any Docker host). Donations later; **no billing code**.
 4. **Branding is per camp.** A host may also ship server-wide structure packs.
    (Cameron.)
 5. **No billing code.** Donations via an outside service. (Cameron.)
-6. **Cameron is buying the domain.** Nothing waits on it until deploy.
+6. **Domain: `camptool.org`** (bought by Cameron, 2026-11-13). Camps get their
+   own subdomains: `<slug>.camptool.org`. (Cameron.)
 7. **On Cloudflare: Workers + D1 + R2**, not Durable Objects. Reasons: D1 has
    Time Travel (point-in-time restore), a SQL console and `wrangler d1 export`;
    our only multi-statement atomic writes can be expressed as batches.
@@ -71,6 +72,25 @@ jackson, any Docker host). Donations later; **no billing code**.
 - `camp.discord_guild_id`, set by a camp admin. `DISCORD_GUILD_ID` env stays as
   the fallback for single-camp deploys.
 
+### Camp subdomains
+
+- Opt-in: `CAMP_SUBDOMAINS=1` with `PUBLIC_BASE_URL=https://camptool.org`.
+  Off, the app behaves as today (one host, active camp from the session), so
+  `camptool.mathcamp.us` is untouched.
+- `<slug>.camptool.org` pins the active camp to that slug; a signed-in
+  non-member sees that camp's public page (`/c/:slug` content) instead.
+- **All auth on the apex.** Login, signup, passkeys and the Discord OAuth
+  callback run on `camptool.org`; a subdomain sends you there with a `next`
+  back. The session cookie is set for `.camptool.org` (better-auth
+  `crossSubDomainCookies`), so one login covers every camp. Passkey RP ID is
+  `camptool.org`, origin the apex only.
+- Slugs must be DNS labels (a-z, 0-9, `-`, at most 63) and not reserved
+  (`www`, `api`, `app`, `admin`, `mail`, `static`, `assets`, `auth`, …).
+- Cloudflare side: proxied wildcard DNS `*.camptool.org` plus a Worker route
+  `*.camptool.org/*`; Universal SSL covers one wildcard level for free.
+- Later, maybe: a camp's own domain (e.g. `camptool.mathcamp.us`) mapped to
+  its camp. Not now.
+
 ### Host adapters
 
 Selected by package.json `imports` conditions, so each bundle carries only its
@@ -97,10 +117,13 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 
 ## Plan / steps
 
-1. [ ] Season rollover: `CURRENT_EVENT_YEAR` moves on after the event ends.
-2. [ ] Structure packs per camp (registry, enablement, palette filtering,
-   super-admin UI, build var).
+1. [x] Season rollover: `currentEventYear()` moves on after exodus
+   (`f08991d`).
+2. [x] Structure packs per camp: `CAMP_THEME` server-wide, `CAMP_THEMES` per
+   camp, `camp.structure_packs`, Site admin → Camps switches. Verified over
+   HTTP (pyramid add 403 until switched on, then 200) and by screenshot.
 3. [ ] Discord guild per camp.
+3b. [ ] Camp subdomains (see Design).
 4. [ ] Host adapters: async db type, `atomic`, rewrite `merge.server.ts` and
    `faq.server.ts` transactions; blobs; snapshot; Bun entry unchanged.
 5. [ ] Cloudflare target: `wrangler.jsonc`, Workers entry, Vite plugin under
@@ -124,7 +147,7 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 
 ## Open questions for the user
 
-1. Domain: whenever it's bought. Needed only at step 7.
+1. None right now.
 
 ## Things not to do
 

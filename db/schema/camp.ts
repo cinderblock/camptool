@@ -36,6 +36,10 @@ export const camp = sqliteTable("camp", {
   placementContactPlaya: text("placement_contact_playa"),
   placementContactEmail: text("placement_contact_email"),
   placementContactPhone: text("placement_contact_phone"),
+  // Per-camp structure packs this camp may place: a JSON array of camp-theme
+  // package names, switched on by a super admin. Only matters for packs bundled
+  // per camp (`CAMP_THEMES`); server-wide packs need no entry. See app/theme.
+  structurePacks: text("structure_packs"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .default(now),

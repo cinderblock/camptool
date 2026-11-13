@@ -18,7 +18,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { data, useFetcher } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
-import { isKindBanned, parseBannedKinds } from "~/lib/bans";
+import { blockedKinds, isKindBlocked } from "~/lib/bans";
 import { requireFeature } from "~/lib/features.server";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -236,7 +236,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     occupantOptions,
     withoutBed,
     locked: activeEdition.locked,
-    bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
+    bannedKinds: blockedKinds(activeEdition, active.camp),
     items: rows.map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -283,7 +283,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "addItem") {
     const kind = String(form.get("kind") ?? "tent");
-    if (isKindBanned(activeEdition.bannedKinds, kind)) {
+    if (isKindBlocked(activeEdition, active.camp, kind)) {
       return data(
         { error: `${kindDef(kind).label} isn't allowed this year.` },
         { status: 403 },

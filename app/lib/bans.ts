@@ -8,6 +8,7 @@
  * banned kinds, add-actions reject them, and already-placed objects of a
  * now-banned kind are flagged (not deleted).
  */
+import { unavailableKinds } from "~/theme";
 import { BURNING_MAN } from "./events";
 
 /** Parse the stored JSON array of banned kind values (NULL/garbage → none). */
@@ -42,4 +43,30 @@ export function isKindBanned(
  */
 export function defaultBannedKinds(event: string): string[] {
   return event === BURNING_MAN ? ["popup"] : [];
+}
+
+/**
+ * Every kind this camp may not place in this edition: the edition's banned
+ * kinds plus the structures of per-camp packs the camp hasn't been given (see
+ * `app/theme`). Palettes hide these and add actions refuse them.
+ */
+export function blockedKinds(
+  edition: { bannedKinds: string | null },
+  camp: { structurePacks: string | null },
+): string[] {
+  return [
+    ...new Set([
+      ...parseBannedKinds(edition.bannedKinds),
+      ...unavailableKinds(camp.structurePacks),
+    ]),
+  ];
+}
+
+/** Whether `kind` is blocked for this camp in this edition. */
+export function isKindBlocked(
+  edition: { bannedKinds: string | null },
+  camp: { structurePacks: string | null },
+  kind: string,
+): boolean {
+  return blockedKinds(edition, camp).includes(kind);
 }

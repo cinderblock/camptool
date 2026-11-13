@@ -206,6 +206,9 @@ export type CampStructure = Kind & {
  * breaking existing themes.
  */
 export type CampTheme = {
+  /** Human name for the pack, shown to super admins choosing which camps get
+   * it (e.g. "Math Camp structures"). Falls back to the package name. */
+  name?: string;
   /** Custom structures added to the map palette. */
   structures: readonly CampStructure[];
   // Reserved Phase 2.5 surface (typed when built):

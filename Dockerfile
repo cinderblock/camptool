@@ -8,11 +8,15 @@ COPY package.json bun.lock ./
 COPY packages ./packages
 RUN bun install --frozen-lockfile
 COPY . .
-# Which camp-theme package to bake into the bundle (build-time; default = the
-# built-in theme). Override per deployment: `docker build --build-arg CAMP_THEME=…`
-# or via compose (see compose.yaml). See app/theme + vite.config.ts.
+# Which camp-theme packs to bundle (build-time; see app/theme + vite.config.ts).
+# CAMP_THEME: server-wide packs, every camp gets them (default = the built-in
+# theme). CAMP_THEMES: packs a super admin switches on per camp. Both are
+# comma lists. Override per deployment: `docker build --build-arg CAMP_THEME=…`
+# or via compose (see compose.yaml).
 ARG CAMP_THEME=@camptool/default-theme
+ARG CAMP_THEMES=
 ENV CAMP_THEME=$CAMP_THEME
+ENV CAMP_THEMES=$CAMP_THEMES
 RUN bun run build
 
 # --- Runtime stage: prod deps + build output + the socket server ---

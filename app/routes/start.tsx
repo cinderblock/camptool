@@ -29,7 +29,7 @@ import {
   type TripData,
   TripNote,
 } from "~/components/TripPlanner";
-import { parseBannedKinds } from "~/lib/bans";
+import { blockedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
 import { shownQuestions } from "~/lib/conditions";
 import { featureVisibleTo } from "~/lib/features";
@@ -291,7 +291,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return redact(privacy, {
     firstVisit,
     locked: activeEdition.locked,
-    bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
+    bannedKinds: blockedKinds(activeEdition, active.camp),
     userName: authUser.name,
     year: activeEdition.year,
     weeksToEvent: weeksUntilEvent(activeEdition.year),

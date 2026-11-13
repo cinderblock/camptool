@@ -355,17 +355,20 @@ pinned in the ops repo, and only an ops push changes it. Both paths are in
   REST API and slash commands use the interactions webhook — both live inside
   this web server, so the deployment stays a single "little webserver." A
   separate gateway process is only added if a feature needs live events.
-- **Per-deployment customization = a camp-theme package, not runtime config.** A
-  self-hoster who wants bespoke map structures (or, later, UI overrides) adds a
-  workspace package under `packages/` implementing the `@camptool/theme-contract`
-  `CampTheme` and points `CAMP_THEME` at it (default → the built-in
-  `@camptool/default-theme`). Core reads it through the single `~/theme` module;
-  Vite swaps the active package in at build time. Custom map structures contribute
-  a `CampStructure` (a palette kind with its own `renderFootprint`), so they slot
-  into the map/legend/picker without ever bloating the shared open-source palette.
-  `@camptool/mathcamp-theme` is the worked example (its **Sierpinski pyramid**
-  landmark — a 3-level Sierpinski tetrahedron drawn as an honest 40′ top-down
-  Sierpinski-triangle footprint).
+- **Camp customization = camp-theme packages, bundled at build time and
+  assigned per camp.** A pack is a workspace package under `packages/`
+  implementing the `@camptool/theme-contract` `CampTheme`: bespoke map structures
+  (or, later, UI overrides). The build names which packs to bundle:
+  `CAMP_THEME` for **server-wide** packs every camp gets (how a single-camp
+  deployment works), and `CAMP_THEMES` for packs a super admin switches on
+  **per camp** from Site admin → Camps (for a deployment hosting several
+  camps). Both are comma lists. Core reads packs through the single `~/theme`
+  module. Custom map structures contribute a `CampStructure` (a palette kind
+  with its own `renderFootprint`), so they slot into the map/legend/picker
+  without ever bloating the shared open-source palette; a camp without a pack
+  never sees its structures. `@camptool/mathcamp-theme` is the worked example
+  (its **Sierpinski pyramid** landmark — a 3-level Sierpinski tetrahedron drawn
+  as an honest 40′ top-down Sierpinski-triangle footprint).
 - **Instance admin vs. camp admin:** super admin is the only deployment-wide
   role (stored in a `super_admin` side table, not on `user`, so per-camp identity
   stays clean). Its two toggles live in a singleton `instance_setting` row. The

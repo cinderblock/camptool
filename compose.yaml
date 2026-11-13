@@ -8,6 +8,8 @@ services:
         # the environment before `docker compose build`, e.g.
         # `CAMP_THEME=@camptool/mycamp-theme docker compose up -d --build`.
         CAMP_THEME: ${CAMP_THEME:-@camptool/default-theme}
+        # Packs a super admin switches on per camp (multi-camp hosting).
+        CAMP_THEMES: ${CAMP_THEMES:-}
     image: camptool:latest
     container_name: camptool
     restart: unless-stopped

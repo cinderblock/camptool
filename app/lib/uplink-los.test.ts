@@ -12,12 +12,15 @@ import { describe, expect, mock, test } from "bun:test";
 import mathCampTheme from "@camptool/mathcamp-theme";
 import type { LosObject, SightLine } from "~/lib/uplink-los";
 
-// The camp theme is a Vite build-time alias, so under `bun test` `~/theme`
-// resolves to the empty default and the palette has no pyramid. Swap it in
-// first, then load the module under test, so the Sierpinski cases below run
-// through the real `kindDef` → `crossSectionAt` path the app uses.
+// Camp-theme packs are generated at build time, so under `bun test` `~/theme`
+// bundles only the empty default and the palette has no pyramid. Swap Math
+// Camp's structures in first, then load the module under test, so the
+// Sierpinski cases below run through the real `kindDef` → `crossSectionAt`
+// path the app uses. Spread the real module: Bun's mocks outlive this file,
+// and later files need the rest of `~/theme`.
+const realTheme = await import("~/theme");
 mock.module("~/theme", () => ({
-  theme: mathCampTheme,
+  ...realTheme,
   campStructures: mathCampTheme.structures,
 }));
 const { blocksSightLine } = await import("~/lib/uplink-los");

@@ -119,3 +119,6 @@ docker compose up -d --build
 
 If you ship a custom camp-theme package, set `CAMP_THEME` (build-time) before
 building: `CAMP_THEME=@camptool/mycamp-theme docker compose up -d --build`.
+That makes the pack server-wide. Hosting several camps, name it in
+`CAMP_THEMES` instead and switch it on for the camps that want it under Site
+admin → Camps.

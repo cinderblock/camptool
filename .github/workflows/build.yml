@@ -85,9 +85,14 @@ jobs:
           # The Dockerfile turns it into an image LABEL, and ops' pin.json
           # asserts that label at deploy time — so a variable that was never
           # synced fails loudly instead of shipping the wrong camp's branding.
+          #
+          # CAMP_THEMES (optional, unset today) names packs bundled for a super
+          # admin to switch on per camp, for a deployment hosting several
+          # camps. See app/theme/index.ts.
           build-args: |
             GIT_SHA=${{ github.sha }}
             CAMP_THEME=${{ vars.CAMP_THEME }}
+            CAMP_THEMES=${{ vars.CAMP_THEMES }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}:latest

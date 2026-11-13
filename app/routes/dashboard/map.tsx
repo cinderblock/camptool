@@ -52,7 +52,7 @@ import {
 } from "~/components/map/AerialPhoto";
 import type { AerialRow } from "~/lib/aerial";
 import { AERIAL_INTENTS, aerialAction, loadAerials } from "~/lib/aerial.server";
-import { isKindBanned, parseBannedKinds } from "~/lib/bans";
+import { blockedKinds, isKindBlocked } from "~/lib/bans";
 import { BLOCKS, blockById } from "~/lib/blocks";
 import {
   clockOptions,
@@ -902,7 +902,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     event: activeEdition.event,
     // Structure kinds disallowed this edition: hidden from the palette/picker,
     // rejected on add, and flagged on any already-placed object.
-    bannedKinds: parseBannedKinds(activeEdition.bannedKinds),
+    bannedKinds: blockedKinds(activeEdition, active.camp),
     canManage: canManage && !activeEdition.locked,
     // Aerial photos are a reference layer, not the plan, so a locked year
     // doesn't stop an officer adding the photo of what actually got built.
@@ -1300,7 +1300,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     if (intent === "addObject") {
       const kind = String(form.get("kind") ?? "structure");
-      if (isKindBanned(activeEdition.bannedKinds, kind)) {
+      if (isKindBlocked(activeEdition, active.camp, kind)) {
         return data(
           { error: `${kindDef(kind).label} isn't allowed this year.` },
           { status: 403 },
@@ -1377,7 +1377,7 @@ export async function action({ request }: Route.ActionArgs) {
         .map((it) => {
           const kind = String((it as { kind?: unknown }).kind ?? "");
           if (!isKind(kind)) return null;
-          if (isKindBanned(activeEdition.bannedKinds, kind)) return null;
+          if (isKindBlocked(activeEdition, active.camp, kind)) return null;
           const def = kindDef(kind);
           const n = (v: unknown, d: number) => {
             const x = Number(v);

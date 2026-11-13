@@ -12,7 +12,7 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { desc, eq, ne } from "drizzle-orm";
+import { asc, count, desc, eq, ne } from "drizzle-orm";
 import { useEffect, useRef } from "react";
 import { data, redirect, useFetcher } from "react-router";
 import {
@@ -29,8 +29,19 @@ import {
   requireUser,
   resolveActiveCamp,
 } from "~/lib/session.server";
+import {
+  parseStructurePacks,
+  perCampPacks,
+  serializeStructurePacks,
+} from "~/theme";
 import { db } from "../../../db/client.server";
-import { clientError, feedback, user as userTable } from "../../../db/schema";
+import {
+  camp,
+  clientError,
+  feedback,
+  membership,
+  user as userTable,
+} from "../../../db/schema";
 import type { Route } from "./+types/admin";
 
 export function meta(_: Route.MetaArgs) {
@@ -101,6 +112,29 @@ export async function loader({ request }: Route.LoaderArgs) {
     at: f.createdAt.toISOString(),
   }));
 
+  // Every camp on the deployment, for the hoster: who's here, and which
+  // per-camp structure packs each one has.
+  const camps = (
+    await db
+      .select({
+        id: camp.id,
+        name: camp.name,
+        slug: camp.slug,
+        structurePacks: camp.structurePacks,
+        members: count(membership.id),
+      })
+      .from(camp)
+      .leftJoin(membership, eq(membership.organizationId, camp.id))
+      .groupBy(camp.id)
+      .orderBy(asc(camp.name))
+  ).map((c) => ({
+    id: c.id,
+    name: c.name,
+    slug: c.slug,
+    members: c.members,
+    packs: parseStructurePacks(c.structurePacks),
+  }));
+
   // Site admin spans every camp, so the lens's free-text vocabulary (which is
   // camp-scoped) won't know other camps' people — but the field rules do the
   // heavy lifting here, and names/emails/telemetry are keyed, not prose.
@@ -114,6 +148,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     })),
     recentErrors,
     recentFeedback,
+    camps,
+    perCampPacks,
   });
 }
 
@@ -136,6 +172,29 @@ export async function action({ request }: Route.ActionArgs) {
       return data({ error: "Unknown setting." }, { status: 400 });
     }
     await setInstanceSettings({ [field]: value });
+    return data({ ok: true });
+  }
+
+  // Switch a per-camp structure pack on or off for one camp.
+  if (intent === "setCampPack") {
+    const campId = String(form.get("campId") ?? "");
+    const pack = String(form.get("pack") ?? "");
+    const on = String(form.get("on") ?? "") === "true";
+    if (!perCampPacks.some((p) => p.key === pack)) {
+      return data({ error: "Unknown structure pack." }, { status: 400 });
+    }
+    const [row] = await db
+      .select({ structurePacks: camp.structurePacks })
+      .from(camp)
+      .where(eq(camp.id, campId));
+    if (!row) return data({ error: "No such camp." }, { status: 404 });
+    const packs = new Set(parseStructurePacks(row.structurePacks));
+    if (on) packs.add(pack);
+    else packs.delete(pack);
+    await db
+      .update(camp)
+      .set({ structurePacks: serializeStructurePacks(packs) })
+      .where(eq(camp.id, campId));
     return data({ ok: true });
   }
 
@@ -174,8 +233,15 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
-  const { settings, admins, currentUserId, recentErrors, recentFeedback } =
-    loaderData;
+  const {
+    settings,
+    admins,
+    currentUserId,
+    recentErrors,
+    recentFeedback,
+    camps,
+    perCampPacks,
+  } = loaderData;
 
   return (
     <Container size="sm">
@@ -203,6 +269,20 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
               label="Allow open sign-ups"
               description="When off, new accounts are invite-only — only people who follow a camp invite link or a camp's public apply page can register."
             />
+          </Stack>
+        </Card>
+
+        <Card withBorder radius="md" padding="lg">
+          <Stack gap="md">
+            <Title order={4}>Camps</Title>
+            <Text size="sm" c="dimmed">
+              Every camp on this deployment. Each camp's admins run their own
+              camp.
+              {perCampPacks.length > 0
+                ? " Structure packs bundled per camp only show up in the camps you switch them on for."
+                : ""}
+            </Text>
+            <CampsTable camps={camps} packs={perCampPacks} />
           </Stack>
         </Card>
 
@@ -404,6 +484,104 @@ function ToggleRow({
       onChange={(e) =>
         fetcher.submit(
           { intent: "toggle", field, value: String(e.currentTarget.checked) },
+          { method: "post" },
+        )
+      }
+    />
+  );
+}
+
+function CampsTable({
+  camps,
+  packs,
+}: {
+  camps: {
+    id: string;
+    name: string;
+    slug: string | null;
+    members: number;
+    packs: string[];
+  }[];
+  packs: readonly { key: string; name: string }[];
+}) {
+  if (camps.length === 0) {
+    return (
+      <Text size="sm" c="dimmed">
+        No camps yet.
+      </Text>
+    );
+  }
+  return (
+    <Table.ScrollContainer minWidth={360}>
+      <Table>
+        <Table.Thead>
+          <Table.Tr>
+            <Table.Th>Camp</Table.Th>
+            <Table.Th>Members</Table.Th>
+            {packs.map((p) => (
+              <Table.Th key={p.key}>{p.name}</Table.Th>
+            ))}
+          </Table.Tr>
+        </Table.Thead>
+        <Table.Tbody>
+          {camps.map((c) => (
+            <Table.Tr key={c.id}>
+              <Table.Td>
+                <Text size="sm" fw={500}>
+                  {c.name}
+                </Text>
+                {c.slug ? (
+                  <Text size="xs" c="dimmed">
+                    {c.slug}
+                  </Text>
+                ) : null}
+              </Table.Td>
+              <Table.Td>{c.members}</Table.Td>
+              {packs.map((p) => (
+                <Table.Td key={p.key}>
+                  <PackSwitch
+                    campId={c.id}
+                    pack={p.key}
+                    on={c.packs.includes(p.key)}
+                    label={`${p.name} for ${c.name}`}
+                  />
+                </Table.Td>
+              ))}
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+    </Table.ScrollContainer>
+  );
+}
+
+function PackSwitch({
+  campId,
+  pack,
+  on,
+  label,
+}: {
+  campId: string;
+  pack: string;
+  on: boolean;
+  label: string;
+}) {
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  // Optimistic: show the switch where it's headed while the post is in flight.
+  const pending = fetcher.formData?.get("on");
+  const checked = pending != null ? pending === "true" : on;
+  return (
+    <Switch
+      checked={checked}
+      aria-label={label}
+      onChange={(e) =>
+        fetcher.submit(
+          {
+            intent: "setCampPack",
+            campId,
+            pack,
+            on: String(e.currentTarget.checked),
+          },
           { method: "post" },
         )
       }

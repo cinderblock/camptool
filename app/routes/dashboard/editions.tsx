@@ -30,6 +30,7 @@ import {
   setEditionCookie,
 } from "~/lib/session.server";
 import { isKind, KIND_GROUPS } from "~/lib/structures";
+import { unavailableKinds } from "~/theme";
 import { db } from "../../../db/client.server";
 import { campEdition, placement } from "../../../db/schema";
 import type { Route } from "./+types/editions";
@@ -44,6 +45,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   return redact(privacy, {
     canManage: hasAtLeast(active.membership.role, "officer"),
     activeEditionId: activeEdition?.id ?? null,
+    // Structures of packs this camp hasn't been given: not offered for banning.
+    hiddenKinds: unavailableKinds(active.camp.structurePacks),
     editions: editions.map((e) => ({
       id: e.id,
       year: e.year,
@@ -197,7 +200,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Editions({ loaderData }: Route.ComponentProps) {
-  const { editions, activeEditionId, canManage } = loaderData;
+  const { editions, activeEditionId, canManage, hiddenKinds } = loaderData;
   const activeEdition = editions.find((e) => e.id === activeEditionId) ?? null;
   const activeLabel = activeEdition
     ? activeEdition.label
@@ -292,7 +295,9 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                   <Stack gap="sm">
                     {KIND_GROUPS.map((grp) => {
                       const bannable = grp.kinds.filter(
-                        (k) => k.value !== "structure",
+                        (k) =>
+                          k.value !== "structure" &&
+                          !hiddenKinds.includes(k.value),
                       );
                       if (bannable.length === 0) return null;
                       return (

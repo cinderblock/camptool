@@ -617,6 +617,13 @@
       "when": 1793920986719,
       "tag": "0087_nervous_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1794608184887,
+      "tag": "0088_flashy_psynapse",
+      "breakpoints": true
     }
   ]
 }

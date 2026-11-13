@@ -1,24 +1,59 @@
+import { resolve } from "node:path";
 import { reactRouter } from "@react-router/dev/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 const publicHost = process.env.PUBLIC_BASE_URL
   ? new URL(process.env.PUBLIC_BASE_URL).hostname
   : undefined;
 
-// Camp-theme seam (Phase 2.5). Core imports the built-in `@camptool/default-theme`
-// through `~/theme`; if CAMP_THEME names a different (workspace) package, alias
-// that import to it so the active theme is swapped in at build time. Both satisfy
-// the same `CampTheme` contract, so the swap is type-identical. Default = built-in.
-const campTheme = process.env.CAMP_THEME;
-const themeAlias =
-  campTheme && campTheme !== "@camptool/default-theme"
-    ? { "@camptool/default-theme": campTheme }
-    : {};
+// Camp-theme packs (Phase 2.5, per camp since plans/hosting-other-camps.md).
+// `app/theme/packs.ts` is replaced at build time by a module importing every
+// pack named here. CAMP_THEME = server-wide packs (every camp; how a single-camp
+// deployment has always worked). CAMP_THEMES = packs a super admin switches on
+// per camp. Both are comma lists of workspace package names. The built-in
+// default theme is always bundled, server-wide.
+const DEFAULT_THEME = "@camptool/default-theme";
+const themeList = (v: string | undefined) =>
+  (v ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+const globalThemes = [
+  ...new Set([DEFAULT_THEME, ...themeList(process.env.CAMP_THEME)]),
+];
+const perCampThemes = themeList(process.env.CAMP_THEMES).filter(
+  (t) => !globalThemes.includes(t),
+);
+
+function campThemePacks(): Plugin {
+  const target = resolve(import.meta.dirname, "app/theme/packs.ts");
+  return {
+    name: "camp-theme-packs",
+    enforce: "pre",
+    load(id) {
+      if (resolve(id.split("?")[0]) !== target) return null;
+      const all = [
+        ...globalThemes.map((key) => ({ key, global: true })),
+        ...perCampThemes.map((key) => ({ key, global: false })),
+      ];
+      const imports = all
+        .map((p, i) => `import t${i} from ${JSON.stringify(p.key)};`)
+        .join("\n");
+      const entries = all
+        .map(
+          (p, i) =>
+            `{ key: ${JSON.stringify(p.key)}, theme: t${i}, global: ${p.global} }`,
+        )
+        .join(",\n  ");
+      return `${imports}\nexport const PACKS = [\n  ${entries},\n];\n`;
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [reactRouter()],
+  plugins: [campThemePacks(), reactRouter()],
   // tsconfigPaths: Vite 8 resolves tsconfig "paths" natively (replaces vite-tsconfig-paths).
-  resolve: { alias: themeAlias, tsconfigPaths: true },
+  resolve: { tsconfigPaths: true },
   server: {
     // Uncommon default on purpose (see app/lib/env.server.ts — keep in sync):
     // 3000/5173 collide with other dev apps, and Windows Hyper-V reserves
