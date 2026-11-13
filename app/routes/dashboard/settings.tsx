@@ -6,6 +6,7 @@
  * its data.
  */
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -21,6 +22,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
+import { eq } from "drizzle-orm";
 import { type ReactNode, useState } from "react";
 import { data, redirect, useFetcher } from "react-router";
 import {
@@ -30,6 +32,7 @@ import {
   setBinsLink,
 } from "~/lib/bins.server";
 import { clearBinsCache } from "~/lib/bins-api.server";
+import { botInviteUrl, parseGuildId } from "~/lib/discord-guild";
 import {
   FEATURES,
   type FeatureKey,
@@ -46,6 +49,8 @@ import {
 } from "~/lib/meetings.server";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
+import { db } from "../../../db/client.server";
+import { camp } from "../../../db/schema";
 import type { Route } from "./+types/settings";
 
 export function meta(_: Route.MetaArgs) {
@@ -74,6 +79,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       label: binsLink?.label ?? "",
       hasCode: !!binsLink?.accessCode,
       hasToken: !!binsLink?.apiToken,
+    },
+    discord: {
+      guildId: active.camp.discordGuildId ?? "",
+      // Set for the whole deployment (a single-camp host) rather than here.
+      deploymentGuild:
+        !active.camp.discordGuildId && !!process.env.DISCORD_GUILD_ID,
+      botInviteUrl: botInviteUrl(),
     },
     features: FEATURES.map((def) => ({
       key: def.key,
@@ -137,6 +149,22 @@ export async function action({ request }: Route.ActionArgs) {
       note: String(form.get("note") ?? "").trim() || null,
       updatedByMembershipId: active.membership.id,
     });
+    return { ok: true };
+  }
+
+  if (intent === "discordGuild") {
+    const raw = String(form.get("guildId") ?? "");
+    const guildId = raw.trim() ? parseGuildId(raw) : null;
+    if (raw.trim() && !guildId) {
+      return data(
+        { error: "A server ID is a long number, 17 to 20 digits." },
+        400,
+      );
+    }
+    await db
+      .update(camp)
+      .set({ discordGuildId: guildId })
+      .where(eq(camp.id, active.camp.id));
     return { ok: true };
   }
 
@@ -444,8 +472,90 @@ function MeetingRoomConfig({
   );
 }
 
+/**
+ * Which Discord server is this camp's. The bot and login app belong to the
+ * deployment; the server is the camp's own (plans/hosting-other-camps.md).
+ */
+function DiscordConfig({
+  discord,
+}: {
+  discord: {
+    guildId: string;
+    deploymentGuild: boolean;
+    botInviteUrl: string | null;
+  };
+}) {
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const [guildId, setGuildId] = useState(discord.guildId);
+  const saving = fetcher.state !== "idle";
+  const saved = fetcher.data?.ok && !saving;
+  return (
+    <Card withBorder radius="md" padding="lg">
+      <Stack gap="sm">
+        <Title order={4}>Discord server</Title>
+        <Text size="sm" c="dimmed">
+          Lets CampTool check who has joined your camp&apos;s Discord server.
+          {discord.botInviteUrl ? (
+            <>
+              {" "}
+              First{" "}
+              <Anchor
+                href={discord.botInviteUrl}
+                target="_blank"
+                rel="noopener"
+              >
+                add the CampTool bot to your server
+              </Anchor>
+              ; it needs no permissions.
+            </>
+          ) : (
+            " This deployment has no Discord app yet, so nothing will be checked until its operator sets one up."
+          )}
+        </Text>
+        <TextInput
+          size="xs"
+          label="Server ID"
+          description="In Discord, turn on Developer Mode (Settings → Advanced), then right-click your server → Copy Server ID."
+          placeholder={
+            discord.deploymentGuild
+              ? "Set for this whole deployment"
+              : "123456789012345678"
+          }
+          inputMode="numeric"
+          value={guildId}
+          onChange={(e) => setGuildId(e.currentTarget.value)}
+        />
+        {fetcher.data?.error ? (
+          <Text size="xs" c="red">
+            {fetcher.data.error}
+          </Text>
+        ) : null}
+        <Group justify="flex-end" gap="xs">
+          {saved ? (
+            <Text size="xs" c="dimmed" mr="auto">
+              Saved
+            </Text>
+          ) : null}
+          <Button
+            size="xs"
+            loading={saving}
+            onClick={() =>
+              fetcher.submit(
+                { intent: "discordGuild", guildId },
+                { method: "post" },
+              )
+            }
+          >
+            Save
+          </Button>
+        </Group>
+      </Stack>
+    </Card>
+  );
+}
+
 export default function CampSettings({ loaderData }: Route.ComponentProps) {
-  const { campName, features, bins, meetingRoom } = loaderData;
+  const { campName, features, bins, meetingRoom, discord } = loaderData;
   const stateOf = (key: FeatureKey): FeatureState =>
     features.find((f) => f.key === key)?.state ?? "off";
   return (
@@ -467,6 +577,7 @@ export default function CampSettings({ loaderData }: Route.ComponentProps) {
             ) : null}
           </FeatureCard>
         ))}
+        <DiscordConfig discord={discord} />
       </Stack>
     </Container>
   );

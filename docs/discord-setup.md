@@ -80,6 +80,12 @@ messages.
 2. Right-click your camp's server icon → **Copy Server ID** → this is
    `DISCORD_GUILD_ID`.
 
+**Hosting several camps?** Skip `DISCORD_GUILD_ID`. The Discord app and bot
+above belong to the deployment, and one bot can sit in many servers. Each
+camp's admin pastes their own server ID under **Camp settings → Discord
+server**, which also links them to an invite that adds your bot to their
+server. A camp with no server ID of its own falls back to `DISCORD_GUILD_ID`.
+
 ## 6. Fill in `.env`
 
 ```

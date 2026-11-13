@@ -40,6 +40,11 @@ export const camp = sqliteTable("camp", {
   // package names, switched on by a super admin. Only matters for packs bundled
   // per camp (`CAMP_THEMES`); server-wide packs need no entry. See app/theme.
   structurePacks: text("structure_packs"),
+  // The camp's Discord server (guild) ID, set by a camp admin. The bot and the
+  // login app are the deployment's (one bot joins many servers); only the
+  // server is per camp. NULL falls back to the DISCORD_GUILD_ID env var, which
+  // is how a single-camp deployment configures it.
+  discordGuildId: text("discord_guild_id"),
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .notNull()
     .default(now),

@@ -9,6 +9,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import { account, discordLink, membership, user } from "../../db/schema";
+import { campGuildId } from "./discord-guild";
 
 export type DiscordLinkView = {
   discordUserId: string;
@@ -85,15 +86,16 @@ export async function getDiscordLinksForCamp(
 }
 
 /**
- * Check whether a Discord user is in the configured guild, via the REST API.
- * Returns null when Discord isn't configured (bot token / guild id missing), so
- * callers can render "unknown" rather than "not a member".
+ * Check whether a Discord user is in the camp's Discord server, via the REST
+ * API. Returns null when Discord isn't configured (no bot token, or the camp
+ * has no server), so callers can render "unknown" rather than "not a member".
  */
 export async function checkGuildMembership(
+  camp: { discordGuildId: string | null },
   discordUserId: string,
 ): Promise<boolean | null> {
   const token = process.env.DISCORD_BOT_TOKEN;
-  const guildId = process.env.DISCORD_GUILD_ID;
+  const guildId = campGuildId(camp);
   if (!token || !guildId) return null;
 
   const res = await fetch(

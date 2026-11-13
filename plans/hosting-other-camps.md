@@ -122,7 +122,10 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 2. [x] Structure packs per camp: `CAMP_THEME` server-wide, `CAMP_THEMES` per
    camp, `camp.structure_packs`, Site admin → Camps switches. Verified over
    HTTP (pyramid add 403 until switched on, then 200) and by screenshot.
-3. [ ] Discord guild per camp.
+3. [x] Discord server per camp: `camp.discord_guild_id`, set under Camp
+   settings → Discord server (with a no-permission bot invite link);
+   `DISCORD_GUILD_ID` is the fallback. Verified over HTTP and by screenshot.
+   No email transport exists yet (`mailEnabled = false`), so nothing to split.
 3b. [ ] Camp subdomains (see Design).
 4. [ ] Host adapters: async db type, `atomic`, rewrite `merge.server.ts` and
    `faq.server.ts` transactions; blobs; snapshot; Bun entry unchanged.

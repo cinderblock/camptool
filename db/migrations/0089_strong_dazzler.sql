@@ -1,0 +1,1 @@
+ALTER TABLE `camp` ADD `discord_guild_id` text;

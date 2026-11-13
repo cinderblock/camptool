@@ -624,6 +624,13 @@
       "when": 1794608184887,
       "tag": "0088_flashy_psynapse",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1794608498674,
+      "tag": "0089_strong_dazzler",
+      "breakpoints": true
     }
   ]
 }
