@@ -55,8 +55,8 @@ import { AERIAL_INTENTS, aerialAction, loadAerials } from "~/lib/aerial.server";
 import { isKindBanned, parseBannedKinds } from "~/lib/bans";
 import { BLOCKS, blockById } from "~/lib/blocks";
 import {
-  CURRENT_EVENT_YEAR,
   clockOptions,
+  currentEventYear,
   eventYearOptions,
   hasGeometry,
   landmarkRadiusFt,
@@ -3750,7 +3750,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
 
   // ---- Shade simulation: time of day drives the sun, which casts shadows. The
   // sim is always on (drag the sun to the day's ends to clear the shadows). ----
-  const sunYear = lot?.year ?? CURRENT_EVENT_YEAR;
+  const sunYear = lot?.year ?? currentEventYear();
   const arc = useMemo(() => dayArc(sunYear), [sunYear]);
   // Animation is opt-in: the sun otherwise holds at a fixed time; turn this on to
   // auto-drift the sun across the day.
@@ -10574,7 +10574,7 @@ function PlacementForm({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const [year, setYear] = useState<string>(
-    lot?.year ? String(lot.year) : String(CURRENT_EVENT_YEAR),
+    lot?.year ? String(lot.year) : String(currentEventYear()),
   );
   const [streetLetter, setStreetLetter] = useState<string | null>(
     lot?.streetLetter ?? null,
@@ -10594,7 +10594,7 @@ function PlacementForm({
           <Select
             size="xs"
             label="BRC year"
-            data={eventYearOptions}
+            data={eventYearOptions()}
             value={year}
             onChange={(v) => v && setYear(v)}
             allowDeselect={false}

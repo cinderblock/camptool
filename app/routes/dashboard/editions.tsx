@@ -19,7 +19,7 @@ import {
   parseBannedKinds,
   serializeBannedKinds,
 } from "~/lib/bans";
-import { CURRENT_EVENT_YEAR } from "~/lib/brc";
+import { currentEventYear } from "~/lib/brc";
 import { BURNING_MAN, EVENTS, eventLabel, isEvent } from "~/lib/events";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
@@ -229,7 +229,7 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                   size="xs"
                   label="New year"
                   name="year"
-                  defaultValue={CURRENT_EVENT_YEAR}
+                  defaultValue={currentEventYear()}
                   min={1900}
                   max={3000}
                   w={110}

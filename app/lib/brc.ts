@@ -88,20 +88,33 @@ export const BRC_YEARS = Object.keys(CITY_GEOMETRY)
   .map(Number)
   .sort((a, b) => b - a);
 
-/** The current event year — default for new editions / lot setup. BRC republishes
- * its measurements each year; until the current year's doc is loaded into
- * CITY_GEOMETRY, radius derivation falls back to the latest year we have (see
- * geometryYearFor). */
-export const CURRENT_EVENT_YEAR = new Date().getFullYear();
+/** The current event year: the next Burning Man that hasn't ended yet. It rolls
+ * over the day after exodus (Labor Day Monday), not on January 1, so in the
+ * autumn after an event the app already defaults to the coming year. Only a
+ * default (new-edition picker, a lot's year, the sun sim); nothing is locked or
+ * cut off when it moves. A function, not a constant, because a server process
+ * outlives a season. BRC republishes its measurements each year; until that
+ * year's doc is loaded into CITY_GEOMETRY, radius derivation falls back to the
+ * latest year we have (see geometryYearFor). */
+export function currentEventYear(now: Date = new Date()): number {
+  const year = now.getFullYear();
+  // Exodus is Labor Day Monday, gate-open + 8; the year is over the day after.
+  const start = eventStartFor(year);
+  const over = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate() + 9,
+  );
+  return now >= over ? year + 1 : year;
+}
 
-/** Event years offered in pickers (not limited to geometry years). */
-export const EVENT_YEARS = (() => {
-  const out: number[] = [];
-  for (let y = CURRENT_EVENT_YEAR + 1; y >= 2023; y--) out.push(y);
+/** Event years offered in pickers (not limited to geometry years): the year
+ * after the current one back to 2023. */
+export function eventYearOptions(now: Date = new Date()): string[] {
+  const out: string[] = [];
+  for (let y = currentEventYear(now) + 1; y >= 2023; y--) out.push(String(y));
   return out;
-})();
-
-export const eventYearOptions = EVENT_YEARS.map(String);
+}
 
 /** Approximate BRC event start (gates open) for a given year: the Sunday 8 days
  * before Labor Day (the first Monday of September) — BRC runs that Sunday through
