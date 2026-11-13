@@ -10,6 +10,19 @@
 
 ## Open
 
+### `e2e/prospects.ts` 9g fails: the Members page HTML has no prospect link
+
+**Raised:** multi-host thread, 2026-11-13. **Status:** not investigated.
+
+`E2E_BASE_URL=… bun e2e/prospects.ts` → 37 passed, 1 failed:
+`FAIL 9g. Members links the new member back to their recruiting history`.
+The test looks for `/prospects/<id>` in the server-rendered `/members` page.
+The "Recruiting history" link (`app/routes/dashboard/members.tsx`, ~line 1851)
+now lives in the member detail sidebar from `05a494f` (2026-08-20), which isn't
+in that HTML. Probably the test is stale rather than the feature broken, but
+check that an officer can still reach the thread from Members. 9h (the inverse
+check) passes vacuously for the same reason, so it proves nothing right now.
+
 ### `sap-pdf.test.ts` fails locally (4 tests)
 
 **Raised:** map-aerial thread, 2026-11-05. **Status:** not investigated.
