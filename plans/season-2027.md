@@ -32,19 +32,30 @@
   UnSCruz 2026 ("Absurdia") ran April 30 to May 3. No 2027 dates were published
   as of 2026-11-13.
 
+## Decisions already made (don't re-ask)
+
+1. **No hard cutoff for 2026.** The "current event year" just rolls over
+   after exodus; nothing gets locked or cut off. (Cameron, 2026-11-13.)
+2. **Cameron starts the 2027 year himself** on `/editions`. Nothing else is
+   needed for BM2027 right now. (Cameron.)
+3. **UnSCruz is a general offering, later.** Not for a particular camp.
+   Their maps are irregular, so no fixed address scheme. "We'll need to build
+   support for other events eventually." (Cameron.)
+
 ## Plan / steps
 
 ### A. BM2027 (Math Camp)
 
-1. [ ] **Data, done in the app by an officer:** create the 2027 edition on
-   `/editions`, copying from 2026; lock 2026. Not a code change.
-2. [ ] Season rollover: `CURRENT_EVENT_YEAR` becomes "the next event that
-   hasn't ended", not the calendar year.
+1. [ ] **Data, done in the app by Cameron:** create the 2027 edition on
+   `/editions`, copying from 2026. Not a code change.
+2. [x] Season rollover: `currentEventYear()` is the next Burning Man that
+   hasn't ended (`f08991d`, on master).
 3. [ ] 2027 street names, once BMorg publishes them; 2027 geometry once
    measured.
-4. [ ] Whatever else "get started" means. **Open question 1.**
 
 ### B. Event layer: dates per event (needed by UnSCruz and by any non-BM camp)
+
+*Deferred ("eventually"). Not started.*
 
 1. [ ] Season dates come from the edition, not from BRC. Proposal: nullable
    `starts_on` / `ends_on` on `camp_edition`, defaulted from the event
@@ -64,15 +75,9 @@
 
 ## Open questions for the user
 
-1. **What does "get started on BM2027" cover?** My reading: create the 2027
-   year, fix the rollover, then the usual early-season work (recruiting,
-   dues tiers, the first meeting). Is there a specific feature you want first?
-2. **UnSCruz: who is it for?** A friend's camp going to UnSCruz, or making it
-   available in general? If you know an UnSCruz camp, their placement process
-   and terms decide part C.
-3. Should several events per camp per year (B.2) happen now? Recommended:
-   yes, together with B.1, since both change the same edition model.
+None. B and C wait until other events are picked up.
 
 ## Progress log
 
 - [x] 2026-11-13: surveyed the event layer and edition model (above).
+- [x] 2026-11-13: rollover shipped to master (`f08991d`).

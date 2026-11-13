@@ -148,10 +148,23 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    90 migrations apply to a fresh D1; sign-up, camp creation, feature toggles,
    a prospect merge (atomic batch), R2 upload/download and the backup all
    pass (10/10). A D1 backup restores onto the Bun host and boots.
-6. [ ] Self-host docs: the Docker walkthrough and the Cloudflare walkthrough /
-   deploy button.
-7. [ ] Deploy to Cameron's Cloudflare account: **needs his yes for each
-   change** (account, D1, R2, domain, secrets).
+6. [~] Self-host docs: `docs/cloudflare-deploy.md` (walkthrough) and the
+   Docker section of `docs/firefly-deploy.md` exist. A "Deploy to Cloudflare"
+   button is NOT done: it runs Workers Builds (`npm run build`, then a deploy
+   command) in the deployer's account, so it needs the build to detect
+   `WORKERS_CI` and a real account to test it on. Do it after step 7.
+7. [ ] **Current step.** Deploy to Cameron's Cloudflare account at
+   `camptool.org`: **needs his yes for each change**. In order:
+   a. Workers Paid plan on his account ($5/mo): his action.
+   b. `wrangler login` (or an API token) on this machine: his action.
+   c. `vars.PUBLIC_BASE_URL=https://camptool.org`, `CAMP_SUBDOMAINS=1`,
+      `CAMP_THEMES` (which packs to bundle) in `wrangler.jsonc`.
+   d. `wrangler secret put BETTER_AUTH_SECRET` (+ Discord, optional).
+   e. `bun run cf:deploy`: creates D1 `camptool` + R2 `camptool-uploads`.
+   f. DNS on camptool.org: apex + proxied wildcard `*`, Worker routes for
+      `camptool.org/*` and `*.camptool.org/*`.
+   g. Sign up first (becomes super admin), turn off open camp creation if
+      wanted, create the friend's camp.
 
 ## Findings / gotchas
 
@@ -193,10 +206,19 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 
 - [x] 2026-11-13: surveyed coupling, costed Cloudflare (Workers Paid $5/mo;
   D1 includes 25B row reads, 50M writes, 5 GB).
+- [x] 2026-11-13: steps 1–5 and 3b built, verified and pushed to master
+  (`f08991d`..`48181de`). Lint on master was already red before this
+  (Biome 2 upgrade leftovers in map/passes/index/auth/e2e); not touched.
 
 ## Open questions for the user
 
-1. None right now.
+1. Where is `camptool.org` registered, and is its DNS on Cloudflare yet?
+   (Decides step 7f.)
+2. Should the shared site bundle Math Camp's structure pack (`CAMP_THEMES`
+   for per-camp use), or start with none?
+3. Does Math Camp's own deploy (firefly) take this build? It's safe as-is
+   (new columns only; `CAMP_THEME` keeps its packs server-wide), but bumping
+   ops `pin.json` is an ops change that needs your yes.
 
 ## Things not to do
 
