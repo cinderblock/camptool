@@ -6,51 +6,37 @@
  * This builds the whole thing: the database snapshot plus every file in the
  * uploads directory, as a streamed `.tar.gz`.
  *
- * The archive is laid out so restoring is one command:
+ * The archive is laid out so restoring a Bun host is one command:
  *
  *     tar -xzf camptool-backup-YYYY-MM-DD.tar.gz -C /srv/camptool/data
  *
  * because the entries are `camptool.db` and `uploads/…` — exactly the shape of
- * the data directory they came from.
+ * the data directory they came from. On Cloudflare the database half is
+ * `camptool.sql` instead (D1 has no file to copy; see `db/host/d1.ts`), and
+ * `uploads/…` holds the R2 bucket's files under the same keys.
  */
-import { readdir, stat } from "node:fs/promises";
-import { join, posix } from "node:path";
 import { Duplex } from "node:stream";
 import { createGzip } from "node:zlib";
-import { db, sqlite } from "../../db/client.server";
+import { db, dbSnapshot } from "../../db/client.server";
 import { campImage } from "../../db/schema";
-import { uploadsRoot } from "./images.server";
+import { blobs } from "./blobs.server";
 import { tarHeader, tarPadding, tarTrailer } from "./tar";
 
-/** A file on disk destined for the archive. */
-type Entry = { archivePath: string; diskPath: string; size: number };
+/** A stored file destined for the archive. */
+type Entry = { archivePath: string; key: string; size: number };
 
-/** Everything under the uploads dir, as archive-relative paths.
+/** Every stored file, as archive-relative paths.
  *
- * The disk is walked directly rather than the `camp_image` table: a backup's
+ * The store is listed directly rather than the `camp_image` table: a backup's
  * job is to preserve what EXISTS, including a file whose row was lost. The
  * table is used afterwards only to cross-check and report.
  */
 async function walkUploads(): Promise<Entry[]> {
-  const root = uploadsRoot();
-  const out: Entry[] = [];
-  const visit = async (dir: string, prefix: string): Promise<void> => {
-    // No uploads directory yet is a normal, empty-deployment state, not an error.
-    const items = await readdir(dir, { withFileTypes: true }).catch(() => []);
-    for (const item of items) {
-      const diskPath = join(dir, item.name);
-      const archivePath = posix.join(prefix, item.name);
-      if (item.isDirectory()) {
-        await visit(diskPath, archivePath);
-      } else if (item.isFile()) {
-        const info = await stat(diskPath);
-        out.push({ archivePath, diskPath, size: info.size });
-      }
-    }
-  };
-  await visit(root, "uploads");
-  out.sort((a, b) => a.archivePath.localeCompare(b.archivePath));
-  return out;
+  return (await blobs.list()).map((b) => ({
+    archivePath: `uploads/${b.key}`,
+    key: b.key,
+    size: b.size,
+  }));
 }
 
 /**
@@ -60,6 +46,7 @@ async function walkUploads(): Promise<Entry[]> {
  * discrepancy is written into the archive itself.
  */
 function manifestText(opts: {
+  dbName: string;
   dbBytes: number;
   files: Entry[];
   missing: string[];
@@ -72,17 +59,28 @@ function manifestText(opts: {
     `Taken: ${opts.takenAt}`,
     "",
     "CONTENTS",
-    `  camptool.db   ${opts.dbBytes} bytes — the whole database, every camp.`,
+    `  ${opts.dbName.padEnd(13)} ${opts.dbBytes} bytes — the whole database, every camp.`,
     `  uploads/      ${opts.files.length} files, ${totalFileBytes} bytes — every uploaded picture, at full resolution.`,
     "",
     "This is the complete backup: restoring the database file and the uploads",
     "directory together reproduces the deployment's state.",
     "",
     "RESTORE",
-    "  tar -xzf <this file> -C /srv/camptool/data",
-    "",
-    "  The entries are named to land exactly where they came from. Stop the app",
-    "  first; it opens the database at startup and migrates on boot.",
+    ...(opts.dbName.endsWith(".sql")
+      ? [
+          "  Taken on Cloudflare: the database is a SQL script, the uploads are",
+          "  the R2 bucket's files under the same keys.",
+          "  Into D1:          wrangler d1 execute <database> --remote --file camptool.sql",
+          "                    then upload uploads/<key> to R2 at <key>.",
+          "  Into a Bun host:  sqlite3 /srv/camptool/data/camptool.db < camptool.sql",
+          "                    then copy uploads/ to /srv/camptool/data/uploads/.",
+        ]
+      : [
+          "  tar -xzf <this file> -C /srv/camptool/data",
+          "",
+          "  The entries are named to land exactly where they came from. Stop the",
+          "  app first; it opens the database at startup and migrates on boot.",
+        ]),
     "",
     "INTEGRITY",
   ];
@@ -139,12 +137,13 @@ export async function backupArchive(takenAt: string): Promise<{
   stream: ReadableStream<Uint8Array>;
   filename: string;
 }> {
-  // Point-in-time and WAL-inclusive, so it is safe to take while the app runs.
-  const dbBytes = new Uint8Array(sqlite.serialize());
+  // Point-in-time, so it is safe to take while the app runs.
+  const snapshot = await dbSnapshot();
   const files = await walkUploads();
   const { missing, orphans } = await crossCheck(files);
   const manifest = manifestText({
-    dbBytes: dbBytes.byteLength,
+    dbName: snapshot.name,
+    dbBytes: snapshot.bytes.byteLength,
     files,
     missing,
     orphans,
@@ -170,16 +169,14 @@ export async function backupArchive(takenAt: string): Promise<{
 
       // Manifest first, so `tar -tzf` opens with an explanation of the rest.
       if (cursor === -2) put("MANIFEST.txt", manifest);
-      else if (cursor === -1) put("camptool.db", dbBytes);
+      else if (cursor === -1) put(snapshot.name, snapshot.bytes);
       else if (cursor < files.length) {
         const file = files[cursor];
         if (file) {
-          const handle = Bun.file(file.diskPath);
+          const stored = await blobs.get(file.key);
           // A picture deleted between the walk and now is skipped rather than
           // aborting the whole backup — losing one file must not cost the rest.
-          if (await handle.exists()) {
-            put(file.archivePath, new Uint8Array(await handle.arrayBuffer()));
-          }
+          if (stored) put(file.archivePath, await stored.bytes());
         }
       } else {
         controller.enqueue(tarTrailer());

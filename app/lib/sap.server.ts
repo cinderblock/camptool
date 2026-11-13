@@ -18,8 +18,6 @@
  *     `voidPass` is the only way out, it demands a reason, and it does not
  *     return the pass to the pool.
  */
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../../db/client.server";
@@ -34,7 +32,7 @@ import {
   user,
 } from "../../db/schema";
 import { needsSetupPass } from "./age";
-import { uploadsRoot } from "./images.server";
+import { blobs, sapDocumentKey } from "./blobs.server";
 import { canManageAttendee, type PartyViewer } from "./party";
 import { hasAtLeast } from "./permissions";
 import { parseSapPdf } from "./sap-pdf.server";
@@ -42,12 +40,6 @@ import { SapRenameError } from "./sap-rename.server";
 import { sliceSapPage } from "./sap-slice.server";
 
 export type StockStatus = "available" | "assigned" | "released" | "void";
-
-/** `<uploads>/<camp>/sap/<documentId>` — a camp's orders are one directory, so
- * they can be archived or dropped as a unit. */
-function documentPath(campId: string, documentId: string): string {
-  return join(uploadsRoot(), campId, "sap", documentId);
-}
 
 export type ImportOutcome = {
   documentId: string;
@@ -101,10 +93,10 @@ export async function importSapPdf(opts: {
   }
 
   const documentId = crypto.randomUUID();
-  await mkdir(join(uploadsRoot(), opts.campId, "sap"), { recursive: true });
   // File first: a row pointing at bytes that failed to land would break every
-  // later slice, whereas an orphaned file is merely wasted space.
-  await Bun.write(documentPath(opts.campId, documentId), opts.bytes);
+  // later slice, whereas an orphaned file is merely wasted space. A camp's
+  // orders share one key prefix, so they can be archived or dropped as a unit.
+  await blobs.put(sapDocumentKey(opts.campId, documentId), opts.bytes);
 
   await db.insert(sapDocument).values({
     id: documentId,
@@ -540,14 +532,14 @@ export async function documentBytes(
   campId: string,
   documentId: string,
 ): Promise<Uint8Array> {
-  const file = Bun.file(documentPath(campId, documentId));
-  if (!(await file.exists())) {
+  const file = await blobs.get(sapDocumentKey(campId, documentId));
+  if (!file) {
     throw new SapStateError(
       "The original PDF for this pass is missing from storage — re-import the " +
         "order to restore it.",
     );
   }
-  return new Uint8Array(await file.arrayBuffer());
+  return file.bytes();
 }
 
 /**

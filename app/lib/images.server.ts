@@ -1,36 +1,18 @@
 /**
  * Uploaded pictures — the disk half (see plans/pictures-in-bodies.md).
  *
- * Bytes live in the data dir beside the SQLite file; SQLite holds only the
- * metadata row. Every function is camp-scoped, and every path is built from a
- * camp id plus this row's uuid — never from anything a user typed.
+ * Bytes live in the host's blob store (a directory beside the SQLite file, or
+ * an R2 bucket on Cloudflare); the database holds only the metadata row.
+ * Every function is camp-scoped, and every key is built from a camp id plus
+ * this row's uuid — never from anything a user typed.
  */
-import { mkdir, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import { campImage, faqEntry, mapAerial, wikiPage } from "../../db/schema";
+import { blobs, imageKey, type StoredBlob } from "./blobs.server";
 import { type ImageMimeType, imageRefs } from "./images";
 
 export type CampImageRow = typeof campImage.$inferSelect;
-
-/**
- * Where the files go. Defaults to `uploads/` next to the database, which on
- * firefly is `/srv/camptool/data/uploads` — a directory that already exists and
- * survives deploys, so standing this up needed no ops change.
- */
-export function uploadsRoot(): string {
-  const explicit = process.env.UPLOADS_PATH?.trim();
-  if (explicit) return explicit;
-  const dbPath = process.env.DATABASE_PATH ?? "./data/camptool.db";
-  return join(dirname(dbPath), "uploads");
-}
-
-/** `<root>/<camp>/<id>` — a camp's pictures are one directory, so they can be
- * archived or dropped as a unit and no single directory holds every camp. */
-function filePath(campId: string, id: string, variant: "full" | "display") {
-  return join(uploadsRoot(), campId, variant === "full" ? id : `${id}.display`);
-}
 
 export async function saveImage(opts: {
   campId: string;
@@ -44,12 +26,11 @@ export async function saveImage(opts: {
   userId: string;
 }): Promise<{ id: string }> {
   const id = crypto.randomUUID();
-  await mkdir(join(uploadsRoot(), opts.campId), { recursive: true });
   // Files first: a metadata row pointing at bytes that failed to land would
   // render as a broken picture, whereas an orphaned file is merely wasted space.
-  await Bun.write(filePath(opts.campId, id, "full"), opts.bytes);
+  await blobs.put(imageKey(opts.campId, id, "full"), opts.bytes);
   if (opts.display) {
-    await Bun.write(filePath(opts.campId, id, "display"), opts.display.bytes);
+    await blobs.put(imageKey(opts.campId, id, "display"), opts.display.bytes);
   }
   await db.insert(campImage).values({
     id,
@@ -94,21 +75,23 @@ export function listImages(campId: string) {
 }
 
 /**
- * The bytes, as a lazy handle. Returned to the route as a `Bun.file`, which a
- * `Response` streams — an original is full-resolution and must never be read
- * into memory just to be handed to the client.
+ * The stored bytes, as a stream-able handle — an original is full-resolution
+ * and must never be read into memory just to be handed to the client. Null
+ * when the file is missing.
  *
  * Falls back to the original when a display variant was never made.
  */
-export function imageFile(
+export async function imageFile(
   row: CampImageRow,
   variant: "full" | "display",
-): { file: ReturnType<typeof Bun.file>; mimeType: string } {
+): Promise<{ file: StoredBlob; mimeType: string } | null> {
   const useDisplay = variant === "display" && !!row.displayMimeType;
+  const file = await blobs.get(
+    imageKey(row.campId, row.id, useDisplay ? "display" : "full"),
+  );
+  if (!file) return null;
   return {
-    file: Bun.file(
-      filePath(row.campId, row.id, useDisplay ? "display" : "full"),
-    ),
+    file,
     mimeType: useDisplay ? (row.displayMimeType as string) : row.mimeType,
   };
 }
@@ -127,9 +110,10 @@ export async function serveImage(
 ): Promise<Response> {
   const row = await getImage(campId, id);
   if (!row) return new Response("Not found", { status: 404 });
-  const { file, mimeType } = imageFile(row, variant);
-  if (!(await file.exists())) return new Response("Not found", { status: 404 });
-  return new Response(file, {
+  const found = await imageFile(row, variant);
+  if (!found) return new Response("Not found", { status: 404 });
+  const { file, mimeType } = found;
+  return new Response(file.stream(), {
     headers: {
       "content-type": mimeType,
       "content-length": String(file.size),
@@ -159,8 +143,8 @@ export async function deleteImage(campId: string, id: string): Promise<void> {
   await db
     .delete(campImage)
     .where(and(eq(campImage.campId, campId), eq(campImage.id, id)));
-  await rm(filePath(campId, id, "full"), { force: true });
-  await rm(filePath(campId, id, "display"), { force: true });
+  await blobs.delete(imageKey(campId, id, "full"));
+  await blobs.delete(imageKey(campId, id, "display"));
 }
 
 /**

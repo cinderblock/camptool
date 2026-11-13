@@ -17,9 +17,14 @@
  * Both reduce to the same primitive: re-point every row that references the
  * stale id at the survivor, then delete the stale row.
  *
- * The reference list is derived at runtime from `PRAGMA foreign_key_list` over
- * every table rather than hardcoded, so a table added later is covered without
- * anyone remembering to update this file.
+ * The reference list is derived from the Drizzle schema's foreign keys rather
+ * than hardcoded, so a table added later is covered without anyone remembering
+ * to update this file. (It used to read `PRAGMA foreign_key_list`; the schema
+ * says the same thing without a database round trip, on every host.
+ * `merge-refs.test.ts` holds the two to agreement.)
+ *
+ * Every merge reads first, then writes everything in one `atomic` batch, so it
+ * lands whole or not at all on Bun and on D1 alike.
  *
  * Ordering note: the sweep uses `UPDATE OR IGNORE`. Where a unique constraint
  * means both people already have the equivalent row (both signed up for the
@@ -29,8 +34,19 @@
  * repaired in migration 0065 — before that migration this function could not
  * have worked either.
  */
-import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
-import { db, sqlite } from "../../db/client.server";
+import {
+  and,
+  eq,
+  inArray,
+  is,
+  isNotNull,
+  ne,
+  type SQL,
+  sql,
+} from "drizzle-orm";
+import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
+import { atomic, db } from "../../db/client.server";
+import * as schema from "../../db/schema";
 import {
   account,
   attendee,
@@ -51,54 +67,48 @@ type Ref = { table: string; column: string };
 
 let refCache: Map<string, Ref[]> | null = null;
 
-/** Every (table, column) in the database with a foreign key pointing at `target`. */
-function referencesTo(target: string): Ref[] {
+/** Every (table, column) in the schema with a foreign key pointing at `target`. */
+export function referencesTo(target: string): Ref[] {
   if (!refCache) refCache = new Map();
   const hit = refCache.get(target);
   if (hit) return hit;
 
-  const tables = sqlite
-    .query<{ name: string }, []>(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`,
-    )
-    .all();
-
   const refs: Ref[] = [];
-  for (const { name } of tables) {
-    const fks = sqlite
-      .query<{ table: string; from: string }, []>(
-        `PRAGMA foreign_key_list("${name}")`,
-      )
-      .all();
-    for (const fk of fks) {
-      if (fk.table === target) refs.push({ table: name, column: fk.from });
+  for (const t of Object.values(schema)) {
+    if (!is(t, SQLiteTable)) continue;
+    const cfg = getTableConfig(t);
+    for (const fk of cfg.foreignKeys) {
+      const r = fk.reference();
+      if (getTableConfig(r.foreignTable).name !== target) continue;
+      for (const col of r.columns) {
+        refs.push({ table: cfg.name, column: col.name });
+      }
     }
   }
   refCache.set(target, refs);
   return refs;
 }
 
+const ident = (name: string) => sql.identifier(name);
+
 /** How many rows each reference would move — drives the confirmation screen. */
-function countRefs(
+async function countRefs(
   target: string,
   id: string,
   skip: Ref[] = [],
-): { table: string; column: string; rows: number }[] {
-  return referencesTo(target)
-    .filter(
-      (r) => !skip.some((s) => s.table === r.table && s.column === r.column),
-    )
-    .map((r) => ({
-      ...r,
-      rows: (
-        sqlite
-          .query<{ n: number }, [string]>(
-            `SELECT count(*) AS n FROM "${r.table}" WHERE "${r.column}" = ?`,
-          )
-          .get(id) ?? { n: 0 }
-      ).n,
-    }))
-    .filter((r) => r.rows > 0);
+): Promise<{ table: string; column: string; rows: number }[]> {
+  const refs = referencesTo(target).filter(
+    (r) => !skip.some((s) => s.table === r.table && s.column === r.column),
+  );
+  const counted = await Promise.all(
+    refs.map(async (r) => {
+      const [row] = await db.all<{ n: number }>(
+        sql`SELECT count(*) AS n FROM ${ident(r.table)} WHERE ${ident(r.column)} = ${id}`,
+      );
+      return { ...r, rows: row?.n ?? 0 };
+    }),
+  );
+  return counted.filter((r) => r.rows > 0);
 }
 
 export type MergePreview = {
@@ -109,23 +119,24 @@ export type MergePreview = {
 };
 
 /**
- * Re-point every reference from `staleId` to `survivorId` for one target table,
- * without deleting anything. Rows blocked by a unique constraint stay put.
+ * The writes that re-point every reference from `staleId` to `survivorId` for
+ * one target table, without deleting anything. Rows blocked by a unique
+ * constraint stay put.
  */
 function repoint(
   target: string,
   survivorId: string,
   staleId: string,
   skip: Ref[] = [],
-): void {
-  for (const r of referencesTo(target)) {
-    if (skip.some((s) => s.table === r.table && s.column === r.column))
-      continue;
-    sqlite.run(
-      `UPDATE OR IGNORE "${r.table}" SET "${r.column}" = ? WHERE "${r.column}" = ?`,
-      [survivorId, staleId],
+): SQL[] {
+  return referencesTo(target)
+    .filter(
+      (r) => !skip.some((s) => s.table === r.table && s.column === r.column),
+    )
+    .map(
+      (r) =>
+        sql`UPDATE OR IGNORE ${ident(r.table)} SET ${ident(r.column)} = ${survivorId} WHERE ${ident(r.column)} = ${staleId}`,
     );
-  }
 }
 
 // `attendee` is reconciled per-edition before the generic sweep, so the sweep
@@ -136,9 +147,9 @@ const ATTENDEE_MEMBERSHIP_COLS: Ref[] = [
 ];
 
 /**
- * Fold one attendee row into another: everything attached to the stale body
- * (tent spot, ticket, setup pass, speaking slot) moves to the survivor, then
- * the stale row is deleted.
+ * The writes that fold one attendee row into another: everything attached to
+ * the stale body (tent spot, ticket, setup pass, speaking slot) moves to the
+ * survivor, then the stale row is deleted.
  *
  * Used both when merging two memberships that each RSVP'd for the same year,
  * and when a guest turns out to already have their own account.
@@ -146,10 +157,12 @@ const ATTENDEE_MEMBERSHIP_COLS: Ref[] = [
 export function mergeAttendeeRows(
   survivorAttendeeId: string,
   staleAttendeeId: string,
-): void {
-  if (survivorAttendeeId === staleAttendeeId) return;
-  repoint("attendee", survivorAttendeeId, staleAttendeeId);
-  sqlite.run("DELETE FROM attendee WHERE id = ?", [staleAttendeeId]);
+): SQL[] {
+  if (survivorAttendeeId === staleAttendeeId) return [];
+  return [
+    ...repoint("attendee", survivorAttendeeId, staleAttendeeId),
+    sql`DELETE FROM attendee WHERE id = ${staleAttendeeId}`,
+  ];
 }
 
 /** Everything a merge decision needs about one member, in one round trip. */
@@ -232,10 +245,10 @@ export async function planMemberMerge(
   // as "records that will be brought together" reads as a promise to keep them,
   // which is the opposite of what happens (see `foldUser`).
   const moves = [
-    ...countRefs("membership", plan.staleId),
+    ...(await countRefs("membership", plan.staleId)),
     ...(plan.sameUser
       ? []
-      : countRefs("user", plan.staleUserId, [
+      : await countRefs("user", plan.staleUserId, [
           { table: "session", column: "user_id" },
         ])),
   ];
@@ -278,69 +291,58 @@ export async function mergeMembers(
     .from(attendee)
     .where(eq(attendee.membershipId, survivorId));
 
-  const run = sqlite.transaction(() => {
-    for (const sa of staleAttendees) {
-      const twin = survivorAttendees.find((a) => a.editionId === sa.editionId);
-      if (twin) {
-        mergeAttendeeRows(twin.id, sa.id);
-      } else {
-        // Survivor wasn't on the roster that year — adopt the duplicate's row.
-        sqlite.run(
-          "UPDATE attendee SET membership_id = ?, host_membership_id = NULL WHERE id = ?",
-          [survivorId, sa.id],
-        );
-      }
+  const writes: SQL[] = [];
+  for (const sa of staleAttendees) {
+    const twin = survivorAttendees.find((a) => a.editionId === sa.editionId);
+    if (twin) {
+      writes.push(...mergeAttendeeRows(twin.id, sa.id));
+    } else {
+      // Survivor wasn't on the roster that year — adopt the duplicate's row.
+      writes.push(
+        sql`UPDATE attendee SET membership_id = ${survivorId}, host_membership_id = NULL WHERE id = ${sa.id}`,
+      );
     }
-    // Guests the duplicate was hosting become the survivor's guests.
-    sqlite.run(
-      "UPDATE attendee SET host_membership_id = ? WHERE host_membership_id = ?",
-      [survivorId, staleId],
-    );
+  }
+  // Guests the duplicate was hosting become the survivor's guests.
+  writes.push(
+    sql`UPDATE attendee SET host_membership_id = ${survivorId} WHERE host_membership_id = ${staleId}`,
+  );
 
-    repoint("membership", survivorId, staleId, ATTENDEE_MEMBERSHIP_COLS);
+  writes.push(
+    ...repoint("membership", survivorId, staleId, ATTENDEE_MEMBERSHIP_COLS),
+  );
 
-    // The resolved person, written as one row.
-    const m = plan.membership;
-    sqlite.run(
-      `UPDATE membership SET role = ?, status = ?, playa_name = ?,
-         invited_by_membership_id = ?, via_invite_id = ?, wizard_step = ?,
-         wizard_completed_at = ?, joined_at = ?, created_at = ?
-       WHERE id = ?`,
-      [
-        m.role,
-        m.status,
-        m.playaName,
-        m.invitedByMembershipId,
-        m.viaInviteId,
-        m.wizardStep,
-        m.wizardCompletedAt,
-        m.joinedAt,
-        m.createdAt,
-        survivorId,
-      ],
-    );
+  // The resolved person, written as one row.
+  const m = plan.membership;
+  writes.push(
+    sql`UPDATE membership SET role = ${m.role}, status = ${m.status},
+         playa_name = ${m.playaName},
+         invited_by_membership_id = ${m.invitedByMembershipId},
+         via_invite_id = ${m.viaInviteId}, wizard_step = ${m.wizardStep},
+         wizard_completed_at = ${m.wizardCompletedAt},
+         joined_at = ${m.joinedAt}, created_at = ${m.createdAt}
+       WHERE id = ${survivorId}`,
+  );
 
-    // A membership can't point at itself as its own inviter, which the fill
-    // rule above can produce when one duplicate invited the other.
-    sqlite.run(
-      "UPDATE membership SET invited_by_membership_id = NULL WHERE id = ? AND invited_by_membership_id = ?",
-      [survivorId, survivorId],
-    );
+  // A membership can't point at itself as its own inviter, which the fill
+  // rule above can produce when one duplicate invited the other.
+  writes.push(
+    sql`UPDATE membership SET invited_by_membership_id = NULL WHERE id = ${survivorId} AND invited_by_membership_id = ${survivorId}`,
+  );
 
-    // Anything that couldn't move was a true duplicate of a row the survivor
-    // already had; the ON DELETE rules clear it as the stale record goes.
-    sqlite.run("DELETE FROM membership WHERE id = ?", [staleId]);
+  // Anything that couldn't move was a true duplicate of a row the survivor
+  // already had; the ON DELETE rules clear it as the stale record goes.
+  writes.push(sql`DELETE FROM membership WHERE id = ${staleId}`);
 
-    if (!plan.sameUser) foldUser(plan);
-  });
-  run();
+  if (!plan.sameUser) writes.push(...foldUser(plan));
+  await atomic(writes);
 
   return outcome;
 }
 
 /**
- * Fold the duplicate's account into the survivor's, inside the merge's
- * transaction.
+ * The writes that fold the duplicate's account into the survivor's, as part
+ * of the merge's batch.
  *
  * Deliberately NOT scoped to the merging camp: the two accounts are one human,
  * so memberships they hold in *other* camps move too. Half-moving a person
@@ -348,16 +350,16 @@ export async function mergeMembers(
  * other camp holding two memberships for one account, that camp has an ordinary
  * duplicate to merge, which is not this camp's business.
  */
-function foldUser(plan: MergePlan): void {
+function foldUser(plan: MergePlan): SQL[] {
   const { survivorUserId, staleUserId } = plan;
+  const writes: SQL[] = [];
 
   // Every session on both sides dies. `revokeOtherSessions` reasoning from
   // plans/password-recovery.md applies: a credential change is an identity
   // event, and the tokens predate the person this account now represents.
-  sqlite.run("DELETE FROM session WHERE user_id IN (?, ?)", [
-    survivorUserId,
-    staleUserId,
-  ]);
+  writes.push(
+    sql`DELETE FROM session WHERE user_id IN (${survivorUserId}, ${staleUserId})`,
+  );
 
   // better-auth's password paths assume at most one `credential` account per
   // user, so a second one can't simply be moved across. The survivor's wins and
@@ -365,40 +367,33 @@ function foldUser(plan: MergePlan): void {
   // password stopped working" is precisely the surprise this feature exists to
   // prevent.
   if (plan.droppedPassword) {
-    sqlite.run(
-      "DELETE FROM account WHERE user_id = ? AND provider_id = 'credential'",
-      [staleUserId],
+    writes.push(
+      sql`DELETE FROM account WHERE user_id = ${staleUserId} AND provider_id = 'credential'`,
     );
   }
 
   // Passkeys, social logins, authored rows, and memberships in other camps all
   // follow the same sweep that moves everything else in this file.
-  repoint("user", survivorUserId, staleUserId);
+  writes.push(...repoint("user", survivorUserId, staleUserId));
 
   const u = plan.user;
-  sqlite.run(
-    "UPDATE user SET name = ?, email = ?, image = ?, email_verified = ?, updated_at = ? WHERE id = ?",
-    [
-      u.name,
-      u.email,
-      u.image,
-      u.emailVerified ? 1 : 0,
-      Date.now(),
-      survivorUserId,
-    ],
+  writes.push(
+    sql`UPDATE user SET name = ${u.name}, email = ${u.email}, image = ${u.image},
+         email_verified = ${u.emailVerified ? 1 : 0}, updated_at = ${Date.now()}
+       WHERE id = ${survivorUserId}`,
   );
 
   // Keep the address that stopped being primary findable. Bookkeeping only —
   // nothing in the sign-in path reads it (plans/merge-symmetric.md decision 2).
   if (plan.aliasEmail) {
-    sqlite.run(
-      `INSERT OR IGNORE INTO user_email_alias (id, user_id, email, reason, created_at)
-       VALUES (?, ?, ?, 'merge', ?)`,
-      [crypto.randomUUID(), survivorUserId, plan.aliasEmail, Date.now()],
+    writes.push(
+      sql`INSERT OR IGNORE INTO user_email_alias (id, user_id, email, reason, created_at)
+       VALUES (${crypto.randomUUID()}, ${survivorUserId}, ${plan.aliasEmail}, 'merge', ${Date.now()})`,
     );
   }
 
-  sqlite.run("DELETE FROM user WHERE id = ?", [staleUserId]);
+  writes.push(sql`DELETE FROM user WHERE id = ${staleUserId}`);
+  return writes;
 }
 
 /**
@@ -438,19 +433,15 @@ export async function claimGuestAsMember(
     )
     .limit(1);
 
-  const run = sqlite.transaction(() => {
-    if (own) {
-      mergeAttendeeRows(own.id, guestAttendeeId);
-    } else {
-      // No member row for this year yet — promote the guest row in place, which
-      // keeps every reference pointing at it.
-      sqlite.run(
-        "UPDATE attendee SET membership_id = ?, host_membership_id = NULL, name = NULL, email = NULL WHERE id = ?",
-        [membershipId, guestAttendeeId],
-      );
-    }
-  });
-  run();
+  await atomic(
+    own
+      ? mergeAttendeeRows(own.id, guestAttendeeId)
+      : // No member row for this year yet — promote the guest row in place,
+        // which keeps every reference pointing at it.
+        [
+          sql`UPDATE attendee SET membership_id = ${membershipId}, host_membership_id = NULL, name = NULL, email = NULL WHERE id = ${guestAttendeeId}`,
+        ],
+  );
 }
 
 /** What a prospect merge would move. Read-only. */
@@ -460,7 +451,7 @@ export async function previewProspectMerge(
   staleId: string,
 ): Promise<MergePreview> {
   await assertProspectsMergeable(campId, survivorId, staleId);
-  const moves = countRefs("prospect", staleId);
+  const moves = await countRefs("prospect", staleId);
   return { moves, total: moves.reduce((n, m) => n + m.rows, 0) };
 }
 
@@ -552,23 +543,24 @@ export async function mergeProspects(
     fill.created_at = stale.createdAt.getTime();
   }
 
-  const run = sqlite.transaction(() => {
-    // Handles carry a unique (prospect, kind, value), so UPDATE OR IGNORE
-    // collapses ones both records held instead of failing the merge; the
-    // leftovers cascade away with the stale row below.
-    repoint("prospect", survivorId, staleId);
+  // Handles carry a unique (prospect, kind, value), so UPDATE OR IGNORE
+  // collapses ones both records held instead of failing the merge; the
+  // leftovers cascade away with the stale row below.
+  const writes = repoint("prospect", survivorId, staleId);
 
-    const cols = Object.keys(fill);
-    if (cols.length) {
-      sqlite.run(
-        `UPDATE prospect SET ${cols.map((c) => `"${c}" = ?`).join(", ")}, updated_at = ? WHERE id = ?`,
-        [...cols.map((c) => fill[c] as string), Date.now(), survivorId],
-      );
-    }
+  const cols = Object.keys(fill);
+  if (cols.length) {
+    const sets = sql.join(
+      cols.map((c) => sql`${ident(c)} = ${fill[c] as string | number}`),
+      sql`, `,
+    );
+    writes.push(
+      sql`UPDATE prospect SET ${sets}, updated_at = ${Date.now()} WHERE id = ${survivorId}`,
+    );
+  }
 
-    sqlite.run("DELETE FROM prospect WHERE id = ?", [staleId]);
-  });
-  run();
+  writes.push(sql`DELETE FROM prospect WHERE id = ${staleId}`);
+  await atomic(writes);
 
   return preview;
 }

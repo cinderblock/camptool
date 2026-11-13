@@ -19,7 +19,7 @@
  */
 import { eq } from "drizzle-orm";
 import { mergeMembers, planMemberMerge } from "../app/lib/merge.server";
-import { db, sqlite } from "../db/client.server";
+import { db, sqlite } from "../db/host/bun-sqlite";
 import { account, camp, membership, passkey, user } from "../db/schema";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17932";

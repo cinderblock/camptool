@@ -5,6 +5,16 @@
   "type": "module",
   "license": "MIT",
   "description": "Self-hosted Burning Man theme-camp registration & management.",
+  "imports": {
+    "#host/db": {
+      "workerd": "./db/host/d1.ts",
+      "default": "./db/host/bun-sqlite.ts"
+    },
+    "#host/blobs": {
+      "workerd": "./app/host/blobs-r2.server.ts",
+      "default": "./app/host/blobs-disk.server.ts"
+    }
+  },
   "workspaces": [
     "packages/*"
   ],
@@ -71,6 +81,8 @@
     "@camptool/default-theme": "workspace:*",
     "@camptool/mathcamp-theme": "workspace:*",
     "@camptool/theme-contract": "workspace:*",
+    "@cloudflare/vite-plugin": "^1.69.1",
+    "@cloudflare/workers-types": "^5.20261113.1",
     "@react-router/dev": "^8.0.0",
     "@types/bun": "latest",
     "@types/node": "^26.0.0",
@@ -82,6 +94,7 @@
     "postcss-preset-mantine": "^1.17.0",
     "postcss-simple-vars": "^7.0.1",
     "typescript": "^7.0.0",
-    "vite": "^8.0.0"
+    "vite": "^8.0.0",
+    "wrangler": "^4.162.0"
   }
 }

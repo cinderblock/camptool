@@ -3,7 +3,7 @@
  * camp-scoped: the campId argument is the multi-camp invariant, never optional.
  */
 import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
-import { db } from "../../db/client.server";
+import { atomic, db } from "../../db/client.server";
 import { faqCategory, faqEntry } from "../../db/schema";
 import { type FaqStatus, faqSlug } from "./faq";
 import { featureVisibleTo } from "./features";
@@ -85,17 +85,17 @@ export async function moveCategory(
   if (index < 0 || !self || !other) return;
   // Positions are rewritten from the sorted order rather than swapped blindly,
   // so a camp whose rows all share position 0 still reorders correctly.
-  await db.transaction(async (tx) => {
-    const order = [...all];
-    order[index] = other;
-    order[target] = self;
-    for (const [i, c] of order.entries()) {
-      await tx
+  const order = [...all];
+  order[index] = other;
+  order[target] = self;
+  await atomic(
+    order.map((c, i) =>
+      db
         .update(faqCategory)
         .set({ position: i })
-        .where(and(eq(faqCategory.campId, campId), eq(faqCategory.id, c.id)));
-    }
-  });
+        .where(and(eq(faqCategory.campId, campId), eq(faqCategory.id, c.id))),
+    ),
+  );
 }
 
 /* ---------------------------------------------------------------- entries */
@@ -297,17 +297,17 @@ export async function moveEntry(
   const self = siblings[index];
   const other = siblings[target];
   if (index < 0 || !self || !other) return;
-  await db.transaction(async (tx) => {
-    const order = [...siblings];
-    order[index] = other;
-    order[target] = self;
-    for (const [i, s] of order.entries()) {
-      await tx
+  const order = [...siblings];
+  order[index] = other;
+  order[target] = self;
+  await atomic(
+    order.map((e, i) =>
+      db
         .update(faqEntry)
         .set({ position: i })
-        .where(and(eq(faqEntry.campId, campId), eq(faqEntry.id, s.id)));
-    }
-  });
+        .where(and(eq(faqEntry.campId, campId), eq(faqEntry.id, e.id))),
+    ),
+  );
 }
 
 /** Officer nav badge: how many questions are waiting on an answer. */

@@ -127,8 +127,15 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    `DISCORD_GUILD_ID` is the fallback. Verified over HTTP and by screenshot.
    No email transport exists yet (`mailEnabled = false`), so nothing to split.
 3b. [ ] Camp subdomains (see Design).
-4. [ ] Host adapters: async db type, `atomic`, rewrite `merge.server.ts` and
-   `faq.server.ts` transactions; blobs; snapshot; Bun entry unchanged.
+4. [x] Host adapters (`#host/db`, `#host/blobs` in package.json `imports`):
+   `db/host/{bun-sqlite,d1}.ts`, `app/host/blobs-{disk,r2}.server.ts`. `Db` is
+   typed async with no `transaction`; `atomic()` for all-or-nothing writes.
+   Merges now read first and write one batch; their FK sweep comes from the
+   Drizzle schema (test holds it equal to `PRAGMA foreign_key_list`). Backup
+   uses `dbSnapshot()` (SQLite file on Bun, SQL dump on D1). Verified on Bun:
+   unit tests, e2e merge 16/16, backup 13/13, pictures 17/17, FAQ 34/34,
+   prospects 37/38 (9g is stale, logged in `plans/issues.md`), production
+   build boots and serves.
 5. [ ] Cloudflare target: `wrangler.jsonc`, Workers entry, Vite plugin under
    a build flag, D1 migration folder + safety check, local `wrangler dev`
    smoke test (no account needed).
@@ -138,6 +145,12 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    change** (account, D1, R2, domain, secrets).
 
 ## Findings / gotchas
+
+- Running several `bun run dev` at once in one checkout races on
+  `.react-router/types` (ENOENT in typegen). Start them a few seconds apart.
+- e2e scripts open the database directly, so give them the same
+  `DATABASE_PATH` as their server; otherwise they read the checkout's `.env`
+  database and fail with "no user row".
 
 - D1 rejects `PRAGMA foreign_keys`, and deferral doesn't stop cascades (see
   Design). Sources: Cloudflare D1 foreign-keys docs; brachkow.com note
