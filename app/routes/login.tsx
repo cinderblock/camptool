@@ -19,6 +19,8 @@ import { redirect, useNavigate } from "react-router";
 import { NoMailRecoveryNote } from "~/components/NoMailRecoveryNote";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";
 import { signIn, signUp } from "~/lib/auth-client";
+import { safeNext } from "~/lib/camp-host";
+import { APEX } from "~/lib/env.server";
 import { getInstanceSettings } from "~/lib/instance.server";
 import { getSession } from "~/lib/session.server";
 import type { Route } from "./+types/login";
@@ -28,18 +30,28 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
+  // Where to go afterwards: a camp subdomain sends people here to sign in
+  // (signing in only happens on the apex), and back with `next`.
+  const next = safeNext(new URL(request.url).searchParams.get("next"), APEX);
   const session = await getSession(request);
-  if (session) throw redirect("/");
+  if (session) throw redirect(next ?? "/");
   const { allowOpenSignups } = await getInstanceSettings();
   // Set by /reset/:token after a successful password reset — the only way in
   // when there's no mail transport (plans/password-recovery.md).
   const justReset = new URL(request.url).searchParams.get("reset") === "1";
-  return { discordEnabled, mailEnabled, allowOpenSignups, justReset };
+  return { discordEnabled, mailEnabled, allowOpenSignups, justReset, next };
 }
 
 export default function Login({ loaderData }: Route.ComponentProps) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
+  const { next } = loaderData;
+  // A camp subdomain is another origin, so leave the app for it rather than
+  // routing within this one.
+  const go = () =>
+    next && !next.startsWith("/")
+      ? window.location.assign(next)
+      : navigate(next ?? "/");
 
   const form = useForm({
     initialValues: { name: "", email: "", password: "" },
@@ -61,7 +73,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     });
     setBusy(false);
     if (error) return fail(error.message ?? "Sign in failed");
-    navigate("/");
+    go();
   }
 
   async function handleSignUp(values: typeof form.values) {
@@ -77,7 +89,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     });
     setBusy(false);
     if (error) return fail(error.message ?? "Sign up failed");
-    navigate("/");
+    go();
   }
 
   async function handleMagicLink() {
@@ -85,7 +97,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     setBusy(true);
     const { error } = await signIn.magicLink({
       email: form.values.email,
-      callbackURL: "/",
+      callbackURL: next ?? "/",
     });
     setBusy(false);
     if (error) return fail(error.message ?? "Could not send link");
@@ -101,11 +113,11 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     const res = await signIn.passkey();
     setBusy(false);
     if (res?.error) return fail(res.error.message ?? "Passkey sign in failed");
-    navigate("/");
+    go();
   }
 
   async function handleDiscord() {
-    await signIn.social({ provider: "discord", callbackURL: "/" });
+    await signIn.social({ provider: "discord", callbackURL: next ?? "/" });
   }
 
   return (

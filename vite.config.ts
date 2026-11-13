@@ -70,7 +70,13 @@ export default defineConfig({
     // 3000/5173 collide with other dev apps, and Windows Hyper-V reserves
     // port ranges around 3000 that make Vite walk the whole 3000s.
     port: Number(process.env.PORT ?? 17923),
-    allowedHosts: publicHost ? [publicHost] : undefined,
+    // With camp subdomains, every <slug>.<host> too (a leading dot is Vite's
+    // "and its subdomains").
+    allowedHosts: publicHost
+      ? process.env.CAMP_SUBDOMAINS === "1"
+        ? [publicHost, `.${publicHost}`]
+        : [publicHost]
+      : undefined,
   },
   // We use the Drizzle adapter, never Kysely. better-auth still references the
   // optional `@better-auth/kysely-adapter`, which imports symbols dropped in

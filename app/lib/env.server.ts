@@ -9,3 +9,9 @@ export const DEV_PORT = Number(process.env.PORT ?? 17923);
 /** Public-facing base URL; falls back to the local dev server. */
 export const PUBLIC_BASE_URL =
   process.env.PUBLIC_BASE_URL ?? `http://localhost:${DEV_PORT}`;
+
+/** `PUBLIC_BASE_URL` parsed. With camp subdomains on, this is the apex. */
+export const APEX = new URL(PUBLIC_BASE_URL);
+
+/** Each camp at `<slug>.<apex>` (see app/lib/camp-host.ts). Off by default. */
+export const CAMP_SUBDOMAINS = process.env.CAMP_SUBDOMAINS === "1";

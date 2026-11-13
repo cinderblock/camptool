@@ -43,8 +43,21 @@ applies the migrations, and serves it at http://localhost:17940 (set
    and the R2 bucket (`camptool-uploads`), applies the migrations, and
    publishes the Worker.
 5. Point your domain at the Worker (Workers → camptool → Settings → Domains &
-   Routes). To give each camp its own subdomain, add a route for
-   `*.your-domain/*` too, with a proxied wildcard DNS record.
+   Routes).
+
+### A subdomain for each camp
+
+Set `vars.CAMP_SUBDOMAINS` to `"1"` in `wrangler.jsonc`, with
+`PUBLIC_BASE_URL` at the bare domain (`https://camptool.example.org`). Each camp
+then lives at `<slug>.camptool.example.org`. Cloudflare needs a proxied
+wildcard DNS record (`*`) and a Worker route for `*.camptool.example.org/*`;
+Universal SSL already covers one level of wildcard.
+
+Signing in, passkey sign-in, the Discord callback, invites and public apply
+pages all stay on the bare domain; the session cookie is set for the whole
+domain, so one sign-in covers every camp. A camp's slug has to be a valid
+DNS label, and names like `www`, `api` and `admin` are reserved
+(`app/lib/camp-host.ts`).
 
 The first account to sign up becomes the site's super admin.
 

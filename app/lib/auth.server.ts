@@ -4,6 +4,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
 import { magicLink, organization } from "better-auth/plugins";
 import { db, schema } from "../../db/client.server";
+import { isValidCampSlug } from "./camp-host";
 import { DEV_PORT, PUBLIC_BASE_URL } from "./env.server";
 import {
   ensureFirstUserSuperAdmin,
@@ -52,14 +53,29 @@ const devOrigins =
         `http://[::1]:${DEV_PORT}`,
       ];
 
+// Camp subdomains (app/lib/camp-host.ts): every camp's `<slug>.<apex>` is a
+// trusted origin, and the session cookie is set for the apex domain so one
+// sign-in covers every camp. Signing in itself stays on the apex.
+const apex = new URL(baseURL);
+const campSubdomains = process.env.CAMP_SUBDOMAINS === "1";
+
 export const auth = betterAuth({
   baseURL,
   secret: process.env.BETTER_AUTH_SECRET,
-  trustedOrigins: [baseURL, ...devOrigins],
+  trustedOrigins: [
+    baseURL,
+    ...devOrigins,
+    ...(campSubdomains ? [`${apex.protocol}//*.${apex.host}`] : []),
+  ],
 
   // See isLocalDev above: prefix dev cookies to dodge cross-app collisions on
   // localhost; leave production on the default name (its domain isolates it).
-  ...(isLocalDev ? { advanced: { cookiePrefix: "camptool" } } : {}),
+  advanced: {
+    ...(isLocalDev ? { cookiePrefix: "camptool" } : {}),
+    ...(campSubdomains
+      ? { crossSubDomainCookies: { enabled: true, domain: apex.hostname } }
+      : {}),
+  },
 
   database: drizzleAdapter(db, { provider: "sqlite", schema }),
 
@@ -119,6 +135,18 @@ export const auth = betterAuth({
         const { allowCampCreation } = await getInstanceSettings();
         return allowCampCreation;
       },
+      // With camp subdomains, a camp's slug is its address, so it must be a
+      // usable DNS label and not one of the names the site keeps for itself.
+      organizationHooks: {
+        beforeCreateOrganization: async ({ organization }) => {
+          if (campSubdomains && !isValidCampSlug(organization.slug ?? "")) {
+            throw new APIError("BAD_REQUEST", {
+              message:
+                "That camp address isn't available: use lowercase letters, numbers and dashes.",
+            });
+          }
+        },
+      },
       schema: {
         organization: { modelName: "camp" },
         member: {
@@ -147,7 +175,12 @@ export const auth = betterAuth({
     passkey({
       rpID: new URL(baseURL).hostname,
       rpName: "CampTool",
-      origin: baseURL,
+      // With camp subdomains, passkeys get added from a camp's own address
+      // (the account page lives there), so the expected origin is the
+      // request's own. That's safe: the browser only lets our apex and its
+      // subdomains use this RP ID, and the trusted-origins check above
+      // already turns away any other origin.
+      origin: campSubdomains ? null : baseURL,
 
       // `signIn.passkey()` with no email is a DISCOVERABLE-credential ceremony
       // — the authenticator has to be able to enumerate its own credentials for

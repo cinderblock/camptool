@@ -910,11 +910,17 @@ function CreateCampForm() {
   const [busy, setBusy] = useState(false);
 
   function slugify(value: string) {
-    return value
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+    return (
+      value
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        // Room for the random suffix inside a 63-character DNS label: the slug
+        // is the camp's subdomain when those are on (app/lib/camp-host.ts).
+        .slice(0, 50)
+        .replace(/-+$/g, "")
+    );
   }
 
   async function create() {

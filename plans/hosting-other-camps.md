@@ -126,7 +126,12 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    settings → Discord server (with a no-permission bot invite link);
    `DISCORD_GUILD_ID` is the fallback. Verified over HTTP and by screenshot.
    No email transport exists yet (`mailEnabled = false`), so nothing to split.
-3b. [ ] Camp subdomains (see Design).
+3b. [x] Camp subdomains (`app/lib/camp-host.ts`, `CAMP_SUBDOMAINS=1`): host
+   pins the camp, apex camp pages redirect to the subdomain, signed-out →
+   apex `/login?next=` (open-redirect safe), non-member → apex `/c/<slug>`,
+   cookie on the apex domain, reserved/invalid slugs refused at creation,
+   camp switcher jumps hosts, passkeys accept any of our origins (RP ID is the
+   apex). Verified over HTTP against a Bun dev server: 11/11.
 4. [x] Host adapters (`#host/db`, `#host/blobs` in package.json `imports`):
    `db/host/{bun-sqlite,d1}.ts`, `app/host/blobs-{disk,r2}.server.ts`. `Db` is
    typed async with no `transaction`; `atomic()` for all-or-nothing writes.
@@ -149,6 +154,16 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    change** (account, D1, R2, domain, secrets).
 
 ## Findings / gotchas
+
+- Passkeys: `@better-auth/passkey` checks against its `origin` option, or the
+  request's own `Origin` when that's null. With subdomains it's null; the RP
+  ID (the apex) plus better-auth's trusted-origins wildcard keep it to our
+  hosts.
+- Vite's dev server rejects unknown `Host` headers; with subdomains on,
+  `allowedHosts` adds `.<host>` (Vite's "and subdomains").
+- Real browsers may refuse `Domain=localhost` cookies, so trying subdomains
+  in a browser locally needs a real name (e.g. a hosts-file domain); curl
+  with a `Host` header is fine.
 
 - **D1 caps compound SELECTs** ("too many terms in compound SELECT"):
   migration 0060's 12-way `UNION ALL` failed; `db/migrations-d1/0060…` uses a

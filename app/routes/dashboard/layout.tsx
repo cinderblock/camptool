@@ -33,6 +33,8 @@ import { discordEnabled } from "~/lib/auth.server";
 import { authClient, signOut } from "~/lib/auth-client";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
+import { campOrigin, isValidCampSlug } from "~/lib/camp-host";
+import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
 import { featureName } from "~/lib/events";
 import { countPendingEntries } from "~/lib/faq.server";
 import {
@@ -222,6 +224,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       id: c.camp.id,
       name: c.camp.name,
       role: c.membership.role,
+      // With camp subdomains on, each camp's own address: switching camps
+      // goes there instead of flipping the session's active camp in place.
+      origin:
+        CAMP_SUBDOMAINS && c.camp.slug && isValidCampSlug(c.camp.slug)
+          ? campOrigin(c.camp.slug, APEX)
+          : null,
     })),
   });
 }
@@ -512,6 +520,11 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
 
   async function switchCamp(id: string | null) {
     if (!id || id === activeCampId) return;
+    const origin = camps.find((c) => c.id === id)?.origin;
+    if (origin) {
+      window.location.assign(`${origin}${location.pathname}`);
+      return;
+    }
     await authClient.organization.setActive({ organizationId: id });
     navigate(location.pathname, { replace: true });
   }

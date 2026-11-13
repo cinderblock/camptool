@@ -3,8 +3,17 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { data, redirect } from "react-router";
 import { db } from "../../db/client.server";
-import { attendee, camp, campEdition, membership, user } from "../../db/schema";
+import {
+  attendee,
+  camp,
+  campEdition,
+  membership,
+  session as sessionTable,
+  user,
+} from "../../db/schema";
 import { auth } from "./auth.server";
+import { campOrigin, campSlugFromHost, isValidCampSlug } from "./camp-host";
+import { APEX, CAMP_SUBDOMAINS } from "./env.server";
 import { hasAtLeast, rankOf } from "./permissions";
 import {
   PRIVACY_OFF,
@@ -259,10 +268,26 @@ export async function getSession(request: Request): Promise<AppSession | null> {
   return (await applyImpersonation(real, actas)) ?? real;
 }
 
-/** Require a logged-in user, else redirect to /login. */
+/** The camp this request's host names (`<slug>.<apex>`), when camp
+ * subdomains are on. Null on the apex or with subdomains off. */
+export function requestCampSlug(request: Request): string | null {
+  if (!CAMP_SUBDOMAINS) return null;
+  return campSlugFromHost(new URL(request.url).host, APEX);
+}
+
+/** Require a logged-in user, else redirect to /login. On a camp subdomain
+ * that's the apex's login, which sends them back here afterwards: signing in
+ * only ever happens on the apex (plans/hosting-other-camps.md). */
 export async function requireUser(request: Request) {
   const session = await getSession(request);
-  if (!session) throw redirect("/login");
+  if (!session) {
+    if (requestCampSlug(request)) {
+      throw redirect(
+        `${APEX.origin}/login?next=${encodeURIComponent(request.url)}`,
+      );
+    }
+    throw redirect("/login");
+  }
   return session;
 }
 
@@ -312,7 +337,35 @@ export async function resolveActiveCamp(
   const session = await requireUser(request);
   const camps = await loadUserCamps(session.user.id);
   const activeId = session.session.activeOrganizationId;
-  const active = camps.find((c) => c.camp.id === activeId) ?? camps[0] ?? null;
+  let active = camps.find((c) => c.camp.id === activeId) ?? camps[0] ?? null;
+
+  // Camp subdomains: the host decides the camp. Someone who isn't in it gets
+  // its public page on the apex. On the apex itself, a page view of a camp
+  // that has a subdomain moves there, so each camp has one address.
+  const slug = requestCampSlug(request);
+  if (slug) {
+    const pinned = camps.find((c) => c.camp.slug === slug);
+    if (!pinned) throw redirect(`${APEX.origin}/c/${slug}`);
+    active = pinned;
+    // Keep the session in step, so anything reading the session's active
+    // camp (rather than this context) agrees with the address bar.
+    if (activeId !== pinned.camp.id && !session.impersonatedBy) {
+      await db
+        .update(sessionTable)
+        .set({ activeOrganizationId: pinned.camp.id })
+        .where(eq(sessionTable.id, session.session.id));
+    }
+  } else if (
+    CAMP_SUBDOMAINS &&
+    request.method === "GET" &&
+    active?.camp.slug &&
+    isValidCampSlug(active.camp.slug)
+  ) {
+    const url = new URL(request.url);
+    throw redirect(
+      `${campOrigin(active.camp.slug, APEX)}${url.pathname}${url.search}`,
+    );
+  }
 
   let editions: Edition[] = [];
   let activeEdition: Edition | null = null;
