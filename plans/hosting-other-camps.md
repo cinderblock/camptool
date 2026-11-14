@@ -68,9 +68,18 @@ jackson, any Docker host). Donations later; **no billing code**.
     Ops provisions the empty Worker, D1, R2, DNS and routes, the same split
     as `empyreangate-org` and `telemetry-collector` in ops. (Cameron,
     2026-11-13.)
-15. **Discord connections should be per camp, probably runtime config**
-    rather than deploy env. (Cameron, 2026-11-13; exact shape still open, see
-    Open questions.)
+15. **One CampTool Discord app and bot for the whole site**; each camp picks
+    its own server at runtime (camp Settings, already built). Firefly never
+    had Discord configured (all `DISCORD_*` empty), so there is no Math Camp
+    app to carry over. (Cameron, 2026-11-13.)
+16. **Copy firefly's `BETTER_AUTH_SECRET`** to the Worker, so people signed
+    in on the old site arrive signed in. Passkeys are redone regardless (new
+    RP ID); that's the `/moved` bridge plus the forced new passkey. (Cameron,
+    2026-11-13.)
+17. **Workers Builds deploys from `master`, which is protected.** GitHub
+    ruleset "Protect master (deploys to Cloudflare)" (id 27249613): no
+    deletion, no force push, no bypass. Direct pushes still allowed.
+    (Cameron, 2026-11-13.)
 
 ## Design
 
@@ -208,34 +217,40 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    new passkey → signed out, the new passkey signs in and lands in the camp).
 8. [ ] **Current step.** Deploy to the `isozilla` account and move Math Camp.
    **Each change needs Cameron's yes**, and every infrastructure change goes
-   through the ops repo (decision 14). Draft order:
-   a. Settle the Discord shape (decision 15) and the login secret (Open
-      questions 2-3); may add a CampTool code step before deploying.
-   b. Ops: `cloudflare/config/workers/camptool.yaml` (or similar): D1
-      `camptool`, R2 `camptool-uploads`, empty Worker `camptool`
-      (`external: true`, `provision: true`), `camptool.org` apex + proxied `*`,
-      routes `camptool.org/*` and `*.camptool.org/*`. Staged, shown, applied on
-      a yes.
-   c. Workers Builds on that Worker from `cinderblock/CampTool`, deploy branch
-      (name open). Build: `CAMP_THEMES=@camptool/mathcamp-theme bun run
-      cf:build`; deploy: migrations then `wrangler deploy` with production vars
-      (`PUBLIC_BASE_URL=https://camptool.org`, `CAMP_SUBDOMAINS=1`,
-      `LEGACY_HOSTS=camptool.mathcamp.us=mathcamp`). Where the production vars
-      live (a `wrangler.jsonc` env vs. dashboard vars kept with `keep_vars`) is
-      to decide with the ops change. Use the `cloudflare-workers-builds` skill
-      to walk Cameron through the connection.
-   d. Secrets on the Worker (Cameron's call on sourcing).
-   e. Discord developer portal: add redirect
-      `https://camptool.org/api/auth/callback/discord` (his action).
-   f. Smoke-test on camptool.org with a throwaway camp.
-   g. Cutover (a quiet hour; writes to firefly after the backup are lost):
+   through the ops repo (decision 14). In order:
+   a. [x] Ops config staged: `cloudflare/config/workers/camptool.yaml`, commit
+      `9455a394` on branch `camptool-org` (worktree
+      `C:/Users/camer/.t3/worktrees/ops/camptool-org`, based on
+      origin/master, not pushed). D1 `camptool`, R2 `camptool-uploads`,
+      provisioned Worker `camptool` as `camptool.org`'s custom domain, proxied
+      CNAME `*.camptool.org` → apex, route `*.camptool.org/*`, zone SSL
+      strict + always HTTPS. Local dry run: 6 creates, 1 update, 0 deletes,
+      nothing outside camptool.org. **Waiting on Cameron's yes** to push it
+      to ops `master` (CI applies).
+   b. Workers Builds on the `camptool` Worker from `cinderblock/camptool`
+      `master` (Cameron, in the dashboard; walk through with the
+      `cloudflare-workers-builds` skill). Build: `CAMP_THEMES=@camptool/
+      mathcamp-theme bun run cf:build`; deploy: `bunx wrangler d1 migrations
+      apply DB --remote && bunx wrangler deploy --var
+      PUBLIC_BASE_URL:https://camptool.org --var CAMP_SUBDOMAINS:1 --var
+      LEGACY_HOSTS:camptool.mathcamp.us=mathcamp`. Check on the first build
+      that wrangler binds the ops-made D1/R2 by name rather than making new
+      ones.
+   c. Secrets on the Worker: `BETTER_AUTH_SECRET` and `DEV_API_TOKEN` copied
+      from firefly (`/opt/deployment-state/firefly/camptool/.env`) without
+      printing them; Discord secrets once the app exists.
+   d. Discord: Cameron makes one "CampTool" application (redirect
+      `https://camptool.org/api/auth/callback/discord`), then its client ID,
+      secret and bot token go on the Worker.
+   e. Smoke-test on camptool.org with a throwaway camp.
+   f. Cutover (a quiet hour; writes to firefly after the backup are lost):
       backup from firefly's Site admin → `import-to-d1.ts --legacy-rp-id
-      camptool.mathcamp.us --packs mathcamp=@camptool/mathcamp-theme
-      --discord-guild mathcamp=<firefly's DISCORD_GUILD_ID> --apply remote`
-      (the import's wrangler calls need a token, to sort out with ops) →
-      ops `mathcamp.yaml`: `camptool.mathcamp.us` from `proxy: firefly` to the
-      Worker route.
-   h. Later: retire firefly's camptool stack and Caddy site (ops change).
+      camptool.mathcamp.us --packs mathcamp=@camptool/mathcamp-theme --apply
+      remote` (no `--discord-guild`: firefly had none set; the import's
+      wrangler calls need a token, to sort out with ops) → ops
+      `mathcamp.yaml`: `camptool.mathcamp.us` from `proxy: firefly` to a
+      custom domain on the `camptool` Worker.
+   g. Later: retire firefly's camptool stack and Caddy site (ops change).
       Keep `LEGACY_HOSTS` for as long as old links and passkeys matter.
    The deploy button (old step 6) is dropped (decision 13).
 
@@ -293,6 +308,12 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 - `CAMP_THEMES` and `--packs` take package names (`@camptool/mathcamp-theme`),
   not slugs.
 
+- **Firefly's live CampTool never had Discord configured**: every
+  `DISCORD_*` in its `.env` is empty (checked 2026-11-13).
+- Ops already supports Worker routes (`src/providers/worker-routes.ts`, full
+  patterns like `*.camptool.org/*`), so the wildcard needed no ops code.
+  Workers custom domains can't be wildcards.
+
 ## Progress log
 
 - [x] 2026-11-13: surveyed coupling, costed Cloudflare (Workers Paid $5/mo;
@@ -306,23 +327,7 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 
 ## Open questions for the user
 
-1. Is `camptool.org`'s DNS on the isozilla account yet? (Not in ops config
-   as of 2026-11-13.)
-2. Discord per camp (decision 15): today the **server** is already per camp
-   and set at runtime (camp Settings, `camp.discord_guild_id`); the **app**
-   (`DISCORD_CLIENT_ID`/`SECRET`, used for "Sign in with Discord" on the apex)
-   and the **bot token** (member checks) are site-wide env. Recommended: one
-   shared CampTool Discord app + bot for the whole site, which each camp
-   invites into its own server (the normal model for a Discord bot); a camp
-   bringing its own bot is a later option, stored per camp in the database.
-   Also: reuse Math Camp's existing Discord app as the shared one, or make a
-   new "CampTool" app (then Math Camp re-invites the bot; Discord user IDs are
-   the same across apps, so existing links survive)?
-3. `BETTER_AUTH_SECRET`: copy firefly's (people signed in on the old site
-   arrive signed in) or generate a fresh one for the Worker (everyone signs in
-   once; passwords, Discord and the `/moved` passkey bridge all still work).
-   Recommended: fresh, so no secret has to travel between systems.
-4. Deploy branch name: `master`, or a dedicated `deploy` branch?
+(None open: decisions 14-17 answered the last round, 2026-11-13.)
 
 ## Things not to do
 
