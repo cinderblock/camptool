@@ -29,9 +29,7 @@ applies the migrations, and serves it at http://localhost:17940 (set
 ## Deploy
 
 1. `bunx wrangler login`
-2. Set the public address in `wrangler.jsonc` → `vars.PUBLIC_BASE_URL`
-   (e.g. `https://camptool.example.org`).
-3. Secrets:
+2. Secrets:
 
    ```sh
    bunx wrangler secret put BETTER_AUTH_SECRET   # any long random string
@@ -39,15 +37,20 @@ applies the migrations, and serves it at http://localhost:17940 (set
 
    Optional, for Discord login and member checks: `DISCORD_CLIENT_ID`,
    `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN` (see `discord-setup.md`).
-4. `bun run cf:deploy`. The first deploy creates the D1 database (`camptool`)
+3. `bun run cf:deploy`. The first deploy creates the D1 database (`camptool`)
    and the R2 bucket (`camptool-uploads`), applies the migrations, and
    publishes the Worker.
+4. Set the public address: Workers → camptool → Settings → Variables and
+   Secrets, add a text variable `PUBLIC_BASE_URL` (e.g.
+   `https://camptool.example.org`). `wrangler.jsonc` has `keep_vars: true`, so
+   later deploys leave the Worker's variables alone; that's where every
+   setting below goes too.
 5. Point your domain at the Worker (Workers → camptool → Settings → Domains &
    Routes).
 
 ### A subdomain for each camp
 
-Set `vars.CAMP_SUBDOMAINS` to `"1"` in `wrangler.jsonc`, with
+Set the Worker variable `CAMP_SUBDOMAINS` to `1`, with
 `PUBLIC_BASE_URL` at the bare domain (`https://camptool.example.org`). Each camp
 then lives at `<slug>.camptool.example.org`. Cloudflare needs a proxied
 wildcard DNS record (`*`) and a Worker route for `*.camptool.example.org/*`;
@@ -82,7 +85,7 @@ move onto the shared site without anyone signing up again:
    (`CAMP_THEME`, `DISCORD_GUILD_ID`); the new site must bundle the pack in
    `CAMP_THEMES`. Passwords, Discord links and sessions come across as they
    are. The script refuses a D1 database that already has users.
-3. Set `vars.LEGACY_HOSTS` to `camptool.example.com=<slug>`, point the old
+3. Set the Worker variable `LEGACY_HOSTS` to `camptool.example.com=<slug>`, point the old
    name's DNS at the Worker (proxied) and add a route
    `camptool.example.com/*`.
 

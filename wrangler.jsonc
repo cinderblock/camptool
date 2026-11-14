@@ -6,9 +6,12 @@
 //
 // No resource IDs here: `wrangler deploy` creates the D1 database and R2
 // bucket on first deploy and remembers them, so a fork deploys as-is.
-// Settings and secrets (see docs/cloudflare-deploy.md):
-//   PUBLIC_BASE_URL        var, e.g. https://camptool.org
-//   CAMP_SUBDOMAINS        var, "1" to give each camp <slug>.<domain>
+// Settings and secrets live on the Worker (dashboard → Settings → Variables
+// and Secrets), not here, so one file serves every deployment
+// (see docs/cloudflare-deploy.md):
+//   PUBLIC_BASE_URL        variable, e.g. https://camptool.org (required)
+//   CAMP_SUBDOMAINS        variable, "1" to give each camp <slug>.<domain>
+//   LEGACY_HOSTS           variable, old hosts to redirect (moving a camp)
 //   BETTER_AUTH_SECRET     secret (wrangler secret put)
 //   DISCORD_*              optional secrets
 {
@@ -32,7 +35,7 @@
     }
   ],
   "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "camptool-uploads" }],
-  "vars": {
-    "PUBLIC_BASE_URL": "http://localhost:17940"
-  }
+  // Deploys leave the Worker's variables alone. Without this, every deploy
+  // would replace them with whatever `vars` this file has (none).
+  "keep_vars": true
 }

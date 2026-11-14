@@ -44,7 +44,7 @@
     "cf:migrations": "bun scripts/d1-migrations.ts",
     "cf:dev": "bun run cf:migrations && wrangler d1 migrations apply DB --local && CAMPTOOL_TARGET=cloudflare react-router dev",
     "cf:build": "bun run cf:migrations && CAMPTOOL_TARGET=cloudflare react-router build",
-    "cf:preview": "bun run cf:build && wrangler d1 migrations apply DB --local && wrangler dev --config build/server/wrangler.json --port 17940",
+    "cf:preview": "bun run cf:build && wrangler d1 migrations apply DB --local && wrangler dev --config build/server/wrangler.json --port 17940 --persist-to .wrangler/state --var PUBLIC_BASE_URL:http://localhost:17940",
     "cf:deploy": "bun run cf:build && wrangler d1 migrations apply DB --remote && wrangler deploy",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
