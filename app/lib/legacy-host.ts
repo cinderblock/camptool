@@ -51,16 +51,26 @@ export function legacyHostOf(
 /** Pages that live on the apex rather than a camp's subdomain. */
 const APEX_PAGES = /^\/(?:login\/?$|i\/|reset\/|c\/)/;
 
+/** A public camp page, `/c/<slug>` and anything under it. */
+const PUBLIC_CAMP_PAGE = /^\/c\/[^/]+(\/.*)?$/;
+
 /**
  * Where a page on the old host lives now: path-for-path at the camp's
  * subdomain, except signing in, invites, recovery links and public camp pages,
- * which live on the apex.
+ * which live on the apex. An old host only ever served the one camp, so its
+ * public pages go to that camp's slug now, whatever slug the old link carried
+ * (Math Camp was `math-camp-group-w-m0d3` before the move renamed it).
  */
 export function movedTarget(
   url: URL,
   campOrigin: string,
   apexOrigin: string,
+  slug: string,
 ): string {
+  const publicPage = url.pathname.match(PUBLIC_CAMP_PAGE);
+  if (publicPage) {
+    return `${apexOrigin}/c/${slug}${publicPage[1] ?? ""}${url.search}`;
+  }
   const base = APEX_PAGES.test(url.pathname) ? apexOrigin : campOrigin;
   return `${base}${url.pathname}${url.search}`;
 }

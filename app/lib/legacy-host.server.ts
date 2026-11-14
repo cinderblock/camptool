@@ -138,7 +138,7 @@ export async function legacyHostResponse(
   if (LEGACY_HOST_PATHS.has(url.pathname)) return null;
   // biome-ignore lint/style/noNonNullAssertion: requestLegacyHost found it.
   const slug = LEGACY_HOSTS.get(host)!;
-  const target = movedTarget(url, campOrigin(slug, APEX), APEX.origin);
+  const target = movedTarget(url, campOrigin(slug, APEX), APEX.origin, slug);
   // Only a page load can carry the sign-in across; anything else (a form
   // post, a data request) just moves.
   if (request.method === "GET") {

@@ -37,7 +37,12 @@ describe("movedTarget", () => {
   const camp = "https://mathcamp.camptool.org";
   const apex = "https://camptool.org";
   const at = (p: string) =>
-    movedTarget(new URL(`https://camptool.mathcamp.us${p}`), camp, apex);
+    movedTarget(
+      new URL(`https://camptool.mathcamp.us${p}`),
+      camp,
+      apex,
+      "mathcamp",
+    );
   test("camp pages keep their path on the subdomain", () => {
     expect(at("/map?year=2026")).toBe(`${camp}/map?year=2026`);
     expect(at("/")).toBe(`${camp}/`);
@@ -49,5 +54,12 @@ describe("movedTarget", () => {
     expect(at("/reset/xyz")).toBe(`${apex}/reset/xyz`);
     expect(at("/c/mathcamp")).toBe(`${apex}/c/mathcamp`);
     expect(at("/loginx")).toBe(`${camp}/loginx`);
+  });
+  test("public pages under the old slug go to the camp's slug now", () => {
+    expect(at("/c/math-camp-group-w-m0d3")).toBe(`${apex}/c/mathcamp`);
+    expect(at("/c/math-camp-group-w-m0d3/schedule?day=2")).toBe(
+      `${apex}/c/mathcamp/schedule?day=2`,
+    );
+    expect(at("/c/")).toBe(`${apex}/c/`);
   });
 });
