@@ -6,9 +6,14 @@
  */
 export const DEV_PORT = Number(process.env.PORT ?? 17923);
 
-/** Public-facing base URL; falls back to the local dev server. */
-export const PUBLIC_BASE_URL =
-  process.env.PUBLIC_BASE_URL ?? `http://localhost:${DEV_PORT}`;
+/**
+ * Public-facing base URL; falls back to the local dev server. Trailing slashes
+ * are dropped, since callers append paths (`${PUBLIC_BASE_URL}/i/…`) and the
+ * Cloudflare dashboard happily stores `https://camptool.org/`.
+ */
+export const PUBLIC_BASE_URL = (
+  process.env.PUBLIC_BASE_URL || `http://localhost:${DEV_PORT}`
+).replace(/\/+$/, "");
 
 /** `PUBLIC_BASE_URL` parsed. With camp subdomains on, this is the apex. */
 export const APEX = new URL(PUBLIC_BASE_URL);
