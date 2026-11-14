@@ -37,6 +37,13 @@ another person's QR code; a red suite hides a real regression there. Could be
 the Bun version (the plan records 1.3.0) or a QR/PDF dependency behaving
 differently on Windows.
 
+**2026-11-13 (hosting thread):** it's the Bun version, not Windows. CI on
+Linux went red with exactly these 4 failures when its Bun pin moved 1.3.0 →
+1.4.4 (run 43563931189, commit `c33b02b`); the pin went back to 1.3.0. The
+production Docker image already runs Bun 1.4 (`FROM oven/bun:1.4`), so SAP
+PDF parsing/slicing may be broken on the live site, not just in tests. Fix
+before moving CI (or Workers Builds' `BUN_VERSION`) past 1.3.
+
 ### The public programming schedule exposes the server to the open internet
 
 **Raised:** Cameron, 2026-08-16. **Status:** deferred, "that's for later".
