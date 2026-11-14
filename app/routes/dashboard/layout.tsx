@@ -33,7 +33,7 @@ import { discordEnabled } from "~/lib/auth.server";
 import { authClient, signOut } from "~/lib/auth-client";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
-import { campOrigin, isValidCampSlug } from "~/lib/camp-host";
+import { campOrigin, isValidCampSlug, pageUrl } from "~/lib/camp-host";
 import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
 import { featureName } from "~/lib/events";
 import { countPendingEntries } from "~/lib/faq.server";
@@ -54,7 +54,7 @@ import { countProspectsNeedingAttention } from "~/lib/prospects.server";
 import { hasScheduledDays } from "~/lib/schedule.server";
 import { passkeyNagSnoozed, resolveActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
-import { membership, passkey } from "../../../db/schema";
+import { legacyPasskey, membership, passkey } from "../../../db/schema";
 import type { Route } from "./+types/layout";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -69,6 +69,34 @@ export async function loader({ request }: Route.LoaderArgs) {
     privacyMode,
     canUsePrivacy,
   } = await resolveActiveCamp(request);
+
+  // The passkey banner. Queried per USER rather than read off the ask snapshot
+  // below, because a credential belongs to the human: someone who hasn't joined
+  // a camp yet (so has no edition, and therefore no snapshot) still needs the
+  // prompt. The quiet, permanent half of this lives in the ask registry.
+  const [anyPasskey] = await db
+    .select({ id: passkey.id })
+    .from(passkey)
+    .where(eq(passkey.userId, user.id))
+    .limit(1);
+
+  // Someone whose passkeys were all made for the camp's old address can't sign
+  // in here with any of them. Before anything else, they make one that works
+  // (app/lib/legacy-host.server.ts). Not while an officer is working as them:
+  // that's not their browser.
+  if (!anyPasskey && !impersonatedBy) {
+    const [old] = await db
+      .select({ id: legacyPasskey.id })
+      .from(legacyPasskey)
+      .where(eq(legacyPasskey.userId, user.id))
+      .limit(1);
+    if (old) {
+      const here = pageUrl(request.url);
+      throw redirect(
+        `/new-passkey?next=${encodeURIComponent(here.pathname + here.search)}`,
+      );
+    }
+  }
 
   // Guide brand-new campers through the wizard. The forced redirect fires at
   // most once (wizardStep flips to 1 the first time /start loads) and stays
@@ -97,15 +125,6 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const superAdmin = await isSuperAdmin(user.id);
 
-  // The passkey banner. Queried per USER rather than read off the ask snapshot
-  // below, because a credential belongs to the human: someone who hasn't joined
-  // a camp yet (so has no edition, and therefore no snapshot) still needs the
-  // prompt. The quiet, permanent half of this lives in the ask registry.
-  const [anyPasskey] = await db
-    .select({ id: passkey.id })
-    .from(passkey)
-    .where(eq(passkey.userId, user.id))
-    .limit(1);
   const showPasskeyNag = !anyPasskey && !passkeyNagSnoozed(request);
 
   // Per-camp feature states (off / preview / on) drive which nav links exist

@@ -23,8 +23,17 @@ import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 
 import { Announcer, SkipLink } from "~/components/Announcer";
+import { legacyHostResponse } from "~/lib/legacy-host.server";
 import { installTelemetry, pushCrumb } from "~/lib/telemetry.client";
 import type { Route } from "./+types/root";
+
+// A camp's old address (LEGACY_HOSTS) serves nothing itself: every request is
+// sent on to the same page at its new one, signed in when it can be
+// (app/lib/legacy-host.server.ts). Runs before any loader, action or resource
+// route.
+export const middleware: Route.MiddlewareFunction[] = [
+  async ({ request }, next) => (await legacyHostResponse(request)) ?? next(),
+];
 
 // Mantine's body background only resolves once its CSS + ColorSchemeScript run.
 // On a dark-mode device that's a visible white flash. This inline <style> paints

@@ -61,6 +61,40 @@ DNS label, and names like `www`, `api` and `admin` are reserved
 
 The first account to sign up becomes the site's super admin.
 
+### Moving a camp from its own deploy
+
+A camp already running on its own Bun server (say `camptool.example.com`) can
+move onto the shared site without anyone signing up again:
+
+1. On the old site, Site admin → Backup. Keep the old site's
+   `BETTER_AUTH_SECRET`: set the same value on the new one, so its session
+   cookies still verify.
+2. Import into the new site's (still empty) D1 database and R2 bucket:
+
+   ```sh
+   bun scripts/import-to-d1.ts camptool-backup-YYYY-MM-DD.tar.gz \
+     --legacy-rp-id camptool.example.com \
+     --packs <slug>=<theme package> --discord-guild <slug>=<server id> \
+     --apply remote
+   ```
+
+   `--packs` and `--discord-guild` carry over what the old deploy had in env
+   (`CAMP_THEME`, `DISCORD_GUILD_ID`); the new site must bundle the pack in
+   `CAMP_THEMES`. Passwords, Discord links and sessions come across as they
+   are. The script refuses a D1 database that already has users.
+3. Set `vars.LEGACY_HOSTS` to `camptool.example.com=<slug>`, point the old
+   name's DNS at the Worker (proxied) and add a route
+   `camptool.example.com/*`.
+
+From then on, every page on the old address redirects to the same page at
+`<slug>.camptool.example.org`. A browser still signed in there arrives signed
+in. Passkeys can't move (each belongs to the address it was made for), so the
+old address keeps one page, `/moved`, where someone can use their old passkey
+once to be signed in at the new address; the app then has them make a new
+passkey before anything else. The login page links there for anyone who needs
+it. `e2e/camp-move.ts` and `e2e/camp-move-browser.ts` rehearse the whole move
+locally.
+
 ## Updating
 
 `bun run cf:deploy` again. Migrations are applied **before** the new Worker

@@ -102,3 +102,28 @@ export const passkey = sqliteTable("passkey", {
   aaguid: text("aaguid"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now),
 });
+
+/**
+ * Passkeys made for another address this camp used to live at (e.g.
+ * `camptool.mathcamp.us`, before the move to `<slug>.camptool.org`). A
+ * WebAuthn credential is bound to its RP ID, so these can't sign anyone in
+ * here. They exist only so the old address can still recognise its owner
+ * once and hand them over to the new one (app/lib/legacy-host.server.ts),
+ * after which they must make a new passkey. Kept out of `passkey` on purpose,
+ * so every "has a passkey" check counts only ones that work here.
+ */
+export const legacyPasskey = sqliteTable("legacy_passkey", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  /** The RP ID it was registered for: the old host name. */
+  rpId: text("rp_id").notNull(),
+  name: text("name"),
+  /** Same encodings as `passkey`: base64url credential id, base64 COSE key. */
+  credentialID: text("credential_id").notNull().unique(),
+  publicKey: text("public_key").notNull(),
+  counter: integer("counter").notNull(),
+  transports: text("transports"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(now),
+});

@@ -22,6 +22,14 @@ export default [
   // Snooze the passkey banner for 24h (resource route; sets a cookie).
   route("passkey-nag", "routes/passkey-nag.tsx"),
   route("start", "routes/start.tsx"),
+  // Moving a camp off its old address (app/lib/legacy-host.server.ts): the
+  // apex turns a one-time code into a session; the old address keeps only its
+  // "we've moved" page and the old-passkey check behind it; and anyone whose
+  // passkeys were all for the old address must make a new one.
+  route("handoff", "routes/handoff.tsx"),
+  route("moved", "routes/moved.tsx"),
+  route("api/legacy-passkey", "routes/api.legacy-passkey.tsx"),
+  route("new-passkey", "routes/new-passkey.tsx"),
   // Super-admin DB backup download (resource route; self-gated).
   route("export-db", "routes/export-db.tsx"),
   // Hand-off into the camp's bins inventory app, signed in (resource route;

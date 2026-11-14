@@ -52,6 +52,17 @@ jackson, any Docker host). Donations later; **no billing code**.
    event year" just moves on once an event is over. (Cameron.)
 9. **Other events (UnSCruz etc.) wait.** General offering eventually; their
    maps are irregular. Tracked in `plans/season-2027.md`, not here.
+10. **Host on Cameron's `isozilla` Cloudflare account** (Workers Paid is on
+    there), at least for now. (Cameron, 2026-11-13.)
+11. **Math Camp's structures stay Math Camp's.** The shared site bundles
+    `@camptool/mathcamp-theme` in `CAMP_THEMES` and switches it on for Math
+    Camp only. (Cameron.)
+12. **Math Camp moves onto the shared site**: `camptool.mathcamp.us` →
+    `mathcamp.camptool.org`. The old URL redirects automatically; user data
+    and logins are imported; a bridge handles passkeys, and users with old
+    passkeys are forced to make a new one for the new domain. (Cameron.)
+13. **No "Deploy to Cloudflare" button for now.** Hosting our couple of camps
+    on one account is enough. (Cameron, 2026-11-13.)
 
 ## Design
 
@@ -90,6 +101,31 @@ jackson, any Docker host). Donations later; **no billing code**.
   `*.camptool.org/*`; Universal SSL covers one wildcard level for free.
 - Later, maybe: a camp's own domain (e.g. `camptool.mathcamp.us`) mapped to
   its camp. Not now.
+
+### Moving a camp onto the shared site
+
+- `scripts/import-to-d1.ts <backup.tar.gz>`: migrates a copy of the old Bun
+  database to this checkout's schema, moves `passkey` rows to
+  `legacy_passkey` (with the old RP ID), applies `--packs` and
+  `--discord-guild` per camp, writes `data.sql` (clears migration-seeded rows,
+  then parents-first INSERTs; forward references deferred to UPDATEs, since
+  D1 always enforces foreign keys), and with `--apply` loads it plus every
+  upload into R2. Refuses a D1 database that already has users.
+- `LEGACY_HOSTS=camptool.mathcamp.us=mathcamp`: the old host's DNS points at
+  the Worker. Root middleware (`app/root.tsx` →
+  `app/lib/legacy-host.server.ts`) redirects every request there to the same
+  page at the new address (sign-in, invites, recovery, `/c/` to the apex). A
+  GET carrying a still-valid old session cookie (same `BETTER_AUTH_SECRET`,
+  imported `session` table) goes via a one-time hand-off code to apex
+  `/handoff`, which sets a new session cookie for the whole domain.
+- Passkeys are bound to their RP ID, so they can't move. `legacy_passkey`
+  keeps them out of `passkey` (every "has a passkey" check stays honest). The
+  old host keeps `/moved` + `/api/legacy-passkey`: a WebAuthn assertion with
+  the old RP ID, checked with `@simplewebauthn/server`, then the same hand-off.
+  The new login page links there.
+- Forced new passkey: the dashboard layout sends anyone with a legacy passkey
+  and no current one to `/new-passkey` (no skip; sign-out only) before
+  anything else, except while impersonated.
 
 ### Host adapters
 
@@ -153,18 +189,41 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    button is NOT done: it runs Workers Builds (`npm run build`, then a deploy
    command) in the deployer's account, so it needs the build to detect
    `WORKERS_CI` and a real account to test it on. Do it after step 7.
-7. [ ] **Current step.** Deploy to Cameron's Cloudflare account at
-   `camptool.org`: **needs his yes for each change**. In order:
-   a. Workers Paid plan on his account ($5/mo): his action.
-   b. `wrangler login` (or an API token) on this machine: his action.
-   c. `vars.PUBLIC_BASE_URL=https://camptool.org`, `CAMP_SUBDOMAINS=1`,
-      `CAMP_THEMES` (which packs to bundle) in `wrangler.jsonc`.
-   d. `wrangler secret put BETTER_AUTH_SECRET` (+ Discord, optional).
-   e. `bun run cf:deploy`: creates D1 `camptool` + R2 `camptool-uploads`.
-   f. DNS on camptool.org: apex + proxied wildcard `*`, Worker routes for
-      `camptool.org/*` and `*.camptool.org/*`.
-   g. Sign up first (becomes super admin), turn off open camp creation if
-      wanted, create the friend's camp.
+7. [x] Moving a camp onto the shared site (Design above): import script,
+   old-host redirects with sign-in hand-off, old-passkey bridge, forced new
+   passkey, login-page pointer. Verified locally end to end: a Bun site
+   standing in for the old one → backup → `import-to-d1.ts --apply local` →
+   `wrangler dev` serving both hosts: `e2e/camp-move.ts` 18/18 (twice, and on
+   a second fresh import), and in real headless Chrome with a virtual
+   authenticator holding the old passkey, `e2e/camp-move-browser.ts` 3/3 (old
+   passkey on the old host → signed in at the new address → forced to make a
+   new passkey → signed out, the new passkey signs in and lands in the camp).
+8. [ ] **Current step.** Deploy to the `isozilla` account and move Math Camp.
+   **Each change needs Cameron's yes.** In order:
+   a. `wrangler login` on this machine with the isozilla account (his action).
+   b. Production config. Proposal: an ops-owned deploy script (ops repo, not
+      CampTool's `wrangler.jsonc`, which stays a self-hoster default) that runs
+      in the CampTool checkout: `CAMP_THEMES=@camptool/mathcamp-theme bun run
+      cf:build`, `wrangler d1 migrations apply DB --remote`, then `wrangler
+      deploy --var PUBLIC_BASE_URL:https://camptool.org --var
+      CAMP_SUBDOMAINS:1 --var LEGACY_HOSTS:camptool.mathcamp.us=mathcamp`.
+   c. Secrets via `wrangler secret put`: `BETTER_AUTH_SECRET` (**the same
+      value as firefly's**), `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`,
+      `DISCORD_BOT_TOKEN`, `DEV_API_TOKEN`.
+   d. First deploy: creates D1 `camptool` + R2 `camptool-uploads` (empty).
+   e. Discord developer portal: add redirect
+      `https://camptool.org/api/auth/callback/discord` (his action).
+   f. Ops Cloudflare config: `camptool.org` apex + proxied `*` records, Worker
+      routes `camptool.org/*` and `*.camptool.org/*`. Smoke-test there.
+   g. Cutover (a quiet hour; writes to firefly after the backup are lost):
+      backup from firefly's Site admin → `import-to-d1.ts --legacy-rp-id
+      camptool.mathcamp.us --packs mathcamp=@camptool/mathcamp-theme
+      --discord-guild mathcamp=<firefly's DISCORD_GUILD_ID> --apply remote` →
+      ops `mathcamp.yaml`: `camptool.mathcamp.us` from `proxy: firefly` to the
+      Worker route.
+   h. Later: retire firefly's camptool stack and Caddy site (ops change).
+      Keep `LEGACY_HOSTS` for as long as old links and passkeys matter.
+   The deploy button (old step 6) is dropped (decision 13).
 
 ## Findings / gotchas
 
@@ -202,6 +261,24 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   Design). Sources: Cloudflare D1 foreign-keys docs; brachkow.com note
   (May 2026).
 
+- **Chrome won't use `localhost` as the RP ID for a `*.localhost` page**
+  ("The RP ID "localhost" is invalid for this domain"). Local passkey tests
+  on subdomains need real-looking names (`camptool.test` via
+  `--host-resolver-rules`) plus `--unsafely-treat-insecure-origin-as-secure`,
+  which only works in full Chromium (`channel: "chromium"`) with a profile
+  directory (`launchPersistentContext`); the headless shell ignores it
+  ("WebAuthn is not supported in this browser").
+- **A loader sees `<page>.data` on client navigations** (`/_.data` for `/`).
+  Redirecting one to another host must name the page (`pageUrl()` in
+  `camp-host.ts`); before the fix, signing in with a passkey on the apex
+  landed on `mathcamp.<apex>/_.data`. Covered by `e2e/camp-subdomains.ts`.
+- A fresh D1 isn't empty: migration 0011 seeds `instance_setting`. The import
+  clears every table first ("UNIQUE constraint failed: instance_setting.id").
+- Git for Windows' `tar` reads `C:\...` as a remote host ("Cannot connect to
+  C: resolve failed"); the import script runs it with relative paths.
+- `CAMP_THEMES` and `--packs` take package names (`@camptool/mathcamp-theme`),
+  not slugs.
+
 ## Progress log
 
 - [x] 2026-11-13: surveyed coupling, costed Cloudflare (Workers Paid $5/mo;
@@ -209,16 +286,16 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 - [x] 2026-11-13: steps 1–5 and 3b built, verified and pushed to master
   (`f08991d`..`48181de`). Lint on master was already red before this
   (Biome 2 upgrade leftovers in map/passes/index/auth/e2e); not touched.
+- [x] 2026-11-13: step 7 (moving a camp) built and rehearsed locally.
+- [ ] Step 8: deploy and Math Camp cutover, waiting on Cameron.
 
 ## Open questions for the user
 
-1. Where is `camptool.org` registered, and is its DNS on Cloudflare yet?
-   (Decides step 7f.)
-2. Should the shared site bundle Math Camp's structure pack (`CAMP_THEMES`
-   for per-camp use), or start with none?
-3. Does Math Camp's own deploy (firefly) take this build? It's safe as-is
-   (new columns only; `CAMP_THEME` keeps its packs server-wide), but bumping
-   ops `pin.json` is an ops change that needs your yes.
+1. Is `camptool.org`'s DNS on the isozilla account yet? (Step 8f.)
+2. OK to put the production deploy in the ops repo as a script (step 8b)?
+   Recommended: keeps camptool.org's settings out of the open-source repo.
+3. Where should `BETTER_AUTH_SECRET` and the Discord secrets come from: read
+   from firefly's env (needs a yes to read it), or will Cameron paste them?
 
 ## Things not to do
 

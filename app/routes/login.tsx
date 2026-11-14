@@ -22,6 +22,7 @@ import { signIn, signUp } from "~/lib/auth-client";
 import { safeNext } from "~/lib/camp-host";
 import { APEX } from "~/lib/env.server";
 import { getInstanceSettings } from "~/lib/instance.server";
+import { LEGACY_HOSTS } from "~/lib/legacy-host.server";
 import { getSession } from "~/lib/session.server";
 import type { Route } from "./+types/login";
 
@@ -39,7 +40,21 @@ export async function loader({ request }: Route.LoaderArgs) {
   // Set by /reset/:token after a successful password reset — the only way in
   // when there's no mail transport (plans/password-recovery.md).
   const justReset = new URL(request.url).searchParams.get("reset") === "1";
-  return { discordEnabled, mailEnabled, allowOpenSignups, justReset, next };
+  // A camp that moved here from its own address (LEGACY_HOSTS): passkeys
+  // made there can't sign in here, so offer the old address's bridge.
+  const movedFrom = [...LEGACY_HOSTS.keys()].map((host) => ({
+    host,
+    // Same scheme and (in local dev) port as here.
+    bridge: `${APEX.protocol}//${host}${!host.includes(":") && APEX.port ? `:${APEX.port}` : ""}/moved${next ? `?next=${encodeURIComponent(next)}` : ""}`,
+  }));
+  return {
+    discordEnabled,
+    mailEnabled,
+    allowOpenSignups,
+    justReset,
+    next,
+    movedFrom,
+  };
 }
 
 export default function Login({ loaderData }: Route.ComponentProps) {
@@ -135,6 +150,20 @@ export default function Login({ loaderData }: Route.ComponentProps) {
           consider adding a passkey so you never need a password again.
         </Alert>
       ) : null}
+
+      {loaderData.movedFrom.map(({ host, bridge }) => (
+        <Alert
+          key={host}
+          color="blue"
+          mt="lg"
+          title={`Moved here from ${host}?`}
+        >
+          Your account came along, and your password and Discord sign-in work
+          here. A passkey made for {host} doesn't, so{" "}
+          <Anchor href={bridge}>use it once at {host}</Anchor> to get signed in
+          here, then make a new one.
+        </Alert>
+      ))}
 
       <Paper withBorder shadow="sm" p="lg" radius="md" mt="xl">
         <Tabs defaultValue="signin">

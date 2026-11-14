@@ -17,6 +17,8 @@
         "@mantine/notifications": "^9.0.0",
         "@react-router/node": "^8.0.0",
         "@react-router/serve": "^8.0.0",
+        "@simplewebauthn/browser": "13.3.0",
+        "@simplewebauthn/server": "13.3.3",
         "better-auth": "^1.7.15",
         "bwip-js": "^4.11.4",
         "dayjs": "^1.11.13",

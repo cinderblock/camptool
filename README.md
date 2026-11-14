@@ -328,7 +328,10 @@ multi-camp site): `bun run cf:preview` to try it locally with no account,
 `bun run cf:deploy` to ship it. See
 [`docs/cloudflare-deploy.md`](docs/cloudflare-deploy.md). The host is chosen at
 build time through the `#host/db` and `#host/blobs` imports in `package.json`,
-so neither build carries the other's code.
+so neither build carries the other's code. A camp on its own Bun deploy can move
+onto a shared Cloudflare site with its accounts and sign-ins intact
+(`scripts/import-to-d1.ts`; its old address keeps redirecting, see
+`LEGACY_HOSTS` in the same doc).
 
 ## Design notes
 

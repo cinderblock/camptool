@@ -20,6 +20,12 @@ const APP = join(import.meta.dir, "..");
 /** Routes with a loader that deliberately does NOT redact, and why. */
 const EXEMPT: Record<string, string> = {
   "routes/login.tsx": "Sign-in page; renders no camp data.",
+  "routes/handoff.tsx":
+    "Turns a one-time code into a session and redirects; returns no payload.",
+  "routes/moved.tsx":
+    "A camp's old address: renders only host names, no camp or personal data.",
+  "routes/new-passkey.tsx":
+    "Renders only the old host name and a button; no camp or personal data.",
   "routes/api.auth.$.tsx": "better-auth passthrough; not our payload shape.",
   "routes/export-db.tsx":
     "Raw SQLite bytes can't be transformed in flight — privacy mode refuses " +
