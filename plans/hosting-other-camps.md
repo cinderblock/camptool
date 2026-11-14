@@ -63,6 +63,14 @@ jackson, any Docker host). Donations later; **no billing code**.
     passkeys are forced to make a new one for the new domain. (Cameron.)
 13. **No "Deploy to Cloudflare" button for now.** Hosting our couple of camps
     on one account is enough. (Cameron, 2026-11-13.)
+14. **Deploys go through ops, never a `wrangler login` here.** Cloudflare
+    Workers Builds reading a deploy branch of CampTool (even `master`) is fine.
+    Ops provisions the empty Worker, D1, R2, DNS and routes, the same split
+    as `empyreangate-org` and `telemetry-collector` in ops. (Cameron,
+    2026-11-13.)
+15. **Discord connections should be per camp, probably runtime config**
+    rather than deploy env. (Cameron, 2026-11-13; exact shape still open, see
+    Open questions.)
 
 ## Design
 
@@ -199,26 +207,32 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    passkey on the old host → signed in at the new address → forced to make a
    new passkey → signed out, the new passkey signs in and lands in the camp).
 8. [ ] **Current step.** Deploy to the `isozilla` account and move Math Camp.
-   **Each change needs Cameron's yes.** In order:
-   a. `wrangler login` on this machine with the isozilla account (his action).
-   b. Production config. Proposal: an ops-owned deploy script (ops repo, not
-      CampTool's `wrangler.jsonc`, which stays a self-hoster default) that runs
-      in the CampTool checkout: `CAMP_THEMES=@camptool/mathcamp-theme bun run
-      cf:build`, `wrangler d1 migrations apply DB --remote`, then `wrangler
-      deploy --var PUBLIC_BASE_URL:https://camptool.org --var
-      CAMP_SUBDOMAINS:1 --var LEGACY_HOSTS:camptool.mathcamp.us=mathcamp`.
-   c. Secrets via `wrangler secret put`: `BETTER_AUTH_SECRET` (**the same
-      value as firefly's**), `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`,
-      `DISCORD_BOT_TOKEN`, `DEV_API_TOKEN`.
-   d. First deploy: creates D1 `camptool` + R2 `camptool-uploads` (empty).
+   **Each change needs Cameron's yes**, and every infrastructure change goes
+   through the ops repo (decision 14). Draft order:
+   a. Settle the Discord shape (decision 15) and the login secret (Open
+      questions 2-3); may add a CampTool code step before deploying.
+   b. Ops: `cloudflare/config/workers/camptool.yaml` (or similar): D1
+      `camptool`, R2 `camptool-uploads`, empty Worker `camptool`
+      (`external: true`, `provision: true`), `camptool.org` apex + proxied `*`,
+      routes `camptool.org/*` and `*.camptool.org/*`. Staged, shown, applied on
+      a yes.
+   c. Workers Builds on that Worker from `cinderblock/CampTool`, deploy branch
+      (name open). Build: `CAMP_THEMES=@camptool/mathcamp-theme bun run
+      cf:build`; deploy: migrations then `wrangler deploy` with production vars
+      (`PUBLIC_BASE_URL=https://camptool.org`, `CAMP_SUBDOMAINS=1`,
+      `LEGACY_HOSTS=camptool.mathcamp.us=mathcamp`). Where the production vars
+      live (a `wrangler.jsonc` env vs. dashboard vars kept with `keep_vars`) is
+      to decide with the ops change. Use the `cloudflare-workers-builds` skill
+      to walk Cameron through the connection.
+   d. Secrets on the Worker (Cameron's call on sourcing).
    e. Discord developer portal: add redirect
       `https://camptool.org/api/auth/callback/discord` (his action).
-   f. Ops Cloudflare config: `camptool.org` apex + proxied `*` records, Worker
-      routes `camptool.org/*` and `*.camptool.org/*`. Smoke-test there.
+   f. Smoke-test on camptool.org with a throwaway camp.
    g. Cutover (a quiet hour; writes to firefly after the backup are lost):
       backup from firefly's Site admin → `import-to-d1.ts --legacy-rp-id
       camptool.mathcamp.us --packs mathcamp=@camptool/mathcamp-theme
-      --discord-guild mathcamp=<firefly's DISCORD_GUILD_ID> --apply remote` →
+      --discord-guild mathcamp=<firefly's DISCORD_GUILD_ID> --apply remote`
+      (the import's wrangler calls need a token, to sort out with ops) →
       ops `mathcamp.yaml`: `camptool.mathcamp.us` from `proxy: firefly` to the
       Worker route.
    h. Later: retire firefly's camptool stack and Caddy site (ops change).
@@ -287,15 +301,28 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   (`f08991d`..`48181de`). Lint on master was already red before this
   (Biome 2 upgrade leftovers in map/passes/index/auth/e2e); not touched.
 - [x] 2026-11-13: step 7 (moving a camp) built and rehearsed locally.
-- [ ] Step 8: deploy and Math Camp cutover, waiting on Cameron.
+- [ ] Step 8: deploy and Math Camp cutover, waiting on Cameron. 2026-11-13:
+  corrected to deploy through ops + Workers Builds (decision 14).
 
 ## Open questions for the user
 
-1. Is `camptool.org`'s DNS on the isozilla account yet? (Step 8f.)
-2. OK to put the production deploy in the ops repo as a script (step 8b)?
-   Recommended: keeps camptool.org's settings out of the open-source repo.
-3. Where should `BETTER_AUTH_SECRET` and the Discord secrets come from: read
-   from firefly's env (needs a yes to read it), or will Cameron paste them?
+1. Is `camptool.org`'s DNS on the isozilla account yet? (Not in ops config
+   as of 2026-11-13.)
+2. Discord per camp (decision 15): today the **server** is already per camp
+   and set at runtime (camp Settings, `camp.discord_guild_id`); the **app**
+   (`DISCORD_CLIENT_ID`/`SECRET`, used for "Sign in with Discord" on the apex)
+   and the **bot token** (member checks) are site-wide env. Recommended: one
+   shared CampTool Discord app + bot for the whole site, which each camp
+   invites into its own server (the normal model for a Discord bot); a camp
+   bringing its own bot is a later option, stored per camp in the database.
+   Also: reuse Math Camp's existing Discord app as the shared one, or make a
+   new "CampTool" app (then Math Camp re-invites the bot; Discord user IDs are
+   the same across apps, so existing links survive)?
+3. `BETTER_AUTH_SECRET`: copy firefly's (people signed in on the old site
+   arrive signed in) or generate a fresh one for the Worker (everyone signs in
+   once; passwords, Discord and the `/moved` passkey bridge all still work).
+   Recommended: fresh, so no secret has to travel between systems.
+4. Deploy branch name: `master`, or a dedicated `deploy` branch?
 
 ## Things not to do
 
