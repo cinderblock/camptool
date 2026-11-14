@@ -271,7 +271,8 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
         1 camp, 8 passkeys. Writes to firefly after that are not carried.
       - Firefly's real slug was `math-camp-group-w-m0d3`, not `mathcamp`;
         `474954c` added `--rename-slug`. Old `/c/math-camp-group-w-m0d3`
-        public links now 404.
+        links 404'd until `bd6e170`: the old host now sends any `/c/…` to
+        `/c/<its camp's slug>` (verified live).
       - `import-to-d1.ts … --rename-slug math-camp-group-w-m0d3=mathcamp
         --packs mathcamp=@camptool/mathcamp-theme --apply remote`: 1240 rows,
         3 uploads. Rehearsed into a scratch local D1 first. The ops
