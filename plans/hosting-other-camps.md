@@ -242,12 +242,18 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    b2. [ ] Worker variables (Cameron, dashboard): `PUBLIC_BASE_URL=
       https://camptool.org`, `CAMP_SUBDOMAINS=1`, `LEGACY_HOSTS=
       camptool.mathcamp.us=mathcamp`. Not on the Worker yet as of 10:30 PM.
-   c. [ ] Secrets on the Worker: `BETTER_AUTH_SECRET` and `DEV_API_TOKEN`
+   c. [x] Secrets on the Worker: `BETTER_AUTH_SECRET` and `DEV_API_TOKEN`
       copied from firefly (`/opt/deployment-state/firefly/camptool/.env`)
-      without printing them; Discord secrets once the app exists. **Blocked:**
-      the local ops token (`cloudflare/.env.local` `CF_API_TOKEN`) gets "No
-      access to the specified resource." on PUT `.../scripts/camptool/secrets`.
-      Waiting on Cameron for a way in (see Open questions).
+      without printing them (2026-11-14, both 48 chars, API `success: true`),
+      using a short-lived Workers Scripts Edit token from Cameron via
+      `request_secret`; the local copy was deleted after use. The local ops
+      token (`cloudflare/.env.local` `CF_API_TOKEN`) can't write Worker
+      secrets ("No access to the specified resource."). Discord secrets
+      follow once the app exists (step d).
+   c2. [ ] Worker variables (runtime, type Text, in the dashboard; Cameron):
+      `PUBLIC_BASE_URL=https://camptool.org`, `CAMP_SUBDOMAINS=1`,
+      `LEGACY_HOSTS=camptool.mathcamp.us=mathcamp`. Not set as of
+      2026-11-14.
    d. Discord: Cameron makes one "CampTool" application (redirect
       `https://camptool.org/api/auth/callback/discord`), then its client ID,
       secret and bot token go on the Worker.
@@ -343,10 +349,7 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 
 ## Open questions for the user
 
-1. How do firefly's `BETTER_AUTH_SECRET` and `DEV_API_TOKEN` get onto the
-   Worker? The local ops token can't write Worker secrets. Recommended: a
-   short-lived token (Account → Workers Scripts → Edit) handed over through
-   `request_secret`, used once, then revoked by Cameron.
+(None open, 2026-11-14.)
 
 ## Things not to do
 
