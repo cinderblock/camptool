@@ -225,8 +225,12 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
       provisioned Worker `camptool` as `camptool.org`'s custom domain, proxied
       CNAME `*.camptool.org` → apex, route `*.camptool.org/*`, zone SSL
       strict + always HTTPS. Local dry run: 6 creates, 1 update, 0 deletes,
-      nothing outside camptool.org. **Waiting on Cameron's yes** to push it
-      to ops `master` (CI applies).
+      nothing outside camptool.org. Cameron said yes; pushed as ops
+      `fc6b34b8`, applied by Cloudflare run 43555859593 (2026-11-13 8:17 PM
+      PST, 04:17Z): all 7 changes made. `https://camptool.org/` answers ops'
+      503 placeholder. `*.camptool.org` resolves but its TLS handshake failed
+      right after (certificate presumably still issuing); recheck.
+      Account: `c5987fbfdbb396ef3121459c26125cc0`.
    b. Workers Builds on the `camptool` Worker from `cinderblock/camptool`
       `master` (Cameron, in the dashboard; walk through with the
       `cloudflare-workers-builds` skill). Build: `CAMP_THEMES=@camptool/
