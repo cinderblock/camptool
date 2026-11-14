@@ -50,6 +50,7 @@ import {
 } from "react-router";
 import { auth, discordEnabled } from "~/lib/auth.server";
 import { authClient } from "~/lib/auth-client";
+import { defaultDeviceName } from "~/lib/device-name";
 import { addToGroup, listGroups, removeFromGroup } from "~/lib/groups.server";
 import { redact } from "~/lib/privacy.server";
 import { resolveActiveCamp } from "~/lib/session.server";
@@ -1001,14 +1002,3 @@ function PasskeyRow({
 }
 
 /** A best-effort human label so people aren't all staring at "My device". */
-function defaultDeviceName(): string {
-  if (typeof navigator === "undefined") return "My device";
-  const ua = navigator.userAgent;
-  if (/iPhone/.test(ua)) return "iPhone";
-  if (/iPad/.test(ua)) return "iPad";
-  if (/Android/.test(ua)) return "Android phone";
-  if (/Mac OS X/.test(ua)) return "Mac";
-  if (/Windows/.test(ua)) return "Windows PC";
-  if (/Linux/.test(ua)) return "Linux PC";
-  return "My device";
-}

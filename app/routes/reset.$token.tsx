@@ -40,26 +40,13 @@ import {
   useParams,
 } from "react-router";
 import { authClient } from "~/lib/auth-client";
+import { defaultDeviceName } from "~/lib/device-name";
 import {
   inspectPasswordReset,
   type ResetLinkState,
   redeemPasswordReset,
 } from "~/lib/password-reset.server";
 import type { Route } from "./+types/reset.$token";
-
-/** A best-effort human label so people aren't all staring at "My device".
- * Mirrors the helper on /account. */
-function defaultDeviceName(): string {
-  if (typeof navigator === "undefined") return "My device";
-  const ua = navigator.userAgent;
-  if (/iPhone/.test(ua)) return "iPhone";
-  if (/iPad/.test(ua)) return "iPad";
-  if (/Android/.test(ua)) return "Android phone";
-  if (/Mac OS X/.test(ua)) return "Mac";
-  if (/Windows/.test(ua)) return "Windows PC";
-  if (/Linux/.test(ua)) return "Linux PC";
-  return "My device";
-}
 
 export function meta(_: Route.MetaArgs) {
   return [{ title: "Get back into your account · CampTool" }];
