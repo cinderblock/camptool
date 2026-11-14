@@ -228,21 +228,26 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
       nothing outside camptool.org. Cameron said yes; pushed as ops
       `fc6b34b8`, applied by Cloudflare run 43555859593 (2026-11-13 8:17 PM
       PST, 04:17Z): all 7 changes made. `https://camptool.org/` answers ops'
-      503 placeholder. `*.camptool.org` resolves but its TLS handshake failed
-      right after (certificate presumably still issuing); recheck.
+      503 placeholder. (`*.camptool.org` worked too; an earlier "TLS
+      failing" note was a malformed curl command, exit 43.)
       Account: `c5987fbfdbb396ef3121459c26125cc0`.
-   b. Workers Builds on the `camptool` Worker from `cinderblock/camptool`
-      `master` (Cameron, in the dashboard; walk through with the
-      `cloudflare-workers-builds` skill). Build: `CAMP_THEMES=@camptool/
-      mathcamp-theme bun run cf:build`; deploy: `bunx wrangler d1 migrations
-      apply DB --remote && bunx wrangler deploy --var
-      PUBLIC_BASE_URL:https://camptool.org --var CAMP_SUBDOMAINS:1 --var
-      LEGACY_HOSTS:camptool.mathcamp.us=mathcamp`. Check on the first build
-      that wrangler binds the ops-made D1/R2 by name rather than making new
-      ones.
-   c. Secrets on the Worker: `BETTER_AUTH_SECRET` and `DEV_API_TOKEN` copied
-      from firefly (`/opt/deployment-state/firefly/camptool/.env`) without
-      printing them; Discord secrets once the app exists.
+   b. [x] Workers Builds connected by Cameron (2026-11-13): `master`, build
+      `bun run cf:build`, deploy `bunx wrangler d1 migrations apply DB
+      --remote && bunx wrangler deploy`, build variables `BUN_VERSION=1.4.4`
+      and `CAMP_THEMES=@camptool/mathcamp-theme`. First build `1d394eb9`
+      (`eef9746`, 10:18 PM PST, 06:18Z) succeeded: 91 migrations on the
+      ops-made D1 `6e55063c…`, bound by name, R2 likewise. Settings live on
+      the Worker, not in `wrangler.jsonc` (`keep_vars: true`, `eef9746`).
+      Also reachable at `camptool.isozilla.workers.dev`.
+   b2. [ ] Worker variables (Cameron, dashboard): `PUBLIC_BASE_URL=
+      https://camptool.org`, `CAMP_SUBDOMAINS=1`, `LEGACY_HOSTS=
+      camptool.mathcamp.us=mathcamp`. Not on the Worker yet as of 10:30 PM.
+   c. [ ] Secrets on the Worker: `BETTER_AUTH_SECRET` and `DEV_API_TOKEN`
+      copied from firefly (`/opt/deployment-state/firefly/camptool/.env`)
+      without printing them; Discord secrets once the app exists. **Blocked:**
+      the local ops token (`cloudflare/.env.local` `CF_API_TOKEN`) gets "No
+      access to the specified resource." on PUT `.../scripts/camptool/secrets`.
+      Waiting on Cameron for a way in (see Open questions).
    d. Discord: Cameron makes one "CampTool" application (redirect
       `https://camptool.org/api/auth/callback/discord`), then its client ID,
       secret and bot token go on the Worker.
@@ -318,6 +323,13 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   patterns like `*.camptool.org/*`), so the wildcard needed no ops code.
   Workers custom domains can't be wildcards.
 
+- Bun 1.4 broke SAP PDF reading (fixed in `29bce2a`): `getOperatorList()`
+  resolves before pdf.js has decoded the images it names, so the synchronous
+  `objs.get(name)` threw "Requesting object that isn't resolved yet". Use the
+  callback form. CI now on Bun 1.4.4.
+- Workers Builds "Variables" are build-time only; runtime settings are
+  Worker variables, kept across deploys by `keep_vars: true`.
+
 ## Progress log
 
 - [x] 2026-11-13: surveyed coupling, costed Cloudflare (Workers Paid $5/mo;
@@ -331,7 +343,10 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 
 ## Open questions for the user
 
-(None open: decisions 14-17 answered the last round, 2026-11-13.)
+1. How do firefly's `BETTER_AUTH_SECRET` and `DEV_API_TOKEN` get onto the
+   Worker? The local ops token can't write Worker secrets. Recommended: a
+   short-lived token (Account → Workers Scripts → Edit) handed over through
+   `request_secret`, used once, then revoked by Cameron.
 
 ## Things not to do
 
