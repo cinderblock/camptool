@@ -354,6 +354,12 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   callback form. CI now on Bun 1.4.4.
 - Workers Builds "Variables" are build-time only; runtime settings are
   Worker variables, kept across deploys by `keep_vars: true`.
+- **Passkey plugin quirks** (2026-11-14): `addPasskey({ name })` sent the
+  device label as the WebAuthn account name, so phones listed passkeys as
+  "iPhone"; a before-hook blanks it (`f7aaeed`; hook results merge with defu,
+  which skips `undefined`, so it's `""`). And `signIn.passkey()` reports any
+  browser refusal, including "no passkey for this site", as "auth
+  cancelled"; the login page now explains it (`0413658`).
 
 ## Progress log
 
