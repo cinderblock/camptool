@@ -109,10 +109,45 @@ export function readQr(img: PdfImage): string | null {
   return jsQR(rgba, img.width, img.height)?.data?.trim() || null;
 }
 
+type ObjStore = {
+  get: (name: string, callback?: (data: unknown) => void) => unknown;
+};
+
 type PageLike = {
   getOperatorList: () => Promise<{ fnArray: number[]; argsArray: unknown[][] }>;
-  objs: { get: (name: string) => unknown };
+  objs: ObjStore;
+  commonObjs?: ObjStore;
 };
+
+/** How long to wait for pdf.js to finish decoding one image. */
+const IMAGE_WAIT_MS = 10_000;
+
+/**
+ * An image the page paints, once pdf.js has decoded it.
+ *
+ * `getOperatorList()` can resolve before the images it names are decoded:
+ * pdf.js sends them over its (fake) worker channel separately. Under Bun 1.3
+ * they happened to arrive first; under 1.4 they don't, and the synchronous
+ * `objs.get(name)` throws "Requesting object that isn't resolved yet", which
+ * read as "no QR on this page". The callback form waits for it. Images shared
+ * across pages (`g_…`) live in `commonObjs`.
+ */
+function resolvedImage(page: PageLike, name: string): Promise<unknown> {
+  const store =
+    name.startsWith("g_") && page.commonObjs ? page.commonObjs : page.objs;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), IMAGE_WAIT_MS);
+    try {
+      store.get(name, (data) => {
+        clearTimeout(timer);
+        resolve(data);
+      });
+    } catch {
+      clearTimeout(timer);
+      resolve(null); // referenced but unresolvable: not something we can read
+    }
+  });
+}
 
 /**
  * The square images a page paints, in drawing order.
@@ -135,13 +170,7 @@ async function squareImagesOnPage(
 
   const out: PdfImage[] = [];
   for (const name of names) {
-    let img: unknown;
-    try {
-      img = page.objs.get(name);
-    } catch {
-      continue; // referenced but unresolvable — not something we can read
-    }
-    const c = img as PdfImage;
+    const c = (await resolvedImage(page, name)) as PdfImage | null;
     if (!c?.data || !c.width || !c.height) continue;
     if (Math.abs(c.width - c.height) > 1) continue; // a QR is square
     out.push(c);

@@ -23,27 +23,6 @@ in that HTML. Probably the test is stale rather than the feature broken, but
 check that an officer can still reach the thread from Members. 9h (the inverse
 check) passes vacuously for the same reason, so it proves nothing right now.
 
-### `sap-pdf.test.ts` fails locally (4 tests)
-
-**Raised:** map-aerial thread, 2026-11-05. **Status:** not investigated.
-
-On Cameron's Windows box with Bun 1.4.2 and a fresh `bun install
---frozen-lockfile`, `bun test` has 4 failures, all in `app/lib/sap-pdf.test.ts`:
-`parseSapPdf > reads one pass per page…` ("page 1 did not parse"), and three
-`sliceSapPage` cases where `scanCodesInPdf` finds 0 QR codes where 1 is
-expected. Every other suite passes (437). Untouched by the commit that noticed
-it. **Why it matters:** the SAP slice/scan code guards against a pass leaking
-another person's QR code; a red suite hides a real regression there. Could be
-the Bun version (the plan records 1.3.0) or a QR/PDF dependency behaving
-differently on Windows.
-
-**2026-11-13 (hosting thread):** it's the Bun version, not Windows. CI on
-Linux went red with exactly these 4 failures when its Bun pin moved 1.3.0 →
-1.4.4 (run 43563931189, commit `c33b02b`); the pin went back to 1.3.0. The
-production Docker image already runs Bun 1.4 (`FROM oven/bun:1.4`), so SAP
-PDF parsing/slicing may be broken on the live site, not just in tests. Fix
-before moving CI (or Workers Builds' `BUN_VERSION`) past 1.3.
-
 ### The public programming schedule exposes the server to the open internet
 
 **Raised:** Cameron, 2026-08-16. **Status:** deferred, "that's for later".
