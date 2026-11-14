@@ -261,14 +261,28 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    d. Discord: Cameron makes one "CampTool" application (redirect
       `https://camptool.org/api/auth/callback/discord`), then its client ID,
       secret and bot token go on the Worker.
-   e. Smoke-test on camptool.org with a throwaway camp.
-   f. Cutover (a quiet hour; writes to firefly after the backup are lost):
-      backup from firefly's Site admin → `import-to-d1.ts --legacy-rp-id
-      camptool.mathcamp.us --packs mathcamp=@camptool/mathcamp-theme --apply
-      remote` (no `--discord-guild`: firefly had none set; the import's
-      wrangler calls need a token, to sort out with ops) → ops
-      `mathcamp.yaml`: `camptool.mathcamp.us` from `proxy: firefly` to a
-      custom domain on the `camptool` Worker.
+   e. [-] Throwaway-camp smoke test dropped (Cameron, 2026-11-14): the
+      import refuses a D1 with any users, and the first sign-up becomes
+      super admin, so we cut over and tested with the real data instead.
+   f. [x] Cutover, 2026-11-14 ~1:45–2:30 AM PST (09:45–10:30Z):
+      - Backup: `VACUUM INTO` snapshot of
+        `/var/lib/docker/volumes/camptool_app/_data/data/camptool.db` plus
+        `uploads/`, over ssh at 1:46 AM PST (09:46Z); integrity ok. 42 users,
+        1 camp, 8 passkeys. Writes to firefly after that are not carried.
+      - Firefly's real slug was `math-camp-group-w-m0d3`, not `mathcamp`;
+        `474954c` added `--rename-slug`. Old `/c/math-camp-group-w-m0d3`
+        public links now 404.
+      - `import-to-d1.ts … --rename-slug math-camp-group-w-m0d3=mathcamp
+        --packs mathcamp=@camptool/mathcamp-theme --apply remote`: 1240 rows,
+        3 uploads. Rehearsed into a scratch local D1 first. The ops
+        `CLOUDFLARE_API_TOKEN` can read D1 but not import ("Authentication
+        error [code: 10000]"); used a short-lived D1 Edit + Workers R2
+        Storage Edit token from Cameron.
+      - Ops `f2c3439a`: a worker route `camptool.mathcamp.us/*` (the proxied
+        CNAME to firefly kept, so a rollback is deleting the `worker:` block).
+        Applied by ops run 43621073150. Verified: `/` → 302
+        `https://mathcamp.camptool.org/`, `/login` → 302
+        `https://camptool.org/login`, `/moved` → 200 "We've moved".
    g. Later: retire firefly's camptool stack and Caddy site (ops change).
       Keep `LEGACY_HOSTS` for as long as old links and passkeys matter.
    The deploy button (old step 6) is dropped (decision 13).
