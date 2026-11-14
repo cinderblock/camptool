@@ -250,10 +250,14 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
       token (`cloudflare/.env.local` `CF_API_TOKEN`) can't write Worker
       secrets ("No access to the specified resource."). Discord secrets
       follow once the app exists (step d).
-   c2. [ ] Worker variables (runtime, type Text, in the dashboard; Cameron):
-      `PUBLIC_BASE_URL=https://camptool.org`, `CAMP_SUBDOMAINS=1`,
-      `LEGACY_HOSTS=camptool.mathcamp.us=mathcamp`. Not set as of
-      2026-11-14.
+   c2. [x] Worker variables (runtime, type Text, in the dashboard; Cameron,
+      2026-11-14): `PUBLIC_BASE_URL`, `CAMP_SUBDOMAINS=1`,
+      `LEGACY_HOSTS=camptool.mathcamp.us=mathcamp`. The dashboard stored
+      `https://camptool.org/` with a trailing slash, which made invite links
+      `//i/…`; `98cdfe4` strips it in `env.server.ts`. Verified live:
+      `mathcamp.camptool.org/` → 302 to `https://camptool.org/login?next=…`.
+      The short-lived token was deleted by Cameron. `/_version` on the Worker
+      says `dev` (no version stamped in Workers builds yet).
    d. Discord: Cameron makes one "CampTool" application (redirect
       `https://camptool.org/api/auth/callback/discord`), then its client ID,
       secret and bot token go on the Worker.
