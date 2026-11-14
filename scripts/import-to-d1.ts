@@ -5,7 +5,7 @@
  *
  *   bun scripts/import-to-d1.ts <backup.tar.gz> --out data/import \
  *     --legacy-rp-id camptool.mathcamp.us \
- *     --packs mathcamp=@camptool/mathcamp-theme --discord-guild mathcamp=<server id> \
+ *     --rename-slug math-camp-group-w-m0d3=mathcamp  *     --packs mathcamp=@camptool/mathcamp-theme --discord-guild mathcamp=<server id> \
  *     [--apply local|remote] [--persist-to .wrangler/x]
  *
  * The backup is the super admin's download from /export-db on the old site
@@ -16,7 +16,9 @@
  * 2. moves passkeys to `legacy_passkey` (`--legacy-rp-id`, the old host):
  *    they're bound to the old address and can't sign in here, but the old
  *    address can still check them once (app/lib/legacy-host.server.ts);
- * 3. applies per-camp settings the old deploy had in env: `--packs
+ * 3. renames camps (`--rename-slug <old>=<new>`: the slug becomes the camp's
+ *    subdomain, and the app has no way to change it), then applies per-camp
+ *    settings the old deploy had in env: `--packs
  *    <slug>=<pack,...>` (structure packs, by package name: the old
  *    `CAMP_THEME`; the new site must bundle them in `CAMP_THEMES`) and
  *    `--discord-guild <slug>=<id>` (the old `DISCORD_GUILD_ID`);
@@ -56,6 +58,7 @@ const { values: opt, positionals } = parseArgs({
     "legacy-rp-id": { type: "string" },
     packs: { type: "string", multiple: true, default: [] },
     "discord-guild": { type: "string", multiple: true, default: [] },
+    "rename-slug": { type: "string", multiple: true, default: [] },
     apply: { type: "string" },
     "persist-to": { type: "string" },
     bucket: { type: "string", default: "camptool-uploads" },
@@ -135,6 +138,14 @@ const campBySlug = (slug: string) =>
       id: string;
     } | null) ?? fail(`no camp with slug ${slug}`)
   ).id;
+for (const [from, to] of pairs(opt["rename-slug"] as string[], "rename-slug")) {
+  if (!isValidCampSlug(to)) fail(`--rename-slug: "${to}" isn't a valid slug`);
+  if (db.query("SELECT 1 FROM camp WHERE slug = ?").get(to)) {
+    fail(`--rename-slug: a camp already has slug ${to}`);
+  }
+  db.run("UPDATE camp SET slug = ? WHERE id = ?", [to, campBySlug(from)]);
+  console.log(`Renamed camp ${from} → ${to}.`);
+}
 for (const [slug, packs] of pairs(opt.packs as string[], "packs")) {
   db.run("UPDATE camp SET structure_packs = ? WHERE id = ?", [
     serializeStructurePacks(packs.split(",").map((s) => s.trim())),
