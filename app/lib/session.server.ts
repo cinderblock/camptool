@@ -12,7 +12,12 @@ import {
   user,
 } from "../../db/schema";
 import { auth } from "./auth.server";
-import { campOrigin, campSlugFromHost, isValidCampSlug } from "./camp-host";
+import {
+  campOrigin,
+  campSlugFromHost,
+  isValidCampSlug,
+  pageUrl,
+} from "./camp-host";
 import { APEX, CAMP_SUBDOMAINS } from "./env.server";
 import { hasAtLeast, rankOf } from "./permissions";
 import {
@@ -283,7 +288,7 @@ export async function requireUser(request: Request) {
   if (!session) {
     if (requestCampSlug(request)) {
       throw redirect(
-        `${APEX.origin}/login?next=${encodeURIComponent(request.url)}`,
+        `${APEX.origin}/login?next=${encodeURIComponent(pageUrl(request.url).href)}`,
       );
     }
     throw redirect("/login");
@@ -361,7 +366,7 @@ export async function resolveActiveCamp(
     active?.camp.slug &&
     isValidCampSlug(active.camp.slug)
   ) {
-    const url = new URL(request.url);
+    const url = pageUrl(request.url);
     throw redirect(
       `${campOrigin(active.camp.slug, APEX)}${url.pathname}${url.search}`,
     );

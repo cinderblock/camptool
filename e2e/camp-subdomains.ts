@@ -80,6 +80,23 @@ check(
   `${apexMap.status} → ${apexMap.headers.get("location")}`,
 );
 
+// A client-side navigation asks for `<page>.data`; the browser must still be
+// sent to the page itself on the other host.
+const apexData = await fetch(`${APEX}/settings.data?x=1`, {
+  headers: H,
+  redirect: "manual",
+});
+const dataLoc =
+  apexData.headers.get("location") ??
+  apexData.headers.get("x-remix-redirect") ??
+  (await apexData.text());
+check(
+  "…and so does a client navigation's data request, to the page itself",
+  dataLoc.includes(`http://${SLUG}.${APEX_HOST}/settings?x=1`) &&
+    !dataLoc.includes(".data"),
+  `${apexData.status} → ${dataLoc.slice(0, 120)}`,
+);
+
 const sub = await asHost(`${SLUG}.${APEX_HOST}`, "/settings", {
   headers: H,
 });

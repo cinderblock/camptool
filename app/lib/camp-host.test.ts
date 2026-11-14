@@ -1,8 +1,9 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import {
   campOrigin,
   campSlugFromHost,
   isValidCampSlug,
+  pageUrl,
   safeNext,
 } from "./camp-host";
 
@@ -68,5 +69,24 @@ describe("safeNext", () => {
     expect(safeNext("http://mathcamp.camptool.org/", apex)).toBeNull();
     expect(safeNext("javascript:alert(1)", apex)).toBeNull();
     expect(safeNext(null, apex)).toBeNull();
+  });
+});
+
+describe("pageUrl", () => {
+  test("a client navigation's data request names its page", () => {
+    expect(pageUrl("https://camptool.org/_.data").href).toBe(
+      "https://camptool.org/",
+    );
+    expect(
+      pageUrl("https://camptool.org/map.data?year=2026&_routes=root").href,
+    ).toBe("https://camptool.org/map?year=2026");
+    expect(pageUrl("https://camptool.org/wiki/a.data").pathname).toBe(
+      "/wiki/a",
+    );
+  });
+  test("a page request is left alone", () => {
+    expect(pageUrl("https://camptool.org/map?x=1").href).toBe(
+      "https://camptool.org/map?x=1",
+    );
   });
 });

@@ -81,3 +81,19 @@ export function safeNext(target: string | null, apex: URL): string | null {
   if (h !== a && campSlugFromHost(h, apex) === null) return null;
   return u.toString();
 }
+
+/**
+ * The page a request is for. React Router's client navigations fetch a page's
+ * data at `<path>.data` (`/_.data` for `/`), with a `_routes` parameter, and
+ * that's the URL a loader sees. A redirect to another host can't stay a data
+ * request (the browser navigates there), so it must name the page itself.
+ */
+export function pageUrl(raw: string): URL {
+  const url = new URL(raw);
+  if (url.pathname.endsWith(".data")) {
+    const p = url.pathname.slice(0, -".data".length);
+    url.pathname = p === "/_" ? "/" : p;
+    url.searchParams.delete("_routes");
+  }
+  return url;
+}
