@@ -127,7 +127,20 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     setBusy(true);
     const res = await signIn.passkey();
     setBusy(false);
-    if (res?.error) return fail(res.error.message ?? "Passkey sign in failed");
+    if (res?.error) {
+      // The plugin reports every browser refusal as "auth cancelled",
+      // including "this browser has no passkey for this site", which is
+      // what someone gets with only a passkey made at a camp's old address.
+      if ("code" in res.error && res.error.code === "AUTH_CANCELLED") {
+        const oldHost = loaderData.movedFrom[0]?.host;
+        return fail(
+          oldHost
+            ? `No passkey for ${location.hostname} was used. A passkey made at ${oldHost} only works there: use the link above, or sign in with your password.`
+            : `No passkey for ${location.hostname} was used. Try again, or sign in with your password.`,
+        );
+      }
+      return fail(res.error.message ?? "Passkey sign in failed");
+    }
     go();
   }
 
