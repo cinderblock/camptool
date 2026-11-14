@@ -1,7 +1,7 @@
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { magicLink, organization } from "better-auth/plugins";
 import { db, schema } from "../../db/client.server";
 import { isValidCampSlug } from "./camp-host";
@@ -87,6 +87,22 @@ export const auth = betterAuth({
   // async-storage context, not the explicit argument. The passkey path ALSO
   // checks the gate earlier, in resolveUser, to fail before the WebAuthn prompt
   // rather than after it.
+  // The passkey plugin uses `?name=` from `addPasskey({ name })` as BOTH the
+  // passkey's label in our list ("iPhone") and the WebAuthn account name the
+  // phone's password manager shows, which then read "iPhone" instead of who
+  // the passkey signs in as. Drop it from the options request so the account
+  // name falls back to the email (session) or resolveUser's email (signup,
+  // recovery). The label still arrives with verify-registration and is saved.
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/passkey/generate-register-options") return;
+      if (!ctx.query?.name) return;
+      // Hook results are merged in with defu, which skips undefined, so the
+      // key is blanked rather than left out; the plugin's `name || email`
+      // then falls through to the email.
+      return { context: { query: { ...ctx.query, name: "" } } };
+    }),
+  },
   databaseHooks: {
     user: {
       create: {
