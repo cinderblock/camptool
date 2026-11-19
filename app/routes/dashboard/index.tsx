@@ -11,21 +11,14 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { notifications } from "@mantine/notifications";
 import { and, count, eq, isNotNull, sql } from "drizzle-orm";
 import { useState } from "react";
-import {
-  data,
-  Link,
-  useFetcher,
-  useNavigate,
-  useRevalidator,
-} from "react-router";
+import { data, Link, useFetcher } from "react-router";
+import { CreateCampForm } from "~/components/CreateCampForm";
 import { type OutstandingAsk, outstandingAsks } from "~/lib/asks";
 import { loadAskSnapshots } from "~/lib/asks.server";
 import { type Headcount, headcountFor } from "~/lib/attendee.server";
 import { discordEnabled } from "~/lib/auth.server";
-import { authClient } from "~/lib/auth-client";
 import { weeksUntilEvent } from "~/lib/brc";
 import { featureVisibleTo } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
@@ -900,76 +893,5 @@ function ContactFix({
         ) : null}
       </Stack>
     </Card>
-  );
-}
-
-function CreateCampForm() {
-  const navigate = useNavigate();
-  const revalidator = useRevalidator();
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  function slugify(value: string) {
-    return (
-      value
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        // Room for the random suffix inside a 63-character DNS label: the slug
-        // is the camp's subdomain when those are on (app/lib/camp-host.ts).
-        .slice(0, 50)
-        .replace(/-+$/g, "")
-    );
-  }
-
-  async function create() {
-    if (!name.trim()) return;
-    setBusy(true);
-    const slug = `${slugify(name)}-${Math.random().toString(36).slice(2, 6)}`;
-    const { data, error } = await authClient.organization.create({
-      name: name.trim(),
-      slug,
-    });
-    if (error || !data) {
-      setBusy(false);
-      notifications.show({
-        color: "red",
-        title: "Could not create camp",
-        message: error?.message ?? "Unknown error",
-      });
-      return;
-    }
-    await authClient.organization.setActive({ organizationId: data.id });
-    setBusy(false);
-    revalidator.revalidate();
-    navigate("/");
-  }
-
-  return (
-    <Container size="sm">
-      <Stack gap="md">
-        <div>
-          <Title order={1} size="h2">
-            Create your camp
-          </Title>
-          <Text c="dimmed">
-            You're not part of a camp yet. Create one to get started — you'll be
-            its first admin.
-          </Text>
-        </div>
-        <TextInput
-          label="Camp name"
-          placeholder="e.g. Math Camp"
-          value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
-        />
-        <Group>
-          <Button onClick={create} loading={busy} disabled={!name.trim()}>
-            Create camp
-          </Button>
-        </Group>
-      </Stack>
-    </Container>
   );
 }
