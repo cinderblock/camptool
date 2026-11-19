@@ -371,6 +371,9 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 - [x] 2026-11-13: step 7 (moving a camp) built and rehearsed locally.
 - [ ] Step 8: deploy and Math Camp cutover, waiting on Cameron. 2026-11-13:
   corrected to deploy through ops + Workers Builds (decision 14).
+- [x] 2026-11-19: `/new-camp` (account menu → "New camp…") so someone
+  already in a camp can start another; before, the create form only showed
+  to someone in no camp (`f3dbfd4`, live).
 
 ## Open questions for the user
 
