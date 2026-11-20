@@ -39,6 +39,9 @@ taper), then add
 structures from a palette (tent, RV, shade, kitchen, art, generator, container)
 and drag/resize/rotate them into place, with an orientation compass (true north,
 sun, the Man) and footprint shapes for tents, hexayurts, hyparhuts, cars/RVs.
+Officers can add the camp's **own structures** under Map → Camp structures
+(name, shape or a drawn outline, size, height, colour); they place, shade and
+get banned like the built-ins, and no other camp sees them.
 
 It's also **inventory-driven**: campers declare what they're *bringing* on a
 **Bringing** page (each item sized, unplaced); officers drag those items from an
@@ -365,6 +368,11 @@ onto a shared Cloudflare site with its accounts and sign-ins intact
   REST API and slash commands use the interactions webhook — both live inside
   this web server, so the deployment stays a single "little webserver." A
   separate gateway process is only added if a feature needs live events.
+- **Camp structures are data; packs are for structures that need code.** A
+  camp's officers define their own kinds at runtime (`structure_kind`, one row
+  per kind, `x-<id>` values that never change). Every page reads kinds through
+  a per-camp `KindRegistry` (built-ins + bundled packs + the camp's rows), so a
+  camp's kinds never reach another camp. See `plans/custom-structures.md`.
 - **Camp customization = camp-theme packages, bundled at build time and
   assigned per camp.** A pack is a workspace package under `packages/`
   implementing the `@camptool/theme-contract` `CampTheme`: bespoke map structures

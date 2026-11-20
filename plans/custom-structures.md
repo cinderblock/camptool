@@ -126,7 +126,7 @@ inventing a scripting language. So:
 ## Plan / steps
 
 1. [x] Design sign-off (2026-11-20; all six recommendations accepted).
-2. [x] Schema: `structure_kind` (migration 0091), `db:verify` OK. Backup
+2. [x] Schema: `structure_kind` (migration 0092; renumbered from 0091 on rebase, master took 0091), `db:verify` OK. Backup
    (whole-DB snapshot) and `import-to-d1.ts` (walks every table) need nothing.
 3. [x] `KindRegistry` + compile (`app/lib/custom-kinds.tsx`), unit tests
    (`app/lib/custom-kinds.test.ts`: triangulation, outline problems, shadow
@@ -136,13 +136,16 @@ inventing a scripting language. So:
    add / kind-change / Bringing / ban actions check the camp's registry.
 6. [x] `/map/structures` editor.
 7. [x] Wire-up: legend link, palettes, editions picker, wiki, Bringing/wizard.
-8. [~] **Current step.** Verify. Done on Bun: HTTP checks 24/24 (create,
-   crossing outline refused, member refused, place, other camp can't place or
-   archive or see it, pages render, delete refused while used, archived can't
-   be placed but still renders, ban/unban, Bringing); `e2e/custom-structures.ts`
-   13/13 with screenshots. To do: existing map e2e regression, a production
-   build, and a `wrangler dev` smoke.
-9. [ ] Ship: commit per step, push to `master`, confirm Workers Builds deploy
+8. [x] Verify. On Bun: HTTP checks 24/24 (create, crossing outline refused,
+   member refused, place, other camp can't place/archive/see it, pages render,
+   delete refused while used, archived can't be placed but still renders,
+   ban/unban, Bringing); `e2e/custom-structures.ts` 13/13 with screenshots;
+   regression `e2e/noc-uplink.ts` and `e2e/map-versions.ts` pass (the latter
+   needs its fixture: a "Planned v1" snapshot, a deleted object, a member named
+   Mabel Member with two suggestions). Production build and `cf:build` green.
+   Under `wrangler dev` + D1: `e2e/cloudflare-smoke.ts` 15/15 including define,
+   place, archive-refusal and delete (atomic batch).
+9. [ ] **Current step.** Ship: commit per step, push to `master`, confirm Workers Builds deploy
    and `/_version`.
 
 ## Open questions for the user

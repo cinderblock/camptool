@@ -3,8 +3,9 @@
  * over real HTTP (plans/hosting-other-camps.md). The e2e scripts that open the
  * Bun database directly can't drive a Worker, so this one reads D1 through
  * `wrangler d1 execute` instead. Covers: sign-up, camp creation, feature
- * toggles, a prospect merge (one atomic D1 batch of raw SQL), a picture
- * through R2 and back, and the complete backup.
+ * toggles, a prospect merge (one atomic D1 batch of raw SQL), a camp's own
+ * structure kind placed on the map, a picture through R2 and back, and the
+ * complete backup.
  *
  * Needs a fresh local database each run (a super admin is the first sign-up):
  *
@@ -141,6 +142,88 @@ check(
     gotBytes.length === png.length &&
     gotBytes.every((b, i) => b === png[i]),
   `HTTP ${got.status}, ${gotBytes.length} bytes`,
+);
+
+// 4b. A camp's own structure kind (plans/custom-structures.md): defined over
+// D1, placed on the map, and refused once archived.
+await post("/settings", { feature: "map", state: "on" });
+await post("/editions", {
+  intent: "create",
+  year: "2026",
+  event: "burning-man",
+});
+const mk = await post("/map/structures.data", {
+  intent: "save",
+  label: "L kitchen",
+  groupName: "Camp",
+  color: "#e64980",
+  shape: "outline",
+  outline: JSON.stringify([
+    { x: 0, y: 0 },
+    { x: 0.5, y: 0 },
+    { x: 0.5, y: 0.5 },
+    { x: 1, y: 0.5 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+  ]),
+  width: "30",
+  height: "20",
+  tallFt: "9",
+  tags: '["structure"]',
+});
+const [sk] = await d1("SELECT id, value FROM structure_kind");
+check(
+  "define a camp structure",
+  mk.ok && String(sk?.value ?? "").startsWith("x-"),
+  `HTTP ${mk.status}`,
+);
+const placeIt = () =>
+  post("/map.data", {
+    intent: "addObject",
+    kind: String(sk?.value),
+    x: "10",
+    y: "10",
+  });
+const placed = await placeIt();
+const objs = await d1(
+  `SELECT width, tall_ft FROM map_object WHERE kind = '${sk?.value}'`,
+);
+check(
+  "place it on the map at its own size",
+  placed.ok && objs[0]?.width === 30 && objs[0]?.tall_ft === 9,
+  `HTTP ${placed.status} ${JSON.stringify(objs)}`,
+);
+const mapPage = await fetch(`${BASE}/map`, { headers: H });
+check("the map renders with it", mapPage.ok, `HTTP ${mapPage.status}`);
+await post("/map/structures.data", { intent: "archive", id: String(sk?.id) });
+const refused = await placeIt();
+check(
+  "an archived kind can't be placed",
+  refused.status === 400,
+  `HTTP ${refused.status}`,
+);
+
+// Deleting an unused kind is one atomic batch (its wiki links + the row).
+await post("/map/structures.data", {
+  intent: "save",
+  label: "Spare",
+  color: "#868e96",
+  shape: "rect",
+  width: "10",
+  height: "10",
+  tallFt: "8",
+  tags: "[]",
+});
+const [spare] = await d1("SELECT id FROM structure_kind WHERE label = 'Spare'");
+const del = await post("/map/structures.data", {
+  intent: "delete",
+  id: String(spare?.id),
+});
+const left = await d1("SELECT id FROM structure_kind WHERE label = 'Spare'");
+check(
+  "delete an unused kind",
+  del.ok && left.length === 0,
+  `HTTP ${del.status}`,
 );
 
 // 5. The complete backup: SQL dump + the R2 file.
