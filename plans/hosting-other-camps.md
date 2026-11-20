@@ -391,6 +391,15 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   already in a camp can start another; before, the create form only showed
   to someone in no camp (`f3dbfd4`, live).
 
+- [x] 2026-11-20: Cameron's account already has a camptool.org passkey
+  ("iPhone", made 2026-11-14 9:40 AM PST (17:40Z)); his old Chrome one stays in
+  `legacy_passkey`. The forced `/new-passkey` page is already built (step 7).
+- [ ] 2026-11-20: delete `entheos-r2vg` (1 member, no data). The ops
+  `CLOUDFLARE_API_TOKEN` is D1 read-only ("You do not have permission to
+  perform this operation."), so Cameron deletes it from Site admin.
+- Camp export/import in every direction is in its own thread,
+  `plans/camp-portability.md` on branch `camp-portability`.
+
 ## Open questions for the user
 
 (None open, 2026-11-14.)
