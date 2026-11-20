@@ -145,7 +145,7 @@ inventing a scripting language. So:
    Mabel Member with two suggestions). Production build and `cf:build` green.
    Under `wrangler dev` + D1: `e2e/cloudflare-smoke.ts` 15/15 including define,
    place, archive-refusal and delete (atomic batch).
-9. [ ] **Current step.** Ship: commit per step, push to `master`, confirm Workers Builds deploy
+9. [x] Ship: commit per step, push to `master`, confirm Workers Builds deploy
    and `/_version`.
 
 ## Open questions for the user
@@ -190,3 +190,14 @@ None open.
 - 2026-11-20: Read plans + registry code; wrote this design. Signed off.
 - 2026-11-20: Built steps 2–7 (`a02a773`, `b3e0d10`, editor commit). Verified
   on a local Bun dev server (port 17931, throwaway DB copy in the worktree).
+- 2026-11-20 2:06 PM PST (22:06Z): pushed `1ed0666` to `master`; Workers
+  Builds deployed it (its deploy command applies D1 migrations first). Proof:
+  `https://mathcamp.camptool.org/map/structures` now 302s to sign-in where an
+  unknown route 404s. (The Worker's `/_version` says `dev`: no `BUILD_SHA` is
+  set on Workers Builds, so it can't confirm a SHA.)
+
+## Follow-ups (not started)
+
+- Hide built-in kinds per camp (declutter, not ban). Agreed as separate work.
+- Uploaded icons (R2) for camp kinds.
+- Set `BUILD_SHA` on Workers Builds so `/_version` proves which commit is live.
