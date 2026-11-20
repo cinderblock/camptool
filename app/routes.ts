@@ -98,6 +98,8 @@ export default [
       "routes/dashboard/programming.$offeringId.tsx",
     ),
     route("map", "routes/dashboard/map.tsx"),
+    // The camp's own structure kinds (plans/custom-structures.md).
+    route("map/structures", "routes/dashboard/map.structures.tsx"),
     route("bringing", "routes/dashboard/bringing.tsx"),
     route("inventory", "routes/dashboard/inventory.tsx"),
     route("supplies", "routes/dashboard/supplies.tsx"),

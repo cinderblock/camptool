@@ -10,6 +10,19 @@
 
 ## Open
 
+### Map legend hydration mismatch: a `KindIcon` line's `y2` differs server vs client
+
+**Raised:** custom-structures thread, 2026-11-20. **Status:** not investigated.
+
+Loading `/map` logs React's "A tree hydrated but some attributes of the server
+rendered HTML didn't match the client properties". The diff is one `<line>` in
+a legend icon (stroke `#f59f00`, `KindIcon` in `app/lib/structures.tsx` ~line
+1915): server `y2="21.41487271892436"`, client `21.414872718924357`. Float
+maths printed at full precision differs between Bun's SSR and the browser.
+Harmless today (React keeps the server value), but it's console noise that
+hides real hydration bugs. Likely fix: round icon coordinates to a few
+decimals. Repro: `e2e/custom-structures.ts` sees it on `/map`.
+
 ### `e2e/prospects.ts` 9g fails: the Members page HTML has no prospect link
 
 **Raised:** multi-host thread, 2026-11-13. **Status:** not investigated.

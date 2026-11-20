@@ -4906,6 +4906,15 @@ function Legend({ bannedKinds }: { bannedKinds: string[] }) {
           </div>
         ))}
       </Stack>
+      <Anchor
+        component={Link}
+        to="/map/structures"
+        size="xs"
+        mt={8}
+        display="block"
+      >
+        Camp structures: add your own kinds
+      </Anchor>
     </Paper>
   );
 }
