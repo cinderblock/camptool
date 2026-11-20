@@ -117,8 +117,8 @@ inventing a scripting language. So:
 
 ## Plan / steps
 
-1. [ ] **Current step.** Design sign-off (this doc, open questions below).
-2. [ ] Schema + migration: `camp_structure_kind` via `bun run db:generate`
+1. [x] Design sign-off (2026-11-20; all six recommendations accepted).
+2. [ ] **Current step.** Schema + migration: `camp_structure_kind` via `bun run db:generate`
    (memory: no-TTY rename split; hide other threads' un-migrated tables), D1
    override if needed, `bun run db:verify`. Check backup + `import-to-d1.ts`
    pick the table up.
@@ -137,23 +137,20 @@ inventing a scripting language. So:
 
 ## Open questions for the user
 
-1. **Custom outlines in v1?** Recommend yes: rect/hex/round alone won't cover
-   L-shaped kitchens or triangle shades, and the outline also yields correct
-   overlap checks and shadows.
-2. **Who edits?** Recommend officer+ (same bar as editing editions / banned
-   kinds).
-3. **Icons:** derive from the shape in v1; uploaded images (R2) later.
-   Recommend that.
-4. **Hide built-in kinds per camp** (a non-BM camp may not want "Skoolie")?
-   Recommend a separate follow-up; edition banned kinds already do it per year.
-5. **Feature flag?** Recommend none: it's part of the map feature, officer-only.
-6. **Math Camp pack:** recommend keeping it as code (section 4).
+None open.
 
 ## Decisions already made (don't re-ask)
 
 - Runtime, per camp, in D1; no deploy per camp. (Cameron, 2026-11-20.)
 - Don't rebuild the Site admin pack-toggle column; another thread removes it.
   (Cameron, 2026-11-20.)
+- Custom outlines (polygons) are in v1. (Cameron, 2026-11-20.)
+- Officer+ edits a camp's kinds. (Cameron, 2026-11-20.)
+- Icons come from the shape in v1; uploaded images (R2) later. (Cameron.)
+- Hiding built-in kinds per camp (decluttering a palette, not banning) is a
+  separate follow-up; edition banned kinds cover it meanwhile. (Cameron.)
+- No feature flag: part of the map feature, officer-only. (Cameron.)
+- Math Camp's pack stays as code (section 4). (Cameron.)
 
 ## Findings / gotchas
 
@@ -168,4 +165,4 @@ inventing a scripting language. So:
 
 ## Progress log
 
-- 2026-11-20: Read plans + registry code; wrote this design. Awaiting sign-off.
+- 2026-11-20: Read plans + registry code; wrote this design. Signed off.
