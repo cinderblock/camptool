@@ -20,6 +20,7 @@ import { loadAskSnapshots } from "~/lib/asks.server";
 import { type Headcount, headcountFor } from "~/lib/attendee.server";
 import { discordEnabled } from "~/lib/auth.server";
 import { weeksUntilEvent } from "~/lib/brc";
+import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
 import { featureVisibleTo } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
 import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
@@ -322,6 +323,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     passkeyCount,
     memberCount,
     canCreateCamp,
+    apexHost: CAMP_SUBDOMAINS ? APEX.host : null,
     pendingApplications,
     overview,
     active: active
@@ -397,6 +399,7 @@ export default function DashboardIndex({ loaderData }: Route.ComponentProps) {
     return (
       <NoCampYet
         canCreateCamp={loaderData.canCreateCamp}
+        apexHost={loaderData.apexHost}
         pendingApplications={loaderData.pendingApplications}
         userName={loaderData.userName}
         userEmail={loaderData.userEmail}
@@ -772,11 +775,13 @@ function CampOverview({
 
 function NoCampYet({
   canCreateCamp,
+  apexHost,
   pendingApplications,
   userName,
   userEmail,
 }: {
   canCreateCamp: boolean;
+  apexHost: string | null;
   pendingApplications: { campName: string; slug: string | null }[];
   userName: string;
   userEmail: string;
@@ -828,7 +833,22 @@ function NoCampYet({
     );
   }
 
-  return <CreateCampForm />;
+  return (
+    <Container size="sm">
+      <Stack gap="md">
+        <div>
+          <Title order={1} size="h2">
+            Create your camp
+          </Title>
+          <Text c="dimmed">
+            You're not part of a camp yet. Create one to get started — you'll be
+            its first admin.
+          </Text>
+        </div>
+        <CreateCampForm action="/new-camp" apexHost={apexHost} />
+      </Stack>
+    </Container>
+  );
 }
 
 /** Inline typo fix for the name/email an applicant signed up with — the only

@@ -26,8 +26,8 @@ const EXEMPT: Record<string, string> = {
     "A camp's old address: renders only host names, no camp or personal data.",
   "routes/new-passkey.tsx":
     "Renders only the old host name and a button; no camp or personal data.",
-  "routes/dashboard/new-camp.tsx":
-    "A blank create-camp form; the loader returns only where to go afterwards.",
+  "routes/new-camp.tsx":
+    "Starting a camp: renders only the viewer's own name and a link's state.",
   "routes/api.auth.$.tsx": "better-auth passthrough; not our payload shape.",
   "routes/export-db.tsx":
     "Raw SQLite bytes can't be transformed in flight — privacy mode refuses " +

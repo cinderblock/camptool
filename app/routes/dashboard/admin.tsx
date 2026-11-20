@@ -1,9 +1,15 @@
 import {
+  Alert,
+  Anchor,
   Badge,
   Button,
   Card,
+  Code,
   Container,
+  CopyButton,
   Group,
+  Menu,
+  Modal,
   Stack,
   Switch,
   Table,
@@ -12,9 +18,18 @@ import {
   Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { asc, count, desc, eq, ne } from "drizzle-orm";
-import { useEffect, useRef } from "react";
+import { and, asc, count, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { useEffect, useRef, useState } from "react";
 import { data, redirect, useFetcher } from "react-router";
+import {
+  createSetupLink,
+  deleteCamp,
+  renameCampSlug,
+  SETUP_LINK_DAYS,
+  setupLinkState,
+} from "~/lib/camp-admin.server";
+import { campOrigin, isValidCampSlug } from "~/lib/camp-host";
+import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
 import {
   getInstanceSettings,
   grantSuperAdminByEmail,
@@ -29,14 +44,10 @@ import {
   requireUser,
   resolveActiveCamp,
 } from "~/lib/session.server";
-import {
-  parseStructurePacks,
-  perCampPacks,
-  serializeStructurePacks,
-} from "~/theme";
 import { db } from "../../../db/client.server";
 import {
   camp,
+  campSetupLink,
   clientError,
   feedback,
   membership,
@@ -112,28 +123,68 @@ export async function loader({ request }: Route.LoaderArgs) {
     at: f.createdAt.toISOString(),
   }));
 
-  // Every camp on the deployment, for the hoster: who's here, and which
-  // per-camp structure packs each one has.
-  const camps = (
-    await db
-      .select({
-        id: camp.id,
-        name: camp.name,
-        slug: camp.slug,
-        structurePacks: camp.structurePacks,
-        members: count(membership.id),
-      })
-      .from(camp)
-      .leftJoin(membership, eq(membership.organizationId, camp.id))
-      .groupBy(camp.id)
-      .orderBy(asc(camp.name))
-  ).map((c) => ({
+  // Every camp on the deployment, for the hoster: where it lives, how big it
+  // is, and its admins (whom a super admin can work as without joining).
+  const campRows = await db
+    .select({
+      id: camp.id,
+      name: camp.name,
+      slug: camp.slug,
+      members: count(membership.id),
+    })
+    .from(camp)
+    .leftJoin(membership, eq(membership.organizationId, camp.id))
+    .groupBy(camp.id)
+    .orderBy(asc(camp.name));
+  const campAdmins = campRows.length
+    ? await db
+        .select({
+          campId: membership.organizationId,
+          userId: membership.userId,
+          adminName: userTable.name,
+        })
+        .from(membership)
+        .innerJoin(userTable, eq(membership.userId, userTable.id))
+        .where(
+          and(
+            eq(membership.role, "admin"),
+            inArray(
+              membership.organizationId,
+              campRows.map((c) => c.id),
+            ),
+          ),
+        )
+    : [];
+  const camps = campRows.map((c) => ({
     id: c.id,
     name: c.name,
     slug: c.slug,
     members: c.members,
-    packs: parseStructurePacks(c.structurePacks),
+    // Where to post "work as": the camp's own address with subdomains on.
+    origin:
+      CAMP_SUBDOMAINS && c.slug && isValidCampSlug(c.slug)
+        ? campOrigin(c.slug, APEX)
+        : "",
+    admins: campAdmins
+      .filter((a) => a.campId === c.id)
+      .map((a) => ({ userId: a.userId, adminName: a.adminName })),
   }));
+
+  // Setup links still waiting to be used, newest first.
+  const setupLinks = (
+    await db
+      .select()
+      .from(campSetupLink)
+      .where(and(isNull(campSetupLink.usedAt), isNull(campSetupLink.revokedAt)))
+      .orderBy(desc(campSetupLink.createdAt))
+  )
+    .filter((l) => setupLinkState(l) === "ok")
+    .map((l) => ({
+      id: l.id,
+      label: l.label,
+      url: `${APEX.origin}/new-camp/${l.token}`,
+      expires: l.expiresAt.toISOString(),
+    }));
 
   // Site admin spans every camp, so the lens's free-text vocabulary (which is
   // camp-scoped) won't know other camps' people — but the field rules do the
@@ -149,7 +200,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     recentErrors,
     recentFeedback,
     camps,
-    perCampPacks,
+    setupLinks,
+    setupLinkDays: SETUP_LINK_DAYS,
+    apexHost: CAMP_SUBDOMAINS ? APEX.host : null,
   });
 }
 
@@ -175,27 +228,49 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ ok: true });
   }
 
-  // Switch a per-camp structure pack on or off for one camp.
-  if (intent === "setCampPack") {
+  if (intent === "createSetupLink") {
+    const token = await createSetupLink({
+      label: String(form.get("label") ?? ""),
+      createdByUserId: session.user.id,
+    });
+    return data({ ok: true, url: `${APEX.origin}/new-camp/${token}` });
+  }
+
+  if (intent === "revokeSetupLink") {
+    await db
+      .update(campSetupLink)
+      .set({ revokedAt: new Date() })
+      .where(eq(campSetupLink.id, String(form.get("id") ?? "")));
+    return data({ ok: true, message: "Link withdrawn." });
+  }
+
+  if (intent === "renameCamp") {
+    const problem = await renameCampSlug(
+      String(form.get("campId") ?? ""),
+      String(form.get("slug") ?? "")
+        .trim()
+        .toLowerCase(),
+    );
+    if (problem) return data({ error: problem }, { status: 400 });
+    return data({ ok: true, message: "Address changed." });
+  }
+
+  if (intent === "deleteCamp") {
     const campId = String(form.get("campId") ?? "");
-    const pack = String(form.get("pack") ?? "");
-    const on = String(form.get("on") ?? "") === "true";
-    if (!perCampPacks.some((p) => p.key === pack)) {
-      return data({ error: "Unknown structure pack." }, { status: 400 });
-    }
     const [row] = await db
-      .select({ structurePacks: camp.structurePacks })
+      .select({ slug: camp.slug, name: camp.name })
       .from(camp)
       .where(eq(camp.id, campId));
     if (!row) return data({ error: "No such camp." }, { status: 404 });
-    const packs = new Set(parseStructurePacks(row.structurePacks));
-    if (on) packs.add(pack);
-    else packs.delete(pack);
-    await db
-      .update(camp)
-      .set({ structurePacks: serializeStructurePacks(packs) })
-      .where(eq(camp.id, campId));
-    return data({ ok: true });
+    // Typed back by hand, so a slip of the mouse can't take a whole camp.
+    if (String(form.get("confirm") ?? "").trim() !== (row.slug ?? row.name)) {
+      return data(
+        { error: "That doesn't match the camp's address." },
+        { status: 400 },
+      );
+    }
+    await deleteCamp(campId);
+    return data({ ok: true, message: `${row.name} deleted.` });
   }
 
   if (intent === "addAdmin") {
@@ -240,7 +315,9 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
     recentErrors,
     recentFeedback,
     camps,
-    perCampPacks,
+    setupLinks,
+    setupLinkDays,
+    apexHost,
   } = loaderData;
 
   return (
@@ -277,12 +354,10 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
             <Title order={4}>Camps</Title>
             <Text size="sm" c="dimmed">
               Every camp on this deployment. Each camp's admins run their own
-              camp.
-              {perCampPacks.length > 0
-                ? " Structure packs bundled per camp only show up in the camps you switch them on for."
-                : ""}
+              camp. You can work as any of them without joining it.
             </Text>
-            <CampsTable camps={camps} packs={perCampPacks} />
+            <CampsTable camps={camps} apexHost={apexHost} />
+            <SetupLinks links={setupLinks} days={setupLinkDays} />
           </Stack>
         </Card>
 
@@ -491,18 +566,21 @@ function ToggleRow({
   );
 }
 
+type CampRow = {
+  id: string;
+  name: string;
+  slug: string | null;
+  members: number;
+  origin: string;
+  admins: { userId: string; adminName: string }[];
+};
+
 function CampsTable({
   camps,
-  packs,
+  apexHost,
 }: {
-  camps: {
-    id: string;
-    name: string;
-    slug: string | null;
-    members: number;
-    packs: string[];
-  }[];
-  packs: readonly { key: string; name: string }[];
+  camps: CampRow[];
+  apexHost: string | null;
 }) {
   if (camps.length === 0) {
     return (
@@ -518,9 +596,7 @@ function CampsTable({
           <Table.Tr>
             <Table.Th>Camp</Table.Th>
             <Table.Th>Members</Table.Th>
-            {packs.map((p) => (
-              <Table.Th key={p.key}>{p.name}</Table.Th>
-            ))}
+            <Table.Th />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -532,21 +608,20 @@ function CampsTable({
                 </Text>
                 {c.slug ? (
                   <Text size="xs" c="dimmed">
-                    {c.slug}
+                    {c.origin ? (
+                      <Anchor href={`${c.origin}/`} size="xs" c="dimmed">
+                        {apexHost ? `${c.slug}.${apexHost}` : c.slug}
+                      </Anchor>
+                    ) : (
+                      c.slug
+                    )}
                   </Text>
                 ) : null}
               </Table.Td>
               <Table.Td>{c.members}</Table.Td>
-              {packs.map((p) => (
-                <Table.Td key={p.key}>
-                  <PackSwitch
-                    campId={c.id}
-                    pack={p.key}
-                    on={c.packs.includes(p.key)}
-                    label={`${p.name} for ${c.name}`}
-                  />
-                </Table.Td>
-              ))}
+              <Table.Td>
+                <CampActions camp={c} apexHost={apexHost} />
+              </Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>
@@ -555,37 +630,284 @@ function CampsTable({
   );
 }
 
-function PackSwitch({
-  campId,
-  pack,
-  on,
-  label,
+/** "Work as" posts to the camp's own address, so the act-as cookie (set per
+ * host) lands where the camp is; the sign-in cookie covers every subdomain. */
+function workAs(origin: string, campId: string, userId: string) {
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = `${origin}/impersonate`;
+  for (const [k, v] of Object.entries({
+    intent: "start",
+    campId,
+    targetUserId: userId,
+  })) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = k;
+    input.value = v;
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  form.submit();
+}
+
+function CampActions({
+  camp: c,
+  apexHost,
 }: {
-  campId: string;
-  pack: string;
-  on: boolean;
-  label: string;
+  camp: CampRow;
+  apexHost: string | null;
+}) {
+  const [open, setOpen] = useState<"rename" | "delete" | null>(null);
+  return (
+    <>
+      <Menu position="bottom-end" withinPortal>
+        <Menu.Target>
+          <Button size="xs" variant="default">
+            Manage
+          </Button>
+        </Menu.Target>
+        <Menu.Dropdown>
+          {c.admins.length > 0 ? (
+            <>
+              <Menu.Label>Work as</Menu.Label>
+              {c.admins.map((a) => (
+                <Menu.Item
+                  key={a.userId}
+                  onClick={() => workAs(c.origin, c.id, a.userId)}
+                >
+                  {a.adminName}
+                </Menu.Item>
+              ))}
+              <Menu.Divider />
+            </>
+          ) : null}
+          <Menu.Item onClick={() => setOpen("rename")}>
+            Change address…
+          </Menu.Item>
+          <Menu.Item color="red" onClick={() => setOpen("delete")}>
+            Delete camp…
+          </Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+      <RenameCampModal
+        camp={c}
+        apexHost={apexHost}
+        opened={open === "rename"}
+        onClose={() => setOpen(null)}
+      />
+      <DeleteCampModal
+        camp={c}
+        opened={open === "delete"}
+        onClose={() => setOpen(null)}
+      />
+    </>
+  );
+}
+
+function RenameCampModal({
+  camp: c,
+  apexHost,
+  opened,
+  onClose,
+}: {
+  camp: CampRow;
+  apexHost: string | null;
+  opened: boolean;
+  onClose: () => void;
 }) {
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
-  // Optimistic: show the switch where it's headed while the post is in flight.
-  const pending = fetcher.formData?.get("on");
-  const checked = pending != null ? pending === "true" : on;
+  const [slug, setSlug] = useState(c.slug ?? "");
+  const done = fetcher.state === "idle" && fetcher.data?.ok;
+  useEffect(() => {
+    if (done) onClose();
+  }, [done, onClose]);
   return (
-    <Switch
-      checked={checked}
-      aria-label={label}
-      onChange={(e) =>
-        fetcher.submit(
-          {
-            intent: "setCampPack",
-            campId,
-            pack,
-            on: String(e.currentTarget.checked),
-          },
-          { method: "post" },
-        )
+    <Modal opened={opened} onClose={onClose} title={`Address of ${c.name}`}>
+      <fetcher.Form method="post">
+        <input type="hidden" name="intent" value="renameCamp" />
+        <input type="hidden" name="campId" value={c.id} />
+        <Stack gap="md">
+          {fetcher.data?.error ? (
+            <Alert color="red">{fetcher.data.error}</Alert>
+          ) : null}
+          <TextInput
+            label="New address"
+            name="slug"
+            value={slug}
+            onChange={(e) => setSlug(e.currentTarget.value.toLowerCase())}
+            rightSection={
+              apexHost ? (
+                <Text size="sm" c="dimmed" pr="xs">
+                  .{apexHost}
+                </Text>
+              ) : undefined
+            }
+            rightSectionWidth={apexHost ? apexHost.length * 8 + 24 : undefined}
+          />
+          <Text size="xs" c="dimmed">
+            Old links to this camp stop working. Its members stay signed in.
+          </Text>
+          <Group justify="flex-end">
+            <Button
+              type="submit"
+              loading={fetcher.state !== "idle"}
+              disabled={!slug || slug === c.slug}
+            >
+              Change address
+            </Button>
+          </Group>
+        </Stack>
+      </fetcher.Form>
+    </Modal>
+  );
+}
+
+function DeleteCampModal({
+  camp: c,
+  opened,
+  onClose,
+}: {
+  camp: CampRow;
+  opened: boolean;
+  onClose: () => void;
+}) {
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const [typed, setTyped] = useState("");
+  const want = c.slug ?? c.name;
+  return (
+    <Modal opened={opened} onClose={onClose} title={`Delete ${c.name}?`}>
+      <fetcher.Form method="post">
+        <input type="hidden" name="intent" value="deleteCamp" />
+        <input type="hidden" name="campId" value={c.id} />
+        <Stack gap="md">
+          <Text size="sm">
+            This removes the camp and everything in it for good: its {c.members}{" "}
+            member{c.members === 1 ? "" : "s"}' memberships, every year's map,
+            pages, money records and uploaded files. People's accounts stay.
+            There is no undo (short of restoring a backup).
+          </Text>
+          {fetcher.data?.error ? (
+            <Alert color="red">{fetcher.data.error}</Alert>
+          ) : null}
+          <TextInput
+            label={
+              <>
+                Type <Code>{want}</Code> to confirm
+              </>
+            }
+            name="confirm"
+            value={typed}
+            onChange={(e) => setTyped(e.currentTarget.value)}
+            autoComplete="off"
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              color="red"
+              loading={fetcher.state !== "idle"}
+              disabled={typed.trim() !== want}
+            >
+              Delete camp
+            </Button>
+          </Group>
+        </Stack>
+      </fetcher.Form>
+    </Modal>
+  );
+}
+
+function SetupLinks({
+  links,
+  days,
+}: {
+  links: { id: string; label: string; url: string; expires: string }[];
+  days: number;
+}) {
+  const fetcher = useFetcher<{ ok?: boolean; url?: string; error?: string }>();
+  const formRef = useRef<HTMLFormElement>(null);
+  const made = fetcher.data?.url;
+  useEffect(() => {
+    if (made) formRef.current?.reset();
+  }, [made]);
+  return (
+    <Stack gap="xs">
+      <Title order={5}>Start a new camp</Title>
+      <Text size="sm" c="dimmed">
+        Make a one-use link and send it to the camp's lead. They make their
+        account, name the camp and pick its address, and become its first admin.
+        You don't join it. Links last {days} days.
+      </Text>
+      <fetcher.Form method="post" ref={formRef}>
+        <input type="hidden" name="intent" value="createSetupLink" />
+        <Group align="flex-end" gap="xs">
+          <TextInput
+            name="label"
+            label="Who it's for"
+            placeholder="e.g. Alex, Entheos"
+            required
+            style={{ flex: 1 }}
+          />
+          <Button type="submit" loading={fetcher.state !== "idle"}>
+            Make link
+          </Button>
+        </Group>
+      </fetcher.Form>
+      {links.length > 0 ? (
+        <Table verticalSpacing="xs">
+          <Table.Tbody>
+            {links.map((l) => (
+              <Table.Tr key={l.id}>
+                <Table.Td>
+                  <Text size="sm">{l.label}</Text>
+                  <Text size="xs" c="dimmed">
+                    good until {l.expires.slice(0, 10)}
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Group gap="xs" justify="flex-end" wrap="nowrap">
+                    <CopyButton value={l.url}>
+                      {({ copied, copy }) => (
+                        <Button
+                          size="xs"
+                          variant={
+                            copied || made === l.url ? "filled" : "light"
+                          }
+                          onClick={copy}
+                        >
+                          {copied ? "Copied" : "Copy link"}
+                        </Button>
+                      )}
+                    </CopyButton>
+                    <RevokeLink id={l.id} />
+                  </Group>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+          </Table.Tbody>
+        </Table>
+      ) : null}
+    </Stack>
+  );
+}
+
+function RevokeLink({ id }: { id: string }) {
+  const fetcher = useFetcher();
+  return (
+    <Button
+      size="xs"
+      variant="subtle"
+      color="red"
+      loading={fetcher.state !== "idle"}
+      onClick={() =>
+        fetcher.submit({ intent: "revokeSetupLink", id }, { method: "post" })
       }
-    />
+    >
+      Withdraw
+    </Button>
   );
 }
 

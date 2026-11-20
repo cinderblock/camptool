@@ -46,3 +46,29 @@ export const superAdmin = sqliteTable("super_admin", {
     .notNull()
     .default(now),
 });
+
+/**
+ * A one-use link a super admin sends to a camp lead to start a camp: they sign
+ * up (or in) and create it, becoming its first admin. The super admin who made
+ * the link is not made a member. Redeemed at `/new-camp/:token`.
+ */
+export const campSetupLink = sqliteTable("camp_setup_link", {
+  id: text("id").primaryKey(),
+  token: text("token").notNull().unique(),
+  // Who it's for, so the open links on Site admin can be told apart.
+  label: text("label").notNull(),
+  createdByUserId: text("created_by_user_id").references(() => user.id, {
+    onDelete: "set null",
+  }),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .default(now),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  usedAt: integer("used_at", { mode: "timestamp_ms" }),
+  usedByUserId: text("used_by_user_id").references(() => user.id, {
+    onDelete: "set null",
+  }),
+  // The camp it made. Kept as a plain id: the camp may be deleted later.
+  campId: text("camp_id"),
+});

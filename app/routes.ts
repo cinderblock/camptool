@@ -30,6 +30,8 @@ export default [
   route("moved", "routes/moved.tsx"),
   route("api/legacy-passkey", "routes/api.legacy-passkey.tsx"),
   route("new-passkey", "routes/new-passkey.tsx"),
+  // Starting a camp: with a super admin's setup link, or where anyone may.
+  route("new-camp/:token?", "routes/new-camp.tsx"),
   // Super-admin DB backup download (resource route; self-gated).
   route("export-db", "routes/export-db.tsx"),
   // Hand-off into the camp's bins inventory app, signed in (resource route;
@@ -70,7 +72,6 @@ export default [
   // redirect to /login — there is no "/dashboard" segment.
   layout("routes/dashboard/layout.tsx", [
     index("routes/dashboard/index.tsx"),
-    route("new-camp", "routes/dashboard/new-camp.tsx"),
     route("guide", "routes/dashboard/guide.tsx"),
     route("announcements", "routes/dashboard/announcements.tsx"),
     route("members", "routes/dashboard/members.tsx"),

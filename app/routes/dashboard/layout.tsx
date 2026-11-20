@@ -45,7 +45,7 @@ import {
   featureVisibleTo,
 } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
-import { getInstanceSettings, isSuperAdmin } from "~/lib/instance.server";
+import { isSuperAdmin } from "~/lib/instance.server";
 import { countUnreadSummaries } from "~/lib/meetings.server";
 import { hasAtLeast } from "~/lib/permissions";
 import type { PrivacyMode } from "~/lib/privacy";
@@ -124,8 +124,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const superAdmin = await isSuperAdmin(user.id);
-  const canCreateCamp =
-    superAdmin || (await getInstanceSettings()).allowCampCreation;
 
   const showPasskeyNag = !anyPasskey && !passkeyNagSnoozed(request);
 
@@ -225,7 +223,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     prospectsPending,
     unreadSummaries,
     showPasskeyNag,
-    canCreateCamp,
     privacyMode,
     canUsePrivacy,
     // Flattened to `…Name` so the redaction registry classifies it as a person;
@@ -283,7 +280,6 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     prospectsPending,
     unreadSummaries,
     showPasskeyNag,
-    canCreateCamp,
     impersonatedByName,
     privacyMode,
     canUsePrivacy,
@@ -731,11 +727,6 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               </Menu.Target>
               <Menu.Dropdown>
                 <Menu.Label>{user.email}</Menu.Label>
-                {canCreateCamp ? (
-                  <Menu.Item component={NavLink} to="/new-camp">
-                    New camp…
-                  </Menu.Item>
-                ) : null}
                 <Menu.Item onClick={handleSignOut}>Sign out</Menu.Item>
               </Menu.Dropdown>
             </Menu>

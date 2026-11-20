@@ -19,6 +19,7 @@ import {
   pageUrl,
 } from "./camp-host";
 import { APEX, CAMP_SUBDOMAINS } from "./env.server";
+import { isSuperAdmin } from "./instance.server";
 import { hasAtLeast, rankOf } from "./permissions";
 import {
   PRIVACY_OFF,
@@ -195,10 +196,11 @@ export async function loadCampEditions(campId: string): Promise<Edition[]> {
 }
 
 /**
- * May `realUserId` act as `targetUserId` within camp `campId`? The real user
- * must be officer+ in that camp and strictly out-rank the target, and the target
- * must belong to the camp. Re-checked on every request so revoking access (or
- * demoting the actor) ends impersonation immediately.
+ * May `realUserId` act as `targetUserId` within camp `campId`? The target must
+ * belong to the camp. The real user must either be a super admin (who looks
+ * after every camp without joining them) or be officer+ in that camp and
+ * strictly out-rank the target. Re-checked on every request so revoking access
+ * (or demoting the actor) ends impersonation immediately.
  */
 export async function canImpersonate(
   realUserId: string,
@@ -206,17 +208,6 @@ export async function canImpersonate(
   campId: string,
 ): Promise<boolean> {
   if (realUserId === targetUserId) return false;
-  const [realM] = await db
-    .select({ role: membership.role })
-    .from(membership)
-    .where(
-      and(
-        eq(membership.userId, realUserId),
-        eq(membership.organizationId, campId),
-      ),
-    )
-    .limit(1);
-  if (!realM || !hasAtLeast(realM.role, "officer")) return false;
   const [targetM] = await db
     .select({ role: membership.role })
     .from(membership)
@@ -228,6 +219,18 @@ export async function canImpersonate(
     )
     .limit(1);
   if (!targetM) return false;
+  if (await isSuperAdmin(realUserId)) return true;
+  const [realM] = await db
+    .select({ role: membership.role })
+    .from(membership)
+    .where(
+      and(
+        eq(membership.userId, realUserId),
+        eq(membership.organizationId, campId),
+      ),
+    )
+    .limit(1);
+  if (!realM || !hasAtLeast(realM.role, "officer")) return false;
   return rankOf(realM.role) > rankOf(targetM.role);
 }
 

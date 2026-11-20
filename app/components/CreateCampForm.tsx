@@ -1,108 +1,94 @@
-import {
-  Button,
-  Container,
-  Group,
-  Stack,
-  Text,
-  TextInput,
-  Title,
-} from "@mantine/core";
-import { notifications } from "@mantine/notifications";
+import { Alert, Button, Group, Stack, Text, TextInput } from "@mantine/core";
 import { useState } from "react";
-import { useNavigate, useRevalidator } from "react-router";
-import { authClient } from "~/lib/auth-client";
+import { useFetcher } from "react-router";
 
-function slugify(value: string) {
-  return (
-    value
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      // Room for the random suffix inside a 63-character DNS label: the slug
-      // is the camp's subdomain when those are on (app/lib/camp-host.ts).
-      .slice(0, 50)
-      .replace(/-+$/g, "")
-  );
+/** A camp name as a camp address: lowercase, dashes, one DNS label. */
+export function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 63)
+    .replace(/-+$/g, "");
 }
 
 /**
- * Make a camp, with the signed-in user as its first admin, and make it the
- * active one. Shown on the home page to someone in no camp yet, and at
- * /new-camp to someone who already has one.
+ * The camp's name and address, posted to `/new-camp` (or a setup link's
+ * `/new-camp/:token`), which makes the camp with the signed-in user as its
+ * first admin and sends the browser to it.
  *
- * `doneUrl` is where to go afterwards. When it's on another origin (a camp
- * subdomain making a camp, which has to land on the NEW camp's subdomain),
- * it's a full page load: the apex then sends the browser on to the camp the
- * session now has active.
+ * The address follows the name until it's edited by hand. `apexHost` is the
+ * shared site's host when camps get subdomains, so the field reads as the
+ * address it is; null on a single-camp site, where it's only the public page's
+ * `/c/<address>`.
  */
 export function CreateCampForm({
-  doneUrl = "/",
-  firstCamp = true,
+  action,
+  apexHost,
 }: {
-  doneUrl?: string;
-  firstCamp?: boolean;
+  action: string;
+  apexHost: string | null;
 }) {
-  const navigate = useNavigate();
-  const revalidator = useRevalidator();
+  const fetcher = useFetcher<{ error?: string }>();
   const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function create() {
-    if (!name.trim()) return;
-    setBusy(true);
-    const slug = `${slugify(name)}-${Math.random().toString(36).slice(2, 6)}`;
-    const { data, error } = await authClient.organization.create({
-      name: name.trim(),
-      slug,
-    });
-    if (error || !data) {
-      setBusy(false);
-      notifications.show({
-        color: "red",
-        title: "Could not create camp",
-        message: error?.message ?? "Unknown error",
-      });
-      return;
-    }
-    await authClient.organization.setActive({ organizationId: data.id });
-    if (/^https?:\/\//.test(doneUrl)) {
-      window.location.assign(doneUrl);
-      return;
-    }
-    setBusy(false);
-    revalidator.revalidate();
-    navigate(doneUrl);
-  }
+  const [slug, setSlug] = useState("");
+  const [slugEdited, setSlugEdited] = useState(false);
+  const busy = fetcher.state !== "idle";
+  const shownSlug = slugEdited ? slug : slugify(name);
 
   return (
-    <Container size="sm">
+    <fetcher.Form method="post" action={action}>
       <Stack gap="md">
-        <div>
-          <Title order={1} size="h2">
-            {firstCamp ? "Create your camp" : "Create a new camp"}
-          </Title>
-          <Text c="dimmed">
-            {firstCamp
-              ? "You're not part of a camp yet. Create one to get started — you'll be its first admin."
-              : "A separate camp, with its own members and data. You'll be its first admin, and you stay in your other camps."}
-          </Text>
-        </div>
+        {fetcher.data?.error ? (
+          <Alert color="red">{fetcher.data.error}</Alert>
+        ) : null}
         <TextInput
           label="Camp name"
+          name="name"
           placeholder="e.g. Math Camp"
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") create();
+          required
+        />
+        <TextInput
+          label={apexHost ? "Camp address" : "Camp page address"}
+          description={
+            apexHost
+              ? "Where your camp lives. Lowercase letters, numbers and dashes."
+              : "Your camp's public page is /c/ followed by this."
+          }
+          name="slug"
+          value={shownSlug}
+          onChange={(e) => {
+            setSlugEdited(true);
+            setSlug(e.currentTarget.value.toLowerCase());
           }}
+          rightSection={
+            apexHost ? (
+              <Text
+                size="sm"
+                c="dimmed"
+                pr="xs"
+                style={{ whiteSpace: "nowrap" }}
+              >
+                .{apexHost}
+              </Text>
+            ) : undefined
+          }
+          rightSectionWidth={apexHost ? apexHost.length * 8 + 24 : undefined}
+          required
         />
         <Group>
-          <Button onClick={create} loading={busy} disabled={!name.trim()}>
+          <Button
+            type="submit"
+            loading={busy}
+            disabled={!name.trim() || !shownSlug}
+          >
             Create camp
           </Button>
         </Group>
       </Stack>
-    </Container>
+    </fetcher.Form>
   );
 }
