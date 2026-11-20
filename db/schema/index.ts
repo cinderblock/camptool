@@ -25,6 +25,7 @@ export * from "./recruit";
 export * from "./sap";
 export * from "./schedule";
 export * from "./season";
+export * from "./structure-kind";
 export * from "./swap";
 export * from "./telemetry";
 export * from "./ticket";
