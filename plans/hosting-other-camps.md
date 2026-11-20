@@ -287,6 +287,22 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
    g. Later: retire firefly's camptool stack and Caddy site (ops change).
       Keep `LEGACY_HOSTS` for as long as old links and passkeys matter.
    The deploy button (old step 6) is dropped (decision 13).
+9. [x] **Onboarding other camps** (Cameron, 2026-11-20, after making Entheos
+   at `entheos-r2vg` and finding himself its member). Built in `ad5e8b2`.
+   a. [x] Camp setup links: a super admin makes a one-use link on Site admin
+      → Camps and sends it to a camp lead, who signs up (or in) and creates
+      the camp with themselves as first admin. The super admin is NOT a
+      member. Table `camp_setup_link`; route `/new-camp/:token` on the apex.
+      The account-menu "New camp…" (`f3dbfd4`) is gone.
+   b. [x] The camp lead picks the subdomain (prefilled from the name, no
+      random suffix). Same picker on the no-camp home form.
+   c. [x] Site admin → Camps: delete a camp (type its subdomain to confirm;
+      DB cascades from `camp`, then its R2 files), change a camp's
+      subdomain, and "Work as" any member of any camp (super admin bypasses
+      `canImpersonate`'s membership check).
+   d. [x] Drop the per-camp pack switches from Site admin. Packs stay set
+      by `import-to-d1 --packs` only. Runtime per-camp structures are their
+      own thread: [CampTool: per-camp custom structures at runtime](t3-thread://v2/ab3781d7-a1dd-4bbb-b3e9-6331e19b7569/mcp:launch:0adfd1e568df70035be3a258f32663b5925f341e917b7a832732a1b3f378e143), `plans/custom-structures.md`.
 
 ## Findings / gotchas
 
