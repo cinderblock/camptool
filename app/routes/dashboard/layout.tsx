@@ -34,6 +34,7 @@ import { authClient, signOut } from "~/lib/auth-client";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
 import { campOrigin, isValidCampSlug, pageUrl } from "~/lib/camp-host";
+import { loadCustomKinds } from "~/lib/custom-kinds.server";
 import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
 import { featureName } from "~/lib/events";
 import { countPendingEntries } from "~/lib/faq.server";
@@ -46,6 +47,7 @@ import {
 } from "~/lib/features";
 import { loadFeatureStates } from "~/lib/features.server";
 import { isSuperAdmin } from "~/lib/instance.server";
+import { KindsProvider } from "~/lib/kinds-context";
 import { countUnreadSummaries } from "~/lib/meetings.server";
 import { hasAtLeast } from "~/lib/permissions";
 import type { PrivacyMode } from "~/lib/privacy";
@@ -210,8 +212,13 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? await getBinsMenu(active.camp.id)
       : null;
 
+  // The camp's own structure kinds, so every page's palette includes them
+  // (`KindsProvider` below; plans/custom-structures.md).
+  const customKinds = active ? await loadCustomKinds(active.camp.id) : [];
+
   return redact(privacy, {
     user,
+    customKinds,
     activeCampId: active?.camp.id ?? null,
     activeRole: active?.membership.role ?? null,
     features,
@@ -269,6 +276,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const {
     user,
     camps,
+    customKinds,
     activeCampId,
     activeRole,
     features,
@@ -905,7 +913,9 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             device PIN instead of a password. Takes a few seconds.
           </ShellBanner>
         ) : null}
-        <Outlet />
+        <KindsProvider kinds={customKinds}>
+          <Outlet />
+        </KindsProvider>
       </AppShell.Main>
     </AppShell>
   );

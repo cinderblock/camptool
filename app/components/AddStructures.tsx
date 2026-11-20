@@ -7,7 +7,8 @@ import {
   Text,
 } from "@mantine/core";
 import { useState } from "react";
-import { CAMPER_KIND_GROUPS, type Kind, ShapeSwatch } from "~/lib/structures";
+import { useKinds } from "~/lib/kinds-context";
+import { type CampStructure, ShapeSwatch } from "~/lib/structures";
 
 export type AddSize = { width?: number; height?: number };
 
@@ -30,10 +31,12 @@ export function AddStructures({
   bannedKinds?: string[];
 }) {
   const banned = new Set(bannedKinds);
-  const groups = CAMPER_KIND_GROUPS.map((grp) => ({
-    ...grp,
-    kinds: grp.kinds.filter((k) => !banned.has(k.value)),
-  })).filter((grp) => grp.kinds.length > 0);
+  const groups = useKinds()
+    .camperGroups.map((grp) => ({
+      ...grp,
+      kinds: grp.kinds.filter((k) => !banned.has(k.value)),
+    }))
+    .filter((grp) => grp.kinds.length > 0);
   return (
     <Stack gap={10}>
       {groups.map((grp) => (
@@ -62,7 +65,7 @@ function AddButton({
   onAdd,
   disabled,
 }: {
-  kind: Kind;
+  kind: CampStructure;
   onAdd: (kind: string, size?: AddSize) => void;
   disabled?: boolean;
 }) {

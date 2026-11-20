@@ -19,10 +19,12 @@ import { data, useFetcher } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
 import { blockedKinds, isKindBlocked } from "~/lib/bans";
+import { loadKindRegistry } from "~/lib/custom-kinds.server";
 import { requireFeature } from "~/lib/features.server";
+import { useKinds } from "~/lib/kinds-context";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
-import { hasTag, kindDef, kindHeight, ShapeSwatch } from "~/lib/structures";
+import { ShapeSwatch } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import {
   attendee,
@@ -283,13 +285,17 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "addItem") {
     const kind = String(form.get("kind") ?? "tent");
+    const kinds = await loadKindRegistry(active.camp.id);
+    if (!kinds.isKind(kind)) {
+      return data({ error: "Unknown kind of item." }, { status: 400 });
+    }
     if (isKindBlocked(activeEdition, active.camp, kind)) {
       return data(
-        { error: `${kindDef(kind).label} isn't allowed this year.` },
+        { error: `${kinds.def(kind).label} isn't allowed this year.` },
         { status: 403 },
       );
     }
-    const def = kindDef(kind);
+    const def = kinds.def(kind);
     // Rigid kinds keep their fixed footprint; sizable ones may carry a
     // camper-picked width/height from the size prompt.
     const width = def.rigid
@@ -311,7 +317,7 @@ export async function action({ request }: Route.ActionArgs) {
       placed: false,
       width,
       height,
-      tallFt: kindHeight(kind),
+      tallFt: kinds.height(kind),
       createdById: user.id,
     });
     return data({ ok: true });
@@ -516,6 +522,7 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
     occupantOptions,
     withoutBed,
   } = loaderData;
+  const kinds = useKinds();
   const fetcher = useFetcher();
 
   function add(kind: string, size?: AddSize) {
@@ -574,7 +581,7 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
                   {lastYear.items
                     .map(
                       (it) =>
-                        `${it.name ? `${it.name} ` : ""}${kindDef(it.kind).label} (${Math.round(it.width)}×${Math.round(it.height)}′)`,
+                        `${it.name ? `${it.name} ` : ""}${kinds.def(it.kind).label} (${Math.round(it.width)}×${Math.round(it.height)}′)`,
                     )
                     .join(", ")}
                   . Add them again to re-declare for this year (officers
@@ -660,7 +667,8 @@ function ItemRow({
   fetcher: ReturnType<typeof useFetcher>;
   locked: boolean;
 }) {
-  const def = kindDef(item.kind);
+  const kinds = useKinds();
+  const def = kinds.def(item.kind);
   function commit(fields: Record<string, string | number>) {
     fetcher.submit(
       { intent: "updateItem", id: item.id, ...fields },
@@ -669,7 +677,7 @@ function ItemRow({
   }
   // Only things people sleep in take occupants.
   const holdsPeople =
-    hasTag(item.kind, "domicile") || hasTag(item.kind, "vehicle");
+    kinds.hasTag(item.kind, "domicile") || kinds.hasTag(item.kind, "vehicle");
 
   return (
     <Paper withBorder p="md" radius="md">
@@ -973,6 +981,7 @@ function OccupantPicker({
   occupantOptions: OccupantOption[];
   fetcher: ReturnType<typeof useFetcher>;
 }) {
+  const kinds = useKinds();
   const taken = new Set([
     ...occupants.map((o) => `a:${o.attendeeId}`),
     ...occupants
@@ -994,7 +1003,7 @@ function OccupantPicker({
       size="xs"
       w={260}
       placeholder="Add someone…"
-      aria-label={`Add someone to ${item.name ?? kindDef(item.kind).label}`}
+      aria-label={`Add someone to ${item.name ?? kinds.def(item.kind).label}`}
       searchable
       data={groups}
       value={null}

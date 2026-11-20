@@ -6,24 +6,23 @@
  * covering a 100′-wide target circle. Distances are feet.
  *
  * Two kinds of tapering solid are covered: a core `dome`, and the camp theme's
- * Sierpinski pyramid (whose theme package has to be mocked in — see below).
+ * Sierpinski pyramid (added to the registry as an extra kind — see below).
  */
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import mathCampTheme from "@camptool/mathcamp-theme";
-import type { LosObject, SightLine } from "~/lib/uplink-los";
+import { makeKindRegistry } from "~/lib/structures";
+import {
+  blocksSightLine,
+  type LosObject,
+  type SightLine,
+} from "~/lib/uplink-los";
 
-// Camp-theme packs are generated at build time, so under `bun test` `~/theme`
-// bundles only the empty default and the palette has no pyramid. Swap Math
-// Camp's structures in first, then load the module under test, so the
-// Sierpinski cases below run through the real `kindDef` → `crossSectionAt`
-// path the app uses. Spread the real module: Bun's mocks outlive this file,
-// and later files need the rest of `~/theme`.
-const realTheme = await import("~/theme");
-mock.module("~/theme", () => ({
-  ...realTheme,
-  campStructures: mathCampTheme.structures,
-}));
-const { blocksSightLine } = await import("~/lib/uplink-los");
+// Camp-theme packs are generated at build time, so under `bun test` the
+// built-in registry has no pyramid. Build one with Math Camp's structures as
+// extra kinds, the same way a camp's own kinds join, so the Sierpinski cases
+// below run through the real `def` → `crossSectionAt` path the app uses.
+const kinds = makeKindRegistry(mathCampTheme.structures);
+const blocks = (o: LosObject, s: SightLine) => blocksSightLine(o, s, kinds);
 
 const DIST = 4872;
 const beam = (mastFt: number): SightLine => ({
@@ -63,43 +62,31 @@ describe("blocksSightLine", () => {
   const container = at("container", 0, 40, 8, 20, 9.5);
 
   test("a 9.5′ container blocks a 6′ mast", () => {
-    expect(blocksSightLine(container, beam(6))).toBe(true);
+    expect(blocks(container, beam(6))).toBe(true);
   });
 
   test("…and clears a 12′ mast — the line has climbed past it", () => {
-    expect(blocksSightLine(container, beam(12))).toBe(false);
+    expect(blocks(container, beam(12))).toBe(false);
   });
 
   test("something off to the side isn't in the beam", () => {
-    expect(blocksSightLine(at("container", 60, 40, 8, 20, 9.5), beam(6))).toBe(
-      false,
-    );
+    expect(blocks(at("container", 60, 40, 8, 20, 9.5), beam(6))).toBe(false);
   });
 
   test("something behind the radio isn't in the beam", () => {
-    expect(blocksSightLine(at("container", 0, -40, 8, 20, 9.5), beam(6))).toBe(
-      false,
-    );
+    expect(blocks(at("container", 0, -40, 8, 20, 9.5), beam(6))).toBe(false);
   });
 
   test("shade cloth doesn't obscure the radio", () => {
     // Same footprint and height as a blocking solid — it's the canopy flag,
     // not the geometry, that lets the link through.
-    expect(blocksSightLine(at("shade", 0, 40, 20, 20, 10), beam(6))).toBe(
-      false,
-    );
-    expect(blocksSightLine(at("carport", 0, 40, 20, 20, 10), beam(6))).toBe(
-      false,
-    );
-    expect(blocksSightLine(at("popup", 0, 40, 20, 20, 10), beam(6))).toBe(
-      false,
-    );
+    expect(blocks(at("shade", 0, 40, 20, 20, 10), beam(6))).toBe(false);
+    expect(blocks(at("carport", 0, 40, 20, 20, 10), beam(6))).toBe(false);
+    expect(blocks(at("popup", 0, 40, 20, 20, 10), beam(6))).toBe(false);
   });
 
   test("a zero-height thing never blocks", () => {
-    expect(blocksSightLine(at("path-light", 0, 40, 1, 1, 0), beam(6))).toBe(
-      false,
-    );
+    expect(blocks(at("path-light", 0, 40, 1, 1, 0), beam(6))).toBe(false);
   });
 
   // A tapering solid is compared level by level. The beam grazes the LEFT RIM
@@ -108,19 +95,15 @@ describe("blocksSightLine", () => {
   // tall near its middle, and by the time the slice is high enough to matter
   // it has shrunk clear of the beam.
   test("a box that height blocks the beam grazing its edge", () => {
-    expect(blocksSightLine(at("structure", 14, 40, 30, 30, 12), beam(6))).toBe(
-      true,
-    );
+    expect(blocks(at("structure", 14, 40, 30, 30, 12), beam(6))).toBe(true);
   });
 
   test("…but the dome of the same size and height does not — it tapers", () => {
-    expect(blocksSightLine(at("dome", 14, 40, 30, 30, 12), beam(6))).toBe(
-      false,
-    );
+    expect(blocks(at("dome", 14, 40, 30, 30, 12), beam(6))).toBe(false);
   });
 
   test("the dome still blocks when the beam goes through its middle", () => {
-    expect(blocksSightLine(at("dome", 0, 40, 30, 30, 12), beam(6))).toBe(true);
+    expect(blocks(at("dome", 0, 40, 30, 30, 12), beam(6))).toBe(true);
   });
 
   // The pyramid is the case that motivated all this: a 40′ tetrahedron whose
@@ -128,7 +111,7 @@ describe("blocksSightLine", () => {
   // beam clips its left side, ~4′ inside the base — over a part of the solid
   // that's only a few feet tall.
   const pyramid = (mastFt: number) =>
-    blocksSightLine(
+    blocks(
       {
         kind: "sierpinski-pyramid",
         x: 14 - 20,
@@ -154,7 +137,7 @@ describe("blocksSightLine", () => {
 
   test("the pyramid still blocks through its middle at any sane mast height", () => {
     expect(
-      blocksSightLine(
+      blocks(
         {
           kind: "sierpinski-pyramid",
           x: -20,

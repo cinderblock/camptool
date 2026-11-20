@@ -55,6 +55,8 @@ export type Kind = {
    * the rotate keys skip it. Its `rotation` stays whatever it was (0 for
    * anything placed since); nothing about it is drawn from the angle. */
   fixedRotation?: boolean;
+  /** A short note about the kind (a camp-defined kind's description). */
+  description?: string;
 };
 
 /** Context handed to a custom structure's footprint renderer. Everything is in

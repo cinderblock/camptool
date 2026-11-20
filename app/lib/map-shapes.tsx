@@ -16,12 +16,12 @@
  * page without making them unique first.
  */
 import { memo } from "react";
+import { useKinds } from "~/lib/kinds-context";
 import { clamp } from "~/lib/num";
 import {
-  hasTag,
+  type CampStructure,
   hexPoints,
   hexVertices,
-  kindDef,
   type StructureConfig,
 } from "~/lib/structures";
 
@@ -463,13 +463,12 @@ function KindGlyph({
  * at a given size — the real shape, so a hexayurt throws a hexagonal shadow (and
  * a triangle is tested as a triangle), not a box. */
 export function footprintOutline(
-  kind: string,
+  def: CampStructure,
   w: number,
   h: number,
   config: StructureConfig = {},
   mirror = false,
 ): Array<[number, number]> {
-  const def = kindDef(kind);
   // A camp-theme structure can declare its true outline (e.g. the pyramid's
   // base triangle + buttress reach); use it instead of the bounding box. A
   // chiral structure's outline is reflected (x→−x) when the object is mirrored,
@@ -515,7 +514,7 @@ export function footprintOutline(
  * either as a box makes it block paths it doesn't really block.
  */
 export function crossSectionOutline(
-  kind: string,
+  def: CampStructure,
   w: number,
   h: number,
   config: StructureConfig,
@@ -523,8 +522,7 @@ export function crossSectionOutline(
   z: number,
   tallFt: number,
 ): Array<[number, number]> | null {
-  const def = kindDef(kind);
-  if (z <= 0) return footprintOutline(kind, w, h, config, mirror);
+  if (z <= 0) return footprintOutline(def, w, h, config, mirror);
   if (def.crossSectionAt) {
     const pts = def.crossSectionAt(z, w, h, config);
     if (!pts || pts.length < 3) return null;
@@ -536,9 +534,9 @@ export function crossSectionOutline(
     // the slice near the top is a small circle rather than the full base.
     const s = Math.sqrt(Math.max(0, 1 - (z / (tallFt || 1)) ** 2));
     if (s < 0.02) return null;
-    return footprintOutline(kind, w * s, h * s, config, mirror);
+    return footprintOutline(def, w * s, h * s, config, mirror);
   }
-  return footprintOutline(kind, w, h, config, mirror);
+  return footprintOutline(def, w, h, config, mirror);
 }
 
 /**
@@ -549,8 +547,10 @@ export function crossSectionOutline(
  * the far antenna, so neither the ground slice nor the top slice alone settles
  * it.
  */
-export function crossSectionLevels(kind: string, tallFt: number): number[] {
-  const def = kindDef(kind);
+export function crossSectionLevels(
+  def: CampStructure,
+  tallFt: number,
+): number[] {
   if (!def.crossSectionAt && def.shape !== "dome") return [tallFt];
   const n = 16;
   return Array.from({ length: n }, (_, i) => (tallFt * (i + 1)) / n);
@@ -630,7 +630,8 @@ export const MapObjectShape = memo(
     onResizeDown: (e: React.PointerEvent) => void;
     onRotateDown: (e: React.PointerEvent) => void;
   }) {
-    const def = kindDef(o.kind);
+    const kinds = useKinds();
+    const def = kinds.def(o.kind);
     const px = originX + o.x * ppf;
     const py = originY + o.y * ppf;
     const w = o.width * ppf;
@@ -648,7 +649,7 @@ export const MapObjectShape = memo(
     const isShade = def.canopyShade === true;
     // Show the owner's first name on sleeping structures (domiciles), drawn
     // upright outside the rotated group (the center cx,cy is rotation-invariant).
-    const isDomicile = hasTag(o.kind, "domicile");
+    const isDomicile = kinds.hasTag(o.kind, "domicile");
     const ownerFirst = o.ownerName?.split(" ")[0] ?? null;
     const bigEnough = w > 22 && h > 16;
     // A given name (e.g. a named RV) is the prominent label; the owner's first
@@ -664,7 +665,28 @@ export const MapObjectShape = memo(
     return (
       <g opacity={dim ? 0.28 : staged ? 0.72 : undefined}>
         <g transform={`rotate(${o.rotation} ${cx} ${cy})`}>
-          {isShade ? (
+          {isShade && def.footprint ? (
+            // A canopy with its own outline (a camp's triangle shade) traces
+            // that outline rather than its bounding box.
+            <polygon
+              points={footprintOutline(
+                def,
+                o.width,
+                o.height,
+                o.config,
+                o.mirrored,
+              )
+                .map(([lx, ly]) => `${cx + lx * ppf},${cy + ly * ppf}`)
+                .join(" ")}
+              fill={fill}
+              fillOpacity={0.18}
+              stroke={selected ? "#1c1c1c" : fill}
+              strokeWidth={selected ? 2.5 : 2}
+              strokeDasharray="6 4"
+              strokeLinejoin="round"
+              pointerEvents="none"
+            />
+          ) : isShade ? (
             <rect
               x={px}
               y={py}
@@ -1103,7 +1125,7 @@ export const MapObjectShape = memo(
             <>
               <polygon
                 points={footprintOutline(
-                  o.kind,
+                  def,
                   o.width,
                   o.height,
                   o.config,
@@ -1133,7 +1155,7 @@ export const MapObjectShape = memo(
             // outline (triangle/hexagon/…), not a bounding box.
             <polygon
               points={footprintOutline(
-                o.kind,
+                def,
                 o.width,
                 o.height,
                 o.config,

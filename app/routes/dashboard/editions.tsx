@@ -20,7 +20,9 @@ import {
   serializeBannedKinds,
 } from "~/lib/bans";
 import { currentEventYear } from "~/lib/brc";
+import { loadKindRegistry } from "~/lib/custom-kinds.server";
 import { BURNING_MAN, EVENTS, eventLabel, isEvent } from "~/lib/events";
+import { useKinds } from "~/lib/kinds-context";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import {
@@ -29,7 +31,6 @@ import {
   requireActiveCamp,
   setEditionCookie,
 } from "~/lib/session.server";
-import { isKind, KIND_GROUPS } from "~/lib/structures";
 import { unavailableKinds } from "~/theme";
 import { db } from "../../../db/client.server";
 import { campEdition, placement } from "../../../db/schema";
@@ -185,10 +186,11 @@ export async function action({ request }: Route.ActionArgs) {
     if (owned.locked) {
       return data({ error: "This year is locked." }, { status: 403 });
     }
+    const registry = await loadKindRegistry(campId);
     const kinds = form
       .getAll("kind")
       .map(String)
-      .filter((k) => isKind(k));
+      .filter((k) => registry.isKind(k));
     await db
       .update(campEdition)
       .set({ bannedKinds: serializeBannedKinds(kinds) })
@@ -201,6 +203,7 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function Editions({ loaderData }: Route.ComponentProps) {
   const { editions, activeEditionId, canManage, hiddenKinds } = loaderData;
+  const kindGroups = useKinds().groups;
   const activeEdition = editions.find((e) => e.id === activeEditionId) ?? null;
   const activeLabel = activeEdition
     ? activeEdition.label
@@ -293,7 +296,7 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                     value={activeEdition.id}
                   />
                   <Stack gap="sm">
-                    {KIND_GROUPS.map((grp) => {
+                    {kindGroups.map((grp) => {
                       const bannable = grp.kinds.filter(
                         (k) =>
                           k.value !== "structure" &&

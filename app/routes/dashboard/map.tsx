@@ -68,8 +68,10 @@ import {
   streetLabel,
   streetOptions,
 } from "~/lib/brc";
+import { loadKindRegistry } from "~/lib/custom-kinds.server";
 import { isBurningMan } from "~/lib/events";
 import { requireFeature } from "~/lib/features.server";
+import { useKinds } from "~/lib/kinds-context";
 import {
   type ObjSelectRow,
   objSelect,
@@ -112,22 +114,16 @@ import {
   roadOutline,
 } from "~/lib/roads";
 import { requireActiveEdition } from "~/lib/session.server";
-import type { StructureConfig } from "~/lib/structures";
+import type { KindRegistry, StructureConfig } from "~/lib/structures";
 import {
   AMP_OPTIONS,
   CONTAINER_FULL,
   CONTAINER_HALF,
   CONTAINER_WIDTH,
   GAUGE_OPTIONS,
-  hasTag,
   hexVertices,
-  isKind,
-  KIND_GROUPS,
-  KINDS,
   KindIcon,
-  kindDef,
   kindHasDoor,
-  kindHeight,
 } from "~/lib/structures";
 import { dayArc, formatClock, minuteForAzimuth, sunAt } from "~/lib/sun";
 import { blocksSightLine, type SightLine } from "~/lib/uplink-los";
@@ -1300,13 +1296,17 @@ export async function action({ request }: Route.ActionArgs) {
 
     if (intent === "addObject") {
       const kind = String(form.get("kind") ?? "structure");
+      const kinds = await loadKindRegistry(campId);
+      if (!kinds.isKind(kind)) {
+        return data({ error: "Unknown kind of structure." }, { status: 400 });
+      }
       if (isKindBlocked(activeEdition, active.camp, kind)) {
         return data(
-          { error: `${kindDef(kind).label} isn't allowed this year.` },
+          { error: `${kinds.def(kind).label} isn't allowed this year.` },
           { status: 403 },
         );
       }
-      const def = kindDef(kind);
+      const def = kinds.def(kind);
       const staged = form.get("staged") === "true";
       const row = {
         id: crypto.randomUUID(),
@@ -1324,7 +1324,7 @@ export async function action({ request }: Route.ActionArgs) {
         width: Math.max(1, num("width", def.w)),
         height: Math.max(1, num("height", def.h)),
         rotation: num("rotation", 0),
-        tallFt: num("tallFt", kindHeight(kind)),
+        tallFt: num("tallFt", kinds.height(kind)),
         showDoor: true,
         mirrored: false,
         color: str("color"),
@@ -1372,13 +1372,14 @@ export async function action({ request }: Route.ActionArgs) {
       if (!Array.isArray(raw) || raw.length === 0) {
         return data({ error: "Empty block." }, { status: 400 });
       }
+      const kinds = await loadKindRegistry(campId);
       const rows = raw
         .slice(0, 20)
         .map((it) => {
           const kind = String((it as { kind?: unknown }).kind ?? "");
-          if (!isKind(kind)) return null;
+          if (!kinds.isKind(kind)) return null;
           if (isKindBlocked(activeEdition, active.camp, kind)) return null;
-          const def = kindDef(kind);
+          const def = kinds.def(kind);
           const n = (v: unknown, d: number) => {
             const x = Number(v);
             return Number.isFinite(x) ? x : d;
@@ -1396,7 +1397,7 @@ export async function action({ request }: Route.ActionArgs) {
             width: Math.max(1, n((it as { width?: unknown }).width, def.w)),
             height: Math.max(1, n((it as { height?: unknown }).height, def.h)),
             rotation: n((it as { rotation?: unknown }).rotation, 0),
-            tallFt: kindHeight(kind),
+            tallFt: kinds.height(kind),
             showDoor: true,
             mirrored: false,
             color: null,
@@ -1598,7 +1599,16 @@ export async function action({ request }: Route.ActionArgs) {
         // Officers edit anything directly; an officer edit accepts (clears) any
         // pending proposal on the item.
         if (form.has("name")) set.name = str("name");
-        if (form.has("kind")) set.kind = String(form.get("kind"));
+        if (form.has("kind")) {
+          const kind = String(form.get("kind"));
+          if (!(await loadKindRegistry(campId)).isKind(kind)) {
+            return data(
+              { error: "Unknown kind of structure." },
+              { status: 400 },
+            );
+          }
+          set.kind = kind;
+        }
         if (form.has("color")) set.color = str("color");
         if (form.has("notes")) set.notes = str("notes");
         if (form.has("showDoor"))
@@ -2357,14 +2367,28 @@ function convexHull(pts: ZonePt[]): ZonePt[] {
 }
 
 /** The footprint outline for a placed object (centered local feet). */
-function footprintLocal(o: ObjRow): Array<[number, number]> {
-  return footprintOutline(o.kind, o.width, o.height, o.config, o.mirrored);
+function footprintLocal(
+  o: ObjRow,
+  kinds: KindRegistry,
+): Array<[number, number]> {
+  return footprintOutline(
+    kinds.def(o.kind),
+    o.width,
+    o.height,
+    o.config,
+    o.mirrored,
+  );
 }
 
 /** An object's footprint corners in WORLD plot-local feet, at a given center —
  * its real outline (rect / hexagon / custom), rotated + mirrored. */
-function objWorldCorners(o: ObjRow, cx: number, cy: number): ZonePt[] {
-  return footprintLocal(o).map(([lx, ly]) => {
+function objWorldCorners(
+  o: ObjRow,
+  cx: number,
+  cy: number,
+  kinds: KindRegistry,
+): ZonePt[] {
+  return footprintLocal(o, kinds).map(([lx, ly]) => {
     const v = rotateVec(lx, ly, o.rotation);
     return { x: cx + v.x, y: cy + v.y };
   });
@@ -2393,10 +2417,11 @@ function snapToStructures(
   o: ObjRow,
   others: ObjRow[],
   threshold: number,
+  kinds: KindRegistry,
 ): { obj: ObjRow; hint: ZonePt | null } {
   const cx = o.x + o.width / 2;
   const cy = o.y + o.height / 2;
-  const corners = objWorldCorners(o, cx, cy);
+  const corners = objWorldCorners(o, cx, cy, kinds);
   let best: { dx: number; dy: number; dist: number; target: ZonePt } | null =
     null;
   for (const other of others) {
@@ -2405,6 +2430,7 @@ function snapToStructures(
       other,
       other.x + other.width / 2,
       other.y + other.height / 2,
+      kinds,
     );
     if (oc.length === 0) continue;
     for (const c of corners) {
@@ -2439,16 +2465,16 @@ function snapToStructures(
 /** Above-ground height (ft) at each footprint corner, aligned with
  * footprintLocal, so a sloped roof casts a warped shadow. The hyparhut's roof is
  * a hyperbolic paraboloid measured per corner; every other kind is a flat height. */
-function cornerHeights(o: ObjRow): number[] {
+function cornerHeights(o: ObjRow, kinds: KindRegistry): number[] {
   const tall = o.tallFt; // authoritative; 0 disables shade for this object
-  if (kindDef(o.kind).shape === "hypar") {
+  if (kinds.def(o.kind).shape === "hypar") {
     // footprintLocal order = [back-left, back-right, front-right, front-left];
     // the door is on the front (+y) edge by the front-right corner. Measured
     // corner heights 4' / 5' / 6' / 4' (front-right = 6' peak next to the door),
     // scaled so the 6' peak tracks `tall`.
     return [4, 5, 6, 4].map((h) => (h / 6) * tall);
   }
-  return footprintLocal(o).map(() => tall);
+  return footprintLocal(o, kinds).map(() => tall);
 }
 
 /** A geodesic dome is a hemisphere, not a box/cylinder — so its shadow is an
@@ -2610,12 +2636,13 @@ function shadowPolygon(
   o: ObjRow,
   sun: { altitude: number; azimuth: number },
   mapUpBearing: number,
+  kinds: KindRegistry,
 ): ZonePt[][] {
   if (sun.altitude <= 0.5) return [];
   // A path light is a point luminaire (no real volume) → never casts shade, even
   // if an older row still carries a stored height.
   if (o.kind === "path-light") return [];
-  const def = kindDef(o.kind);
+  const def = kinds.def(o.kind);
   if (def.shape === "dome") {
     const d = domeShadow(o, sun, mapUpBearing);
     return d ? [d] : [];
@@ -2629,13 +2656,13 @@ function shadowPolygon(
     );
   const altDeg = Math.max(sun.altitude, 3); // clamp so low sun ≠ infinite shadow
   const tan = Math.tan((altDeg * Math.PI) / 180);
-  const heights = cornerHeights(o);
+  const heights = cornerHeights(o, kinds);
   if (heights.every((h) => h <= 0)) return [];
   // Unit shadow direction in plot-local feet (pointing away from the sun).
   const dir = bearingToPlotDelta(sun.azimuth + 180, 1, mapUpBearing);
   const cx = o.x + o.width / 2;
   const cy = o.y + o.height / 2;
-  const corners: ZonePt[] = footprintLocal(o).map(([lx, ly]) => {
+  const corners: ZonePt[] = footprintLocal(o, kinds).map(([lx, ly]) => {
     const v = rotateVec(lx, ly, o.rotation);
     return { x: cx + v.x, y: cy + v.y };
   });
@@ -2658,9 +2685,10 @@ function footprintOffsets(
   rotation: number,
   config: StructureConfig = {},
   mirror = false,
+  kinds: KindRegistry,
 ): Array<{ x: number; y: number }> {
-  return footprintOutline(kind, w, h, config, mirror).map(([lx, ly]) =>
-    rotateVec(lx, ly, rotation),
+  return footprintOutline(kinds.def(kind), w, h, config, mirror).map(
+    ([lx, ly]) => rotateVec(lx, ly, rotation),
   );
 }
 
@@ -2711,6 +2739,7 @@ function stagedByGeometry(
   frontageFt: number,
   depthFt: number,
   rear: number,
+  kinds: KindRegistry,
 ): boolean {
   const pts = footprintOffsets(
     o.kind,
@@ -2719,6 +2748,7 @@ function stagedByGeometry(
     rotation,
     o.config,
     o.mirrored,
+    kinds,
   ).map((v) => ({ x: cx + v.x, y: cy + v.y }));
   return polygonOutsideLot(pts, frontageFt, depthFt, rear);
 }
@@ -2755,12 +2785,15 @@ function stagingPadFt(
 }
 
 /** An object's real (rotated) footprint outline as absolute plot-local feet. */
-function footprintPoints(o: ObjRow): Array<{ x: number; y: number }> {
+function footprintPoints(
+  o: ObjRow,
+  kinds: KindRegistry,
+): Array<{ x: number; y: number }> {
   const cx = o.x + o.width / 2;
   const cy = o.y + o.height / 2;
   // The object's REAL outline (triangle, hexagon, RV pop-outs, …), rotated — not
   // a bounding box, so a rotated non-rect shape isn't falsely flagged.
-  return footprintLocal(o).map(([lx, ly]) => {
+  return footprintLocal(o, kinds).map(([lx, ly]) => {
     const v = rotateVec(lx, ly, o.rotation);
     return { x: cx + v.x, y: cy + v.y };
   });
@@ -2776,8 +2809,9 @@ function objectOverflowsLot(
   frontageFt: number,
   depthFt: number,
   rear: number,
+  kinds: KindRegistry,
 ): boolean {
-  const pts = footprintPoints(o);
+  const pts = footprintPoints(o, kinds);
   if (pts.every((p) => pointInLot(p.x, p.y, frontageFt, depthFt, rear)))
     return false;
   return !polygonOutsideLot(pts, frontageFt, depthFt, rear);
@@ -2791,9 +2825,11 @@ function isStaged(
   frontageFt: number,
   depthFt: number,
   rear: number,
+  kinds: KindRegistry,
 ): boolean {
   return (
-    o.staged || polygonOutsideLot(footprintPoints(o), frontageFt, depthFt, rear)
+    o.staged ||
+    polygonOutsideLot(footprintPoints(o, kinds), frontageFt, depthFt, rear)
   );
 }
 
@@ -3318,11 +3354,11 @@ function moveSummary(was: ObjRow, now: ObjRow): string {
 /** Name a thing in the change list. Most objects are unnamed, and a camp is
  * mostly one person's several things — so lead with WHAT it is and qualify with
  * whose, or a list of six moves all read "Bob". */
-function objLabel(o: ObjRow): string {
+function objLabel(o: ObjRow, kinds: KindRegistry): string {
   const named = o.name?.trim();
   if (named) return named;
   const who = o.ownerName?.split(" ")[0];
-  const what = kindDef(o.kind).label;
+  const what = kinds.def(o.kind).label;
   return who ? `${what} (${who})` : what;
 }
 
@@ -3353,6 +3389,7 @@ function VersionsPanel({
   canManage: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
+  const kinds = useKinds();
   const [label, setLabel] = useState("");
   const save = () => {
     fetcher.submit(
@@ -3473,7 +3510,7 @@ function VersionsPanel({
                   <Text span c="blue.7" fw={600}>
                     ●
                   </Text>{" "}
-                  {objLabel(was)} — {moveSummary(was, now)}
+                  {objLabel(was, kinds)} — {moveSummary(was, now)}
                 </Text>
               ))}
               {diff.added.map((o) => (
@@ -3481,7 +3518,7 @@ function VersionsPanel({
                   <Text span c="teal.7" fw={600}>
                     +
                   </Text>{" "}
-                  {objLabel(o)} — only in this version
+                  {objLabel(o, kinds)} — only in this version
                 </Text>
               ))}
               {diff.removed.map((o) => (
@@ -3489,7 +3526,7 @@ function VersionsPanel({
                   <Text span c="red.7" fw={600}>
                     −
                   </Text>{" "}
-                  {objLabel(o)} — not in this version
+                  {objLabel(o, kinds)} — not in this version
                 </Text>
               ))}
               {diff.zones !== 0 ? (
@@ -4675,6 +4712,7 @@ function UnplacedTray({
   unplaced: Unplaced[];
   fetcher: ReturnType<typeof useFetcher>;
 }) {
+  const kinds = useKinds();
   return (
     <Paper withBorder p="sm" radius="md">
       <Text size="xs" fw={600} mb={6}>
@@ -4687,7 +4725,7 @@ function UnplacedTray({
       ) : (
         <Stack gap={6}>
           {unplaced.map((u) => {
-            const def = kindDef(u.kind);
+            const def = kinds.def(u.kind);
             return (
               <Group
                 key={u.id}
@@ -4813,11 +4851,14 @@ function BlockPalette() {
  * place that kind. Names show as tooltips so the grid of icons stays compact.
  * Kinds disallowed this edition (`bannedKinds`) are dropped from the palette. */
 function Legend({ bannedKinds }: { bannedKinds: string[] }) {
+  const kinds = useKinds();
   const banned = new Set(bannedKinds);
-  const groups = KIND_GROUPS.map((grp) => ({
-    ...grp,
-    kinds: grp.kinds.filter((k) => !banned.has(k.value)),
-  })).filter((grp) => grp.kinds.length > 0);
+  const groups = kinds.groups
+    .map((grp) => ({
+      ...grp,
+      kinds: grp.kinds.filter((k) => !banned.has(k.value)),
+    }))
+    .filter((grp) => grp.kinds.length > 0);
   return (
     <Paper withBorder p="sm" radius="md">
       <Text size="xs" fw={600} mb={8}>
@@ -4993,6 +5034,7 @@ function Editor({
   aerialSwipe: SwipeMode;
   onAerialPoint: (plot: { x: number; y: number }) => void;
 }) {
+  const kinds = useKinds();
   const dark = useComputedColorScheme("light") === "dark";
   // Night-lighting sim: how far the sun is below the horizon drives a dusk→night
   // overlay and turns on path lights / the pyramid's after-dark rainbow. 0 = sun
@@ -5189,7 +5231,10 @@ function Editor({
     // Resolved server-side across owner AND occupant, so a guest's tent counts
     // toward the host's party — see party-map.server.ts.
     if (highlight === "party") return partyIds.has(o.id);
-    return hasTag(o.kind, highlight as "domicile" | "vehicle" | "structure");
+    return kinds.hasTag(
+      o.kind,
+      highlight as "domicile" | "vehicle" | "structure",
+    );
   };
 
   // While dragging, listen on window so the pointer can leave the SVG without
@@ -5358,6 +5403,7 @@ function Editor({
             o.rotation,
             o.config,
             o.mirrored,
+            kinds,
           ),
           nx,
           ny,
@@ -5380,7 +5426,7 @@ function Editor({
             y: ncy - o.height / 2,
             // A thing with no facing (Wi-Fi AP, uplink mast) rides along to its
             // new position but doesn't spin — see `fixedRotation`.
-            rotation: kindDef(o.kind).fixedRotation
+            rotation: kinds.def(o.kind).fixedRotation
               ? o.rotation
               : Math.round(o.rotation + rotate),
           };
@@ -5396,7 +5442,7 @@ function Editor({
       // staging apron and back in again, same as dragging it.
       const next = sel.map((o) => {
         const rotation =
-          rotate !== null && !kindDef(o.kind).fixedRotation
+          rotate !== null && !kinds.def(o.kind).fixedRotation
             ? Math.round(o.rotation + rotate)
             : o.rotation;
         const c = snap(
@@ -5709,7 +5755,7 @@ function Editor({
     for (const o of objects) {
       if (o.placeNearVehicle && o.ownerMembershipId) {
         const v = nearestOf(o, o.ownerMembershipId, (c) =>
-          Boolean(kindDef(c.kind).vehicle),
+          Boolean(kinds.def(c.kind).vehicle),
         );
         if (v) {
           out.push({
@@ -5727,8 +5773,9 @@ function Editor({
         // Bob sleeps, not near Bob's generator. Fall back to anything of theirs
         // so a wish still shows for someone who's only brought a vehicle.
         const target =
-          nearestOf(o, o.nearMembershipId, (c) => hasTag(c.kind, "domicile")) ??
-          nearestOf(o, o.nearMembershipId, () => true);
+          nearestOf(o, o.nearMembershipId, (c) =>
+            kinds.hasTag(c.kind, "domicile"),
+          ) ?? nearestOf(o, o.nearMembershipId, () => true);
         if (target) {
           const who = target.ownerName?.split(" ")[0];
           out.push({
@@ -5743,7 +5790,7 @@ function Editor({
       }
     }
     return out;
-  }, [showWishes, objects]);
+  }, [showWishes, objects, kinds]);
 
   // ---- Uplink aiming. Burning Man's public internet comes off sector antennas
   // on the NOC tower in Center Camp; a camp radio has to SEE that tower, so
@@ -5801,7 +5848,7 @@ function Editor({
       const fx = o.x + o.width / 2;
       const fy = o.y + o.height / 2;
       const a = aim(fx, fy);
-      const mastFt = o.tallFt || kindHeight(o.kind);
+      const mastFt = o.tallFt || kinds.height(o.kind);
       // The beam, handed to the (unit-tested, pure) line-of-sight test: it
       // climbs toward the tower's 40′ antennas, compares tapering solids level
       // by level, and sees through shade cloth. See `app/lib/uplink-los.ts`.
@@ -5819,7 +5866,7 @@ function Editor({
         (other) =>
           other.id !== o.id &&
           other.kind !== "uplink" &&
-          blocksSightLine(other, beam),
+          blocksSightLine(other, beam, kinds),
       );
       return { o, mastFt, blockers, ...a };
     });
@@ -5848,7 +5895,18 @@ function Editor({
       bearingDeg: sight?.bearingDeg ?? null,
       aims,
     };
-  }, [showUplink, wedge, lot, objects, originX, originY, ppf, viewR, viewH]);
+  }, [
+    showUplink,
+    wedge,
+    lot,
+    objects,
+    originX,
+    originY,
+    ppf,
+    viewR,
+    viewH,
+    kinds,
+  ]);
 
   // ---- Wind flow field (plot-local feet). Solved when the wind layer is on and
   // the lot is oriented; buildings become solid obstacles the flow goes around.
@@ -5868,7 +5926,7 @@ function Editor({
     // Open canopies (shade cloth) block sun, not wind — so they don't deflect the
     // flow. Solid builds (tents, RVs, containers, …) do.
     const obstacles = objects
-      .filter((o) => !kindDef(o.kind).canopyShade)
+      .filter((o) => !kinds.def(o.kind).canopyShade)
       .map((o) => {
         const ox = o.x + o.width / 2;
         const oy = o.y + o.height / 2;
@@ -5879,6 +5937,7 @@ function Editor({
           o.rotation,
           o.config,
           o.mirrored,
+          kinds,
         ).map((p) => [ox + p.x, oy + p.y] as [number, number]);
       });
     return solveFlow({
@@ -5903,6 +5962,7 @@ function Editor({
     ppf,
     viewH,
     viewR,
+    kinds,
   ]);
 
   const fx = (sx: number) => (sx - originX) / ppf;
@@ -5935,6 +5995,7 @@ function Editor({
           s.rotation,
           s.config,
           s.mirrored,
+          kinds,
         ),
         nx + s.width / 2,
         ny + s.height / 2,
@@ -6220,7 +6281,7 @@ function Editor({
     const fyp = fy(p.y);
     const shade = [...objects]
       .reverse()
-      .find((o) => kindDef(o.kind).canopyShade && containsPoint(o, fxp, fyp));
+      .find((o) => kinds.def(o.kind).canopyShade && containsPoint(o, fxp, fyp));
     if (shade) {
       // startDrag selects it (and only drags if this viewer may edit it).
       startDrag(e, shade, "move");
@@ -6699,6 +6760,7 @@ function Editor({
             lot.frontageFt,
             lot.depthFt,
             rear,
+            kinds,
           ),
         });
       }
@@ -6733,8 +6795,12 @@ function Editor({
     const p = svgPoint(e);
     let next = applyDrag(d, fx(p.x), fy(p.y));
     // Snap a dragged shade/canopy to nearby structures' vertices/edges.
-    if (d.mode === "move" && snapStructures && kindDef(next.kind).canopyShade) {
-      const snapped = snapToStructures(next, objects, 4);
+    if (
+      d.mode === "move" &&
+      snapStructures &&
+      kinds.def(next.kind).canopyShade
+    ) {
+      const snapped = snapToStructures(next, objects, 4, kinds);
       next = snapped.obj;
       setSnapHint(snapped.hint);
     } else if (snapHint) {
@@ -6807,14 +6873,14 @@ function Editor({
   }
 
   function addObjectAt(kind: string, fxFeet: number, fyFeet: number) {
-    const def = kindDef(kind);
+    const def = kinds.def(kind);
     // Drop point = the object's center; snap the whole footprint to one side of
     // the border, so dropping out past it stages the new item instead of
     // dragging it back into a lot you didn't want it in yet.
     const c = snapToLot(
       lot,
       rear,
-      footprintOffsets(kind, def.w, def.h, 0),
+      footprintOffsets(kind, def.w, def.h, 0, {}, false, kinds),
       fxFeet,
       fyFeet,
     );
@@ -6838,7 +6904,7 @@ function Editor({
     const block = blockById(blockId);
     if (!block) return;
     const items = block.items.map((it) => {
-      const def = kindDef(it.kind);
+      const def = kinds.def(it.kind);
       return {
         kind: it.kind,
         dx: it.dx,
@@ -6931,7 +6997,7 @@ function Editor({
     const kind =
       e.dataTransfer.getData("application/camptool-kind") ||
       e.dataTransfer.getData("text/plain");
-    if (!kind || !isKind(kind)) return;
+    if (!kind || !kinds.isKind(kind)) return;
     addObjectAt(kind, fx(p.x), fy(p.y));
   }
 
@@ -7579,19 +7645,21 @@ function Editor({
                   data-map-shadow="1"
                 >
                   {objects.flatMap((o) =>
-                    shadowPolygon(o, sun, mapUpBearing).map((poly, i) => (
-                      <polygon
-                        // biome-ignore lint/suspicious/noArrayIndexKey: derived geometry, rebuilt each render; position is its identity
-                        key={`sh-${o.id}-${i}`}
-                        points={poly
-                          .map(
-                            (p) =>
-                              `${originX + p.x * ppf},${originY + p.y * ppf}`,
-                          )
-                          .join(" ")}
-                        fill={shadowFill}
-                      />
-                    )),
+                    shadowPolygon(o, sun, mapUpBearing, kinds).map(
+                      (poly, i) => (
+                        <polygon
+                          // biome-ignore lint/suspicious/noArrayIndexKey: derived geometry, rebuilt each render; position is its identity
+                          key={`sh-${o.id}-${i}`}
+                          points={poly
+                            .map(
+                              (p) =>
+                                `${originX + p.x * ppf},${originY + p.y * ppf}`,
+                            )
+                            .join(" ")}
+                          fill={shadowFill}
+                        />
+                      ),
+                    ),
                   )}
                 </g>
               ) : null}
@@ -7770,6 +7838,7 @@ function Editor({
                               b,
                               b.x + b.width / 2,
                               b.y + b.height / 2,
+                              kinds,
                             )
                               .map(
                                 (p) =>
@@ -7925,8 +7994,8 @@ function Editor({
               {[...objects]
                 .sort(
                   (a, b) =>
-                    Number(!!kindDef(a.kind).canopyShade) -
-                    Number(!!kindDef(b.kind).canopyShade),
+                    Number(!!kinds.def(a.kind).canopyShade) -
+                    Number(!!kinds.def(b.kind).canopyShade),
                 )
                 .map((o) => (
                   <MapObjectShape
@@ -7949,8 +8018,15 @@ function Editor({
                       lot.frontageFt,
                       lot.depthFt,
                       rear,
+                      kinds,
                     )}
-                    staged={isStaged(o, lot.frontageFt, lot.depthFt, rear)}
+                    staged={isStaged(
+                      o,
+                      lot.frontageFt,
+                      lot.depthFt,
+                      rear,
+                      kinds,
+                    )}
                     night={isNight}
                     onBodyDown={(e) => startDrag(e, o, "move")}
                     onResizeDown={(e) => startDrag(e, o, "resize")}
@@ -7963,11 +8039,13 @@ function Editor({
             marker goes AROUND the footprint rather than shrinking or hiding it. */}
               <g pointerEvents="none">
                 {objects
-                  .filter((o) => isStaged(o, lot.frontageFt, lot.depthFt, rear))
+                  .filter((o) =>
+                    isStaged(o, lot.frontageFt, lot.depthFt, rear, kinds),
+                  )
                   .map((o) => (
                     <polygon
                       key={`${o.id}-staged`}
-                      points={footprintPoints(o)
+                      points={footprintPoints(o, kinds)
                         .map(
                           (p) =>
                             `${originX + p.x * ppf},${originY + p.y * ppf}`,
@@ -8034,7 +8112,7 @@ function Editor({
                         {blocked
                           ? `Blocked by ${a.blockers
                               .slice(0, 2)
-                              .map((b) => b.name || kindDef(b.kind).label)
+                              .map((b) => b.name || kinds.def(b.kind).label)
                               .join(", ")}${
                               a.blockers.length > 2
                                 ? ` +${a.blockers.length - 2}`
@@ -8060,7 +8138,7 @@ function Editor({
                     const ncx = now.x + now.width / 2;
                     const ncy = now.y + now.height / 2;
                     const pts = footprintOutline(
-                      was.kind,
+                      kinds.def(was.kind),
                       was.width,
                       was.height,
                       was.config,
@@ -8103,7 +8181,7 @@ function Editor({
                     const cx = o.x + o.width / 2;
                     const cy = o.y + o.height / 2;
                     const pts = footprintOutline(
-                      o.kind,
+                      kinds.def(o.kind),
                       o.width,
                       o.height,
                       o.config,
@@ -8149,7 +8227,7 @@ function Editor({
                 const cx = sg.x + sg.width / 2;
                 const cy = sg.y + sg.height / 2;
                 const pts = footprintOutline(
-                  o.kind,
+                  kinds.def(o.kind),
                   sg.width,
                   sg.height,
                   o.config,
@@ -8197,7 +8275,7 @@ function Editor({
                       const by = originY + o.y * ppf;
                       return (
                         <g key={`ban-${o.id}`} pointerEvents="none">
-                          <title>{`${kindDef(o.kind).label} isn't allowed this year`}</title>
+                          <title>{`${kinds.def(o.kind).label} isn't allowed this year`}</title>
                           <circle
                             cx={bx}
                             cy={by}
@@ -8230,7 +8308,7 @@ function Editor({
                 // overhead plan.
                 <g data-map-shade="1">
                   {objects.flatMap((o) => {
-                    const def = kindDef(o.kind);
+                    const def = kinds.def(o.kind);
                     const sd = sunDirLocal(o, sun, mapUpBearing);
                     if (!sd) return [];
                     // Mirror reflects the structure about its vertical axis; that's
@@ -8246,7 +8324,7 @@ function Editor({
                           o.width,
                           o.height,
                           lit,
-                          o.tallFt || kindHeight(o.kind),
+                          o.tallFt || kinds.height(o.kind),
                         );
                     if (!faces.length) return [];
                     const cx = o.x + o.width / 2;
@@ -8275,7 +8353,7 @@ function Editor({
             the sun, so a dome reads as a 3D sphere. */}
               {domeShadeOn
                 ? objects.flatMap((o) =>
-                    kindDef(o.kind).shape === "dome"
+                    kinds.def(o.kind).shape === "dome"
                       ? [
                           <ellipse
                             key={`sphere-${o.id}`}
@@ -8472,6 +8550,7 @@ function Editor({
                       o,
                       o.x + o.width / 2,
                       o.y + o.height / 2,
+                      kinds,
                     )) {
                       if (p.x < xLo) xLo = p.x;
                       if (p.x > xHi) xHi = p.x;
@@ -8520,6 +8599,7 @@ function Editor({
                         o,
                         o.x + o.width / 2,
                         o.y + o.height / 2,
+                        kinds,
                       )) {
                         if (p.x < xLo) xLo = p.x;
                         if (p.x > xHi) xHi = p.x;
@@ -9464,6 +9544,7 @@ function SidePanel({
     byObject: Record<string, { slug: string; title: string }>;
   };
 }) {
+  const kinds = useKinds();
   const selected = objects.find((o) => o.id === selectedId) ?? null;
   // Officers edit the official geometry + name/kind/notes + delete. Members
   // propose changes by DRAGGING the item (creates a personal suggestion), so the
@@ -9678,12 +9759,12 @@ function SidePanel({
                   size="xs"
                   c="dimmed"
                 >
-                  Start a wiki page for {kindDef(selected.kind).label}
+                  Start a wiki page for {kinds.def(selected.kind).label}
                 </Anchor>
               );
             })()}
 
-            {kindDef(selected.kind).fixedName ? null : (
+            {kinds.def(selected.kind).fixedName ? null : (
               <TextInput
                 size="xs"
                 label="Name"
@@ -9704,19 +9785,21 @@ function SidePanel({
               disabled={!canMeta}
               // Hide kinds disallowed this year, but keep the selected one visible
               // even if it's now banned (so a flagged object still shows its kind).
-              data={KINDS.filter(
-                (k) =>
-                  !bannedKinds.includes(k.value) || k.value === selected.kind,
-              ).map((k) => ({
-                value: k.value,
-                label: bannedKinds.includes(k.value)
-                  ? `${k.label} (not allowed)`
-                  : k.label,
-              }))}
+              data={kinds.palette
+                .filter(
+                  (k) =>
+                    !bannedKinds.includes(k.value) || k.value === selected.kind,
+                )
+                .map((k) => ({
+                  value: k.value,
+                  label: bannedKinds.includes(k.value)
+                    ? `${k.label} (not allowed)`
+                    : k.label,
+                }))}
               allowDeselect={false}
               onChange={(v) => {
                 if (!v) return;
-                const d = kindDef(v);
+                const d = kinds.def(v);
                 const fields: Partial<ObjRow> = { kind: v };
                 const out: Record<string, string | number> = { kind: v };
                 // Rigid kinds (hexayurt, hyparhut, car, truck) snap to a fixed
@@ -9768,7 +9851,7 @@ function SidePanel({
                   ]}
                 />
               </div>
-            ) : kindDef(selected.kind).shape === "dome" ? (
+            ) : kinds.def(selected.kind).shape === "dome" ? (
               <NumberInput
                 size="xs"
                 label="Diameter (ft)"
@@ -9784,11 +9867,11 @@ function SidePanel({
                   commitMany(selected.id, { width: d, height: d });
                 }}
               />
-            ) : kindDef(selected.kind).rigid ? (
+            ) : kinds.def(selected.kind).rigid ? (
               <Text size="xs" c="dimmed">
                 {fixedSizeLabel(selected.kind, selected.width, selected.height)}
               </Text>
-            ) : kindDef(selected.kind).vehicle ? (
+            ) : kinds.def(selected.kind).vehicle ? (
               <Group grow>
                 <NumberInput
                   size="xs"
@@ -9858,7 +9941,7 @@ function SidePanel({
                   )
                 }
               />
-              {kindDef(selected.kind).fixedTall ? null : (
+              {kinds.def(selected.kind).fixedTall ? null : (
                 <NumberInput
                   size="xs"
                   label="Height (ft)"
@@ -9896,7 +9979,7 @@ function SidePanel({
                 }}
               />
             ) : null}
-            {canMeta && kindDef(selected.kind).mirrorable ? (
+            {canMeta && kinds.def(selected.kind).mirrorable ? (
               <Checkbox
                 size="xs"
                 label="Mirror (flip left–right)"
@@ -9913,7 +9996,7 @@ function SidePanel({
               />
             ) : null}
             {canMeta
-              ? (kindDef(selected.kind).controls ?? []).map((c) => {
+              ? (kinds.def(selected.kind).controls ?? []).map((c) => {
                   const val = selected.config[c.key] ?? c.default;
                   const apply = (v: number, commit: boolean) => {
                     const config = { ...selected.config, [c.key]: v };
@@ -10041,6 +10124,7 @@ function SuggestionsPanel({
   setSelectedId: (id: string | null) => void;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
+  const kinds = useKinds();
   if (suggestions.length === 0) return null;
   const byObject = new Map<string, Suggestion[]>();
   for (const s of suggestions) {
@@ -10075,7 +10159,7 @@ function SuggestionsPanel({
                   }}
                 >
                   <Text size="xs" fw={600}>
-                    {o.name ?? kindDef(o.kind).label}
+                    {o.name ?? kinds.def(o.kind).label}
                     {o.ownerName ? (
                       <Text span c="dimmed">
                         {" "}

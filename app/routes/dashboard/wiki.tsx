@@ -14,11 +14,11 @@ import {
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
 import { data, Link, useFetcher } from "react-router";
+import { loadKindRegistry } from "~/lib/custom-kinds.server";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
-import { KINDS } from "~/lib/structures";
 import { isWikiSubjectType, wikiExcerpt, wikiSlug } from "~/lib/wiki";
 import { addSubjectLink, createPage, listPages } from "~/lib/wiki.server";
 import type { Route } from "./+types/wiki";
@@ -41,7 +41,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     if (isWikiSubjectType(type) && id) {
       const label =
         type === "structure_kind"
-          ? (KINDS.find((k) => k.value === id)?.label ?? id)
+          ? ((await loadKindRegistry(active.camp.id)).all.find(
+              (k) => k.value === id,
+            )?.label ?? id)
           : id;
       pendingSubject = { type, id, label };
     }

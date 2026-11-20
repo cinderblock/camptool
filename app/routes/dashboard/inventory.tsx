@@ -10,10 +10,11 @@ import {
 import { eq } from "drizzle-orm";
 import { data } from "react-router";
 import { requireFeature } from "~/lib/features.server";
+import { useKinds } from "~/lib/kinds-context";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
-import { kindDef, ShapeSwatch } from "~/lib/structures";
+import { ShapeSwatch } from "~/lib/structures";
 import { db } from "../../../db/client.server";
 import { mapObject, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/inventory";
@@ -82,6 +83,7 @@ function round(v: number) {
 
 export default function Inventory({ loaderData }: Route.ComponentProps) {
   const { items } = loaderData;
+  const kinds = useKinds();
   const placed = items.filter((i) => i.placed).length;
   const unplaced = items.length - placed;
 
@@ -123,7 +125,7 @@ export default function Inventory({ loaderData }: Route.ComponentProps) {
               </Table.Thead>
               <Table.Tbody>
                 {items.map((item) => {
-                  const def = kindDef(item.kind);
+                  const def = kinds.def(item.kind);
                   return (
                     <Table.Tr key={item.id}>
                       <Table.Td>

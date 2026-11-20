@@ -18,11 +18,12 @@ import { and, eq } from "drizzle-orm";
 import { useEffect, useMemo, useState } from "react";
 import { data, Link, redirect, useFetcher } from "react-router";
 import { WikiBody } from "~/components/WikiBody";
+import { loadKindRegistry } from "~/lib/custom-kinds.server";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveCamp } from "~/lib/session.server";
-import { KINDS } from "~/lib/structures";
+import type { KindRegistry } from "~/lib/structures";
 import { isWikiSubjectType, parseWikiBody, wikiSubjectDef } from "~/lib/wiki";
 import {
   addSubjectLink,
@@ -44,8 +45,8 @@ export function meta({ loaderData: d }: Route.MetaArgs) {
 }
 
 /** Human label for a linked subject, resolved in its own namespace. */
-function kindLabel(value: string): string {
-  return KINDS.find((k) => k.value === value)?.label ?? value;
+function kindLabel(kinds: KindRegistry, value: string): string {
+  return kinds.all.find((k) => k.value === value)?.label ?? value;
 }
 
 export async function loader({ params, request }: Route.LoaderArgs) {
@@ -53,6 +54,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   await requireFeature(active, "wiki");
   const campId = active.camp.id;
   const slug = params.slug;
+  const kinds = await loadKindRegistry(campId);
 
   const page = await getPageBySlug(campId, slug);
   const canEdit = hasAtLeast(active.membership.role, "member");
@@ -110,10 +112,11 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const subjects = links.map((l) => {
     const def = wikiSubjectDef(l.subjectType);
     let label = l.subjectId;
-    if (l.subjectType === "structure_kind") label = kindLabel(l.subjectId);
+    if (l.subjectType === "structure_kind")
+      label = kindLabel(kinds, l.subjectId);
     else if (l.subjectType === "map_object") {
       const o = objectById.get(l.subjectId);
-      label = o ? (o.name ?? kindLabel(o.kind)) : "(removed object)";
+      label = o ? (o.name ?? kindLabel(kinds, o.kind)) : "(removed object)";
     }
     return {
       id: l.id,
@@ -127,9 +130,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   // placed objects. Structure kinds come first — a kind-linked page survives
   // the yearly re-declare, a specific object does not.
   const linked = new Set(links.map((l) => `${l.subjectType}:${l.subjectId}`));
-  const structureOptions = KINDS.filter(
-    (k) => !linked.has(`structure_kind:${k.value}`),
-  ).map((k) => ({ value: k.value, label: k.label }));
+  const structureOptions = kinds.palette
+    .filter((k) => !linked.has(`structure_kind:${k.value}`))
+    .map((k) => ({ value: k.value, label: k.label }));
 
   const thisYear = activeEdition
     ? await db
@@ -150,7 +153,9 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     .filter((o) => !linked.has(`map_object:${o.id}`))
     .map((o) => ({
       value: o.id,
-      label: o.name ? `${o.name} (${kindLabel(o.kind)})` : kindLabel(o.kind),
+      label: o.name
+        ? `${o.name} (${kindLabel(kinds, o.kind)})`
+        : kindLabel(kinds, o.kind),
     }));
 
   return redact(privacy, {

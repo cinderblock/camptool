@@ -3,8 +3,8 @@
  * Each kind carries a footprint `shape`, default size (feet), and vehicle rules:
  * `vehicle` = fixed width + length-only; `rigid` = no free resize.
  *
- * (Later: a self-hoster's camp package can extend this registry with custom
- * kinds — see Phase 2.5 / the custom-structures task.)
+ * The palette a camp sees is a `KindRegistry` (below): these built-ins, every
+ * bundled structure pack's kinds, and the camp's own kinds defined in the app.
  */
 import type {
   CampStructure,
@@ -1257,17 +1257,6 @@ const CORE_KINDS = [
   },
 ] as const;
 
-/**
- * The full palette the map + inventory read: built-in core kinds plus any custom
- * structures the active camp-theme package contributes (`CAMP_THEME`, default →
- * none). Every derived helper below (kindDef, KIND_GROUPS, CAMPER_KINDS, …) reads
- * from this, so a camp-theme kind slots into the legend, picker, and map for free.
- */
-export const KINDS: readonly CampStructure[] = [
-  ...CORE_KINDS,
-  ...campStructures,
-];
-
 /** Default above-ground height (feet) per kind, used to seed a new object's
  * height and as the fallback for the 2D shade simulation when height is unset. */
 const KIND_HEIGHTS: Record<string, number> = {
@@ -1321,11 +1310,6 @@ const KIND_HEIGHTS: Record<string, number> = {
   spiderbox: 3,
   structure: 8,
 };
-export function kindHeight(kind: string): number {
-  // Core kinds use the table; a camp-theme structure carries its own `tallFt`.
-  return KIND_HEIGHTS[kind] ?? kindDef(kind).tallFt ?? 8;
-}
-
 /** Industry-standard preset ratings a power line (map_cable) can carry. Both are
  * optional; the map UI renders them as clearable dropdowns. */
 export const AMP_OPTIONS = ["15", "20", "30", "50", "100"] as const;
@@ -1346,108 +1330,138 @@ export const CONTAINER_WIDTH = 8;
 export const CONTAINER_FULL = 40;
 export const CONTAINER_HALF = 20;
 
-/** The kinds a camper may declare for themselves (Bringing page + wizard).
- * Excludes communal infrastructure (kitchen, generator, shipping container,
- * spider box, camp art) that only officers place. */
-export const CAMPER_KINDS: readonly Kind[] = KINDS.filter((k) => k.personal);
+/** Legend group order; groups not listed here (a pack's or a camp's own) follow
+ * in first-seen order. */
+const LEGEND_ORDER = [
+  "Domiciles",
+  "Vehicles",
+  "Shade",
+  "Structures",
+  "Power",
+  "Water",
+  "Network",
+  "Services",
+];
 
-/** `CAMPER_KINDS` split into camper-facing categories, in display order. Derived
- * from each kind's `group` — so a new kind (including a camp-theme one) files
- * itself — with one departure from the map legend: "Domiciles" is more than half
- * the palette, so it splits on the `vehicle` tag into what you pitch and what you
- * drive or tow. Someone adding their trailer shouldn't scan past a dozen tents. */
-export const CAMPER_KIND_GROUPS: ReadonlyArray<{
-  group: string;
-  kinds: readonly Kind[];
-}> = (() => {
-  const order = [
-    "Tents & shelters",
-    "Campers & RVs",
-    "Vehicles",
-    "Shade",
-    "Water",
-    "Network",
-    "Structures",
-  ];
-  const camperGroup = (k: Kind) => {
-    if (k.group !== "Domiciles") return k.group;
-    const towed = (k.tags as readonly string[]).includes("vehicle");
-    return towed ? "Campers & RVs" : "Tents & shelters";
-  };
-  const groups: Array<{ group: string; kinds: Kind[] }> = order.map(
+/** Camper-facing group order (see `camperGroups`). */
+const CAMPER_ORDER = [
+  "Tents & shelters",
+  "Campers & RVs",
+  "Vehicles",
+  "Shade",
+  "Water",
+  "Network",
+  "Structures",
+];
+
+type KindGroup = { group: string; kinds: readonly CampStructure[] };
+
+function groupKinds(
+  kinds: readonly CampStructure[],
+  order: readonly string[],
+  groupOf: (k: CampStructure) => string,
+): KindGroup[] {
+  const groups: Array<{ group: string; kinds: CampStructure[] }> = order.map(
     (group) => ({ group, kinds: [] }),
   );
-  for (const k of CAMPER_KINDS) {
-    const g = camperGroup(k);
+  for (const k of kinds) {
+    const g = groupOf(k);
     let entry = groups.find((x) => x.group === g);
     if (!entry) {
-      // A camp-theme kind in a group core doesn't know — append, don't drop.
+      // A group core doesn't know (a pack's or a camp's own): append it.
       entry = { group: g, kinds: [] };
       groups.push(entry);
     }
     entry.kinds.push(k);
   }
   return groups.filter((g) => g.kinds.length > 0);
-})();
+}
 
-/** Legend groups in display order, each with its kinds. Derived from KINDS so
- * adding a kind only requires setting its `group`. */
-export const KIND_GROUPS: ReadonlyArray<{
-  group: string;
-  kinds: readonly Kind[];
-}> = (() => {
-  const order = [
-    "Domiciles",
-    "Vehicles",
-    "Shade",
-    "Structures",
-    "Power",
-    "Water",
-    "Network",
-    "Services",
-  ];
-  const seen = new Set<string>();
-  const groups: Array<{ group: string; kinds: Kind[] }> = [];
-  const ensure = (g: string) => {
-    let entry = groups.find((x) => x.group === g);
-    if (!entry) {
-      entry = { group: g, kinds: [] };
-      groups.push(entry);
-    }
-    return entry;
-  };
-  for (const g of order) {
-    seen.add(g);
-    ensure(g);
-  }
-  for (const k of KINDS) {
-    if (!seen.has(k.group)) seen.add(k.group);
-    ensure(k.group).kinds.push(k);
-  }
-  return groups.filter((g) => g.kinds.length > 0);
-})();
+/**
+ * One camp's structure palette: the built-in kinds, every bundled pack's
+ * structures, and the camp's own kinds defined in the app
+ * (`app/lib/custom-kinds.tsx`). Everything that reads kinds goes through one
+ * of these, built per camp — on the server per request (`loadKindRegistry`),
+ * in the browser from the dashboard layout's data (`useKinds`) — so a camp's
+ * own kinds never reach another camp. See plans/custom-structures.md.
+ */
+export type KindRegistry = {
+  /** Every kind this camp can draw, archived ones included. */
+  readonly all: readonly CampStructure[];
+  /** The kinds this camp can place (archived camp kinds left out). */
+  readonly palette: readonly CampStructure[];
+  /** `palette` by legend group, in display order. */
+  readonly groups: readonly KindGroup[];
+  /** The kinds a camper may declare for themselves (Bringing page + wizard):
+   * `palette` minus communal infrastructure only officers place. */
+  readonly camperKinds: readonly CampStructure[];
+  /** `camperKinds` in camper-facing groups. One departure from the legend:
+   * "Domiciles" is more than half the palette, so it splits on the `vehicle`
+   * tag into what you pitch and what you drive or tow. */
+  readonly camperGroups: readonly KindGroup[];
+  /** The definition of a kind; an unknown kind draws as a generic structure. */
+  def(kind: string): CampStructure;
+  /** Whether this camp can place `kind` (known and not archived). */
+  isKind(kind: string): boolean;
+  color(kind: string): string;
+  /** Default above-ground height (feet): seeds a new object's height and is
+   * the shade sim's fallback when an object's height is unset. */
+  height(kind: string): number;
+  /** Does this kind carry the given highlight tag (domicile/vehicle/structure)? */
+  hasTag(kind: string, tag: KindTag): boolean;
+};
 
-const KIND_MAP: Record<string, CampStructure> = Object.fromEntries(
-  KINDS.map((k) => [k.value, k]),
-);
-// Derived from CORE_KINDS (a const tuple) so it's always defined — a camp theme
-// can't remove the built-in "structure" fallback.
+// Derived from CORE_KINDS (a const tuple) so it's always defined — nothing can
+// remove the built-in "structure" fallback.
 const FALLBACK_KIND: CampStructure =
   CORE_KINDS.find((k) => k.value === "structure") ?? CORE_KINDS[0];
 
-export function kindDef(kind: string): CampStructure {
-  return KIND_MAP[kind] ?? FALLBACK_KIND;
+/** Built-in kinds plus every bundled pack's structures. */
+const BASE_KINDS: readonly CampStructure[] = [...CORE_KINDS, ...campStructures];
+
+/**
+ * Build a camp's registry over the base kinds plus `extra` (the camp's own
+ * kinds, already compiled). Kinds whose value is in `archived` resolve and
+ * draw but can't be placed. An `extra` kind can't shadow a base kind.
+ */
+export function makeKindRegistry(
+  extra: readonly CampStructure[] = [],
+  archived: ReadonlySet<string> = new Set(),
+): KindRegistry {
+  const map = new Map<string, CampStructure>();
+  for (const k of BASE_KINDS) map.set(k.value, k);
+  const all: CampStructure[] = [...BASE_KINDS];
+  for (const k of extra) {
+    if (map.has(k.value)) continue;
+    map.set(k.value, k);
+    all.push(k);
+  }
+  const palette = all.filter((k) => !archived.has(k.value));
+  const camperKinds = palette.filter((k) => k.personal);
+  const def = (kind: string) => map.get(kind) ?? FALLBACK_KIND;
+  return {
+    all,
+    palette,
+    groups: groupKinds(palette, LEGEND_ORDER, (k) => k.group),
+    camperKinds,
+    camperGroups: groupKinds(camperKinds, CAMPER_ORDER, (k) => {
+      if (k.group !== "Domiciles") return k.group;
+      const towed = (k.tags as readonly string[]).includes("vehicle");
+      return towed ? "Campers & RVs" : "Tents & shelters";
+    }),
+    def,
+    isKind: (kind) => map.has(kind) && !archived.has(kind),
+    color: (kind) => def(kind).color,
+    // Core kinds use the table; a pack's or camp's kind carries its `tallFt`.
+    height: (kind) => KIND_HEIGHTS[kind] ?? def(kind).tallFt ?? 8,
+    hasTag: (kind, tag) => (def(kind).tags as readonly string[]).includes(tag),
+  };
 }
-export function isKind(value: string): boolean {
-  return value in KIND_MAP;
-}
-export function kindColor(kind: string) {
-  return kindDef(kind).color;
-}
-/** Does this kind carry the given highlight tag (domicile/vehicle/structure)? */
-export function hasTag(kind: string, tag: KindTag): boolean {
-  return (kindDef(kind).tags as readonly string[]).includes(tag);
-}
+
+/** The registry with no camp kinds: built-ins plus packs. For tests and for
+ * code that has no camp; camp code builds its own (`loadKindRegistry`,
+ * `useKinds`) so the camp's own kinds aren't missed. */
+export const builtinKinds: KindRegistry = makeKindRegistry();
 
 /** Kinds the map draws a door for — the per-element "show door" toggle applies
  * only to these. */
@@ -1481,10 +1495,14 @@ export function ShapeSwatch({
   kind,
   size = 16,
 }: {
-  kind: Kind;
+  kind: CampStructure;
   size?: number;
 }) {
   const s = size;
+  // A pack's or camp's own shape draws its own icon.
+  if (kind.shape === "custom" && kind.renderIcon) {
+    return <>{kind.renderIcon(s)}</>;
+  }
   return (
     <svg
       width={s}

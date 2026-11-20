@@ -32,8 +32,10 @@ import {
 import { blockedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
 import { shownQuestions } from "~/lib/conditions";
+import { loadCustomKinds } from "~/lib/custom-kinds.server";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState } from "~/lib/features.server";
+import { KindsProvider, useKinds } from "~/lib/kinds-context";
 import { redact } from "~/lib/privacy.server";
 import type { QuestionType } from "~/lib/questions";
 import { isAnswered, parseOptions, surfacedInWizard } from "~/lib/questions";
@@ -47,7 +49,7 @@ import {
 } from "~/lib/questions.server";
 import { loadMySapState } from "~/lib/sap.server";
 import { requireActiveEdition } from "~/lib/session.server";
-import { hasTag, kindDef, ShapeSwatch } from "~/lib/structures";
+import { ShapeSwatch } from "~/lib/structures";
 import type { AskKey } from "~/lib/wizard";
 import { audienceForRole } from "~/lib/wizard";
 import { loadWizardState, resolveAsk } from "~/lib/wizard.server";
@@ -290,6 +292,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   return redact(privacy, {
     firstVisit,
+    // The camp's own structure kinds (this route sits outside the dashboard
+    // layout, so it provides them itself).
+    customKinds: await loadCustomKinds(campId),
     locked: activeEdition.locked,
     bannedKinds: blockedKinds(activeEdition, active.camp),
     userName: authUser.name,
@@ -454,113 +459,116 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
   }
 
   return (
-    <Container component="main" id="main-content" size="sm" py="xl">
-      <Group justify="space-between" align="flex-end" mb="lg">
-        <div>
-          <Title order={1} size="h2">
-            {firstVisit
-              ? "Welcome — let's get you set up"
-              : "Your setup, step by step"}
-          </Title>
-          <Text c="dimmed" size="sm">
-            We only ask for what's relevant right now
-            {weeksToEvent > 0 ? ` (~${weeksToEvent} weeks to the event)` : ""}.
-            {firstVisit
-              ? " Stop anytime and pick up where you left off."
-              : " Everything here also has its own page — this is just the guided pass."}
-          </Text>
-        </div>
-        <Button variant="subtle" size="xs" onClick={() => navigate("/")}>
-          {firstVisit ? "Skip for now" : "Back to dashboard"}
-        </Button>
-      </Group>
-
-      {locked ? (
-        <Paper
-          withBorder
-          p="md"
-          radius="md"
-          mb="md"
-          bg="var(--mantine-color-default-hover)"
-        >
-          <Text size="sm" c="dimmed">
-            This year is locked — items and RSVP are read-only.
-          </Text>
-        </Paper>
-      ) : null}
-
-      <Stepper
-        active={active}
-        onStepClick={goTo}
-        size="sm"
-        orientation="vertical"
-      >
-        {steps.map((s) => (
-          <Stepper.Step
-            key={s.key}
-            label={s.label}
-            description={s.hint}
-            color={resolved[s.key] ? "green" : undefined}
-          >
-            <AskBody askKey={s.key} data={loaderData} fetcher={fetcher} />
-          </Stepper.Step>
-        ))}
-        <Stepper.Completed>
-          <Paper withBorder p="lg" radius="md" mt="md">
-            <Title order={4} mb="xs">
-              You're all set!
+    <KindsProvider kinds={loaderData.customKinds}>
+      <Container component="main" id="main-content" size="sm" py="xl">
+        <Group justify="space-between" align="flex-end" mb="lg">
+          <div>
+            <Title order={1} size="h2">
+              {firstVisit
+                ? "Welcome — let's get you set up"
+                : "Your setup, step by step"}
             </Title>
+            <Text c="dimmed" size="sm">
+              We only ask for what's relevant right now
+              {weeksToEvent > 0 ? ` (~${weeksToEvent} weeks to the event)` : ""}
+              .
+              {firstVisit
+                ? " Stop anytime and pick up where you left off."
+                : " Everything here also has its own page — this is just the guided pass."}
+            </Text>
+          </div>
+          <Button variant="subtle" size="xs" onClick={() => navigate("/")}>
+            {firstVisit ? "Skip for now" : "Back to dashboard"}
+          </Button>
+        </Group>
+
+        {locked ? (
+          <Paper
+            withBorder
+            p="md"
+            radius="md"
+            mb="md"
+            bg="var(--mantine-color-default-hover)"
+          >
             <Text size="sm" c="dimmed">
-              Your answers are saved — it's safe to close this tab now. You can
-              refine any of this anytime from the dashboard — Bringing, the map,
-              tickets, and the checklist.
+              This year is locked — items and RSVP are read-only.
             </Text>
           </Paper>
-        </Stepper.Completed>
-      </Stepper>
+        ) : null}
 
-      {blocked ? (
-        <Text size="sm" c="red" mt="md">
-          Answer the required questions (marked *) above to continue.
-        </Text>
-      ) : null}
-      <Group justify="space-between" mt={blocked ? "xs" : "xl"}>
-        <Button
-          variant="default"
-          onClick={() => goTo(Math.max(0, active - 1))}
-          disabled={active === 0}
+        <Stepper
+          active={active}
+          onStepClick={goTo}
+          size="sm"
+          orientation="vertical"
         >
-          Back
-        </Button>
-        <Group gap="xs">
-          {active > last ? (
-            <Button color="green" onClick={() => navigate("/")}>
-              Go to dashboard
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="subtle"
-                color="gray"
-                disabled={blocked}
-                onClick={() => next("skipped")}
-              >
-                Skip this
+          {steps.map((s) => (
+            <Stepper.Step
+              key={s.key}
+              label={s.label}
+              description={s.hint}
+              color={resolved[s.key] ? "green" : undefined}
+            >
+              <AskBody askKey={s.key} data={loaderData} fetcher={fetcher} />
+            </Stepper.Step>
+          ))}
+          <Stepper.Completed>
+            <Paper withBorder p="lg" radius="md" mt="md">
+              <Title order={4} mb="xs">
+                You're all set!
+              </Title>
+              <Text size="sm" c="dimmed">
+                Your answers are saved — it's safe to close this tab now. You
+                can refine any of this anytime from the dashboard — Bringing,
+                the map, tickets, and the checklist.
+              </Text>
+            </Paper>
+          </Stepper.Completed>
+        </Stepper>
+
+        {blocked ? (
+          <Text size="sm" c="red" mt="md">
+            Answer the required questions (marked *) above to continue.
+          </Text>
+        ) : null}
+        <Group justify="space-between" mt={blocked ? "xs" : "xl"}>
+          <Button
+            variant="default"
+            onClick={() => goTo(Math.max(0, active - 1))}
+            disabled={active === 0}
+          >
+            Back
+          </Button>
+          <Group gap="xs">
+            {active > last ? (
+              <Button color="green" onClick={() => navigate("/")}>
+                Go to dashboard
               </Button>
-              {active < last ? (
-                <Button disabled={blocked} onClick={() => next("done")}>
-                  Next
+            ) : (
+              <>
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  disabled={blocked}
+                  onClick={() => next("skipped")}
+                >
+                  Skip this
                 </Button>
-              ) : (
-                <Button color="green" disabled={blocked} onClick={finish}>
-                  Finish
-                </Button>
-              )}
-            </>
-          )}
+                {active < last ? (
+                  <Button disabled={blocked} onClick={() => next("done")}>
+                    Next
+                  </Button>
+                ) : (
+                  <Button color="green" disabled={blocked} onClick={finish}>
+                    Finish
+                  </Button>
+                )}
+              </>
+            )}
+          </Group>
         </Group>
-      </Group>
-    </Container>
+      </Container>
+    </KindsProvider>
   );
 }
 
@@ -701,6 +709,7 @@ function ProfileStep({
 }
 
 function BringingStep({ data: d }: { data: LoaderData }) {
+  const kinds = useKinds();
   // Reuse the Bringing page's action so there's one source of truth for items.
   const itemFetcher = useFetcher();
   const add = (kind: string, size?: AddSize) => {
@@ -735,7 +744,7 @@ function BringingStep({ data: d }: { data: LoaderData }) {
       ) : (
         <Stack gap="sm">
           {d.items.map((item) => {
-            const def = kindDef(item.kind);
+            const def = kinds.def(item.kind);
             return (
               <Paper key={item.id} withBorder p="sm" radius="md">
                 <Group justify="space-between" wrap="wrap" align="flex-end">
@@ -797,7 +806,7 @@ function BringingStep({ data: d }: { data: LoaderData }) {
                           variant="subtle"
                           color="red"
                           mb={4}
-                          aria-label={`Remove ${item.name ?? kindDef(item.kind).label}`}
+                          aria-label={`Remove ${item.name ?? kinds.def(item.kind).label}`}
                           onClick={() => remove(item.id)}
                         >
                           <span aria-hidden="true">✕</span>
@@ -816,6 +825,7 @@ function BringingStep({ data: d }: { data: LoaderData }) {
 }
 
 function OccupantsStep({ data: d }: { data: LoaderData }) {
+  const kinds = useKinds();
   // Reuse the Bringing page's action — occupants live there now, so there is
   // one write path (plans/wizard-step-homes.md).
   const fetcher = useFetcher();
@@ -823,7 +833,7 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
     fetcher.submit(fields, { method: "post", action: "/bringing" });
   // Only structures that hold people (domiciles + vehicles) take occupants.
   const holders = d.items.filter(
-    (i) => hasTag(i.kind, "domicile") || hasTag(i.kind, "vehicle"),
+    (i) => kinds.hasTag(i.kind, "domicile") || kinds.hasTag(i.kind, "vehicle"),
   );
   // Pick from other camp members (m:) or the viewer's own guests (a:).
   const memberOptions = d.roster.map((r) => ({
@@ -849,7 +859,7 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
         </Text>
       ) : (
         holders.map((item) => {
-          const def = kindDef(item.kind);
+          const def = kinds.def(item.kind);
           const occ = d.occupants.filter((o) => o.objectId === item.id);
           const occMids = new Set(
             occ.map((o) => o.membershipId).filter(Boolean),
@@ -890,7 +900,7 @@ function OccupantsStep({ data: d }: { data: LoaderData }) {
                             size="xs"
                             variant="transparent"
                             color="gray"
-                            aria-label={`Remove ${o.name ?? "person"} from ${item.name ?? kindDef(item.kind).label}`}
+                            aria-label={`Remove ${o.name ?? "person"} from ${item.name ?? kinds.def(item.kind).label}`}
                             onClick={() =>
                               post({
                                 intent: "removeOccupant",

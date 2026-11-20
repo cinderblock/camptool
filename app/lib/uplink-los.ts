@@ -12,7 +12,7 @@
  */
 import type { StructureConfig } from "@camptool/theme-contract";
 import { crossSectionLevels, crossSectionOutline } from "~/lib/map-shapes";
-import { kindDef, kindHeight } from "~/lib/structures";
+import type { KindRegistry } from "~/lib/structures";
 
 /** The parts of a placed map object this test needs. */
 export type LosObject = {
@@ -106,16 +106,20 @@ function rayEntry(pts: Array<{ along: number; off: number }>): number | null {
  * line where the slice first meets the path. Shade cloth never blocks: a canopy
  * is fabric on legs, and a microwave link goes straight through it.
  */
-export function blocksSightLine(other: LosObject, s: SightLine): boolean {
-  const def = kindDef(other.kind);
+export function blocksSightLine(
+  other: LosObject,
+  s: SightLine,
+  kinds: KindRegistry,
+): boolean {
+  const def = kinds.def(other.kind);
   if (def.canopyShade) return false;
-  const tall = other.tallFt || kindHeight(other.kind);
+  const tall = other.tallFt || kinds.height(other.kind);
   if (tall <= 0) return false;
   const cx = other.x + other.width / 2;
   const cy = other.y + other.height / 2;
-  for (const z of crossSectionLevels(other.kind, tall)) {
+  for (const z of crossSectionLevels(def, tall)) {
     const slice = crossSectionOutline(
-      other.kind,
+      def,
       other.width,
       other.height,
       other.config,
