@@ -415,6 +415,10 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   open link; the lead sees it read-only. An open link holds its address
   against other camps and links (`camp_setup_link.slug`, migration 0093).
 
+- [x] 2026-11-21: Cameron's old Chrome passkey now signs in at
+  `camptool.mathcamp.us/moved` ("worked for me"); the earlier Chrome failure
+  didn't come back.
+
 ## Open questions for the user
 
 (None open, 2026-11-14.)
