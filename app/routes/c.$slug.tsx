@@ -16,6 +16,7 @@ import { CampHero } from "~/components/CampHero";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";
+import { assertNotMoving } from "~/lib/camp-move/move-out.server";
 import { shownQuestions } from "~/lib/conditions";
 import { getFeatureState } from "~/lib/features.server";
 import {
@@ -124,6 +125,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     .where(eq(camp.slug, params.slug))
     .limit(1);
   if (!found) throw data("Camp not found", { status: 404 });
+  await assertNotMoving(found.id);
   // Same gate as the loader: no applications while recruiting isn't fully on.
   if ((await getFeatureState(found.id, "recruiting")) !== "on") {
     throw data("Camp not found", { status: 404 });

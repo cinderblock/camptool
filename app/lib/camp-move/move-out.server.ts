@@ -13,6 +13,7 @@
  */
 import { Buffer } from "node:buffer";
 import { and, desc, eq, gt, inArray, isNotNull, lt, or } from "drizzle-orm";
+import { data } from "react-router";
 import { db } from "../../../db/client.server";
 import { campMoveOut, membership, superAdmin, user } from "../../../db/schema";
 import { deleteCamp } from "../camp-admin.server";
@@ -105,6 +106,17 @@ export async function findMoveOut(id: string): Promise<MoveOut | null> {
     .where(eq(campMoveOut.id, id))
     .limit(1);
   return row ?? null;
+}
+
+export const MOVING_MESSAGE =
+  "This camp is moving to another CampTool site, so it's read-only until the move is finished or cancelled.";
+
+/** Refuse a write to a camp that's moving. For the few camp writes that don't
+ * go through `resolveActiveCamp` (joining by invite, applying). */
+export async function assertNotMoving(campId: string): Promise<void> {
+  if (await openMoveFor(campId)) {
+    throw data({ error: MOVING_MESSAGE }, { status: 423 });
+  }
 }
 
 /** Start moving `campId` out. Freezes the camp; returns the move code. */

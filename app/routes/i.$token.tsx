@@ -13,6 +13,7 @@ import { data, Form, redirect } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { CampHero } from "~/components/CampHero";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";
+import { assertNotMoving } from "~/lib/camp-move/move-out.server";
 import {
   getInstanceSettings,
   setSignupUnlockCookie,
@@ -116,6 +117,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   if (await isMemberOf(session.user.id, invite.campId)) throw redirect("/");
+  await assertNotMoving(invite.campId);
 
   // Join directly. We bypass auth.api.addMember because that checks the
   // *caller's* camp permission, and the invitee has none yet — the valid token

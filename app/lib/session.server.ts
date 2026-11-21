@@ -18,7 +18,7 @@ import {
   isValidCampSlug,
   pageUrl,
 } from "./camp-host";
-import { openMoveFor } from "./camp-move/move-out.server";
+import { assertNotMoving } from "./camp-move/move-out.server";
 import { APEX, CAMP_SUBDOMAINS } from "./env.server";
 import { isSuperAdmin } from "./instance.server";
 import { hasAtLeast, rankOf } from "./permissions";
@@ -414,16 +414,7 @@ export async function resolveActiveCamp(
   // A camp that is moving to another install is read-only until the move is
   // done or called off, so nothing written now is left behind.
   if (mutating && active && !opts.allowWhileMoving) {
-    const moving = await openMoveFor(active.camp.id);
-    if (moving) {
-      throw data(
-        {
-          error:
-            "This camp is moving to another CampTool site, so it's read-only until the move is finished or cancelled.",
-        },
-        { status: 423 },
-      );
-    }
+    await assertNotMoving(active.camp.id);
   }
 
   return {
