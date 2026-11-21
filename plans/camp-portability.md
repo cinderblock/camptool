@@ -3,9 +3,10 @@
 > Task plan. Parent plans: `plans/camptool.md`, `plans/hosting-other-camps.md`
 > (step 7 and 8f are the one-way, whole-database move this generalises).
 > Plan path: `plans/camp-portability.md`. Branch `camp-portability`.
-> **Status (2026-11-21): built and verified locally in all four directions
-> (Bun and Cloudflare/wrangler dev, both ways, plus the return trip), on
-> branch `camp-portability`, not merged or deployed.**
+> **Status (2026-11-21): built, verified locally in all four directions,
+> merged to `master` (`1355858`) and live on camptool.org (`0fd1e65`,
+> 11:35 AM PST (19:35Z)). Open: the real-browser passkey check on the first
+> real move.**
 
 ## Goal
 
@@ -476,9 +477,7 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 
 ## Open questions for the user
 
-1. **Merge and deploy?** Merging to `master` deploys camptool.org. Recommend
-   yes once you've looked; nothing changes for existing camps until someone
-   starts a move.
+1. ~~Merge and deploy?~~ Yes (2026-11-21); live on camptool.org.
 2. **A real-browser check of old passkeys at the new site** (Related Origin
    Requests) needs two real HTTPS names, e.g. a scratch camp moved between
    camptool.org and a second test site. Server side is verified with a
