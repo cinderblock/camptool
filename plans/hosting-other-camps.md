@@ -400,6 +400,12 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 - Camp export/import in every direction is in its own thread,
   `plans/camp-portability.md` on branch `camp-portability`.
 
+- [x] 2026-11-20: the super admin can pick a setup link's camp address
+  (Cameron: "I was expecting I would get a say in their subdomain
+  allocation"). Optional "Address" when making the link, and "Address…" on an
+  open link; the lead sees it read-only. An open link holds its address
+  against other camps and links (`camp_setup_link.slug`, migration 0093).
+
 ## Open questions for the user
 
 (None open, 2026-11-14.)

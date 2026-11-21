@@ -2,7 +2,7 @@
  * Starting, renaming and removing camps on a shared site
  * (plans/hosting-other-camps.md, step 9).
  */
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import { camp, campSetupLink, membership } from "../../db/schema";
 import { blobs } from "./blobs.server";
@@ -12,10 +12,14 @@ import { newInviteToken } from "./invite.server";
 /** How long a camp setup link stays good. */
 export const SETUP_LINK_DAYS = 30;
 
-/** Why a camp address can't be used, or null when it can. */
+/**
+ * Why a camp address can't be used, or null when it can. An open setup link
+ * that picked an address holds it. `except.campId` is the camp being renamed;
+ * `except.linkId` is the link being used or edited.
+ */
 export async function slugProblem(
   slug: string,
-  exceptCampId?: string,
+  except: { campId?: string; linkId?: string } = {},
 ): Promise<string | null> {
   if (RESERVED_SLUGS.has(slug)) return "That address is reserved.";
   if (!isValidCampSlug(slug)) {
@@ -25,12 +29,26 @@ export async function slugProblem(
     .select({ id: camp.id })
     .from(camp)
     .where(
-      exceptCampId
-        ? and(eq(camp.slug, slug), ne(camp.id, exceptCampId))
+      except.campId
+        ? and(eq(camp.slug, slug), ne(camp.id, except.campId))
         : eq(camp.slug, slug),
     )
     .limit(1);
-  return taken ? "Another camp already has that address." : null;
+  if (taken) return "Another camp already has that address.";
+  const [held] = await db
+    .select({ id: campSetupLink.id })
+    .from(campSetupLink)
+    .where(
+      and(
+        eq(campSetupLink.slug, slug),
+        isNull(campSetupLink.usedAt),
+        isNull(campSetupLink.revokedAt),
+        gt(campSetupLink.expiresAt, new Date()),
+        except.linkId ? ne(campSetupLink.id, except.linkId) : undefined,
+      ),
+    )
+    .limit(1);
+  return held ? "A camp setup link is holding that address." : null;
 }
 
 /** Make a camp with `userId` as its first admin. Returns its id, or why not. */
@@ -38,11 +56,13 @@ export async function createCamp(opts: {
   userId: string;
   name: string;
   slug: string;
+  /** The setup link being used, whose own hold on the address doesn't count. */
+  linkId?: string;
 }): Promise<{ ok: true; campId: string } | { ok: false; error: string }> {
   const name = opts.name.trim();
   if (!name) return { ok: false, error: "Give the camp a name." };
   if (name.length > 100) return { ok: false, error: "That name is too long." };
-  const problem = await slugProblem(opts.slug);
+  const problem = await slugProblem(opts.slug, { linkId: opts.linkId });
   if (problem) return { ok: false, error: problem };
   const campId = crypto.randomUUID();
   await db.insert(camp).values({ id: campId, name, slug: opts.slug });
@@ -61,7 +81,7 @@ export async function renameCampSlug(
   campId: string,
   slug: string,
 ): Promise<string | null> {
-  const problem = await slugProblem(slug, campId);
+  const problem = await slugProblem(slug, { campId });
   if (problem) return problem;
   await db.update(camp).set({ slug }).where(eq(camp.id, campId));
   return null;
@@ -81,11 +101,25 @@ export async function deleteCamp(campId: string): Promise<void> {
   }
 }
 
-/** A new camp setup link for `label`. Returns its token. */
+function cleanSlug(slug: string | null | undefined): string | null {
+  return slug?.trim().toLowerCase() || null;
+}
+
+/**
+ * A new camp setup link for `label`. With `slug`, the super admin picks the
+ * camp's address and the lead can't change it; without, the lead picks.
+ * Returns its token, or why the address can't be used.
+ */
 export async function createSetupLink(opts: {
   label: string;
   createdByUserId: string;
-}): Promise<string> {
+  slug?: string | null;
+}): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+  const slug = cleanSlug(opts.slug);
+  if (slug) {
+    const problem = await slugProblem(slug);
+    if (problem) return { ok: false, error: problem };
+  }
   const token = newInviteToken();
   await db.insert(campSetupLink).values({
     id: crypto.randomUUID(),
@@ -93,8 +127,27 @@ export async function createSetupLink(opts: {
     label: opts.label.trim().slice(0, 100) || "Camp lead",
     createdByUserId: opts.createdByUserId,
     expiresAt: new Date(Date.now() + SETUP_LINK_DAYS * 86_400_000),
+    slug,
   });
-  return token;
+  return { ok: true, token };
+}
+
+/** Pick the address an open link's camp gets, or (null) leave it to the
+ * lead. Returns why not, or null. */
+export async function setSetupLinkSlug(
+  id: string,
+  slug: string | null,
+): Promise<string | null> {
+  const clean = cleanSlug(slug);
+  if (clean) {
+    const problem = await slugProblem(clean, { linkId: id });
+    if (problem) return problem;
+  }
+  await db
+    .update(campSetupLink)
+    .set({ slug: clean })
+    .where(and(eq(campSetupLink.id, id), isNull(campSetupLink.usedAt)));
+  return null;
 }
 
 export type SetupLinkState = "ok" | "used" | "revoked" | "expired";

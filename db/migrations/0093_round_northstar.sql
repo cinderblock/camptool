@@ -1,0 +1,1 @@
+ALTER TABLE `camp_setup_link` ADD `slug` text;

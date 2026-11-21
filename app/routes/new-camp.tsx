@@ -70,7 +70,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     const link = await findSetupLink(params.token);
     if (!link) throw data("Not found", { status: 404 });
     const state = setupLinkState(link);
-    const payload = { ...common, state, withLink: true };
+    const payload = {
+      ...common,
+      state,
+      withLink: true,
+      fixedSlug: link.slug,
+    };
     // Like a camp invite, a good link is a way in on an invite-only site.
     if (!session && state === "ok") {
       const { allowOpenSignups } = await getInstanceSettings();
@@ -88,7 +93,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!(await mayCreateWithoutLink(session.user.id))) {
     throw data("Starting a camp here needs a setup link.", { status: 403 });
   }
-  return { ...common, state: "ok" as SetupLinkState, withLink: false };
+  return {
+    ...common,
+    state: "ok" as SetupLinkState,
+    withLink: false,
+    fixedSlug: null as string | null,
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -98,7 +108,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
   const form = await request.formData();
   const name = String(form.get("name") ?? "");
-  const slug = String(form.get("slug") ?? "")
+  let slug = String(form.get("slug") ?? "")
     .trim()
     .toLowerCase();
 
@@ -114,6 +124,8 @@ export async function action({ request, params }: Route.ActionArgs) {
       return data({ error: STATE_MESSAGE.used }, { status: 400 });
     }
     linkId = link.id;
+    // The super admin picked the address; the form can't override it.
+    if (link.slug) slug = link.slug;
   } else if (!(await mayCreateWithoutLink(session.user.id))) {
     return data(
       { error: "Starting a camp here needs a setup link." },
@@ -121,7 +133,12 @@ export async function action({ request, params }: Route.ActionArgs) {
     );
   }
 
-  const made = await createCamp({ userId: session.user.id, name, slug });
+  const made = await createCamp({
+    userId: session.user.id,
+    name,
+    slug,
+    linkId: linkId ?? undefined,
+  });
   if (!made.ok) {
     if (linkId) await releaseSetupLink(linkId);
     return data({ error: made.error }, { status: 400 });
@@ -140,7 +157,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function NewCamp({ loaderData, params }: Route.ComponentProps) {
-  const { state, viewer, apexHost, withLink } = loaderData;
+  const { state, viewer, apexHost, withLink, fixedSlug } = loaderData;
   const action = params.token ? `/new-camp/${params.token}` : "/new-camp";
 
   return (
@@ -168,7 +185,11 @@ export default function NewCamp({ loaderData, params }: Route.ComponentProps) {
               You'll be its first admin, as <b>{viewer.name}</b>, and can invite
               your campers from there.
             </Text>
-            <CreateCampForm action={action} apexHost={apexHost} />
+            <CreateCampForm
+              action={action}
+              apexHost={apexHost}
+              fixedSlug={fixedSlug}
+            />
           </Stack>
         )}
       </Paper>

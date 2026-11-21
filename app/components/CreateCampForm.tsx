@@ -21,21 +21,24 @@ export function slugify(value: string) {
  * The address follows the name until it's edited by hand. `apexHost` is the
  * shared site's host when camps get subdomains, so the field reads as the
  * address it is; null on a single-camp site, where it's only the public page's
- * `/c/<address>`.
+ * `/c/<address>`. `fixedSlug` is an address the site's admin already picked on
+ * the setup link: shown, not editable.
  */
 export function CreateCampForm({
   action,
   apexHost,
+  fixedSlug = null,
 }: {
   action: string;
   apexHost: string | null;
+  fixedSlug?: string | null;
 }) {
   const fetcher = useFetcher<{ error?: string }>();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const busy = fetcher.state !== "idle";
-  const shownSlug = slugEdited ? slug : slugify(name);
+  const shownSlug = fixedSlug ?? (slugEdited ? slug : slugify(name));
 
   return (
     <fetcher.Form method="post" action={action}>
@@ -54,12 +57,15 @@ export function CreateCampForm({
         <TextInput
           label={apexHost ? "Camp address" : "Camp page address"}
           description={
-            apexHost
-              ? "Where your camp lives. Lowercase letters, numbers and dashes."
-              : "Your camp's public page is /c/ followed by this."
+            fixedSlug
+              ? "Set by the site's admin. Ask them if it should be different."
+              : apexHost
+                ? "Where your camp lives. Lowercase letters, numbers and dashes."
+                : "Your camp's public page is /c/ followed by this."
           }
           name="slug"
           value={shownSlug}
+          readOnly={!!fixedSlug}
           onChange={(e) => {
             setSlugEdited(true);
             setSlug(e.currentTarget.value.toLowerCase());

@@ -26,6 +26,7 @@ import {
   deleteCamp,
   renameCampSlug,
   SETUP_LINK_DAYS,
+  setSetupLinkSlug,
   setupLinkState,
 } from "~/lib/camp-admin.server";
 import { campOrigin, isValidCampSlug } from "~/lib/camp-host";
@@ -184,6 +185,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       label: l.label,
       url: `${APEX.origin}/new-camp/${l.token}`,
       expires: l.expiresAt.toISOString(),
+      slug: l.slug,
     }));
 
   // Site admin spans every camp, so the lens's free-text vocabulary (which is
@@ -229,11 +231,22 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "createSetupLink") {
-    const token = await createSetupLink({
+    const made = await createSetupLink({
       label: String(form.get("label") ?? ""),
       createdByUserId: session.user.id,
+      slug: String(form.get("slug") ?? ""),
     });
-    return data({ ok: true, url: `${APEX.origin}/new-camp/${token}` });
+    if (!made.ok) return data({ error: made.error }, { status: 400 });
+    return data({ ok: true, url: `${APEX.origin}/new-camp/${made.token}` });
+  }
+
+  if (intent === "setSetupLinkSlug") {
+    const problem = await setSetupLinkSlug(
+      String(form.get("id") ?? ""),
+      String(form.get("slug") ?? ""),
+    );
+    if (problem) return data({ error: problem }, { status: 400 });
+    return data({ ok: true });
   }
 
   if (intent === "revokeSetupLink") {
@@ -357,7 +370,11 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
               camp. You can work as any of them without joining it.
             </Text>
             <CampsTable camps={camps} apexHost={apexHost} />
-            <SetupLinks links={setupLinks} days={setupLinkDays} />
+            <SetupLinks
+              links={setupLinks}
+              days={setupLinkDays}
+              apexHost={apexHost}
+            />
           </Stack>
         </Card>
 
@@ -820,12 +837,36 @@ function DeleteCampModal({
   );
 }
 
+type SetupLinkRow = {
+  id: string;
+  label: string;
+  url: string;
+  expires: string;
+  slug: string | null;
+};
+
+/** The `.camptool.org` after an address field, when camps get subdomains. */
+function addressSuffix(apexHost: string | null) {
+  return apexHost
+    ? {
+        rightSection: (
+          <Text size="sm" c="dimmed" pr="xs" style={{ whiteSpace: "nowrap" }}>
+            .{apexHost}
+          </Text>
+        ),
+        rightSectionWidth: apexHost.length * 8 + 24,
+      }
+    : {};
+}
+
 function SetupLinks({
   links,
   days,
+  apexHost,
 }: {
-  links: { id: string; label: string; url: string; expires: string }[];
+  links: SetupLinkRow[];
   days: number;
+  apexHost: string | null;
 }) {
   const fetcher = useFetcher<{ ok?: boolean; url?: string; error?: string }>();
   const formRef = useRef<HTMLFormElement>(null);
@@ -838,8 +879,9 @@ function SetupLinks({
       <Title order={5}>Start a new camp</Title>
       <Text size="sm" c="dimmed">
         Make a one-use link and send it to the camp's lead. They make their
-        account, name the camp and pick its address, and become its first admin.
-        You don't join it. Links last {days} days.
+        account, name the camp and become its first admin. Pick the camp's
+        address here, or leave it blank to let them pick. You don't join it.
+        Links last {days} days.
       </Text>
       <fetcher.Form method="post" ref={formRef}>
         <input type="hidden" name="intent" value="createSetupLink" />
@@ -849,12 +891,27 @@ function SetupLinks({
             label="Who it's for"
             placeholder="e.g. Alex, Entheos"
             required
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: 160 }}
+          />
+          <TextInput
+            name="slug"
+            label="Address (optional)"
+            placeholder="they pick"
+            onChange={(e) => {
+              e.currentTarget.value = e.currentTarget.value.toLowerCase();
+            }}
+            style={{ flex: 1, minWidth: 200 }}
+            {...addressSuffix(apexHost)}
           />
           <Button type="submit" loading={fetcher.state !== "idle"}>
             Make link
           </Button>
         </Group>
+        {fetcher.data?.error ? (
+          <Alert color="red" mt="xs">
+            {fetcher.data.error}
+          </Alert>
+        ) : null}
       </fetcher.Form>
       {links.length > 0 ? (
         <Table verticalSpacing="xs">
@@ -864,7 +921,12 @@ function SetupLinks({
                 <Table.Td>
                   <Text size="sm">{l.label}</Text>
                   <Text size="xs" c="dimmed">
-                    good until {l.expires.slice(0, 10)}
+                    {l.slug
+                      ? apexHost
+                        ? `${l.slug}.${apexHost}`
+                        : l.slug
+                      : "they pick the address"}
+                    {" · "}good until {l.expires.slice(0, 10)}
                   </Text>
                 </Table.Td>
                 <Table.Td>
@@ -882,6 +944,7 @@ function SetupLinks({
                         </Button>
                       )}
                     </CopyButton>
+                    <LinkAddress link={l} apexHost={apexHost} />
                     <RevokeLink id={l.id} />
                   </Group>
                 </Table.Td>
@@ -891,6 +954,62 @@ function SetupLinks({
         </Table>
       ) : null}
     </Stack>
+  );
+}
+
+/** Pick or change the address an open setup link's camp gets. */
+function LinkAddress({
+  link: l,
+  apexHost,
+}: {
+  link: SetupLinkRow;
+  apexHost: string | null;
+}) {
+  const [opened, setOpened] = useState(false);
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const [slug, setSlug] = useState(l.slug ?? "");
+  const done = fetcher.state === "idle" && fetcher.data?.ok;
+  useEffect(() => {
+    if (done) setOpened(false);
+  }, [done]);
+  return (
+    <>
+      <Button size="xs" variant="subtle" onClick={() => setOpened(true)}>
+        Address…
+      </Button>
+      <Modal
+        opened={opened}
+        onClose={() => setOpened(false)}
+        title={`Address for ${l.label}'s camp`}
+      >
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="setSetupLinkSlug" />
+          <input type="hidden" name="id" value={l.id} />
+          <Stack gap="md">
+            {fetcher.data?.error ? (
+              <Alert color="red">{fetcher.data.error}</Alert>
+            ) : null}
+            <TextInput
+              label="Address"
+              description="Leave blank to let them pick."
+              name="slug"
+              value={slug}
+              onChange={(e) => setSlug(e.currentTarget.value.toLowerCase())}
+              {...addressSuffix(apexHost)}
+            />
+            <Group justify="flex-end">
+              <Button
+                type="submit"
+                loading={fetcher.state !== "idle"}
+                disabled={slug === (l.slug ?? "")}
+              >
+                Save
+              </Button>
+            </Group>
+          </Stack>
+        </fetcher.Form>
+      </Modal>
+    </>
   );
 }
 

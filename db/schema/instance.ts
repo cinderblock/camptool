@@ -71,4 +71,7 @@ export const campSetupLink = sqliteTable("camp_setup_link", {
   }),
   // The camp it made. Kept as a plain id: the camp may be deleted later.
   campId: text("camp_id"),
+  // The address the super admin picked for the camp, if they did; the lead
+  // can't change it. Held against other camps while the link is open.
+  slug: text("slug"),
 });
