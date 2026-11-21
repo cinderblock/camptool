@@ -267,8 +267,9 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
       `DISCORD_BOT_TOKEN` (Secret) set on the Worker in the dashboard; no
       `DISCORD_GUILD_ID` (each camp picks its server). Verified live:
       `/api/auth/sign-in/social` returns the Discord authorize URL with that
-      client ID and redirect. Next: Math Camp adds the bot and its server ID
-      under Settings → Discord server.
+      client ID and redirect. Math Camp's server ID `1393310432416104458` is
+      set and the bot added; Cameron linked his Discord and Members shows him
+      "in server" (2026-11-20). Done.
    e. [-] Throwaway-camp smoke test dropped (Cameron, 2026-11-14): the
       import refuses a D1 with any users, and the first sign-up becomes
       super admin, so we cut over and tested with the real data instead.
@@ -402,7 +403,7 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
 - [x] 2026-11-20: Cameron's account already has a camptool.org passkey
   ("iPhone", made 2026-11-14 9:40 AM PST (17:40Z)); his old Chrome one stays in
   `legacy_passkey`. The forced `/new-passkey` page is already built (step 7).
-- [ ] 2026-11-20: delete `entheos-r2vg` (1 member, no data). The ops
+- [x] 2026-11-20: deleted `entheos-r2vg` (1 member, no data), by Cameron. The ops
   `CLOUDFLARE_API_TOKEN` is D1 read-only ("You do not have permission to
   perform this operation."), so Cameron deletes it from Site admin.
 - Camp export/import in every direction is in its own thread,
