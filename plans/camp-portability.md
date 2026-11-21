@@ -3,7 +3,8 @@
 > Task plan. Parent plans: `plans/camptool.md`, `plans/hosting-other-camps.md`
 > (step 7 and 8f are the one-way, whole-database move this generalises).
 > Plan path: `plans/camp-portability.md`. Branch `camp-portability`.
-> **Status (2026-11-20): design only, waiting on Cameron's yes. No code yet.**
+> **Status (2026-11-20): design revised with Cameron's answers (decisions
+> 6–9); waiting on his go-ahead to build. No code yet.**
 
 ## Goal
 
@@ -60,6 +61,20 @@ written during the move is lost, and nothing that isn't the camp's leaks.
 5. Never touch Cloudflare, DNS or ops without Cameron's yes for that change.
    **Nothing in this design needs an infra change**: forwarding and the
    passkey well-known file are served by the app itself.
+6. **No passwords carried, passkeys forced.** Password hashes never leave the
+   old install. Everyone the import creates must make a passkey on the new
+   install on first arrival (the existing `/new-passkey`, no skip, no
+   "password instead"). In line with `plans/passkey-first-auth.md`.
+   (Cameron, 2026-11-20: "I don't want to support passwords. I want to force
+   passkeys, or at least STRONGLY encourage them".)
+7. **Forwarding + login window: 1 year** by default, extendable. (Cameron,
+   2026-11-20.)
+8. **Delete on the source** as soon as the target confirms the import (option
+   to keep a read-only copy until window end); at window end, delete source
+   accounts left in no camp. (Cameron, 2026-11-20: "ok".)
+9. **Anyone may import a camp when camp registration is open**
+   (`instance_setting.allow_camp_creation`); when it's closed, only via a camp
+   setup link or a super admin. (Cameron, 2026-11-20.)
 
 ## Design
 
@@ -146,9 +161,9 @@ test that fails on any unclassified table (same idea as
 | Class | Rule | Tables (examples) |
 | --- | --- | --- |
 | camp | the `camp` row, and every row reachable from it by FK path | membership, map, attendee, wiki, … (derived from the Drizzle FK graph) |
-| member identity | only for users with a `membership` in this camp | `user`, `account` (Discord links; password hashes per open question 1), `passkey` public keys |
+| member identity | only for users with a `membership` in this camp | `user`, `account` (Discord links only, never password rows), `passkey` public keys |
 | stub identity | users referenced by camp rows but not members (left, removed) | `user` with id + name only: no email, no credentials |
-| never | instance, transient or other-tenant | `super_admin`, `instance_setting`, `camp_setup_link`, telemetry, `session`, `verification`, `password_reset`, `user_email_alias`, other camps' memberships |
+| never | instance, transient or other-tenant | password hashes (`account.password`, credential-provider rows), `super_admin`, `instance_setting`, `camp_setup_link`, telemetry, `session`, `verification`, `password_reset`, `user_email_alias`, other camps' memberships |
 
 - Discord `account` rows carry `provider_id` + `account_id` (the Discord user
   id, an identifier, not a secret); access/refresh tokens are dropped (they
@@ -191,7 +206,7 @@ For each exported member, by email (case-insensitive, also against target
 
 | Situation | Result |
 | --- | --- |
-| no target user with that email | **create**: new user, keeps source user id, carries credentials (Discord link, passkeys as legacy, password per open q. 1) |
+| no target user with that email | **create**: new user, keeps source user id, carries Discord link and passkeys (as legacy); never a password; must make a passkey on arrival |
 | target user exists, and identity is **proven**: both sides verified, or both have the same Discord account id | **link**: map source id → target id; camp rows rewritten to the target id; **no credentials added** to the existing account |
 | target user exists, not proven | **claim**: a placeholder user (hidden email) owns the camp rows; the person resolves it by signing in to the existing account and arriving via the source's login bridge (proving both), which runs the existing account merge. Unclaimed at window end → stays a placeholder the camp's officers can merge or remove |
 
@@ -231,12 +246,14 @@ the target):
    registrable domains, so an install with more than 5 concurrent departures
    lists the newest 5 and the rest use path 1. Safe for the old install:
    its own verifier still accepts only its own origins.
-3. **Carried credentials** (permanent): Discord links always; password hashes
-   if open question 1 says yes.
+3. **Discord** (permanent while the target allows Discord sign-in): the
+   carried link matches on Discord user id.
 
-After arriving by path 1 or 2, a user with only legacy passkeys is sent to
-`/new-passkey` (existing forced flow), which also offers "set a password
-instead" for people without passkeys. Path 3 users land normally.
+Whatever path they arrive by, a created user with no passkey on the target is
+sent to `/new-passkey` (existing forced flow: no skip, sign-out only). No
+password is ever set or carried (decision 6). Someone whose browser can't
+make a passkey gets the officer-issued re-enrollment path from
+`plans/passkey-first-auth.md`.
 
 ### Forwarding old links
 
@@ -251,7 +268,7 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 - On camptool.org this is a DB row, not a DNS or ops change. A self-hoster
   keeps their server up (it can shrink to the bridge only) until the window
   ends, or loses forwarding and the bridge early: their call, shown clearly.
-- The window is extendable by the source's camp admin or super admin.
+- The window defaults to **1 year** (decision 7) and is extendable by the source's camp admin or super admin.
   `LEGACY_HOSTS` stays as the special case for a same-deployment move (Math
   Camp) and can later become a `camp_move_out` row.
 
@@ -274,11 +291,13 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 - **Export / move out**: the camp's admins, or a super admin (for a camp whose
   lead is gone). Not while impersonating. Source super admins see every
   pending and recent move on Site admin → Camps.
-- **Import on camptool.org**: through a **camp setup link** (the step 9 flow)
-  with an "Import an existing camp" choice, or by a super admin. The importer
+- **Import on any install**: anyone allowed to create a camp there (camp
+  registration open, decision 9), through the same "start a camp" flow with an
+  "Import an existing camp" choice; when registration is closed, through a camp
+  setup link (the step 9 flow) or by a super admin. The importer
   must be one of the camp's admins in the bundle (matched to themselves) or a
   super admin; otherwise someone could import a camp they don't run.
-- **Import on a self-host**: its super admin, in the UI or the CLI.
+- The CLI needs direct database access, so it is an operator tool.
 - **CLI** (`scripts/camp-move.ts`): `export`, `inspect` (manifest + checks,
   no secret needed for the manifest), `import` (pull by code or from a file;
   `--dry-run` prints the preflight report). The CLI works against a Bun
@@ -299,8 +318,8 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 
 ## Plan / steps
 
-1. [ ] **Current step: Cameron approves the design** (and answers the open
-   questions).
+1. [x] Open questions answered (decisions 6–9, 2026-11-20).
+   [ ] **Current step: Cameron's go-ahead to build.**
 2. [ ] Table registry + classification test; JSON user-id registry.
 3. [ ] Exporter + bundle writer/reader + `camp-move.ts export|inspect`. Unit
    tests: no row outside the camp, no super admin or other-camp data, round
@@ -331,24 +350,16 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 ## Progress log
 
 - [x] 2026-11-20: design written (this file).
+- [x] 2026-11-20: Cameron's answers folded in: no passwords, 1-year window,
+  delete on confirm, open imports when camp registration is open.
 
 ## Open questions for the user
 
-1. **Carry password hashes to the new install?** Recommend **yes, for users
-   the import creates** (never onto existing accounts): passwords then keep
-   working with no time limit and no dependence on the old server. The
-   privacy-tighter alternative is no hashes, relying on the login bridge
-   during the window and asking everyone to set a new login.
-2. **Forwarding / login window length.** Recommend **60 days** default,
-   extendable.
-3. **Deleting on the source.** Recommend: camp data deleted as soon as the
-   target confirms (option to keep a read-only copy until window end); at
-   window end, delete source accounts left in no camp.
-4. **Imports into camptool.org** gated by a setup link (recommended, matches
-   step 9) or open to anyone allowed to create a camp?
+(None; answers recorded as decisions 6–9.)
 
 ## Things not to do
 
+- Don't carry or accept password hashes.
 - Don't share `BETTER_AUTH_SECRET` between installs, or export sessions.
 - Don't add credentials to an existing target account from a bundle, and
   don't honour hand-offs for linked users.
