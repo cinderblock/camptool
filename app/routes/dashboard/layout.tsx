@@ -22,6 +22,7 @@ import {
   NavLink,
   Outlet,
   redirect,
+  type ShouldRevalidateFunctionArgs,
   useFetcher,
   useLocation,
   useNavigate,
@@ -67,6 +68,32 @@ import { yearNudge } from "~/lib/year-nudge";
 import { db } from "../../../db/client.server";
 import { legacyPasskey, membership, passkey } from "../../../db/schema";
 import type { Route } from "./+types/layout";
+
+// When this shell's data last arrived in the browser (see shouldRevalidate).
+let shellLoadedAt = 0;
+const SHELL_MAX_AGE_MS = 60_000;
+
+/**
+ * Single fetch reruns every loader on every page switch unless a route opts
+ * out, and this one is the heaviest: camps, nav badges and the ask counts are
+ * ~45 queries and most of each response (plans/fast-navigation.md). It
+ * changes when something is posted, so it reloads after any form post or an
+ * explicit refresh, and otherwise once it's a minute old, which keeps badges
+ * that other people's actions move (unread summaries, pending FAQs) roughly
+ * current.
+ */
+export function shouldRevalidate({
+  formMethod,
+  currentUrl,
+  nextUrl,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  if (formMethod && formMethod.toUpperCase() !== "GET") {
+    return defaultShouldRevalidate;
+  }
+  if (currentUrl.href === nextUrl.href) return defaultShouldRevalidate;
+  return Date.now() - shellLoadedAt > SHELL_MAX_AGE_MS;
+}
 
 export async function loader({ request }: Route.LoaderArgs) {
   const {
@@ -313,6 +340,9 @@ type NavGroup = { id: string; label: string; items: NavItem[] };
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   // Real-browser timings of loads and page switches (plans/fast-navigation.md).
   useNavTiming();
+  useEffect(() => {
+    if (loaderData) shellLoadedAt = Date.now();
+  }, [loaderData]);
   const {
     user,
     camps,
