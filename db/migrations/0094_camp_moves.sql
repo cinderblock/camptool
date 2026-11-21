@@ -20,6 +20,7 @@ CREATE TABLE `camp_move_out` (
 	`camp_name` text NOT NULL,
 	`state` text DEFAULT 'open' NOT NULL,
 	`secret_hash` text NOT NULL,
+	`secret_sealed` text NOT NULL,
 	`public_key` text NOT NULL,
 	`private_key` text NOT NULL,
 	`target_origin` text,
@@ -30,6 +31,7 @@ CREATE TABLE `camp_move_out` (
 	`done_at` integer,
 	`window_ends_at` integer,
 	`data_deleted_at` integer,
+	`people` text,
 	FOREIGN KEY (`camp_id`) REFERENCES `camp`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null
 );

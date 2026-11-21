@@ -18,6 +18,7 @@ import {
   isValidCampSlug,
   pageUrl,
 } from "./camp-host";
+import { openMoveFor } from "./camp-move/move-out.server";
 import { APEX, CAMP_SUBDOMAINS } from "./env.server";
 import { isSuperAdmin } from "./instance.server";
 import { hasAtLeast, rankOf } from "./permissions";
@@ -336,6 +337,9 @@ export type ResolveOptions = {
    * per-browser view preference rather than camp data (the privacy toggle
    * itself, switching the active year). */
   allowWrite?: boolean;
+  /** Skip the "this camp is moving" freeze. Only for the move page itself,
+   * whose writes are about the move (plans/camp-portability.md). */
+  allowWhileMoving?: boolean;
 };
 
 export async function resolveActiveCamp(
@@ -407,6 +411,20 @@ export async function resolveActiveCamp(
   // form anywhere can write a pseudonym back over real data.
   const mutating = request.method !== "GET" && request.method !== "HEAD";
   if (mutating && !opts.allowWrite) assertWritable(privacy);
+  // A camp that is moving to another install is read-only until the move is
+  // done or called off, so nothing written now is left behind.
+  if (mutating && active && !opts.allowWhileMoving) {
+    const moving = await openMoveFor(active.camp.id);
+    if (moving) {
+      throw data(
+        {
+          error:
+            "This camp is moving to another CampTool site, so it's read-only until the move is finished or cancelled.",
+        },
+        { status: 423 },
+      );
+    }
+  }
 
   return {
     user: session.user,

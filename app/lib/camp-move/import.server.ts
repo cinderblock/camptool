@@ -183,7 +183,10 @@ async function selectWhereIn(
  * proves nothing (no email is ever verified for password sign-ups), so it
  * becomes a claim the person settles by signing in on both sides.
  */
-export async function planPeople(rows: Rows): Promise<PersonPlan[]> {
+export async function planPeople(
+  rows: Rows,
+  importer?: { id: string; email: string } | null,
+): Promise<PersonPlan[]> {
   const users = rows.get("user") ?? [];
   const roles = new Map(
     (rows.get("membership") ?? []).map((r) => [
@@ -238,6 +241,11 @@ export async function planPeople(rows: Rows): Promise<PersonPlan[]> {
   );
 
   const usedTargets = new Set<string>();
+  // The importer's own account is theirs alone; nobody else may land on it.
+  const importerSource = importer
+    ? users.find((u) => lower(u.email) === lower(importer.email))
+    : undefined;
+  if (importer && importerSource) usedTargets.add(importer.id);
   const out: PersonPlan[] = [];
   for (const u of users) {
     const id = String(u.id);
@@ -253,7 +261,16 @@ export async function planPeople(rows: Rows): Promise<PersonPlan[]> {
       : undefined;
     const match = here.get(lower(email));
     let plan: PersonPlan;
-    if (discordUser && !usedTargets.has(discordUser)) {
+    if (importer && u === importerSource) {
+      // Whoever holds the move code was handed it by the camp's admin, and is
+      // signed in here with this address: that's the proof.
+      plan = {
+        ...base,
+        outcome: "link",
+        userId: importer.id,
+        why: "You, importing the camp.",
+      };
+    } else if (discordUser && !usedTargets.has(discordUser)) {
       plan = {
         ...base,
         outcome: "link",
@@ -309,7 +326,7 @@ export async function planPeople(rows: Rows): Promise<PersonPlan[]> {
 export async function preflight(
   source: BundleSource,
   rows: Rows,
-  opts: { slug?: string } = {},
+  opts: { slug?: string; importer?: { id: string; email: string } | null } = {},
 ): Promise<Preflight> {
   const m = source.manifest;
   const problems = schemaProblems(m);
@@ -350,7 +367,7 @@ export async function preflight(
     }
   }
 
-  const people = problems.length ? [] : await planPeople(rows);
+  const people = problems.length ? [] : await planPeople(rows, opts.importer);
   let total = 0;
   for (const list of rows.values()) total += list.length;
   return {

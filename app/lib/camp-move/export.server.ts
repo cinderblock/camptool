@@ -66,6 +66,8 @@ async function selectIn(table: string, column: string, ids: string[]) {
 }
 
 export type CampExport = {
+  /** The camp's people (user ids) whose accounts travel with it. */
+  people: string[];
   manifest: Omit<Manifest, "move">;
   /** Each table's rows as JSON lines (what the manifest's hashes cover). */
   rows: Map<string, string>;
@@ -81,15 +83,29 @@ export function campSource(slug: string | null) {
 }
 
 /** Everything of `campId` that a move carries. */
-export async function exportCamp(campId: string): Promise<CampExport> {
+export async function exportCamp(
+  campId: string,
+  opts: { createdAt?: number } = {},
+): Promise<CampExport> {
   const graph = schemaGraph();
   const paths = campTables(graph);
   const raw: Rows = new Map();
+  // Ordered, so the same camp exports byte for byte the same (the pull API
+  // rebuilds it per request; the hashes must agree).
+  const orderBy = (table: string) => {
+    const pk = graph.get(table)?.primaryKey ?? [];
+    return pk.length
+      ? sql` ORDER BY ${sql.join(
+          pk.map((c) => ident(c)),
+          sql`, `,
+        )}`
+      : sql``;
+  };
   for (const table of paths.keys()) {
     raw.set(
       table,
       await db.all<Row>(
-        sql`SELECT * FROM ${ident(table)} WHERE ${campFilter(table, paths, campId)}`,
+        sql`SELECT * FROM ${ident(table)} WHERE ${campFilter(table, paths, campId)}${orderBy(table)}`,
       ),
     );
   }
@@ -109,7 +125,8 @@ export async function exportCamp(campId: string): Promise<CampExport> {
     const column = table === "user" ? "id" : "user_id";
     const rows = (await selectIn(table, column, ids))
       .map((r) => scrubIdentityRow(table, r))
-      .filter((r): r is Row => r !== null);
+      .filter((r): r is Row => r !== null)
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)));
     raw.set(table, rows);
   }
 
@@ -148,7 +165,7 @@ export async function exportCamp(campId: string): Promise<CampExport> {
     manifest: {
       format: FORMAT,
       formatVersion: FORMAT_VERSION,
-      createdAt: Date.now(),
+      createdAt: opts.createdAt ?? Date.now(),
       migrations: localMigrations(),
       source: campSource(slug),
       camp: { id: campId, slug, name: String(campRow.name) },
@@ -158,5 +175,6 @@ export async function exportCamp(campId: string): Promise<CampExport> {
       dropped: Object.fromEntries(dropped),
     },
     rows: text,
+    people: ids,
   };
 }

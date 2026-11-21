@@ -36,6 +36,9 @@ export const campMoveOut = sqliteTable(
     state: text("state").notNull().default("open"),
     /** SHA-256 of the move code's secret: the pull API's bearer token. */
     secretHash: text("secret_hash").notNull(),
+    /** The secret itself, encrypted with BETTER_AUTH_SECRET, so the camp
+     * admin can see the code again and download the bundle file. */
+    secretSealed: text("secret_sealed").notNull(),
     /** Ed25519, raw, base64url. */
     publicKey: text("public_key").notNull(),
     /** Ed25519 PKCS#8, encrypted with BETTER_AUTH_SECRET (AES-GCM). */
@@ -57,6 +60,10 @@ export const campMoveOut = sqliteTable(
     /** Forwarding and the login bridge stop after this. */
     windowEndsAt: integer("window_ends_at", { mode: "timestamp_ms" }),
     dataDeletedAt: integer("data_deleted_at", { mode: "timestamp_ms" }),
+    /** JSON array of the camp's people (user ids), taken when the move is
+     * done: whose sign-ins the bridge vouches for, and whose accounts are
+     * removed at the end if they're left in no camp. */
+    people: text("people"),
   },
   (t) => [index("camp_move_out_camp").on(t.campId)],
 );

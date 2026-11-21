@@ -29,6 +29,14 @@ const EXEMPT: Record<string, string> = {
   "routes/new-camp.tsx":
     "Starting a camp: renders only the viewer's own name and a link's state.",
   "routes/api.auth.$.tsx": "better-auth passthrough; not our payload shape.",
+  "routes/api.move.tsx":
+    "Server-to-server pull API for a camp move: raw bundle bytes for the new install, not a page anyone views.",
+  "routes/import-camp.tsx":
+    "Its loader returns only the viewer's own name and address; the people list comes from the action, after the camp's admin is identified.",
+  "routes/move.bundle.tsx":
+    "Streams the encrypted camp bundle file for a move; not a rendered payload.",
+  "routes/dashboard/move.tsx":
+    "Returns only the camp's name and its move code; no person data.",
   "routes/export-db.tsx":
     "Raw SQLite bytes can't be transformed in flight — privacy mode refuses " +
     "this route outright instead (409).",

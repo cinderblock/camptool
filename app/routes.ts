@@ -30,6 +30,12 @@ export default [
   route("moved", "routes/moved.tsx"),
   route("api/legacy-passkey", "routes/api.legacy-passkey.tsx"),
   route("new-passkey", "routes/new-passkey.tsx"),
+  // Moving a camp between installs (plans/camp-portability.md): the pull API
+  // the new install fetches it through (server to server, bearer-gated), and
+  // the page that imports one.
+  route("api/move/:id/:what", "routes/api.move.tsx"),
+  route("import-camp", "routes/import-camp.tsx"),
+  route("move/bundle", "routes/move.bundle.tsx"),
   // Starting a camp: with a super admin's setup link, or where anyone may.
   route("new-camp/:token?", "routes/new-camp.tsx"),
   // Super-admin DB backup download (resource route; self-gated).
@@ -138,6 +144,7 @@ export default [
     route("onboarding", "routes/dashboard/onboarding.tsx"),
     route("account", "routes/dashboard/account.tsx"),
     route("settings", "routes/dashboard/settings.tsx"),
+    route("move", "routes/dashboard/move.tsx"),
     route("admin", "routes/dashboard/admin.tsx"),
   ]),
 ] satisfies RouteConfig;

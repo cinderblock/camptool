@@ -34,6 +34,7 @@ import { authClient, signOut } from "~/lib/auth-client";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
 import { campOrigin, isValidCampSlug, pageUrl } from "~/lib/camp-host";
+import { openMoveFor } from "~/lib/camp-move/move-out.server";
 import { loadCustomKinds } from "~/lib/custom-kinds.server";
 import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
 import { featureName } from "~/lib/events";
@@ -126,6 +127,10 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   const superAdmin = await isSuperAdmin(user.id);
+
+  // A camp on its way to another CampTool site is read-only meanwhile
+  // (plans/camp-portability.md); say so on every page.
+  const campMoving = active ? !!(await openMoveFor(active.camp.id)) : false;
 
   const showPasskeyNag = !anyPasskey && !passkeyNagSnoozed(request);
 
@@ -230,6 +235,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     prospectsPending,
     unreadSummaries,
     showPasskeyNag,
+    campMoving,
     privacyMode,
     canUsePrivacy,
     // Flattened to `…Name` so the redaction registry classifies it as a person;
@@ -288,6 +294,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     prospectsPending,
     unreadSummaries,
     showPasskeyNag,
+    campMoving,
     impersonatedByName,
     privacyMode,
     canUsePrivacy,
@@ -821,6 +828,28 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             : undefined
         }
       >
+        {campMoving ? (
+          <ShellBanner
+            color="orange"
+            announce
+            action={
+              activeRole === "admin" ? (
+                <Button
+                  component={NavLink}
+                  to="/move"
+                  size="xs"
+                  variant="light"
+                  color="orange"
+                >
+                  The move
+                </Button>
+              ) : null
+            }
+          >
+            <b>This camp is moving</b> to another CampTool site. It's read-only
+            until the move is finished.
+          </ShellBanner>
+        ) : null}
         {privacyMode.on ? (
           <ShellBanner
             color="orange"

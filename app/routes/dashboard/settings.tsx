@@ -24,7 +24,7 @@ import {
 } from "@mantine/core";
 import { eq } from "drizzle-orm";
 import { type ReactNode, useState } from "react";
-import { data, redirect, useFetcher } from "react-router";
+import { data, Link, redirect, useFetcher } from "react-router";
 import {
   clearBinsLink,
   getBinsLink,
@@ -578,6 +578,20 @@ export default function CampSettings({ loaderData }: Route.ComponentProps) {
           </FeatureCard>
         ))}
         <DiscordConfig discord={discord} />
+        <Card withBorder radius="md" padding="lg">
+          <Stack gap="xs">
+            <Title order={4}>Move this camp</Title>
+            <Text size="sm" c="dimmed">
+              Take {campName} to another CampTool site, with everything and
+              everyone in it.
+            </Text>
+            <Group justify="flex-end">
+              <Button component={Link} to="/move" size="xs" variant="light">
+                Move this camp…
+              </Button>
+            </Group>
+          </Stack>
+        </Card>
       </Stack>
     </Container>
   );
