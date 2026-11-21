@@ -52,6 +52,7 @@ import { featureStatesFor } from "~/lib/features.server";
 import { isSuperAdmin } from "~/lib/instance.server";
 import { KindsProvider } from "~/lib/kinds-context";
 import { countUnreadSummaries } from "~/lib/meetings.server";
+import { useNavTiming } from "~/lib/nav-timing";
 import { hasAtLeast } from "~/lib/permissions";
 import type { PrivacyMode } from "~/lib/privacy";
 import { redact } from "~/lib/privacy.server";
@@ -310,6 +311,8 @@ type NavItem = {
 type NavGroup = { id: string; label: string; items: NavItem[] };
 
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
+  // Real-browser timings of loads and page switches (plans/fast-navigation.md).
+  useNavTiming();
   const {
     user,
     camps,

@@ -64,6 +64,7 @@ const EXEMPT: Record<string, string> = {
     "Token-gated ops API (DEV_API_TOKEN), not a UI surface. Reads real " +
     "telemetry on purpose — that is the whole point of the endpoint.",
   "routes/api.dev.feedback.tsx": "Token-gated ops API; same as api.dev.errors.",
+  "routes/api.dev.nav.tsx": "Token-gated ops API; same as api.dev.errors.",
   "routes/c.$slug.tsx":
     "Public camp page — shows only what the camp chose to publish, and has no " +
     "session to carry a privacy cookie.",

@@ -24,6 +24,7 @@ export const NEVER: Readonly<Record<string, string>> = {
     "Merge bookkeeping about other addresses a person had; not needed to sign in, and not the camp's to share.",
   client_error: "Instance telemetry.",
   feedback: "Instance telemetry.",
+  nav_timing: "Instance telemetry.",
   password_reset:
     "One-time recovery credentials (decision 6: no passwords move).",
   camp_move_out:

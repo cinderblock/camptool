@@ -41,7 +41,11 @@ export default {
     const response = new Response(result.body, result);
     response.headers.append(
       "Server-Timing",
-      serverTiming(metrics, performance.now() - started),
+      serverTiming(
+        metrics,
+        performance.now() - started,
+        (request as { cf?: { colo?: string } }).cf?.colo,
+      ),
     );
     return response;
   },

@@ -76,10 +76,14 @@ export default [
   route("spike/passkey", "routes/spike.passkey.tsx"),
   // Browser error forwarding (telemetry.client.ts → client_error table).
   route("api/log-error", "routes/api.log-error.tsx"),
+  // Page load / switch timings from real browsers (nav-timing.ts →
+  // nav_timing table; plans/fast-navigation.md).
+  route("api/log-nav", "routes/api.log-nav.tsx"),
   // User feedback submissions (FeedbackButton → feedback table).
   route("api/feedback", "routes/api.feedback.tsx"),
   // Dev-only telemetry read APIs (token-gated via DEV_API_TOKEN; for tracing).
   route("api/dev/errors", "routes/api.dev.errors.tsx"),
+  route("api/dev/nav", "routes/api.dev.nav.tsx"),
   route("api/dev/feedback", "routes/api.dev.feedback.tsx"),
   // The app itself lives at the root behind a pathless layout (the shell). The
   // layout loader requires a logged-in user, so "/" is either the overview or a

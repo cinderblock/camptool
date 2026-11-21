@@ -98,9 +98,17 @@ export function instrumentD1(d1: D1Database): D1Database {
 }
 
 /** `Server-Timing` value for a finished request. */
-export function serverTiming(metrics: DbMetrics, totalMs: number): string {
+export function serverTiming(
+  metrics: DbMetrics,
+  totalMs: number,
+  colo?: string,
+): string {
   return [
     `db;dur=${metrics.busyMs.toFixed(0)};desc="${metrics.queries} queries in ${metrics.waits} waits"`,
     `total;dur=${totalMs.toFixed(0)}`,
+    // Where the Worker ran: with placement pinned, every visitor's request
+    // should show the database's data center (app/lib/nav-timing.ts
+    // records it).
+    ...(colo && /^[A-Z]{3}$/.test(colo) ? [`colo;desc="${colo}"`] : []),
   ].join(", ");
 }
