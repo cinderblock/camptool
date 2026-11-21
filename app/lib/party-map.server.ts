@@ -29,54 +29,58 @@ import { attendee, mapObject, mapObjectOccupant } from "../../db/schema";
 export async function partyMapObjects(
   editionId: string,
 ): Promise<Map<string, string[]>> {
-  const ownerRows = await db
-    .select({
-      objectId: mapObject.id,
-      membershipId: mapObject.ownerMembershipId,
-    })
-    .from(mapObject)
-    .where(
-      and(
-        eq(mapObject.editionId, editionId),
-        eq(mapObject.placed, true),
-        isNotNull(mapObject.ownerMembershipId),
+  // The three reads are independent, so they share one D1 round trip
+  // (plans/fast-navigation.md).
+  const [ownerRows, occupantRows, hostRows] = await Promise.all([
+    db
+      .select({
+        objectId: mapObject.id,
+        membershipId: mapObject.ownerMembershipId,
+      })
+      .from(mapObject)
+      .where(
+        and(
+          eq(mapObject.editionId, editionId),
+          eq(mapObject.placed, true),
+          isNotNull(mapObject.ownerMembershipId),
+        ),
       ),
-    );
 
-  const occupantRows = await db
-    .select({
-      objectId: mapObjectOccupant.objectId,
-      membershipId: attendee.membershipId,
-      hostMembershipId: attendee.hostMembershipId,
-    })
-    .from(mapObjectOccupant)
-    .innerJoin(attendee, eq(attendee.id, mapObjectOccupant.attendeeId))
-    .innerJoin(mapObject, eq(mapObject.id, mapObjectOccupant.objectId))
-    .where(
-      and(
-        eq(mapObjectOccupant.editionId, editionId),
-        eq(mapObject.placed, true),
+    db
+      .select({
+        objectId: mapObjectOccupant.objectId,
+        membershipId: attendee.membershipId,
+        hostMembershipId: attendee.hostMembershipId,
+      })
+      .from(mapObjectOccupant)
+      .innerJoin(attendee, eq(attendee.id, mapObjectOccupant.attendeeId))
+      .innerJoin(mapObject, eq(mapObject.id, mapObjectOccupant.objectId))
+      .where(
+        and(
+          eq(mapObjectOccupant.editionId, editionId),
+          eq(mapObject.placed, true),
+        ),
       ),
-    );
 
-  // Who anchors each member's household this year. A person attaches to an
-  // object as owner OR occupant, and BOTH have to follow the same anchor —
-  // routing only occupants through it strands the owned structures of someone
-  // who joined another member's party, so their tent belongs to nobody and the
-  // roster reads "not placed" for the whole household.
-  const hostRows = await db
-    .select({
-      membershipId: attendee.membershipId,
-      hostMembershipId: attendee.hostMembershipId,
-    })
-    .from(attendee)
-    .where(
-      and(
-        eq(attendee.editionId, editionId),
-        isNotNull(attendee.membershipId),
-        isNotNull(attendee.hostMembershipId),
+    // Who anchors each member's household this year. A person attaches to an
+    // object as owner OR occupant, and BOTH have to follow the same anchor —
+    // routing only occupants through it strands the owned structures of someone
+    // who joined another member's party, so their tent belongs to nobody and the
+    // roster reads "not placed" for the whole household.
+    db
+      .select({
+        membershipId: attendee.membershipId,
+        hostMembershipId: attendee.hostMembershipId,
+      })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          isNotNull(attendee.membershipId),
+          isNotNull(attendee.hostMembershipId),
+        ),
       ),
-    );
+  ]);
   const hostOf = new Map<string, string>();
   for (const r of hostRows) {
     if (r.membershipId && r.hostMembershipId)

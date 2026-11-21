@@ -35,40 +35,43 @@ export async function loadWizardState(opts: {
 }): Promise<WizardState> {
   const { campId, editionId, membershipId, role, year } = opts;
 
-  const askRows = await db
-    .select({ askKey: wizardAsk.askKey, status: wizardAsk.status })
-    .from(wizardAsk)
-    .where(
-      and(
-        eq(wizardAsk.editionId, editionId),
-        eq(wizardAsk.membershipId, membershipId),
+  // Three independent reads, one D1 round trip (plans/fast-navigation.md).
+  const [askRows, [part], featureStates] = await Promise.all([
+    db
+      .select({ askKey: wizardAsk.askKey, status: wizardAsk.status })
+      .from(wizardAsk)
+      .where(
+        and(
+          eq(wizardAsk.editionId, editionId),
+          eq(wizardAsk.membershipId, membershipId),
+        ),
       ),
-    );
+    db
+      .select({
+        status: attendee.status,
+        arrivalDate: attendee.arrivalDate,
+        departureDate: attendee.departureDate,
+        note: attendee.note,
+      })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          eq(attendee.membershipId, membershipId),
+        ),
+      )
+      .limit(1),
+    loadFeatureStates(campId),
+  ]);
   const resolved: Record<string, string> = {};
   for (const r of askRows) resolved[r.askKey] = r.status;
-
-  const [part] = await db
-    .select({
-      status: attendee.status,
-      arrivalDate: attendee.arrivalDate,
-      departureDate: attendee.departureDate,
-      note: attendee.note,
-    })
-    .from(attendee)
-    .where(
-      and(
-        eq(attendee.editionId, editionId),
-        eq(attendee.membershipId, membershipId),
-      ),
-    )
-    .limit(1);
 
   const scheduled = scheduleAsks({
     role,
     weeksUntilEvent: weeksUntilEvent(year),
     // Asks for features the camp turned off (or that this camper can't see
     // yet) aren't scheduled — no nudging toward pages that would bounce.
-    featureStates: Object.fromEntries(await loadFeatureStates(campId)),
+    featureStates: Object.fromEntries(featureStates),
     // Someone who has said "not this year" is not walked through what tent
     // they're bringing. The dashboard to-do list has always known this; the
     // wizard didn't, so the two disagreed about the same person.

@@ -14,7 +14,7 @@ import { Link } from "react-router";
 import { JoinFlowchart } from "~/components/JoinFlowchart";
 import { weeksUntilEvent } from "~/lib/brc";
 import { featureVisibleTo } from "~/lib/features";
-import { loadFeatureStates } from "~/lib/features.server";
+import { featureStatesFor } from "~/lib/features.server";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
 import { loadWizardState } from "~/lib/wizard.server";
@@ -27,14 +27,18 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition, privacy } =
     await requireActiveEdition(request);
-  const state = await loadWizardState({
-    campId: active.camp.id,
-    editionId: activeEdition.id,
-    membershipId: active.membership.id,
-    role: active.membership.role,
-    year: activeEdition.year,
-  });
-  const featureStates = await loadFeatureStates(active.camp.id);
+  // The feature states came with the camp, so they cost no query of their own
+  // (plans/fast-navigation.md).
+  const [state, featureStates] = await Promise.all([
+    loadWizardState({
+      campId: active.camp.id,
+      editionId: activeEdition.id,
+      membershipId: active.membership.id,
+      role: active.membership.role,
+      year: activeEdition.year,
+    }),
+    featureStatesFor(active),
+  ]);
   const seeFeature = (key: Parameters<typeof featureStates.get>[0]) =>
     featureVisibleTo(featureStates.get(key) ?? "off", active.membership.role);
   return redact(privacy, {

@@ -66,38 +66,41 @@ export async function loader({ request }: Route.LoaderArgs) {
   const membershipId = active.membership.id;
   const role = active.membership.role;
 
-  const tasks = await db
-    .select()
-    .from(onboardingTask)
-    .where(eq(onboardingTask.campId, campId))
-    .orderBy(asc(onboardingTask.sortOrder), asc(onboardingTask.createdAt));
-
-  const done = await db
-    .select({ taskId: onboardingCompletion.taskId })
-    .from(onboardingCompletion)
-    .where(eq(onboardingCompletion.membershipId, membershipId));
+  // Independent reads, so they go out together rather than one D1 round trip
+  // each (plans/fast-navigation.md).
+  const [tasks, done, questionRows, answers, invitedByName] = await Promise.all(
+    [
+      db
+        .select()
+        .from(onboardingTask)
+        .where(eq(onboardingTask.campId, campId))
+        .orderBy(asc(onboardingTask.sortOrder), asc(onboardingTask.createdAt)),
+      db
+        .select({ taskId: onboardingCompletion.taskId })
+        .from(onboardingCompletion)
+        .where(eq(onboardingCompletion.membershipId, membershipId)),
+      loadCampQuestions(campId),
+      loadAnswers({
+        editionId: activeEdition.id,
+        membershipId,
+      }),
+      loadInviterName(membershipId),
+    ],
+  );
   const doneSet = new Set(done.map((d) => d.taskId));
 
   // The camp questionnaire (e.g. the email-list opt-in) is part of onboarding,
   // so surface the member's relevant questions here too. Answers are
   // edition-scoped and saved via the /questions route's "answer" action.
-  const questions = filterByAudience(await loadCampQuestions(campId), role).map(
-    (q) => ({
-      id: q.id,
-      prompt: q.prompt,
-      helpText: q.helpText,
-      type: q.type as QuestionType,
-      options: parseOptions(q.options),
-      required: q.required,
-      exclusiveOption: q.exclusiveOption,
-    }),
-  );
-  const answers = await loadAnswers({
-    editionId: activeEdition.id,
-    membershipId,
-  });
-  const invitedByName = await loadInviterName(membershipId);
-
+  const questions = filterByAudience(questionRows, role).map((q) => ({
+    id: q.id,
+    prompt: q.prompt,
+    helpText: q.helpText,
+    type: q.type as QuestionType,
+    options: parseOptions(q.options),
+    required: q.required,
+    exclusiveOption: q.exclusiveOption,
+  }));
   return redact(privacy, {
     canManage: hasAtLeast(role, "officer"),
     tasks: tasks.map((t) => ({ ...t, done: doneSet.has(t.id) })),

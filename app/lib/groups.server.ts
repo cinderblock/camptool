@@ -35,20 +35,23 @@ export const GROUP_TREE = {
 
 /** Every group in the camp with its roster of membership ids. */
 export async function listGroups(campId: string): Promise<GroupSummary[]> {
-  const groups = await db
-    .select()
-    .from(campGroup)
-    .where(eq(campGroup.campId, campId))
-    .orderBy(asc(campGroup.name));
+  // Both reads go out together, one D1 round trip instead of two
+  // (plans/fast-navigation.md). A camp with no groups has no links either.
+  const [groups, links] = await Promise.all([
+    db
+      .select()
+      .from(campGroup)
+      .where(eq(campGroup.campId, campId))
+      .orderBy(asc(campGroup.name)),
+    db
+      .select({
+        groupId: campGroupMember.groupId,
+        membershipId: campGroupMember.membershipId,
+      })
+      .from(campGroupMember)
+      .where(eq(campGroupMember.campId, campId)),
+  ]);
   if (groups.length === 0) return [];
-
-  const links = await db
-    .select({
-      groupId: campGroupMember.groupId,
-      membershipId: campGroupMember.membershipId,
-    })
-    .from(campGroupMember)
-    .where(eq(campGroupMember.campId, campId));
 
   const byGroup = new Map<string, string[]>();
   for (const l of links) {

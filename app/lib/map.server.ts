@@ -140,19 +140,25 @@ export function toObjRow(r: ObjSelectRow): ObjRow {
 export async function loadMapView(
   editionId: string,
 ): Promise<{ lot: MapLot | null; objects: ObjRow[] }> {
-  const [lot] = await db
-    .select()
-    .from(placement)
-    .where(eq(placement.editionId, editionId))
-    .limit(1);
+  // The objects are asked for alongside the lot rather than after it: one D1
+  // round trip instead of two (plans/fast-navigation.md). Without a lot they're
+  // thrown away, and an edition with no lot has next to nothing placed anyway.
+  const [[lot], rows] = await Promise.all([
+    db
+      .select()
+      .from(placement)
+      .where(eq(placement.editionId, editionId))
+      .limit(1),
+    db
+      .select(objSelect)
+      .from(mapObject)
+      .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(
+        and(eq(mapObject.editionId, editionId), eq(mapObject.placed, true)),
+      ),
+  ]);
   if (!lot) return { lot: null, objects: [] };
-
-  const rows = await db
-    .select(objSelect)
-    .from(mapObject)
-    .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(and(eq(mapObject.editionId, editionId), eq(mapObject.placed, true)));
 
   return {
     lot: {

@@ -65,42 +65,43 @@ export async function loader({ request }: Route.LoaderArgs) {
     await requireActiveEdition(request);
   const mid = active.membership.id;
 
-  const [me] = await db
-    .select({
-      status: attendee.status,
-      arrivalDate: attendee.arrivalDate,
-      departureDate: attendee.departureDate,
-      note: attendee.note,
-    })
-    .from(attendee)
-    .where(
-      and(
-        eq(attendee.editionId, activeEdition.id),
-        eq(attendee.membershipId, mid),
-      ),
-    )
-    .limit(1);
-
-  // The pass control offers a Setup Access Pass, so only show it when this camp
-  // actually runs passes — otherwise it points at nothing.
-  const sap = {
-    visible: await passesVisibleTo(active),
-    ...(await loadMySapState(activeEdition.id, mid)),
-  };
-
-  // Has this camper already said "nothing else to add"? Same acknowledgement
-  // row the wizard writes — the note ask has nothing else to derive from.
-  const [ack] = await db
-    .select({ status: wizardAsk.status })
-    .from(wizardAsk)
-    .where(
-      and(
-        eq(wizardAsk.editionId, activeEdition.id),
-        eq(wizardAsk.membershipId, mid),
-        eq(wizardAsk.askKey, "extras"),
-      ),
-    )
-    .limit(1);
+  // Independent reads, so they go out together rather than one D1 round trip
+  // each (plans/fast-navigation.md).
+  const [[me], passesVisible, sapState, [ack]] = await Promise.all([
+    db
+      .select({
+        status: attendee.status,
+        arrivalDate: attendee.arrivalDate,
+        departureDate: attendee.departureDate,
+        note: attendee.note,
+      })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, activeEdition.id),
+          eq(attendee.membershipId, mid),
+        ),
+      )
+      .limit(1),
+    // The pass control offers a Setup Access Pass, so only show it when this
+    // camp actually runs passes — otherwise it points at nothing.
+    passesVisibleTo(active),
+    loadMySapState(activeEdition.id, mid),
+    // Has this camper already said "nothing else to add"? Same acknowledgement
+    // row the wizard writes — the note ask has nothing else to derive from.
+    db
+      .select({ status: wizardAsk.status })
+      .from(wizardAsk)
+      .where(
+        and(
+          eq(wizardAsk.editionId, activeEdition.id),
+          eq(wizardAsk.membershipId, mid),
+          eq(wizardAsk.askKey, "extras"),
+        ),
+      )
+      .limit(1),
+  ]);
+  const sap = { visible: passesVisible, ...sapState };
 
   return redact(privacy, {
     trip: {

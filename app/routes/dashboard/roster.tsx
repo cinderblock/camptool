@@ -49,8 +49,8 @@ import {
 } from "~/lib/attendee.server";
 import { eventStartIso } from "~/lib/brc";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
-import { featureVisibleTo } from "~/lib/features";
-import { getFeatureState, requireFeature } from "~/lib/features.server";
+import { type FeatureKey, featureVisibleTo } from "~/lib/features";
+import { featureStatesFor, requireFeature } from "~/lib/features.server";
 import { buildForest, flattenForest } from "~/lib/forest";
 import { listGroups } from "~/lib/groups.server";
 import {
@@ -83,44 +83,59 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition, privacy } =
     await requireActiveEdition(request);
   await requireFeature(active, "roster");
-  const { members, headcount } = await loadRoster(
-    active.camp.id,
-    activeEdition.id,
-  );
+  // Feature states were loaded with the camp, so the map and groups checks
+  // cost no query and every read below can go out in one wave rather than one
+  // D1 round trip each (plans/fast-navigation.md).
+  const features = await featureStatesFor(active);
+  const sees = (key: FeatureKey) =>
+    featureVisibleTo(features.get(key) ?? "off", active.membership.role);
   // "Where are they camped?" is only answerable when this camp actually runs
   // the map — and only linkable for someone whose party has something placed,
   // so the column never offers a link to an empty map.
-  const mapVisible = featureVisibleTo(
-    await getFeatureState(active.camp.id, "map"),
-    active.membership.role,
-  );
-  const mapCounts = mapVisible
-    ? await partyMapObjects(activeEdition.id)
-    : new Map<string, string[]>();
-  // The mini-map draws with the editor's own renderer and geometry, so it needs
-  // the same object rows the map page loads — see lib/map.server.ts.
-  const mapView = mapVisible
-    ? await loadMapView(activeEdition.id)
-    : { lot: null, objects: [] };
+  const mapVisible = sees("map");
+  const groupsVisible = sees("groups");
   const myMembershipId = active.membership.id;
+  const rosterP = loadRoster(active.camp.id, activeEdition.id);
+  const [
+    { members, headcount },
+    mapCounts,
+    mapView,
+    invites,
+    partyHostCandidates,
+    partyInvites,
+    groups,
+  ] = await Promise.all([
+    rosterP,
+    mapVisible
+      ? partyMapObjects(activeEdition.id)
+      : new Map<string, string[]>(),
+    // The mini-map draws with the editor's own renderer and geometry, so it
+    // needs the same object rows the map page loads — see lib/map.server.ts.
+    mapVisible ? loadMapView(activeEdition.id) : { lot: null, objects: [] },
+    // Persist the per-guest invite link with the page instead of only in the
+    // fetcher response, so a host can see at a glance which of their plus-ones
+    // already has a link out and which has already used it. Needs my guests,
+    // so it follows the roster.
+    rosterP.then(({ members }) =>
+      loadPromotionInvites(
+        active.camp.id,
+        (
+          members.find((m) => m.membershipId === myMembershipId)?.guests ?? []
+        ).map((g) => g.id),
+      ),
+    ),
+    // Who I could name as anchoring my household. Officers get the same list
+    // per row, computed client-side off `members` rather than one query per
+    // member.
+    listPartyHostCandidates(active.camp.id, activeEdition.id, myMembershipId),
+    // Open "will you camp with me?" questions, both directions. Scoped to the
+    // viewer rather than folded into `members`, which goes to every browser.
+    loadPartyInvites(activeEdition.id, myMembershipId),
+    // Social groups, when the camp has them on. Purely a way to read the list —
+    // nothing here consults them for permission (plans/social-groups.md).
+    groupsVisible ? listGroups(active.camp.id) : [],
+  ]);
   const me = members.find((m) => m.membershipId === myMembershipId) ?? null;
-  // Persist the per-guest invite link with the page instead of only in the
-  // fetcher response, so a host can see at a glance which of their plus-ones
-  // already has a link out and which has already used it.
-  const invites = await loadPromotionInvites(
-    active.camp.id,
-    (me?.guests ?? []).map((g) => g.id),
-  );
-  // Who I could name as anchoring my household. Officers get the same list per
-  // row, computed client-side off `members` rather than one query per member.
-  const partyHostCandidates = await listPartyHostCandidates(
-    active.camp.id,
-    activeEdition.id,
-    myMembershipId,
-  );
-  // Open "will you camp with me?" questions, both directions. Scoped to the
-  // viewer rather than folded into `members`, which goes to every browser.
-  const partyInvites = await loadPartyInvites(activeEdition.id, myMembershipId);
   return redact(privacy, {
     members: members.map((m) => {
       // `partyMapObjects` keys a whole household under its host, so someone
@@ -155,14 +170,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     partyHostCandidates,
     partyInvites,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
-    // Social groups, when the camp has them on. Purely a way to read the list —
-    // nothing here consults them for permission (plans/social-groups.md).
-    groups: featureVisibleTo(
-      await getFeatureState(active.camp.id, "groups"),
-      active.membership.role,
-    )
-      ? await listGroups(active.camp.id)
-      : [],
+    groups,
     locked: activeEdition.locked,
     year: activeEdition.year,
   });

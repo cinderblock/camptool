@@ -77,44 +77,47 @@ export async function loadRoster(
   campId: string,
   editionId: string,
 ): Promise<{ members: RosterMember[]; headcount: Headcount }> {
-  const memberRows = await db
-    .select({
-      membershipId: membership.id,
-      userId: membership.userId,
-      role: membership.role,
-      playaName: membership.playaName,
-      userName: user.name,
-      status: attendee.status,
-      arrivalDate: attendee.arrivalDate,
-      departureDate: attendee.departureDate,
-      note: attendee.note,
-      ageBand: attendee.ageBand,
-      partyHostMembershipId: attendee.hostMembershipId,
-    })
-    .from(membership)
-    .innerJoin(user, eq(user.id, membership.userId))
-    // A member has at most one attendee row per edition, so no fan-out.
-    .leftJoin(
-      attendee,
-      and(
-        eq(attendee.membershipId, membership.id),
-        eq(attendee.editionId, editionId),
-      ),
-    )
-    .where(eq(membership.organizationId, campId));
-
-  const guestRows = await db
-    .select({
-      id: attendee.id,
-      hostMembershipId: attendee.hostMembershipId,
-      name: attendee.name,
-      arrivalDate: attendee.arrivalDate,
-      departureDate: attendee.departureDate,
-      note: attendee.note,
-      ageBand: attendee.ageBand,
-    })
-    .from(attendee)
-    .where(and(eq(attendee.editionId, editionId), isGuestRow));
+  // Members and guests are independent reads, so they share one D1 round trip
+  // (plans/fast-navigation.md).
+  const [memberRows, guestRows] = await Promise.all([
+    db
+      .select({
+        membershipId: membership.id,
+        userId: membership.userId,
+        role: membership.role,
+        playaName: membership.playaName,
+        userName: user.name,
+        status: attendee.status,
+        arrivalDate: attendee.arrivalDate,
+        departureDate: attendee.departureDate,
+        note: attendee.note,
+        ageBand: attendee.ageBand,
+        partyHostMembershipId: attendee.hostMembershipId,
+      })
+      .from(membership)
+      .innerJoin(user, eq(user.id, membership.userId))
+      // A member has at most one attendee row per edition, so no fan-out.
+      .leftJoin(
+        attendee,
+        and(
+          eq(attendee.membershipId, membership.id),
+          eq(attendee.editionId, editionId),
+        ),
+      )
+      .where(eq(membership.organizationId, campId)),
+    db
+      .select({
+        id: attendee.id,
+        hostMembershipId: attendee.hostMembershipId,
+        name: attendee.name,
+        arrivalDate: attendee.arrivalDate,
+        departureDate: attendee.departureDate,
+        note: attendee.note,
+        ageBand: attendee.ageBand,
+      })
+      .from(attendee)
+      .where(and(eq(attendee.editionId, editionId), isGuestRow)),
+  ]);
 
   const guestsByHost = new Map<string, RosterGuest[]>();
   for (const g of guestRows) {

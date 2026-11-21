@@ -26,8 +26,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { data, Link, useFetcher, useSubmit } from "react-router";
 import { auth } from "~/lib/auth.server";
 import { syncDiscordLinksForCamp } from "~/lib/discord.server";
-import { featureVisibleTo } from "~/lib/features";
-import { getFeatureState } from "~/lib/features.server";
+import { type FeatureKey, featureVisibleTo } from "~/lib/features";
+import { featureStatesFor, getFeatureState } from "~/lib/features.server";
 import {
   buildForest,
   flattenForest,
@@ -107,81 +107,111 @@ export async function loader({ request }: Route.LoaderArgs) {
     .innerJoin(user, eq(user.id, membership.userId))
     .where(eq(membership.organizationId, campId));
 
+  // The Discord sync writes, so it keeps its place: after the roster read and
+  // before everything else, on its own.
   const discord = await syncDiscordLinksForCamp(campId);
 
   const canManage = hasAtLeast(actorRole, "officer");
-
-  // Which credentials each member actually holds. Officers only — it's the
-  // thing you need in order to answer "why can't they sign in", and it doubles
-  // as the passkey adoption column (plans/passkey-first-auth.md step 8).
   const userIds = rows.map((r) => r.userId);
-  const withPasskey = new Set<string>();
-  const withPassword = new Set<string>();
-  if (canManage && userIds.length) {
-    for (const r of await db
-      .select({ userId: passkey.userId })
-      .from(passkey)
-      .where(inArray(passkey.userId, userIds))) {
-      withPasskey.add(r.userId);
-    }
-    for (const r of await db
-      .select({ userId: account.userId })
-      .from(account)
-      .where(
-        and(
-          inArray(account.userId, userIds),
-          eq(account.providerId, "credential"),
-        ),
-      )) {
-      withPassword.add(r.userId);
-    }
-  }
+  const inviteIds = [
+    ...new Set(rows.flatMap((r) => (r.viaInviteId ? [r.viaInviteId] : []))),
+  ];
+  // Feature states were loaded with the camp, so these gates cost no query.
+  const features = await featureStatesFor(active);
+  const sees = (key: FeatureKey) =>
+    featureVisibleTo(features.get(key) ?? "off", actorRole);
+  // Social groups. Descriptive only — nothing on this page consults them to
+  // decide what anyone may do (plans/social-groups.md).
+  const groupsVisible = sees("groups");
+
+  // Every read from here on is independent of the others, so they go out in
+  // one wave rather than one D1 round trip each (plans/fast-navigation.md).
+  const [
+    passkeyRows,
+    passwordRows,
+    inviteRows,
+    prospectRows,
+    flagRows,
+    groups,
+  ] = await Promise.all([
+    // Which credentials each member actually holds. Officers only — it's the
+    // thing you need in order to answer "why can't they sign in", and it
+    // doubles as the passkey adoption column (plans/passkey-first-auth.md
+    // step 8).
+    canManage && userIds.length
+      ? db
+          .select({ userId: passkey.userId })
+          .from(passkey)
+          .where(inArray(passkey.userId, userIds))
+      : [],
+    canManage && userIds.length
+      ? db
+          .select({ userId: account.userId })
+          .from(account)
+          .where(
+            and(
+              inArray(account.userId, userIds),
+              eq(account.providerId, "credential"),
+            ),
+          )
+      : [],
+    inviteIds.length
+      ? db
+          .select({
+            id: campInvite.id,
+            kind: campInvite.kind,
+            note: campInvite.note,
+          })
+          .from(campInvite)
+          .where(
+            and(
+              eq(campInvite.campId, campId),
+              inArray(campInvite.id, inviteIds),
+            ),
+          )
+      : [],
+    // Whose Prospects thread points at them. The locked decision is that the
+    // conversation log FOLLOWS the person past joining
+    // (plans/prospects-crm.md), which is only true if there's a way back to
+    // it once they're a member — this is that way. Officers only, and only
+    // when the feature is on for them.
+    canManage && sees("prospects")
+      ? db
+          .select({ id: prospect.id, membershipId: prospect.membershipId })
+          .from(prospect)
+          .where(
+            and(eq(prospect.campId, campId), isNotNull(prospect.membershipId)),
+          )
+      : [],
+    // Open flags. Names resolve via the roster already loaded above; a null
+    // reporter means they've since left the camp.
+    db
+      .select()
+      .from(memberFlag)
+      .where(and(eq(memberFlag.campId, campId), eq(memberFlag.status, "open"))),
+    groupsVisible ? listGroups(campId) : [],
+  ]);
+
+  const withPasskey = new Set(passkeyRows.map((r) => r.userId));
+  const withPassword = new Set(passwordRows.map((r) => r.userId));
 
   // Who invited whom. The edge has been recorded on every redemption since
   // invites shipped but was never shown anywhere. A member with no *named*
   // inviter may still have come through an open camp link, which records the
   // door but no person — so fall back to naming the door rather than "—".
   const nameOf = new Map(rows.map((r) => [r.memberId, r.name]));
-  const inviteIds = [
-    ...new Set(rows.flatMap((r) => (r.viaInviteId ? [r.viaInviteId] : []))),
-  ];
   const inviteLabel = new Map<string, string>();
-  if (inviteIds.length) {
-    for (const inv of await db
-      .select({
-        id: campInvite.id,
-        kind: campInvite.kind,
-        note: campInvite.note,
-      })
-      .from(campInvite)
-      .where(
-        and(eq(campInvite.campId, campId), inArray(campInvite.id, inviteIds)),
-      )) {
-      inviteLabel.set(
-        inv.id,
-        inv.note?.trim() ||
-          (inv.kind === "open" ? "an open camp link" : "an invite link"),
-      );
-    }
+  for (const inv of inviteRows) {
+    inviteLabel.set(
+      inv.id,
+      inv.note?.trim() ||
+        (inv.kind === "open" ? "an open camp link" : "an invite link"),
+    );
   }
 
-  // Whose Prospects thread points at them. The locked decision is that the
-  // conversation log FOLLOWS the person past joining (plans/prospects-crm.md),
-  // which is only true if there's a way back to it once they're a member —
-  // this is that way. Officers only, and only when the feature is on for them.
   const prospectOf = new Map<string, string>();
-  if (canManage) {
-    const state = await getFeatureState(campId, "prospects");
-    if (featureVisibleTo(state, actorRole)) {
-      for (const p of await db
-        .select({ id: prospect.id, membershipId: prospect.membershipId })
-        .from(prospect)
-        .where(
-          and(eq(prospect.campId, campId), isNotNull(prospect.membershipId)),
-        )) {
-        if (p.membershipId) prospectOf.set(p.membershipId, p.id);
-      }
-    }
+  for (const p of prospectRows) {
+    if (p.membershipId) prospectOf.set(p.membershipId, p.id);
   }
 
   const members = rows
@@ -213,13 +243,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const canFlag = hasAtLeast(actorRole, "member");
   const assignableRoles = ROLES.filter((r) => rankOf(r) <= rankOf(actorRole));
 
-  // Open flags. Names resolve via the roster already loaded above; a null
-  // reporter means they've since left the camp.
   const myMid = active.membership.id;
-  const flagRows = await db
-    .select()
-    .from(memberFlag)
-    .where(and(eq(memberFlag.campId, campId), eq(memberFlag.status, "open")));
   const toView = (f: (typeof flagRows)[number]) => ({
     id: f.id,
     subjectMembershipId: f.subjectMembershipId,
@@ -239,13 +263,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     ? flagRows.filter((f) => f.reporterMembershipId === myMid).map(toView)
     : [];
 
-  // Social groups. Descriptive only — nothing on this page consults them to
-  // decide what anyone may do (plans/social-groups.md).
-  const groupsVisible = featureVisibleTo(
-    await getFeatureState(campId, "groups"),
-    actorRole,
-  );
-
   return redact(privacy, {
     campId,
     campName: active.camp.name,
@@ -259,7 +276,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     officerFlags,
     myFlags,
     groupsVisible,
-    groups: groupsVisible ? await listGroups(campId) : [],
+    groups,
     // "N of M enrolled", the cheap-to-delete adoption summary.
     passkeyEnrolled: canManage ? withPasskey.size : 0,
   });

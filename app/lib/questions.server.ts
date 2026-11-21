@@ -5,6 +5,7 @@
  * Pairs with the pure helpers in questions.ts.
  */
 import { and, asc, eq, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../../db/client.server";
 import {
   campQuestion,
@@ -25,17 +26,17 @@ export type QuestionRow = typeof campQuestion.$inferSelect;
 export async function loadInviterName(
   membershipId: string,
 ): Promise<string | null> {
-  const [me] = await db
-    .select({ inviter: membership.invitedByMembershipId })
-    .from(membership)
-    .where(eq(membership.id, membershipId))
-    .limit(1);
-  if (!me?.inviter) return null;
+  // One query, joining the member to their inviter, rather than looking up the
+  // inviter's id and then the inviter: a D1 round trip each
+  // (plans/fast-navigation.md). No inviter, or one who has left, joins to
+  // nulls and comes back null as before.
+  const inviter = alias(membership, "inviter");
   const [inv] = await db
-    .select({ name: user.name, playa: membership.playaName })
+    .select({ name: user.name, playa: inviter.playaName })
     .from(membership)
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(eq(membership.id, me.inviter))
+    .leftJoin(inviter, eq(inviter.id, membership.invitedByMembershipId))
+    .leftJoin(user, eq(inviter.userId, user.id))
+    .where(eq(membership.id, membershipId))
     .limit(1);
   return inv?.playa || inv?.name || null;
 }

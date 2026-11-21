@@ -94,25 +94,6 @@ export async function loader({ request }: Route.LoaderArgs) {
   // are user-authored labels and are on the redaction list.
   const { user, active, privacy, impersonatedBy } =
     await resolveActiveCamp(request);
-  const keys = await db
-    .select({
-      id: passkey.id,
-      name: passkey.name,
-      deviceType: passkey.deviceType,
-      backedUp: passkey.backedUp,
-      createdAt: passkey.createdAt,
-    })
-    .from(passkey)
-    .where(eq(passkey.userId, user.id));
-
-  // Discord is a linked identity on the same account, so it belongs here next
-  // to the other credentials — and the "link your Discord" ask points at this
-  // page, which means the control has to exist for anyone the ask reaches.
-  const [discordAccount] = await db
-    .select({ id: account.id })
-    .from(account)
-    .where(and(eq(account.userId, user.id), eq(account.providerId, "discord")))
-    .limit(1);
 
   // Who you are to THIS camp. Null when the account has no camp yet, in which
   // case the identity card simply doesn't render — there is no playa name
@@ -120,17 +101,43 @@ export async function loader({ request }: Route.LoaderArgs) {
   const mid = active?.membership.id ?? null;
   const campId = active?.camp.id ?? null;
 
-  const allGroups = campId ? await listGroups(campId) : [];
-
-  // Their RSVP, so the card can say what it is and point at the one place that
-  // changes it, rather than quietly duplicating the control.
-  const [rsvp] = mid
-    ? await db
-        .select({ status: attendee.status })
-        .from(attendee)
-        .where(eq(attendee.membershipId, mid))
-        .limit(1)
-    : [];
+  // Independent reads, so they go out together rather than one D1 round trip
+  // each (plans/fast-navigation.md).
+  const [keys, [discordAccount], allGroups, [rsvp], hasPassword] =
+    await Promise.all([
+      db
+        .select({
+          id: passkey.id,
+          name: passkey.name,
+          deviceType: passkey.deviceType,
+          backedUp: passkey.backedUp,
+          createdAt: passkey.createdAt,
+        })
+        .from(passkey)
+        .where(eq(passkey.userId, user.id)),
+      // Discord is a linked identity on the same account, so it belongs here
+      // next to the other credentials — and the "link your Discord" ask points
+      // at this page, which means the control has to exist for anyone the ask
+      // reaches.
+      db
+        .select({ id: account.id })
+        .from(account)
+        .where(
+          and(eq(account.userId, user.id), eq(account.providerId, "discord")),
+        )
+        .limit(1),
+      campId ? listGroups(campId) : [],
+      // Their RSVP, so the card can say what it is and point at the one place
+      // that changes it, rather than quietly duplicating the control.
+      mid
+        ? db
+            .select({ status: attendee.status })
+            .from(attendee)
+            .where(eq(attendee.membershipId, mid))
+            .limit(1)
+        : [],
+      hasPasswordFor(user.id),
+    ]);
 
   return redact(privacy, {
     identity: active
@@ -148,7 +155,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       mine: mid ? g.memberIds.includes(mid) : false,
       memberCount: g.memberIds.length,
     })),
-    hasPassword: await hasPasswordFor(user.id),
+    hasPassword,
     discordEnabled,
     discordLinked: Boolean(discordAccount),
     // Password controls are hidden (and refused server-side) while an officer

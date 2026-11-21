@@ -95,13 +95,18 @@ export async function loader({ request }: Route.LoaderArgs) {
     userId: user.id,
   });
 
-  const rows = await loadCampQuestions(campId);
-  const answers = await loadAnswers({
-    editionId: activeEdition.id,
-    membershipId: active.membership.id,
-  });
-  const invitedByName = await loadInviterName(active.membership.id);
-  const inviterOptions = await loadInviterOptions(campId);
+  // The import above may write answers, so it runs on its own first; the reads
+  // after it are independent and share one D1 round trip
+  // (plans/fast-navigation.md).
+  const [rows, answers, invitedByName, inviterOptions] = await Promise.all([
+    loadCampQuestions(campId),
+    loadAnswers({
+      editionId: activeEdition.id,
+      membershipId: active.membership.id,
+    }),
+    loadInviterName(active.membership.id),
+    loadInviterOptions(campId),
+  ]);
 
   const questions = rows.map((q) => ({
     id: q.id,
