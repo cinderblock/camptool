@@ -20,6 +20,10 @@ import {
 } from "./camp-host";
 import { assertNotMoving } from "./camp-move/move-out.server";
 import { APEX, CAMP_SUBDOMAINS } from "./env.server";
+import {
+  loadUserFeatureStates,
+  rememberFeatureStates,
+} from "./features.server";
 import { isSuperAdmin } from "./instance.server";
 import { hasAtLeast, rankOf } from "./permissions";
 import {
@@ -359,13 +363,14 @@ export async function resolveActiveCamp(
   opts: ResolveOptions = {},
 ): Promise<ActiveCampContext> {
   const session = await requireUser(request);
-  // The camps and every one of their editions go out together: which camp is
-  // active isn't known until the camps are back, and waiting for that before
-  // asking for its editions cost a whole D1 round trip on every page
-  // (plans/fast-navigation.md). People belong to few camps.
-  const [camps, allEditions] = await Promise.all([
+  // The camps, every one of their editions and their feature states go out
+  // together: which camp is active isn't known until the camps are back, and
+  // waiting for that before asking for the rest cost a D1 round trip each on
+  // every page (plans/fast-navigation.md). People belong to few camps.
+  const [camps, allEditions, featuresOf] = await Promise.all([
     loadUserCamps(session.user.id),
     loadUserEditions(session.user.id),
+    loadUserFeatureStates(session.user.id),
   ]);
   const activeId = session.session.activeOrganizationId;
   let active = camps.find((c) => c.camp.id === activeId) ?? camps[0] ?? null;
@@ -402,6 +407,8 @@ export async function resolveActiveCamp(
   let activeEdition: Edition | null = null;
   if (active) {
     const campId = active.camp.id;
+    // For the page's `requireFeature`, so its gate needs no query of its own.
+    rememberFeatureStates(active, featuresOf(campId));
     editions = allEditions.filter((e) => e.campId === campId);
     const wantId = readCookie(request, EDITION_COOKIE);
     // The cookie may point at another camp's edition; only honor it if it's one

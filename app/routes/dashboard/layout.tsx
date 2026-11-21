@@ -48,7 +48,7 @@ import {
   featureForPath,
   featureVisibleTo,
 } from "~/lib/features";
-import { loadFeatureStates } from "~/lib/features.server";
+import { featureStatesFor } from "~/lib/features.server";
 import { isSuperAdmin } from "~/lib/instance.server";
 import { KindsProvider } from "~/lib/kinds-context";
 import { countUnreadSummaries } from "~/lib/meetings.server";
@@ -125,7 +125,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     // A camp on its way to another CampTool site is read-only meanwhile
     // (plans/camp-portability.md); say so on every page.
     active ? openMoveFor(active.camp.id).then(Boolean) : false,
-    active ? loadFeatureStates(active.camp.id) : undefined,
+    active ? featureStatesFor(active) : undefined,
     active && activeEdition
       ? loadAskSnapshots(active.camp.id, activeEdition.id, activeEdition.year)
       : undefined,

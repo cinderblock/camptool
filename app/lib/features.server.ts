@@ -7,7 +7,7 @@
 import { and, eq } from "drizzle-orm";
 import { redirect } from "react-router";
 import { db } from "../../db/client.server";
-import { campFeature } from "../../db/schema";
+import { campFeature, membership } from "../../db/schema";
 import {
   defaultFeatureState,
   FEATURES,
@@ -25,6 +25,60 @@ export async function loadFeatureStates(
     .select({ featureKey: campFeature.featureKey, state: campFeature.state })
     .from(campFeature)
     .where(eq(campFeature.campId, campId));
+  return statesFromRows(rows);
+}
+
+/**
+ * Feature states for every camp a user belongs to, in one query; returns a
+ * lookup by camp id. Asked for
+ * alongside the user's camps (`resolveActiveCamp`), so the page's feature gate
+ * doesn't wait for the active camp first: one fewer D1 round trip on every
+ * page (plans/fast-navigation.md).
+ */
+export async function loadUserFeatureStates(
+  userId: string,
+): Promise<(campId: string) => Map<FeatureKey, FeatureState>> {
+  const rows = await db
+    .select({
+      campId: membership.organizationId,
+      featureKey: campFeature.featureKey,
+      state: campFeature.state,
+    })
+    .from(membership)
+    .innerJoin(campFeature, eq(campFeature.campId, membership.organizationId))
+    .where(eq(membership.userId, userId));
+  const byCamp = new Map<string, { featureKey: string; state: string }[]>();
+  for (const r of rows) {
+    const list = byCamp.get(r.campId) ?? [];
+    list.push(r);
+    byCamp.set(r.campId, list);
+  }
+  // A camp with no rows still gets every feature at its default.
+  return (campId) => statesFromRows(byCamp.get(campId) ?? []);
+}
+
+// The active camp's states, already loaded for this request, keyed by the
+// request's own `active` object (so nothing outlives the request).
+const preloaded = new WeakMap<object, Map<FeatureKey, FeatureState>>();
+
+/** Record `active`'s feature states for `requireFeature` / `featureStatesFor`. */
+export function rememberFeatureStates(
+  active: object,
+  states: Map<FeatureKey, FeatureState>,
+): void {
+  preloaded.set(active, states);
+}
+
+/** The active camp's feature states: preloaded when available, else queried. */
+export async function featureStatesFor(active: {
+  camp: { id: string };
+}): Promise<Map<FeatureKey, FeatureState>> {
+  return preloaded.get(active) ?? loadFeatureStates(active.camp.id);
+}
+
+function statesFromRows(
+  rows: { featureKey: string; state: string }[],
+): Map<FeatureKey, FeatureState> {
   const byKey = new Map(rows.map((r) => [r.featureKey, r.state]));
   return new Map(
     FEATURES.map((def) => {
@@ -90,7 +144,9 @@ export async function requireFeature(
   active: { camp: { id: string }; membership: { role: string } },
   key: FeatureKey,
 ): Promise<FeatureState> {
-  const state = await getFeatureState(active.camp.id, key);
+  const state =
+    preloaded.get(active)?.get(key) ??
+    (await getFeatureState(active.camp.id, key));
   if (!featureVisibleTo(state, active.membership.role)) throw redirect("/");
   return state;
 }
