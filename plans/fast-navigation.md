@@ -88,6 +88,28 @@ It should feel instant. Find where the time goes, then remove it.
    should be us west/california/San Jose"). Dry run: 0 changes. Needs
    Cameron's yes to push.
 
+7. [current] **Fast far from the database too** (Cameron, 2026-11-21: "so
+   that it's still faster for people on east coast/around the world").
+   a. [x] Shell floor: feature states load with the camps
+      (`loadUserFeatureStates`), so `requireFeature` needs no query. Floor
+      4 → 3 waits on every page (`34a32c3`).
+   b. [ ] Per-route loaders: parallelize the heavy ones (officer, page
+      switch, after 7a: roster 15, passes 15, map 14, members 13, bringing
+      10, guide/questions/onboarding/supplies/dues/trip/account 8). Three
+      agents, by page group; measured after with `nav-speed-measure.sh`.
+   c. [x] **Pin the Worker next to D1**: `placement: { region:
+      "aws:us-west-1" }` (D1 primary answers from SJC: `served_by_colo:
+      SJC`). Cameron said yes 2026-11-21; wrangler dry run accepts it. Effect: a far
+      visitor pays one cross-country trip per request instead of one per
+      wait.
+   d. Not doing: better-auth `session.cookieCache` (would drop the last 2
+      shell waits, but a revoked session, e.g. passkey recovery deleting
+      sessions in `passkey-recovery.server.ts`, keeps working until the
+      cache expires, and direct `session` writes like the subdomain's
+      active-camp sync go stale; once the Worker sits next to D1 those 2
+      waits cost a few ms). D1 read replication + Sessions API: worth it only
+      if most traffic were far away; placement covers our case with no code.
+
 ## Decisions already made (don't re-ask)
 
 - "Best, not fastest" applies.
@@ -133,3 +155,6 @@ app's own backup likely has the same problem (ISSUES.md).
       per wait.
 - [ ] Step 4e: tombstone the eastern pair (later, separate yes).
 - [ ] Step 6: push ops default-`wnam` (`7fa35386`), needs yes.
+- [x] 2026-11-21: step 7a, shell feature gate folded into the camps query.
+- [ ] Step 7b: per-route loaders (in progress).
+- [x] Step 7c: placement pin (Cameron's yes).
