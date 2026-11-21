@@ -55,6 +55,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { active } = await requireMover(request);
   const move = await openMoveFor(active.camp.id);
   return {
+    codeDays: CODE_DAYS,
     campName: active.camp.name,
     move: move
       ? {
@@ -118,7 +119,7 @@ export default function MoveCamp({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { campName, move } = loaderData;
+  const { campName, move, codeDays } = loaderData;
   const busy = useNavigation().state !== "idle";
   const error = (actionData as { error?: string } | undefined)?.error;
   const [newUrl, setNewUrl] = useState("");
@@ -151,7 +152,7 @@ export default function MoveCamp({
                   <List.Item>
                     You get a <b>move code</b>. Paste it into the new site's
                     "Bring a camp here" page (signed in there as yourself). It
-                    works once, for {CODE_DAYS} days.
+                    works once, for {codeDays} days.
                   </List.Item>
                   <List.Item>
                     When the new site has the camp, the camp is{" "}
