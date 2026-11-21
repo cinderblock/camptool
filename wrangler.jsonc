@@ -22,9 +22,15 @@
   // node:crypto, node:zlib, node:stream, process.env.
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
-  // Run near the database rather than near each visitor: a page makes many
-  // small queries, and each one is a round trip to D1.
-  "placement": { "mode": "smart" },
+  // Run next to the database rather than near each visitor: a page makes
+  // several small queries one after another, and each is a round trip to D1.
+  // Far from it, that's ~70 ms a query; next to it, a few ms, and the visitor
+  // pays the distance once. Pinned, because Smart Placement only moves a
+  // Worker with steady traffic from many places, and ours stayed at each
+  // visitor's data center (plans/fast-navigation.md). The D1 primary is in
+  // Western North America, served from San Jose; AWS us-west-1 is Northern
+  // California. Move this with the database.
+  "placement": { "region": "aws:us-west-1" },
   "d1_databases": [
     {
       "binding": "DB",
