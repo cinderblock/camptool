@@ -61,7 +61,7 @@ const { values: opt, positionals } = parseArgs({
     "rename-slug": { type: "string", multiple: true, default: [] },
     apply: { type: "string" },
     "persist-to": { type: "string" },
-    bucket: { type: "string", default: "camptool-uploads" },
+    bucket: { type: "string", default: "camptool-files" },
   },
 });
 

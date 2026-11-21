@@ -45,9 +45,22 @@ applies the migrations, and serves it at http://localhost:17940 (set
 
    Optional, for Discord login and member checks: `DISCORD_CLIENT_ID`,
    `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN` (see `discord-setup.md`).
-3. `bun run cf:deploy`. The first deploy creates the D1 database (`camptool`)
-   and the R2 bucket (`camptool-uploads`), applies the migrations, and
-   publishes the Worker.
+3. `bun run cf:deploy`. The first deploy creates the D1 database
+   (`camptool-db`) and the R2 bucket (`camptool-files`), applies the
+   migrations, and publishes the Worker.
+
+   **Where they're created matters.** Cloudflare puts a new database or
+   bucket near whoever creates it, and can't move it afterwards. Every page
+   makes several queries, each a round trip from the Worker, so a database
+   across a continent from your campers costs seconds per page. Deploying
+   from your own machine near them is fine. If something else creates them
+   (CI, Workers Builds, an infrastructure tool), create them first, near your
+   campers:
+
+   ```sh
+   bunx wrangler d1 create camptool-db --location wnam   # or enam, weur, eeur, apac, oc
+   bunx wrangler r2 bucket create camptool-files --location wnam
+   ```
 4. Set the public address: Workers → camptool → Settings → Variables and
    Secrets, add a text variable `PUBLIC_BASE_URL` (e.g.
    `https://camptool.example.org`). `wrangler.jsonc` has `keep_vars: true`, so
@@ -126,12 +139,17 @@ it by hand instead. `scripts/d1-migrations.ts` explains the details, and
 Site admin → Backup downloads a `.tar.gz` with `camptool.sql` (the whole
 database as SQL) and `uploads/` (every R2 file under its key). Cloudflare also
 keeps 30 days of D1 point-in-time history ("Time Travel"): `wrangler d1
-time-travel restore camptool --timestamp=…`.
+time-travel restore camptool-db --timestamp=…`.
+
+A `wrangler d1 export` doesn't load into a fresh D1 as is: D1 checks foreign
+keys as each row goes in, and the export lists rows in table-creation order,
+not parent tables first. `bun scripts/order-d1-dump.ts export.sql
+ordered.sql` reorders it (that's how this deployment's data moved regions).
 
 The SQL restores onto either host, so a deployment can move:
 
 - **Onto a Bun host:** `sqlite3 /srv/camptool/data/camptool.db < camptool.sql`
   and copy `uploads/` to `/srv/camptool/data/uploads/`. The dump carries the
   Bun migrator's record, so the app boots on it without re-migrating.
-- **Into a fresh D1:** `wrangler d1 execute camptool --remote --file
+- **Into a fresh D1:** `wrangler d1 execute camptool-db --remote --file
   camptool.sql`, then upload each `uploads/<key>` to the bucket at `<key>`.

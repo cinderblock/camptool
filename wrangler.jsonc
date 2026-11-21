@@ -28,13 +28,13 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "camptool",
+      "database_name": "camptool-db",
       // Prepared by `bun run cf:migrations` from db/migrations (D1 can't turn
       // foreign keys off; see scripts/d1-migrations.ts).
       "migrations_dir": ".d1-migrations"
     }
   ],
-  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "camptool-uploads" }],
+  "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "camptool-files" }],
   // Per-visitor request limits (workers/rate-limit.ts). Cloudflare has no
   // spending cap, so these bound what one client can cost. Periods can only
   // be 10 or 60 seconds. Namespace IDs are account-wide counters: keep these
