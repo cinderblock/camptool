@@ -26,6 +26,7 @@ import { Announcer, SkipLink } from "~/components/Announcer";
 import { NavigationProgress } from "~/components/NavigationProgress";
 import { movedCampResponse } from "~/lib/camp-move/forward.server";
 import { legacyHostResponse } from "~/lib/legacy-host.server";
+import { usePreloadRouteCode } from "~/lib/preload-route-code";
 import { installTelemetry, pushCrumb } from "~/lib/telemetry.client";
 import type { Route } from "./+types/root";
 
@@ -104,6 +105,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const location = useLocation();
+  // Fetch a page's code in one go when its link is touched (see the hook).
+  usePreloadRouteCode();
   // Install client error forwarding once, and breadcrumb each navigation.
   useEffect(() => {
     installTelemetry();
