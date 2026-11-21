@@ -628,6 +628,10 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
       component={NavLink}
       to={item.to}
       end={item.end}
+      // Start loading the page (code and data) on hover, focus or the start
+      // of a tap, so it's often there by the time the click lands
+      // (plans/fast-navigation.md).
+      prefetch="intent"
       label={item.label}
       rightSection={
         item.preview ? (

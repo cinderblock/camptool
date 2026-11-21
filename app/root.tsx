@@ -23,6 +23,7 @@ import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 
 import { Announcer, SkipLink } from "~/components/Announcer";
+import { NavigationProgress } from "~/components/NavigationProgress";
 import { movedCampResponse } from "~/lib/camp-move/forward.server";
 import { legacyHostResponse } from "~/lib/legacy-host.server";
 import { installTelemetry, pushCrumb } from "~/lib/telemetry.client";
@@ -124,7 +125,12 @@ export default function App() {
       main.focus({ preventScroll: true });
     }
   }, [location.pathname, location.search]);
-  return <Outlet />;
+  return (
+    <>
+      <NavigationProgress />
+      <Outlet />
+    </>
+  );
 }
 
 export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
