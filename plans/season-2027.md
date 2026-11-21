@@ -52,6 +52,22 @@
    hasn't ended (`f08991d`, on master).
 3. [ ] 2027 street names, once BMorg publishes them; 2027 geometry once
    measured.
+4. [x] **Start-the-new-year banner** (Cameron, 2026-11-21: "a yearly hint at
+   the top of the page"). Nothing told a camp to make its first year, or that
+   last year's event was over. `app/lib/year-nudge.ts` decides; the shell
+   (`layout.tsx`) shows it on every page:
+   - Officers, newest year behind `currentEventYear()`: "Time to start 2027"
+     with a **Start 2027** button (copies the newest year's lot and event,
+     via the normal `/editions` create) and **Not now** (snoozes that year
+     for 14 days, cookie `camptool_yrnudge=<year>`, per browser and camp).
+   - Officers, no years at all: "Add your camp's first year" / **Add 2027**
+     (Burning Man).
+   - Members, no years at all: a plain "an officer needs to add one" note.
+     Members of a camp that's merely behind see nothing; they keep viewing
+     last year until the officer starts the new one.
+   - Hidden in privacy mode. Only ever offers the CURRENT event year.
+   - Tests: `app/lib/year-nudge.test.ts`; `bun run e2e:year-nudge` (officer
+     flow end to end on a scratch DB). Member note checked by hand.
 
 ### B. Event layer: dates per event (needed by UnSCruz and by any non-BM camp)
 
@@ -81,3 +97,4 @@ None. B and C wait until other events are picked up.
 
 - [x] 2026-11-13: surveyed the event layer and edition model (above).
 - [x] 2026-11-13: rollover shipped to master (`f08991d`).
+- [x] 2026-11-21: start-the-new-year banner (step A4).

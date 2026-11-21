@@ -27,6 +27,7 @@
     "e2e:passkey": "node --experimental-strip-types e2e/passkey-signup.ts",
     "e2e:passkey-gate": "bun e2e/passkey-invite-gate.ts",
     "e2e:passkey-nag": "node --experimental-strip-types e2e/passkey-nag.ts",
+    "e2e:year-nudge": "node --experimental-strip-types e2e/year-nudge.ts",
     "e2e:password-reset": "bun e2e/password-reset.ts",
     "e2e:wiki": "bun e2e/wiki.ts",
     "e2e:faq": "bun e2e/faq.ts",

@@ -30,6 +30,7 @@ import {
   loadCampEditions,
   requireActiveCamp,
   setEditionCookie,
+  snoozeYearNudgeCookie,
 } from "~/lib/session.server";
 import { unavailableKinds } from "~/theme";
 import { db } from "../../../db/client.server";
@@ -103,6 +104,19 @@ export async function action({ request }: Route.ActionArgs) {
       { ok: true },
       { headers: { "Set-Cookie": setEditionCookie(editionId) } },
     );
+  }
+
+  // "Not now" on the shell's start-the-new-year banner: a view preference
+  // like the above, so no write guard.
+  if (intent === "snoozeYearNudge") {
+    const year = Math.round(Number(form.get("year")));
+    const raw = String(form.get("returnTo") ?? "/");
+    // Relative paths only, so this can't be turned into an open redirect.
+    const returnTo = raw.startsWith("/") && !raw.startsWith("//") ? raw : "/";
+    if (!Number.isFinite(year)) return redirect(returnTo);
+    return redirect(returnTo, {
+      headers: { "Set-Cookie": snoozeYearNudgeCookie(year) },
+    });
   }
 
   assertWritable(privacy);

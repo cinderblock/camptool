@@ -150,6 +150,26 @@ export function passkeyNagSnoozed(request: Request): boolean {
   return readCookie(request, PASSKEY_NAG_COOKIE) === "1";
 }
 
+// --- Year nudge: hide the "start the new year" banner for two weeks. ---
+//
+// Same reasoning as the passkey nag: unsigned, grants nothing, and only ever
+// snoozes. The value is the year that was snoozed, so next season's nudge
+// isn't hidden by this season's "Not now". Host-only like every cookie here,
+// so with camp subdomains it's per camp.
+
+const YEAR_NUDGE_COOKIE = "camptool_yrnudge";
+const YEAR_NUDGE_TTL_S = 14 * 24 * 60 * 60;
+
+/** Snooze the "start {year}" banner for two weeks. */
+export function snoozeYearNudgeCookie(year: number): string {
+  return `${YEAR_NUDGE_COOKIE}=${year}; ${cookieBase}; Max-Age=${YEAR_NUDGE_TTL_S}`;
+}
+
+/** True while the banner offering `year` is snoozed. */
+export function yearNudgeSnoozed(request: Request, year: number): boolean {
+  return readCookie(request, YEAR_NUDGE_COOKIE) === String(year);
+}
+
 export function setPrivacyCookie(mode: PrivacyMode) {
   return `${PRIVACY_COOKIE}=${serializePrivacyMode(mode)}; ${cookieBase}`;
 }

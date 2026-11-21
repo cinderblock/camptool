@@ -57,7 +57,12 @@ import type { PrivacyMode } from "~/lib/privacy";
 import { redact } from "~/lib/privacy.server";
 import { countProspectsNeedingAttention } from "~/lib/prospects.server";
 import { hasScheduledDays } from "~/lib/schedule.server";
-import { passkeyNagSnoozed, resolveActiveCamp } from "~/lib/session.server";
+import {
+  passkeyNagSnoozed,
+  resolveActiveCamp,
+  yearNudgeSnoozed,
+} from "~/lib/session.server";
+import { yearNudge } from "~/lib/year-nudge";
 import { db } from "../../../db/client.server";
 import { legacyPasskey, membership, passkey } from "../../../db/schema";
 import type { Route } from "./+types/layout";
@@ -162,6 +167,18 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const showPasskeyNag = !anyPasskey && !passkeyNagSnoozed(request);
 
+  // Start-the-new-year banner. Officers get the one-click fix (snoozable);
+  // members only hear about a camp with no year at all, since every year page
+  // bounces them to /editions, where they can't do anything. Hidden in
+  // privacy mode, which can't write and is for demos.
+  const nudge = active && !privacyMode.on ? yearNudge(editions) : null;
+  const yearBanner =
+    nudge && isOfficer && !yearNudgeSnoozed(request, nudge.year)
+      ? nudge
+      : nudge?.kind === "first" && !isOfficer
+        ? ({ kind: "waiting" } as const)
+        : null;
+
   // Per-camp feature states (off / preview / on) drive which nav links exist
   // for this viewer; route loaders enforce the same via requireFeature.
   const features: Partial<Record<FeatureKey, FeatureState>> = featureStates
@@ -248,6 +265,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     prospectsPending,
     unreadSummaries,
     showPasskeyNag,
+    yearBanner,
     campMoving,
     privacyMode,
     canUsePrivacy,
@@ -307,6 +325,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     prospectsPending,
     unreadSummaries,
     showPasskeyNag,
+    yearBanner,
     campMoving,
     impersonatedByName,
     privacyMode,
@@ -1037,6 +1056,66 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           >
             <b>Set up a passkey</b> — sign in with your face, fingerprint or
             device PIN instead of a password. Takes a few seconds.
+          </ShellBanner>
+        ) : null}
+        {/* Start the new year (app/lib/year-nudge.ts). Officers get it from
+            exodus on until the year exists; "Not now" quiets it for two
+            weeks. Creating it lands on /editions, where it's now the year
+            being viewed. */}
+        {yearBanner?.kind === "waiting" ? (
+          <ShellBanner color="blue">
+            <b>Your camp hasn't started a year yet.</b> The map, roster, and
+            gear list open up once an officer adds one.
+          </ShellBanner>
+        ) : yearBanner ? (
+          <ShellBanner
+            color="blue"
+            action={
+              <Group gap="xs" wrap="nowrap">
+                <Form method="post" action="/editions">
+                  <input type="hidden" name="intent" value="create" />
+                  <input type="hidden" name="year" value={yearBanner.year} />
+                  <input type="hidden" name="event" value={yearBanner.event} />
+                  {yearBanner.kind === "next" ? (
+                    <input
+                      type="hidden"
+                      name="copyFromId"
+                      value={yearBanner.from.id}
+                    />
+                  ) : null}
+                  <Button type="submit" size="xs" variant="filled" color="blue">
+                    {yearBanner.kind === "first" ? "Add" : "Start"}{" "}
+                    {yearBanner.year}
+                  </Button>
+                </Form>
+                <Form method="post" action="/editions">
+                  <input type="hidden" name="intent" value="snoozeYearNudge" />
+                  <input type="hidden" name="year" value={yearBanner.year} />
+                  <input
+                    type="hidden"
+                    name="returnTo"
+                    value={location.pathname}
+                  />
+                  <Button type="submit" size="xs" variant="subtle" color="blue">
+                    Not now
+                  </Button>
+                </Form>
+              </Group>
+            }
+          >
+            {yearBanner.kind === "first" ? (
+              <>
+                <b>Add your camp's first year.</b> The map, roster, and gear
+                list all belong to a year.
+              </>
+            ) : (
+              <>
+                <b>Time to start {yearBanner.year}.</b> It begins with{" "}
+                {yearBanner.from.year}'s lot setup, and everyone sees{" "}
+                {yearBanner.year} from then on. {yearBanner.from.year} stays in
+                the year picker.
+              </>
+            )}
           </ShellBanner>
         ) : null}
         <KindsProvider kinds={customKinds}>
