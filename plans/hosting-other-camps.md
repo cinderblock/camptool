@@ -293,7 +293,16 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
         Applied by ops run 43621073150. Verified: `/` → 302
         `https://mathcamp.camptool.org/`, `/login` → 302
         `https://camptool.org/login`, `/moved` → 200 "We've moved".
-   g. Later: retire firefly's camptool stack and Caddy site (ops change).
+   g. Retire firefly's camptool stack (Cameron: "do it", 2026-11-21).
+      [x] Backup: `P:\Backupsirefly\camptool-retired-2026-11-21\camptool-firefly.tar.gz`
+      on uberfall (VACUUM INTO snapshot + uploads + the pre-0066 repair copy;
+      integrity ok, 42 users, 8 passkeys, 1 camp; sha256 `2c791fe6…6731`).
+      [ ] Ops change staged on ops branch `retire-firefly-camptool`
+      (`f9bd0706`, worktree `ops-retire-camptool`), not pushed: drops the
+      stack, Caddy site and socket mount, one-time cleanup in deploy.sh,
+      the camptool vars sync job, points the `camptool.mathcamp.us` record
+      at camptool.org (dry run: 1 DNS update) and moves the uptime monitor to
+      camptool.org. Waiting on Cameron's yes.
       Keep `LEGACY_HOSTS` for as long as old links and passkeys matter.
    The deploy button (old step 6) is dropped (decision 13).
 9. [x] **Onboarding other camps** (Cameron, 2026-11-20, after making Entheos
