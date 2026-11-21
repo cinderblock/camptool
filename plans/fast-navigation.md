@@ -84,5 +84,9 @@ It should feel instant. Find where the time goes, then remove it.
 - [x] 2026-11-21: shell loaders parallel; loading bar (`NavigationProgress`,
       shows after 120 ms); nav links `prefetch="intent"`. Verified in a
       headless Pixel 7 against the local Workers preview.
-- [ ] Placement change: waiting on Cameron (D1 region + yes).
+- [x] 2026-11-21: D1 is in Eastern North America (Cameron, from the
+      dashboard). Most users are in California.
+- [ ] Placement change (`aws:us-east-1`): waiting on Cameron's yes.
+      Option, not recommended now: move D1 to `wnam` (new database,
+      data copy, write freeze) to save the last ~60 ms per request.
 - [ ] Re-measure live after placement.
