@@ -63,13 +63,35 @@ It should feel instant. Find where the time goes, then remove it.
    [ ] Later, only if still needed after placement: per-route loaders, and
    better-auth `session.cookieCache` (drops 2 waits per request; trade-off:
    a revoked session lingers up to its maxAge).
-4. [current] Placement: pin the Worker near D1 — **Cloudflare change, needs Cameron's
-   explicit yes for that exact change.**
+4. [current] **Move D1 + R2 west** (Cameron, 2026-11-21: "fix that now, while
+   I don't have users"; pinning the Worker east was rejected, users are in
+   California). Each step needs Cameron's yes:
+   a. ops `1e60e624` (worktree `ops-camptool-wnam`, not pushed): D1/R2
+      `location` support + new D1 `camptool-db` and R2 `camptool-files` in
+      `wnam`. Dry run: 2 creates, nothing else.
+   b. Copy data: `wrangler d1 export camptool --remote` →
+      `wrangler d1 execute camptool-db --remote --file` (the export carries
+      `d1_migrations`, so the deploy's `migrations apply` is a no-op); copy
+      R2 objects. Keep the export as a backup. Writes in between are lost
+      (no users yet).
+   c. CampTool: `wrangler.jsonc` binds `camptool-db` / `camptool-files`
+      (staged, uncommitted). Wrangler rebinds by name: an inherited binding
+      is only kept when its database's name matches.
+   d. Verify live: per-wait time in `Server-Timing`, sign-in, pages.
+   e. Then tombstone `camptool` + `camptool-uploads` in ops (separate yes).
 5. Re-measure live; record before/after here.
 
 ## Decisions already made (don't re-ask)
 
 - "Best, not fastest" applies.
+
+## Why the data was in the east
+
+Ops created them as `- d1: camptool` / `- r2: camptool-uploads`, no location.
+Cloudflare places a new database or bucket near the API caller, and the ops
+sync runs on a GitHub runner in the eastern US. Confirmed: `wrangler r2
+bucket info camptool-uploads` → `location: ENAM`; Cameron saw Eastern North
+America on the D1. Ops now takes `location` on `d1:`/`r2:` entries.
 
 ## Things not to do
 
@@ -86,7 +108,6 @@ It should feel instant. Find where the time goes, then remove it.
       headless Pixel 7 against the local Workers preview.
 - [x] 2026-11-21: D1 is in Eastern North America (Cameron, from the
       dashboard). Most users are in California.
-- [ ] Placement change (`aws:us-east-1`): waiting on Cameron's yes.
-      Option, not recommended now: move D1 to `wnam` (new database,
-      data copy, write freeze) to save the last ~60 ms per request.
-- [ ] Re-measure live after placement.
+- [-] Pin the Worker east: dropped. Cameron chose moving the data west.
+- [ ] Step 4a–d: waiting on Cameron's yes.
+- [ ] Step 4e: tombstone the eastern pair (later, separate yes).
