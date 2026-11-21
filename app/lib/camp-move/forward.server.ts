@@ -43,9 +43,10 @@ async function state() {
   return cache;
 }
 
-/** Paths that keep working on the old install. */
+/** Paths that keep working on the old install: sign-in, the move itself,
+ * and the site-wide pages for starting or bringing in a camp. */
 const OWN =
-  /^\/(?:api\/|\.well-known\/|moved\/|move-handoff|move-claim|login|handoff|assets\/|@|__|node_modules\/|app\/|_version)/;
+  /^\/(?:api\/|\.well-known\/|moved\/|move-handoff|move-claim|login|handoff|import-camp|new-camp|new-passkey|assets\/|@|__|node_modules\/|app\/|_version)/;
 
 async function campExists(slug: string) {
   const [row] = await db.all<{ id: string }>(
