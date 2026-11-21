@@ -36,11 +36,18 @@ async function get(url: string, bearer?: string): Promise<Response> {
     res = await fetch(url, {
       headers: bearer ? { Authorization: `Bearer ${bearer}` } : {},
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      redirect: "error",
+      // Workers refuse "error"; a redirect is treated as a failure below.
+      redirect: "manual",
     });
-  } catch {
+  } catch (e) {
+    console.warn(`camp move: fetching ${url} failed`, e);
     throw new MoveFetchError(
       `Couldn't reach ${new URL(url).origin}. Check the code, or use a bundle file.`,
+    );
+  }
+  if (res.status >= 300 && res.status < 400) {
+    throw new MoveFetchError(
+      `${new URL(url).origin} redirected the move somewhere else; use the address in the code exactly.`,
     );
   }
   if (res.status === 404) {
@@ -202,7 +209,8 @@ export async function confirmToSource(
         targetCampUrl: target.campUrl,
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      redirect: "error",
+      // Workers refuse "error"; a redirect is treated as a failure below.
+      redirect: "manual",
     });
     return res.ok;
   } catch {
