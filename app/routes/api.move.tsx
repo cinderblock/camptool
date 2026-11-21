@@ -8,10 +8,15 @@
  *   GET  /api/move/:id/key     → { publicKey }
  *   GET  /api/move/:id/bundle  → { manifest, signature, rows }
  *   GET  /api/move/:id/file?key=<blob key> → the bytes
+ *   GET  /api/move/:id/files?start=<n> → a tar of the camp's files from the
+ *        n-th (in key order), up to ~16 MB or 200 files; `X-Next-Start` says
+ *        where the next batch starts (absent at the end). Fewer requests than
+ *        one per file, which matters under per-visitor rate limits.
  *   POST /api/move/:id/done    { targetOrigin, targetCampUrl } → { ok, windowEndsAt }
  */
 import { data } from "react-router";
 import { blobs } from "~/lib/blobs.server";
+import { tar } from "~/lib/camp-move/bundle";
 import { forgetMoves } from "~/lib/camp-move/forward.server";
 import {
   authorizePull,
@@ -23,6 +28,9 @@ import { APEX } from "~/lib/env.server";
 import type { Route } from "./+types/api.move";
 
 const notFound = () => data({ error: "Not found" }, { status: 404 });
+
+const BATCH_BYTES = 16 * 1024 * 1024;
+const BATCH_FILES = 200;
 
 const bearer = (request: Request) =>
   request.headers.get("authorization")?.match(/^Bearer (\S+)$/)?.[1] ?? null;
@@ -59,6 +67,36 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         "Cache-Control": "no-store",
       },
     });
+  }
+  if (what === "files") {
+    const start = Number(new URL(request.url).searchParams.get("start") ?? 0);
+    if (!Number.isInteger(start) || start < 0) return notFound();
+    const all = (await blobs.list()).filter((f) =>
+      f.key.startsWith(`${row.campId}/`),
+    );
+    const entries: [string, Uint8Array][] = [];
+    let size = 0;
+    let i = start;
+    for (; i < all.length; i++) {
+      const f = all[i] as { key: string; size: number };
+      if (
+        entries.length &&
+        (size + f.size > BATCH_BYTES || entries.length >= BATCH_FILES)
+      ) {
+        break;
+      }
+      const blob = await blobs.get(f.key);
+      if (!blob) continue;
+      const bytes = await blob.bytes();
+      entries.push([f.key, bytes]);
+      size += bytes.length;
+    }
+    const headers: Record<string, string> = {
+      "Content-Type": "application/x-tar",
+      "Cache-Control": "no-store",
+    };
+    if (i < all.length) headers["X-Next-Start"] = String(i);
+    return new Response(tar(entries) as BodyInit, { headers });
   }
   return notFound();
 }

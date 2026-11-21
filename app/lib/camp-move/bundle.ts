@@ -218,7 +218,7 @@ export function manifestText(m: Manifest): string {
   return JSON.stringify(m, null, 2);
 }
 
-function tar(entries: [string, Uint8Array][]): Uint8Array {
+export function tar(entries: [string, Uint8Array][]): Uint8Array {
   const parts: Uint8Array[] = [];
   const now = Math.floor(Date.now() / 1000);
   for (const [name, bytes] of entries) {

@@ -13,6 +13,7 @@ import {
   parseMoveCode,
   secretHash,
   unpackBundle,
+  untar,
 } from "./bundle";
 import type { BundleSource } from "./import.server";
 
@@ -85,9 +86,19 @@ async function assertPublicAddress(host: string) {
 
 async function get(url: string, bearer?: string): Promise<Response> {
   await assertPublicAddress(new URL(url).hostname);
-  let res: Response;
+  // A busy old site may ask us to slow down (per-visitor limits): wait as
+  // told, a few times, before giving up.
+  for (let attempt = 0; ; attempt++) {
+    const res = await getOnce(url, bearer);
+    if (res.status !== 429 || attempt >= 6) return checked(res, url);
+    const wait = Number(res.headers.get("retry-after")) || 2 ** attempt;
+    await new Promise((r) => setTimeout(r, Math.min(wait, 30) * 1000));
+  }
+}
+
+async function getOnce(url: string, bearer?: string): Promise<Response> {
   try {
-    res = await fetch(url, {
+    return await fetch(url, {
       headers: bearer ? { Authorization: `Bearer ${bearer}` } : {},
       signal: AbortSignal.timeout(TIMEOUT_MS),
       // Workers refuse "error"; a redirect is treated as a failure below.
@@ -99,6 +110,9 @@ async function get(url: string, bearer?: string): Promise<Response> {
       `Couldn't reach ${new URL(url).origin}. Check the code, or use a bundle file.`,
     );
   }
+}
+
+function checked(res: Response, url: string): Response {
   if (res.status >= 300 && res.status < 400) {
     throw new MoveFetchError(
       `${new URL(url).origin} redirected the move somewhere else; use the address in the code exactly.`,
@@ -198,16 +212,33 @@ export async function pullBundle(rawCode: string): Promise<FetchedBundle> {
       manifest: body.manifest,
       signature: body.signature,
       rows: async (t) => body.rows[t] ?? "",
-      file: async (key) =>
-        new Uint8Array(
-          await (
-            await get(
-              `${api(code, "file")}?key=${encodeURIComponent(key)}`,
-              bearer,
-            )
-          ).arrayBuffer(),
-        ),
+      file: batchedFiles(code, bearer, body.manifest),
     },
+  };
+}
+
+/**
+ * Files from the old site a batch at a time (`/files?start=`), in the
+ * manifest's order, handing each over once and keeping only the current
+ * batch in memory.
+ */
+function batchedFiles(code: MoveCode, bearer: string, m: Manifest) {
+  const index = new Map(m.files.map((f, i) => [f.key, i]));
+  let held = new Map<string, Uint8Array>();
+  return async (key: string): Promise<Uint8Array> => {
+    const got = held.get(key);
+    if (got) {
+      held.delete(key);
+      return got;
+    }
+    const start = index.get(key);
+    if (start === undefined) throw new MoveFetchError(`No file ${key}.`);
+    const res = await get(`${api(code, "files")}?start=${start}`, bearer);
+    held = untar(new Uint8Array(await res.arrayBuffer()));
+    const first = held.get(key);
+    if (!first) throw new MoveFetchError(`The old site didn't send ${key}.`);
+    held.delete(key);
+    return first;
   };
 }
 
