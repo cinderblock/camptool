@@ -297,12 +297,14 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
       [x] Backup: `P:\Backups\firefly\camptool-retired-2026-11-21\camptool-firefly.tar.gz`
       on uberfall (VACUUM INTO snapshot + uploads + the pre-0066 repair copy;
       integrity ok, 42 users, 8 passkeys, 1 camp; sha256 `2c791fe6…6731`).
-      [ ] Ops change staged on ops branch `retire-firefly-camptool`
-      (`f9bd0706`, worktree `ops-retire-camptool`), not pushed: drops the
-      stack, Caddy site and socket mount, one-time cleanup in deploy.sh,
-      the camptool vars sync job, points the `camptool.mathcamp.us` record
-      at camptool.org (dry run: 1 DNS update) and moves the uptime monitor to
-      camptool.org. Waiting on Cameron's yes.
+      [x] Applied (Cameron: "yes", 2026-11-21): ops `f9bd0706`, pushed 1:40 AM
+      PST (09:40Z). Firefly has no camptool container, volumes or deployment
+      state left; `camptool.mathcamp.us` is a proxied CNAME to camptool.org;
+      `/` still 302s to mathcamp.camptool.org and `/moved` answers 200.
+      Server Deploys run 44890688294 went red only on sentinel's idj-whisper
+      verify ("idj queue answered 521" at 09:41:42Z), which hit idj while
+      firefly's Caddy was being recreated in the same run; idj answered 200
+      right after. The P: backup is now the only copy of firefly's data.
       Keep `LEGACY_HOSTS` for as long as old links and passkeys matter.
    The deploy button (old step 6) is dropped (decision 13).
 9. [x] **Onboarding other camps** (Cameron, 2026-11-20, after making Entheos
