@@ -52,6 +52,9 @@ written during the move is lost, and nothing that isn't the camp's leaks.
 
 ## Decisions already made (don't re-ask)
 
+(10 below supersedes parts of the "User matching" design: see Findings,
+"Security review".)
+
 1. Per camp, not per database; must merge into a target that already has users
    and camps. (Cameron's ask.)
 2. Logins keep working after a move "at least for a limited time". (Cameron.)
@@ -73,6 +76,12 @@ written during the move is lost, and nothing that isn't the camp's leaks.
 8. **Delete on the source** as soon as the target confirms the import (option
    to keep a read-only copy until window end); at window end, delete source
    accounts left in no camp. (Cameron, 2026-11-20: "ok".)
+10. **A bundle proves nothing about identity** (Claude, 2026-11-21, after the
+    security review): only the importer's own account links on the spot;
+    every other existing-account match is a claim; Discord links and the
+    old site's `email_verified` don't carry. Reason: a hostile old site could
+    otherwise join a victim's account to its camp (exposing their details)
+    or plant a Discord id in an account it can sign into for a year.
 9. **Anyone may import a camp when camp registration is open**
    (`instance_setting.allow_camp_creation`); when it's closed, only via a camp
    setup link or a super admin. (Cameron, 2026-11-20.)
@@ -162,14 +171,12 @@ test that fails on any unclassified table (same idea as
 | Class | Rule | Tables (examples) |
 | --- | --- | --- |
 | camp | the `camp` row, and every row reachable from it by FK path | membership, map, attendee, wiki, … (derived from the Drizzle FK graph) |
-| member identity | only the camp's people: users with a `membership` or `recruit_application` in this camp (`PEOPLE_SOURCES`) | `user`, `account` (Discord links only, never password rows), `passkey` public keys |
+| member identity | only the camp's people: users with a `membership` or `recruit_application` in this camp (`PEOPLE_SOURCES`) | `user`, `passkey` public keys |
 | not coming | users camp rows point at who aren't the camp's people (a site admin, someone whose membership is gone) | nothing: nullable references cleared, rows that need them left out, cascading like the schema's FKs (same as deleting that account). Counted in `manifest.dropped` |
-| never | instance, transient or other-tenant | password hashes (`account.password`, credential-provider rows), `super_admin`, `instance_setting`, `camp_setup_link`, telemetry, `session`, `verification`, `password_reset`, `user_email_alias`, other camps' memberships |
+| never | instance, transient or other-tenant | `account` (passwords and Discord links: decisions 6 and 10), `super_admin`, `instance_setting`, `camp_setup_link`, telemetry, `session`, `verification`, `password_reset`, `user_email_alias`, other camps' memberships |
 
-- Discord `account` rows carry `provider_id` + `account_id` (the Discord user
-  id, an identifier, not a secret); access/refresh tokens are dropped (they
-  belong to the source's Discord app). On a target with Discord configured,
-  Discord sign-in then just works, indefinitely.
+- No `account` rows at all (decision 10): people link Discord again on the
+  new site.
 - Passkeys go across as `legacy_passkey` (public key + credential id, not
   secrets) with the source's RP ID.
 - JSON columns that can hold user ids get an explicit registry entry with a
@@ -179,7 +186,9 @@ test that fails on any unclassified table (same idea as
 ### Importing: merge rules
 
 All writes are INSERTs; nothing in a bundle can update or overwrite an
-existing target row, except the explicit re-import replace below.
+existing target row. Before anything is written, `containmentProblems`
+refuses a bundle unless every row stays inside its own camp (see Findings,
+"Security review").
 
 - **Camp id** kept. If the target already has that camp id:
   - only a tombstone (it moved away from here earlier) → import, clear the
@@ -210,9 +219,12 @@ For each exported member, by email (case-insensitive, also against target
 
 | Situation | Result |
 | --- | --- |
-| no target user with that email | **create**: new user, keeps source user id, carries Discord link and passkeys (as legacy); never a password; must make a passkey on arrival |
-| target user exists, and identity is **proven**: both sides verified, or both have the same Discord account id | **link**: map source id → target id; camp rows rewritten to the target id; **no credentials added** to the existing account |
-| target user exists, not proven | **claim**: a placeholder user (hidden email) owns the camp rows; the person resolves it by signing in to the existing account and arriving via the source's login bridge (proving both), which runs the existing account merge. Unclaimed at window end → stays a placeholder the camp's officers can merge or remove |
+| the importer (signed in here with that address) | **link**: their account joins the camp; nothing added to its sign-ins |
+| no target user with that email | **create**: new user, keeps source user id (fresh one if taken), passkeys as legacy, `email_verified` off; must make a passkey on arrival |
+| a target user (or merge alias) has that email | **claim**: a placeholder user (`claim-<id>@claim.invalid`) owns the camp rows; the person signs in at the old site (hand-off → `/move-claim`) and then to the account here, and the placeholder's rows move onto it. Unclaimed → stays a placeholder the camp's officers can merge or remove |
+
+(Decision 10 replaced the earlier "proven link" rules: same Discord id, same
+id+email, both verified. All three were the old site's word.)
 
 Why not just match by email: no email is ever verified for password users, so
 anyone could sign up on camptool.org as `someone@x` before a camp moves in;
@@ -221,8 +233,9 @@ hostile source (a self-hoster controls their own DB) must never be able to add
 a password or passkey to an existing target account, which is why linked users
 get no credentials.
 
-Preflight shows the importer the counts (create / link / claim) with names,
-before anything is written.
+Preflight shows the importer the camp's people before anything is written;
+whether each one already has an account here is shown only to this site's
+admins (and the importer's own row).
 
 ### Logins after a move
 
@@ -250,8 +263,7 @@ the target):
    registrable domains, so an install with more than 5 concurrent departures
    lists the newest 5 and the rest use path 1. Safe for the old install:
    its own verifier still accepts only its own origins.
-3. **Discord** (permanent while the target allows Discord sign-in): the
-   carried link matches on Discord user id.
+3. (Discord no longer carries; decision 10.)
 
 Whatever path they arrive by, a created user with no passkey on the target is
 sent to `/new-passkey` (existing forced flow: no skip, sign-out only). No
@@ -348,7 +360,7 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
    held (`slugProblem`), delete after confirm, window expiry
    (`endExpiredMoves`, run lazily from the forwarding cache refresh).
    A camp returning to a site it left ends that site's tombstone.
-9. [x] e2e: `bun e2e/camp-portability.ts [bun|cf] [bun|cf]`, 45/45 in all
+9. [x] e2e: `bun e2e/camp-portability.ts [bun|cf] [bun|cf]`, 46/46 in all
    four combinations (2026-11-21; `cf` = the Cloudflare build under local
    `wrangler dev`, D1 + R2, subdomains on). Covers: import by pull, freeze,
    delete, Site admin listing, forwarding (whole site and old subdomain),
@@ -363,6 +375,41 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
     call. The migration (0094) only adds tables, so it is D1-safe.
 
 ## Findings / gotchas
+
+- **Security review (2026-11-21, independent agent; PoC in the session
+  scratchpad).** Fixed in `Camp moves: close the holes the security review
+  found`:
+  1. Critical: bundle rows could target other camps (a `membership` with
+     another camp's id imported cleanly → admin there). Now
+     `containmentProblems`: exactly one camp, every camp-path column equals
+     the camp, every non-user FK points inside the bundle, map snapshots hold
+     only this camp's rows.
+  2. Critical: bundle file keys were trusted (overwrite, and on failure
+     delete, any blob). Now `badFileKey` (own camp prefix, no `..`, `\`,
+     `//`), checked in preflight and at write; a failed import deletes only
+     files it created.
+  3. High: an officer member-merge repointed `camp_move_user`, letting the
+     old site hand off into a pre-existing account. Merges now delete those
+     rows and skip them in the sweep.
+  4–5. Manifest source origin / RP ID / camp URL must agree with the code
+     (`sourceProblem`); identity matching per decision 10; per-person
+     outcomes shown only to the new site's admins.
+  6. `done`: target camp URL must be on the target origin, HTTPS unless
+     local.
+  7. SSRF: Bun hosts resolve the name and refuse private addresses (more
+     ranges added). DNS rebinding between lookup and fetch remains.
+  8. Forwarding path normalised (`//evil/x`).
+  9. `done` runs once (`returning`), hand-off `jti` recorded before
+     checking.
+  10. Bundle file size: 95 MB upload, 128 MiB unpacked (Workers' zlib caps
+      `maxOutputLength` at 134217728). Pulls still hash every file per
+      request; fine at today's camp sizes, revisit for photo-heavy camps.
+- Residual, accepted: a camp admin on a shared site can list any HTTPS
+  origin in that site's `/.well-known/webauthn` for a year by completing a
+  move to it. That origin can then *request* assertions for the shared
+  site's passkeys, but they verify only at that origin (the shared site's
+  own verifier checks origin), so it's a phishing-surface concern, not an
+  account takeover.
 
 - **Workers reject `fetch(…, { redirect: "error" })`** ("Invalid redirect
   value, must be one of \"follow\" or \"manual\""). Use `"manual"` and treat
@@ -412,7 +459,7 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 
 - [x] 2026-11-21: steps 2–8 built; e2e Bun → Bun green (35/35).
 - [x] 2026-11-21: Cloudflare side, return trip, file transport, Site admin
-  list, docs, `scripts/camp-move.ts inspect`; e2e 45/45 × 4 directions.
+  list, docs, `scripts/camp-move.ts inspect`; e2e 45–46 checks × 4 directions.
 
 - [x] 2026-11-20: design written (this file).
 - [x] 2026-11-20: Cameron's answers folded in: no passwords, 1-year window,

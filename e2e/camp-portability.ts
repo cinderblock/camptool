@@ -349,8 +349,8 @@ try {
     checkHtml.includes("You, importing the camp."),
   );
   check(
-    "B: bob's address is a claim, not a merge",
-    checkHtml.includes("Must claim"),
+    "B: the check doesn't tell the importer who already has an account here",
+    !checkHtml.includes("Must claim") && !checkHtml.includes("New here"),
   );
 
   const imp = await post(
@@ -685,9 +685,11 @@ try {
   form.set("file", new Blob([bytes]), "movers.camptool");
   const check2 = await post(A, "/import-camp", alice.cookie, form);
   const check2Html = await check2.text();
+  await Bun.write(join(ROOT, "check2.html"), check2Html);
   check(
-    "A: carol comes back to her own account",
-    check2Html.includes("The same account, coming back."),
+    "A: the file checks out",
+    check2Html.includes("Import the camp"),
+    `HTTP ${check2.status}`,
   );
   const imp2 = await post(
     A,
@@ -719,6 +721,18 @@ try {
       .query("SELECT slug FROM camp WHERE id = ?")
       .get(camp.id) as { slug: string } | null;
     check("A: same camp, same address", slug?.slug === "movers");
+    // Nothing in a bundle proves who anyone is, so carol's old account here
+    // isn't joined to the camp on the bundle's word: she claims it.
+    const carolBack = db
+      .query(
+        "SELECT mu.outcome FROM camp_move_user mu JOIN camp_move_in mi ON mi.id = mu.move_id WHERE mi.camp_id = ? AND mu.source_user_id = ?",
+      )
+      .get(camp.id, carol.id) as { outcome: string } | null;
+    check(
+      "A: carol, returning, claims her old account",
+      carolBack?.outcome === "claim",
+      JSON.stringify(carolBack),
+    );
     db.close();
   }
   const home = await go(`${campBase(A)}/wiki`, carol.cookie);

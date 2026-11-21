@@ -374,7 +374,18 @@ function foldUser(plan: MergePlan): SQL[] {
 
   // Passkeys, social logins, authored rows, and memberships in other camps all
   // follow the same sweep that moves everything else in this file.
-  writes.push(...repoint("user", survivorUserId, staleUserId));
+  // Except a camp move's record of who arrived as whom: the old site may sign
+  // in only accounts its move created, and a merged account is more than that
+  // now (plans/camp-portability.md). Both sides stop being "arrived with a
+  // move"; they sign in here like anyone else.
+  writes.push(
+    sql`DELETE FROM camp_move_user WHERE user_id IN (${survivorUserId}, ${staleUserId})`,
+  );
+  writes.push(
+    ...repoint("user", survivorUserId, staleUserId, [
+      { table: "camp_move_user", column: "user_id" },
+    ]),
+  );
 
   const u = plan.user;
   writes.push(

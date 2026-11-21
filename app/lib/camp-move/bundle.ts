@@ -201,6 +201,11 @@ export function secretHash(secret: string): Promise<string> {
 
 const MAGIC = new TextEncoder().encode("CAMPTOOL-MOVE-1\n");
 
+/** The largest bundle file (unpacked) this code will open. 128 MiB is the
+ * most Workers' zlib will inflate in one go (and a Worker's whole memory);
+ * bigger camps move by code, which fetches files one at a time. */
+export const MAX_BUNDLE_BYTES = 128 * 1024 * 1024;
+
 export type BundleParts = {
   manifest: Manifest;
   signature: string;
@@ -297,7 +302,16 @@ export async function unpackBundle(
   } catch {
     throw new Error("The move code doesn't open this bundle.");
   }
-  const entries = untar(gunzipSync(plain));
+  let tarBytes: Uint8Array;
+  try {
+    // A bundle that inflates past this is refused rather than allowed to
+    // exhaust the server's memory.
+    tarBytes = gunzipSync(plain, { maxOutputLength: MAX_BUNDLE_BYTES });
+  } catch (e) {
+    console.warn("camp move: gunzip failed", e);
+    throw new Error("The bundle is damaged or too large.");
+  }
+  const entries = untar(tarBytes);
   const dec = new TextDecoder();
   const manifestRaw = entries.get("manifest.json");
   if (!manifestRaw) throw new Error("The bundle has no manifest.");

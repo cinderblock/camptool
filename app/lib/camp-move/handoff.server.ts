@@ -119,18 +119,18 @@ export async function acceptHandoff(
         lt(verification.expiresAt, new Date(now)),
       ),
     );
-  const spent = await db
-    .select({ id: verification.id })
-    .from(verification)
-    .where(eq(verification.identifier, JTI + p.jti))
-    .limit(1);
-  if (spent.length) return { ok: false, why: "replay" };
+  // Record first, then count: of two racing uses, at least one sees two.
   await db.insert(verification).values({
     id: crypto.randomUUID(),
     identifier: JTI + p.jti,
     value: p.mv,
     expiresAt: new Date(p.exp + 60_000),
   });
+  const uses = await db
+    .select({ id: verification.id })
+    .from(verification)
+    .where(eq(verification.identifier, JTI + p.jti));
+  if (uses.length > 1) return { ok: false, why: "replay" };
 
   const [person] = await db
     .select()

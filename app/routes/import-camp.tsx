@@ -63,6 +63,8 @@ export function meta(_: Route.MetaArgs) {
 }
 
 const UPLOADS = "_imports/";
+/** Workers take request bodies up to 100 MB. */
+const MAX_UPLOAD_BYTES = 95 * 1024 * 1024;
 const UPLOAD_TTL_MS = 86_400_000;
 
 async function gate(request: Request) {
@@ -100,8 +102,8 @@ type Person = {
   name: string;
   email: string;
   role: string | null;
-  outcome: string;
-  why: string;
+  outcome: string | null;
+  why: string | null;
 };
 
 export type ActionResult =
@@ -163,6 +165,11 @@ export async function action({
     if (intent === "check") {
       await sweepUploads();
       const file = form.get("file");
+      if (file instanceof File && file.size > MAX_UPLOAD_BYTES) {
+        throw new MoveFetchError(
+          "That file is too big to upload here. Use the move code on its own (the new site fetches the camp directly).",
+        );
+      }
       if (file instanceof File && file.size > 0) {
         upload = `${UPLOADS}${Date.now()}-${crypto.randomUUID()}`;
         await blobs.put(upload, new Uint8Array(await file.arrayBuffer()));
@@ -246,8 +253,12 @@ export async function action({
               name: p.name,
               email: p.email,
               role: p.role,
-              outcome: p.outcome,
-              why: p.why,
+              // Whether an address already has an account here is this
+              // site's business, not the importer's: only a site admin sees
+              // it. Everyone sees their own row.
+              outcome:
+                superAdmin || p.userId === session.user.id ? p.outcome : null,
+              why: superAdmin || p.userId === session.user.id ? p.why : null,
             })),
       },
     };
@@ -373,15 +384,23 @@ export default function ImportCamp({
                         </Text>
                       </Table.Td>
                       <Table.Td>
-                        <Badge
-                          color={OUTCOME[p.outcome]?.color}
-                          variant="light"
-                        >
-                          {OUTCOME[p.outcome]?.label ?? p.outcome}
-                        </Badge>
-                        <Text size="xs" c="dimmed">
-                          {p.why}
-                        </Text>
+                        {p.outcome ? (
+                          <>
+                            <Badge
+                              color={OUTCOME[p.outcome]?.color}
+                              variant="light"
+                            >
+                              {OUTCOME[p.outcome]?.label ?? p.outcome}
+                            </Badge>
+                            <Text size="xs" c="dimmed">
+                              {p.why}
+                            </Text>
+                          </>
+                        ) : (
+                          <Text size="xs" c="dimmed">
+                            Comes along
+                          </Text>
+                        )}
                       </Table.Td>
                     </Table.Tr>
                   ))}

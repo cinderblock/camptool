@@ -23,7 +23,6 @@ import {
   campTables,
   IDENTITY,
   PEOPLE_SOURCES,
-  scrubIdentityRow,
 } from "./registry";
 import { type Row, type Rows, remapPeople } from "./remap";
 import { schemaGraph } from "./schema-graph";
@@ -123,10 +122,9 @@ export async function exportCamp(
   const ids = [...people].sort();
   for (const table of IDENTITY) {
     const column = table === "user" ? "id" : "user_id";
-    const rows = (await selectIn(table, column, ids))
-      .map((r) => scrubIdentityRow(table, r))
-      .filter((r): r is Row => r !== null)
-      .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const rows = (await selectIn(table, column, ids)).sort((a, b) =>
+      String(a.id).localeCompare(String(b.id)),
+    );
     raw.set(table, rows);
   }
 

@@ -98,7 +98,10 @@ export async function action({ request }: Route.ActionArgs) {
     let url: URL;
     try {
       url = new URL(String(form.get("targetCampUrl") ?? "").trim());
-      if (!/^https?:$/.test(url.protocol)) throw new Error();
+      const ok =
+        url.protocol === "https:" ||
+        (APEX.protocol === "http:" && url.protocol === "http:");
+      if (!ok) throw new Error();
     } catch {
       return data(
         { error: "Give the camp's new address, like https://…" },

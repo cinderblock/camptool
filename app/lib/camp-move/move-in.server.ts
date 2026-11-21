@@ -30,7 +30,61 @@ const TIMEOUT_MS = 20_000;
 
 export class MoveFetchError extends Error {}
 
+/** Same site or a subdomain of it. */
+const within = (host: string, site: string) =>
+  host === site || host.endsWith(`.${site}`);
+
+/**
+ * The bundle's idea of where it came from must agree with the code: the code
+ * is what the camp's admin handed over, the manifest is the old site's say.
+ * The login page shows these to everyone, so a mismatch is refused.
+ */
+export function sourceProblem(m: Manifest, code: MoveCode): string | null {
+  const origin = new URL(code.origin);
+  if (m.source.origin !== code.origin) {
+    return "The bundle says it came from somewhere other than the code's site.";
+  }
+  if (!within(origin.hostname, m.source.rpId)) {
+    return "The bundle's passkey site doesn't match the code's site.";
+  }
+  try {
+    const camp = new URL(m.source.campUrl);
+    if (
+      camp.protocol !== origin.protocol ||
+      !within(camp.hostname, origin.hostname)
+    ) {
+      return "The bundle's camp address isn't on the code's site.";
+    }
+  } catch {
+    return "The bundle's camp address is malformed.";
+  }
+  return null;
+}
+
+/** Refuse a host name that resolves to a private address (Bun hosts only:
+ * Workers can't reach private networks anyway). */
+async function assertPublicAddress(host: string) {
+  if (APEX.protocol === "http:") return; // a local test setup
+  if (
+    typeof navigator !== "undefined" &&
+    navigator.userAgent === "Cloudflare-Workers"
+  ) {
+    return;
+  }
+  let addresses: { address: string }[] = [];
+  try {
+    const dns = await import("node:dns/promises");
+    addresses = await dns.lookup(host, { all: true });
+  } catch {
+    throw new MoveFetchError(`Couldn't look up ${host}.`);
+  }
+  if (addresses.some((a) => isPrivateHost(a.address))) {
+    throw new MoveFetchError("The old install must be a public site.");
+  }
+}
+
 async function get(url: string, bearer?: string): Promise<Response> {
+  await assertPublicAddress(new URL(url).hostname);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -85,8 +139,13 @@ export function readCode(raw: string): MoveCode {
 /** Loopback, private and link-local addresses, and single-label names. */
 export function isPrivateHost(host: string): boolean {
   const h = host.replace(/^\[|\]$/g, "").toLowerCase();
-  // IPv6 literals aren't how a camp's site is addressed; refuse them all.
-  if (h.includes(":")) return true;
+  // IPv4 written as IPv6 (`::ffff:10.0.0.1`).
+  const mapped = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped?.[1]) return isPrivateHost(mapped[1]);
+  // IPv6: loopback, unique-local, link-local, unspecified.
+  if (h.includes(":")) {
+    return h === "::1" || h === "::" || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
+  }
   if (h === "localhost" || h.endsWith(".localhost") || !h.includes(".")) {
     return true;
   }
@@ -100,7 +159,9 @@ export function isPrivateHost(host: string): boolean {
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127)
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
   );
 }
 
@@ -127,6 +188,8 @@ export async function pullBundle(rawCode: string): Promise<FetchedBundle> {
   ) {
     throw new MoveFetchError("The bundle isn't the one this code is for.");
   }
+  const wrong = sourceProblem(body.manifest, code);
+  if (wrong) throw new MoveFetchError(wrong);
   return {
     code,
     trustedKey,
@@ -163,6 +226,8 @@ export async function bundleFromFile(
   if (parts.manifest.move.id !== code.moveId) {
     throw new MoveFetchError("The file isn't the one this code is for.");
   }
+  const wrong = sourceProblem(parts.manifest, code);
+  if (wrong) throw new MoveFetchError(wrong);
   let trustedKey = parts.manifest.move.publicKey;
   let confirmed = false;
   try {

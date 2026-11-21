@@ -12,7 +12,6 @@ import {
   JSONISH,
   NEVER,
   PROSE,
-  scrubIdentityRow,
   userKeysOf,
 } from "./registry";
 import { insertOrder, schemaGraph } from "./schema-graph";
@@ -106,24 +105,8 @@ describe("camp move registry", () => {
     expect(out.objects[1].createdById).toBeNull();
   });
 
-  it("drops passwords and OAuth tokens", () => {
-    expect(
-      scrubIdentityRow("account", { provider_id: "credential", password: "x" }),
-    ).toBeNull();
-    expect(
-      scrubIdentityRow("account", {
-        provider_id: "discord",
-        account_id: "123",
-        access_token: "t",
-        refresh_token: "r",
-        password: null,
-      }),
-    ).toEqual({
-      provider_id: "discord",
-      account_id: "123",
-      access_token: null,
-      refresh_token: null,
-      password: null,
-    });
+  it("never carries sign-in methods but passkeys' public keys", () => {
+    expect(NEVER.account).toBeDefined();
+    expect([...IDENTITY]).toEqual(["user", "passkey"]);
   });
 });

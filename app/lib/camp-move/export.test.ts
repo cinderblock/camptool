@@ -150,12 +150,10 @@ describe("exportCamp", () => {
   });
 
   it("never carries passwords, tokens, sessions or instance tables", () => {
-    const accounts = rows("account");
-    expect(accounts.map((a) => a.provider_id)).toEqual(["discord"]);
-    expect(accounts[0]?.access_token).toBeNull();
-    expect(accounts[0]?.refresh_token).toBeNull();
+    expect(out.rows.has("account")).toBe(false);
     for (const t of [
       "session",
+      "account",
       "super_admin",
       "instance_setting",
       "verification",

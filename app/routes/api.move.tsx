@@ -19,6 +19,7 @@ import {
   findMoveOut,
   signedBundle,
 } from "~/lib/camp-move/move-out.server";
+import { APEX } from "~/lib/env.server";
 import type { Route } from "./+types/api.move";
 
 const notFound = () => data({ error: "Not found" }, { status: 404 });
@@ -81,8 +82,15 @@ export async function action({ request, params }: Route.ActionArgs) {
       { status: 400 },
     );
   }
-  if (!/^https?:$/.test(new URL(origin).protocol)) {
-    return data({ error: "Bad origin." }, { status: 400 });
+  const o = new URL(origin);
+  const c = new URL(campUrl);
+  const local = APEX.protocol === "http:";
+  if (
+    (o.protocol !== "https:" && !(local && o.protocol === "http:")) ||
+    c.protocol !== o.protocol ||
+    !(c.hostname === o.hostname || c.hostname.endsWith(`.${o.hostname}`))
+  ) {
+    return data({ error: "Bad target address." }, { status: 400 });
   }
   await completeMoveOut(row, { origin, campUrl });
   forgetMoves();

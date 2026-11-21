@@ -19,9 +19,8 @@ const s = await import("../../../db/schema");
 const { blobs } = await import("../blobs.server");
 const { deleteCamp } = await import("../camp-admin.server");
 const { exportCamp } = await import("./export.server");
-const { manifestText, newMoveKeys, sign, encodeRows } = await import(
-  "./bundle"
-);
+const { decodeRows, encodeRows, manifestText, newMoveKeys, sha256, sign } =
+  await import("./bundle");
 const { applyImport, claimEmail, loadRows, preflight } = await import(
   "./import.server"
 );
@@ -32,6 +31,7 @@ afterAll(() => rmSync(uploads, { recursive: true, force: true }));
 const CAMP = "aaaaaaaa-0000-4000-8000-000000000001";
 const OTHER = "aaaaaaaa-0000-4000-8000-000000000002";
 const MOVE = "aaaaaaaa-0000-4000-8000-0000000000ff";
+const ALICE = { id: "im-alice", email: "im-alice@example.com" };
 
 await db.insert(s.camp).values([
   { id: CAMP, name: "Movers", slug: "movers" },
@@ -153,11 +153,88 @@ describe("importing a camp", () => {
     expect(rows.has("super_admin")).toBe(false);
   });
 
+  /** The bundle with one table's rows changed (and the manifest re-signed,
+   * as a hostile old site would). */
+  async function tampered(
+    table: string,
+    change: (rows: Record<string, unknown>[]) => Record<string, unknown>[],
+    m = structuredClone(manifest),
+  ) {
+    const rows = new Map(out.rows);
+    const text = encodeRows(change(decodeRows(rows.get(table) ?? "")));
+    rows.set(table, text);
+    m.tables[table] = {
+      columns: m.tables[table]?.columns ?? [],
+      rows: decodeRows(text).length,
+      sha256: await sha256(text),
+    };
+    const source = await sourceOf(m, rows);
+    const loaded = await loadRows(source, keys.publicKey);
+    return preflight(source, loaded.rows, { importer: ALICE });
+  }
+
+  it("refuses rows that belong to another camp", async () => {
+    const plan = await tampered("membership", (list) => [
+      ...list,
+      { ...list[0], id: "im-evil", camp_id: OTHER, role: "admin" },
+    ]);
+    expect(plan.problems.join()).toContain("belong to another camp");
+    expect(plan.people).toEqual([]);
+  });
+
+  it("refuses references to rows outside the camp", async () => {
+    await db.insert(s.faqCategory).values({
+      id: "im-other-cat",
+      campId: OTHER,
+      name: "Theirs",
+      slug: "theirs",
+    });
+    const plan = await tampered("faq_entry", () => [
+      {
+        id: "im-evil-entry",
+        camp_id: CAMP,
+        category_id: "im-other-cat",
+        slug: "x",
+        question: "?",
+      },
+    ]);
+    expect(plan.problems.join()).toContain("points outside the camp");
+  });
+
+  it("refuses a second camp", async () => {
+    const plan = await tampered("camp", (list) => [
+      ...list,
+      { ...list[0], id: "im-second", slug: "second" },
+    ]);
+    expect(plan.problems.join()).toContain("exactly one camp");
+  });
+
+  it("refuses files outside the camp", async () => {
+    const m = structuredClone(manifest);
+    m.files.push({ key: `${OTHER}/logo`, size: 1, sha256: "x" });
+    const plan = await tampered("camp", (list) => list, m);
+    expect(plan.problems.join()).toContain("files outside");
+  });
+
+  it("refuses map snapshots holding another camp's rows", async () => {
+    const plan = await tampered("map_snapshot", () => [
+      {
+        id: "im-snap",
+        camp_id: CAMP,
+        edition_id: "im-ed",
+        kind: "auto",
+        seq: 1,
+        data: JSON.stringify({ objects: [{ id: "o", campId: OTHER }] }),
+      },
+    ]);
+    expect(plan.problems.join()).toContain("another camp's rows");
+  });
+
   it("matches people and imports", async () => {
     const source = await sourceOf();
     const { rows, problems } = await loadRows(source, keys.publicKey);
     expect(problems).toEqual([]);
-    const plan = await preflight(source, rows);
+    const plan = await preflight(source, rows, { importer: ALICE });
     expect(plan.problems).toEqual([]);
     expect(plan.camp.slugProblem).toBeNull();
     const who = Object.fromEntries(
@@ -165,7 +242,8 @@ describe("importing a camp", () => {
     );
     expect(who["im-alice"]).toEqual(["link", "im-alice"]);
     expect(who["im-carol"]).toEqual(["create", "im-carol"]);
-    expect(who["im-erin"]).toEqual(["link", "im-erin-here"]);
+    // A Discord id is only the old site's word: no link on it.
+    expect(who["im-erin"]).toEqual(["create", "im-erin"]);
     expect(who["im-dave"]?.[0]).toBe("claim");
 
     await applyImport(source, rows, plan, { importedByUserId: "im-alice" });
@@ -175,7 +253,7 @@ describe("importing a camp", () => {
     );
     const daveId = who["im-dave"]?.[1] as string;
     expect(members.map((m) => m.user_id).sort()).toEqual(
-      ["im-alice", "im-carol", daveId, "im-erin-here"].sort(),
+      ["im-alice", "im-carol", daveId, "im-erin"].sort(),
     );
     const [placeholder] = await db.all<{ email: string }>(
       sql`SELECT email FROM user WHERE id = ${daveId}`,
@@ -187,14 +265,15 @@ describe("importing a camp", () => {
     expect(fc?.created_by_id).toBe(daveId);
   });
 
-  it("carries a new person's passkeys (as legacy) and Discord link, never a password", async () => {
-    const accounts = await db.all<{
-      provider_id: string;
-      password: string | null;
-    }>(
-      sql`SELECT provider_id, password FROM account WHERE user_id = 'im-carol'`,
+  it("carries a new person's passkeys (as legacy), and no other sign-in", async () => {
+    const accounts = await db.all<{ provider_id: string }>(
+      sql`SELECT provider_id FROM account WHERE user_id = 'im-carol'`,
     );
-    expect(accounts).toEqual([{ provider_id: "discord", password: null }]);
+    expect(accounts).toEqual([]);
+    const [carol] = await db.all<{ email_verified: number }>(
+      sql`SELECT email_verified FROM user WHERE id = 'im-carol'`,
+    );
+    expect(carol?.email_verified).toBe(0);
     const legacy = await db.all<{ rp_id: string; credential_id: string }>(
       sql`SELECT rp_id, credential_id FROM legacy_passkey WHERE user_id = 'im-carol'`,
     );
@@ -221,7 +300,7 @@ describe("importing a camp", () => {
     expect(outcomes.map((o) => o.outcome)).toEqual([
       "claim",
       "created",
-      "linked",
+      "created",
       "linked",
     ]);
     expect(await (await blobs.get(`${CAMP}/pic`))?.bytes()).toEqual(

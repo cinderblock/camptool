@@ -177,11 +177,14 @@ async function selectWhereIn(
 }
 
 /**
- * Who each of the camp's people becomes here. Proof that an existing account
- * is the same person: the same Discord account, the same account coming back
- * (same id and address), or both addresses verified. An address match alone
- * proves nothing (no email is ever verified for password sign-ups), so it
- * becomes a claim the person settles by signing in on both sides.
+ * Who each of the camp's people becomes here.
+ *
+ * Nothing in a bundle proves who anyone is: the old site writes it, and the
+ * old site may be anyone. So the only account a bundle may join to the camp
+ * is the importer's own (they're signed in here, and the camp's admin handed
+ * them the code). Anyone else whose address already has an account here gets
+ * a claim: a placeholder holds their place until they prove both sides (sign
+ * in at the old site, then to the account here). Everyone else is new.
  */
 export async function planPeople(
   rows: Rows,
@@ -194,41 +197,19 @@ export async function planPeople(
       String(r.role),
     ]),
   );
-  const discordOf = new Map<string, string>();
-  for (const a of rows.get("account") ?? []) {
-    if (a.provider_id === "discord") {
-      discordOf.set(String(a.user_id), String(a.account_id));
-    }
-  }
-  const byDiscord = new Map(
-    (
-      await selectWhereIn(
-        "account",
-        "account_id",
-        [...discordOf.values()],
-        sql`provider_id = 'discord'`,
-      )
-    ).map((a) => [String(a.account_id), String(a.user_id)]),
-  );
   const emails = users.map((u) => lower(u.email));
-  const here = new Map<string, Row>();
+  const here = new Set<string>();
   // Addresses compare case-insensitively (older rows may not be lowercased).
   for (const u of await selectWhereIn("user", sql`lower(email)`, emails)) {
-    here.set(lower(u.email), u);
+    here.add(lower(u.email));
   }
   // Addresses kept from merges still name their account.
-  const aliases = await selectWhereIn(
+  for (const a of await selectWhereIn(
     "user_email_alias",
     sql`lower(email)`,
     emails,
-  );
-  const aliasIds = aliases.map((a) => String(a.user_id));
-  const aliasUsers = new Map(
-    (await selectWhereIn("user", "id", aliasIds)).map((u) => [String(u.id), u]),
-  );
-  for (const a of aliases) {
-    const u = aliasUsers.get(String(a.user_id));
-    if (u && !here.has(lower(a.email))) here.set(lower(a.email), u);
+  )) {
+    here.add(lower(a.email));
   }
   const takenIds = new Set(
     (
@@ -239,15 +220,11 @@ export async function planPeople(
       )
     ).map((u) => String(u.id)),
   );
-
-  const usedTargets = new Set<string>();
-  // The importer's own account is theirs alone; nobody else may land on it.
   const importerSource = importer
     ? users.find((u) => lower(u.email) === lower(importer.email))
     : undefined;
-  if (importer && importerSource) usedTargets.add(importer.id);
-  const out: PersonPlan[] = [];
-  for (const u of users) {
+
+  return users.map((u): PersonPlan => {
     const id = String(u.id);
     const email = String(u.email);
     const base = {
@@ -256,70 +233,124 @@ export async function planPeople(
       email,
       role: roles.get(id) ?? null,
     };
-    const discordUser = discordOf.has(id)
-      ? byDiscord.get(discordOf.get(id) as string)
-      : undefined;
-    const match = here.get(lower(email));
-    let plan: PersonPlan;
     if (importer && u === importerSource) {
-      // Whoever holds the move code was handed it by the camp's admin, and is
-      // signed in here with this address: that's the proof.
-      plan = {
+      return {
         ...base,
         outcome: "link",
         userId: importer.id,
         why: "You, importing the camp.",
       };
-    } else if (discordUser && !usedTargets.has(discordUser)) {
-      plan = {
-        ...base,
-        outcome: "link",
-        userId: discordUser,
-        why: "Same Discord account.",
-      };
-    } else if (match && !usedTargets.has(String(match.id))) {
-      const mid = String(match.id);
-      if (mid === id) {
-        plan = {
-          ...base,
-          outcome: "link",
-          userId: mid,
-          why: "The same account, coming back.",
-        };
-      } else if (u.email_verified && match.email_verified) {
-        plan = {
-          ...base,
-          outcome: "link",
-          userId: mid,
-          why: "Both addresses are verified.",
-        };
-      } else {
-        plan = {
-          ...base,
-          outcome: "claim",
-          userId: crypto.randomUUID(),
-          why: "An account here has this address, but nothing proves it's the same person.",
-        };
-      }
-    } else if (match || discordUser) {
-      plan = {
+    }
+    if (here.has(lower(email))) {
+      return {
         ...base,
         outcome: "claim",
         userId: crypto.randomUUID(),
-        why: "Another person in this camp already matched that account.",
-      };
-    } else {
-      plan = {
-        ...base,
-        outcome: "create",
-        userId: takenIds.has(id) ? crypto.randomUUID() : id,
-        why: "New here.",
+        why: "Has an account here already; they claim their place by signing in on both sites.",
       };
     }
-    if (plan.outcome === "link") usedTargets.add(plan.userId);
-    out.push(plan);
+    return {
+      ...base,
+      outcome: "create",
+      userId: takenIds.has(id) ? crypto.randomUUID() : id,
+      why: "New here.",
+    };
+  });
+}
+
+/** Where a bundle's files may live: under its own camp, nowhere else. */
+export function badFileKey(key: string, campId: string): boolean {
+  return (
+    !key.startsWith(`${campId}/`) ||
+    key.includes("..") ||
+    key.includes("\\") ||
+    key.includes("//") ||
+    key.length > 300
+  );
+}
+
+/** Snapshot sections and the table each one's rows belong to. */
+const SNAPSHOT_TABLES: Record<string, string> = {
+  placement: "placement",
+  objects: "map_object",
+  occupants: "map_object_occupant",
+  zones: "map_zone",
+  cables: "map_cable",
+  roads: "map_road",
+};
+
+/**
+ * Does every row stay inside the bundle's own camp? A bundle is written by
+ * the old site, which may be hostile: each camp row must carry this camp's
+ * id, every reference must point at a row in the bundle (not at a row already
+ * here, which could be another camp's), there must be exactly one camp, and
+ * map snapshots (restored later, row by row) must hold only this camp's rows.
+ */
+export function containmentProblems(m: Manifest, rows: Rows): string[] {
+  const graph = schemaGraph();
+  const paths = campTables(graph);
+  const problems = new Set<string>();
+  const camps = rows.get("camp") ?? [];
+  if (camps.length !== 1 || camps[0]?.id !== m.camp.id) {
+    problems.add("The bundle must hold exactly one camp, its own.");
   }
-  return out;
+  const ids = new Map<string, Set<unknown>>();
+  for (const [t, list] of rows) ids.set(t, new Set(list.map((r) => r.id)));
+  const userIds = ids.get("user") ?? new Set();
+  for (const [table, list] of rows) {
+    if ((IDENTITY as readonly string[]).includes(table)) {
+      if (table === "user") continue;
+      for (const r of list) {
+        if (!userIds.has(r.user_id)) {
+          problems.add(`${table} rows must belong to the camp's people.`);
+        }
+      }
+      continue;
+    }
+    const path = paths.get(table);
+    const t = graph.get(table);
+    if (!path || !t) continue;
+    for (const r of list) {
+      if (path.kind === "column" && r[path.column] !== m.camp.id) {
+        problems.add(`${table} has rows that belong to another camp.`);
+      }
+      for (const fk of t.foreignKeys) {
+        if (fk.table === "user") continue;
+        const v = r[fk.column];
+        if (v == null) continue;
+        if (!ids.get(fk.table)?.has(v)) {
+          problems.add(`${table}.${fk.column} points outside the camp.`);
+        }
+      }
+    }
+  }
+  for (const snap of rows.get("map_snapshot") ?? []) {
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(String(snap.data));
+    } catch {
+      problems.add("A map snapshot is damaged.");
+      continue;
+    }
+    for (const section of Object.keys(SNAPSHOT_TABLES)) {
+      const v = data[section];
+      const list = Array.isArray(v) ? v : v ? [v] : [];
+      for (const row of list as Record<string, unknown>[]) {
+        if (
+          (row.campId !== undefined && row.campId !== m.camp.id) ||
+          (row.editionId !== undefined && row.editionId !== snap.edition_id)
+        ) {
+          problems.add("A map snapshot holds another camp's rows.");
+        }
+      }
+    }
+  }
+  for (const f of m.files) {
+    if (badFileKey(f.key, m.camp.id)) {
+      problems.add("The bundle has files outside its own camp.");
+    }
+  }
+  return [...problems].slice(0, 10);
 }
 
 /** Everything the import would do, without doing it. */
@@ -335,11 +366,9 @@ export async function preflight(
 ): Promise<Preflight> {
   const m = source.manifest;
   const problems = schemaProblems(m);
+  if (!problems.length) problems.push(...containmentProblems(m, rows));
   const warnings: string[] = [];
   const campRow = rows.get("camp")?.[0];
-  if (!campRow || campRow.id !== m.camp.id) {
-    problems.push("The bundle has no camp.");
-  }
   const [existing] = await db.all<{ slug: string | null }>(
     sql`SELECT slug FROM camp WHERE id = ${m.camp.id}`,
   );
@@ -505,7 +534,6 @@ export async function applyImport(
   // People: new accounts (with their passkeys and Discord link), and
   // placeholders for claims. Linked accounts get nothing added.
   const userRows: Row[] = [];
-  const accountRows: Row[] = [];
   const legacyRows: Row[] = [];
   const existingCreds = new Set(
     (
@@ -520,7 +548,8 @@ export async function applyImport(
     const p = people.get(String(u.id));
     if (!p || p.outcome === "link") continue;
     if (p.outcome === "create") {
-      userRows.push({ ...u, id: p.userId });
+      // The old site's say-so isn't verification here.
+      userRows.push({ ...u, id: p.userId, email_verified: 0 });
     } else {
       userRows.push({
         id: p.userId,
@@ -537,17 +566,6 @@ export async function applyImport(
     const p = people.get(String(id));
     return p?.outcome === "create" ? p.userId : null;
   };
-  for (const a of rows.get("account") ?? []) {
-    const uid = created(a.user_id);
-    if (uid && a.provider_id !== "credential") {
-      accountRows.push({
-        ...a,
-        id: crypto.randomUUID(),
-        user_id: uid,
-        password: null,
-      });
-    }
-  }
   for (const pk of rows.get("passkey") ?? []) {
     const uid = created(pk.user_id);
     if (!uid || existingCreds.has(String(pk.credential_id))) continue;
@@ -567,7 +585,6 @@ export async function applyImport(
   const windowEndsAt = now.getTime() + WINDOW_DAYS * 86_400_000;
   const all: Rows = new Map([
     ["user", userRows],
-    ["account", accountRows],
     ["legacy_passkey", legacyRows],
     ...remapped,
     [
@@ -605,15 +622,21 @@ export async function applyImport(
   ]);
   const statements = insertStatements(all);
 
+  // Only files this import created are removed if it fails: a retried or
+  // doubled import must not delete what a first one put there.
   const put: string[] = [];
   try {
     for (const f of m.files) {
+      if (badFileKey(f.key, m.camp.id)) {
+        throw new Error("The bundle has files outside its own camp.");
+      }
       const bytes = await source.file(f.key);
       if ((await sha256(bytes)) !== f.sha256) {
         throw new Error(`File ${f.key} is damaged.`);
       }
+      const existed = !!(await blobs.get(f.key));
       await blobs.put(f.key, bytes);
-      put.push(f.key);
+      if (!existed) put.push(f.key);
     }
     await atomic([
       ...statements.map((s) => sql.raw(s)),

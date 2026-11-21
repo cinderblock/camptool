@@ -12,7 +12,17 @@
  * Server-only.
  */
 import { Buffer } from "node:buffer";
-import { and, desc, eq, gt, inArray, isNotNull, lt, or } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { data } from "react-router";
 import { db } from "../../../db/client.server";
 import { campMoveOut, membership, superAdmin, user } from "../../../db/schema";
@@ -27,6 +37,7 @@ import {
   sign,
 } from "./bundle";
 import { type CampExport, exportCamp } from "./export.server";
+import { PEOPLE_SOURCES } from "./registry";
 
 /** An unused move code stops working after this long. */
 export const CODE_DAYS = 7;
@@ -229,8 +240,8 @@ export async function completeMoveOut(
   now = new Date(),
 ): Promise<void> {
   if (row.state !== "open") throw new Error("This move isn't open.");
-  const people = row.campId ? (await signedBundle(row)).people : [];
-  await db
+  const people = await campPeople(row.campId);
+  const claimed = await db
     .update(campMoveOut)
     .set({
       state: "done",
@@ -240,7 +251,10 @@ export async function completeMoveOut(
       windowEndsAt: new Date(now.getTime() + WINDOW_DAYS * 86_400_000),
       people: JSON.stringify(people),
     })
-    .where(and(eq(campMoveOut.id, row.id), eq(campMoveOut.state, "open")));
+    .where(and(eq(campMoveOut.id, row.id), eq(campMoveOut.state, "open")))
+    .returning({ id: campMoveOut.id });
+  // Someone else finished it first (a doubled "done"): nothing more to do.
+  if (!claimed.length) return;
   if (row.campId) {
     await deleteCamp(row.campId);
     await db
@@ -248,6 +262,20 @@ export async function completeMoveOut(
       .set({ dataDeletedAt: now })
       .where(eq(campMoveOut.id, row.id));
   }
+}
+
+/** The camp's people (whose accounts travel with it): the same rule the
+ * export uses (`PEOPLE_SOURCES`), without exporting. */
+async function campPeople(campId: string): Promise<string[]> {
+  const ids = new Set<string>();
+  for (const s of PEOPLE_SOURCES) {
+    for (const r of await db.all<{ id: string | null }>(
+      sql`SELECT DISTINCT ${sql.identifier(s.column)} AS id FROM ${sql.identifier(s.table)} WHERE camp_id = ${campId}`,
+    )) {
+      if (r.id) ids.add(r.id);
+    }
+  }
+  return [...ids].sort();
 }
 
 /** Moves whose forwarding and login bridge are running. */

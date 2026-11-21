@@ -98,9 +98,11 @@ export async function movedCampResponse(
   // Public camp pages go to the camp's home there, which shows its public
   // page to anyone who isn't a member.
   const publicPage = url.pathname.startsWith("/c/");
+  // `//evil.example/x` as a path would otherwise name another host.
+  const path = url.pathname.replace(/^\/+/, "/");
   const target = publicPage
     ? move.targetCampUrl
-    : new URL(url.pathname + url.search, move.targetCampUrl).href;
+    : `${new URL(move.targetCampUrl).origin}${path}${url.search}`;
   if (request.method !== "GET") return redirect(target, 308);
   if (publicPage) return redirect(target);
   if (session) {

@@ -17,8 +17,8 @@ Design and reasoning: [`plans/camp-portability.md`](../plans/camp-portability.md
    it unlocks the camp's data.
 2. **On the new site**, the same person signs in (or signs up) with the same
    email address and opens **`/import-camp`** ("Bring a camp here"). They paste
-   the code and press **Check**. The page shows the camp, warnings, and who
-   each person becomes on the new site. Nothing is written yet.
+   the code and press **Check**. The page shows the camp, its people and any
+   warnings. Nothing is written yet.
 3. They pick the camp's address and press **Import the camp**. The new site
    tells the old one, which **deletes the camp there** and starts forwarding.
 
@@ -30,7 +30,8 @@ details aren't shown until that's confirmed.
 If the new site can't reach the old one (a private network, say), download the
 camp as a file from the old site's move page, choose it on `/import-camp`
 along with the code, and afterwards finish the move on the old site by giving
-the camp's new address.
+the camp's new address. A file is limited to 95 MB uploaded and 128 MB unpacked;
+a bigger camp moves by code, which fetches its files one at a time.
 
 To call a move off, use **Call off the move** on the old site's move page. The
 camp is writable again at once.
@@ -47,18 +48,24 @@ camp is writable again at once.
   support WebAuthn Related Origin Requests (Chrome and Edge 128+, Safari 18+):
   the old site lists the new one at `/.well-known/webauthn`. The new site's
   login page offers "Use a passkey from <old site>".
-- Discord sign-in keeps working wherever the new site has Discord set up.
+- Discord links don't come along (the old site's word is all a bundle has);
+  people link Discord again on the new site.
 
 Everyone the move brings in as a new account must **make a passkey** for the
 new site the first time they arrive.
 
-How people are matched on the new site:
+How people are matched on the new site. Nothing in a bundle proves who anyone
+is (the old site wrote it), so only the importer's own account is joined on
+the spot:
 
 | Situation | Result |
 | --- | --- |
-| No account there with their address | A new account, with their passkeys and Discord link |
-| An account there that is provably theirs (same Discord account, the same account coming back, or both addresses verified), or the person importing | That account joins the camp. Nothing is added to its sign-ins |
-| An account there with their address, but nothing proves it's theirs | Their place is held. They claim it by signing in once at the old site, then signing in to that account |
+| The person importing | Their account there joins the camp |
+| No account there with their address | A new account, with their passkeys (from the old site) |
+| An account there already has their address | Their place is held. They claim it by signing in once at the old site, then to that account. Nothing is ever added to an existing account's sign-ins |
+
+Only the new site's own admins see which of the camp's people already have
+accounts there.
 
 The old site keeps the camp's address reserved while it forwards. After the
 year, forwarding stops and accounts on the old site that are left in no camp

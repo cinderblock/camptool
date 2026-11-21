@@ -31,12 +31,14 @@ export const NEVER: Readonly<Record<string, string>> = {
   camp_move_in:
     "This install's record of where a camp came from, with that source's key.",
   camp_move_user: "Who each arriving person became on this install.",
+  account:
+    "Sign-in methods belong to the old site: passwords never move (decision 6), and a Discord link is only the old site's word, which could plant someone's Discord account in an account the old site controls.",
   legacy_passkey:
     "Passkeys for an even older address (a previous move); no browser can use them at a third address.",
 };
 
 /** Per-person tables, carried for the camp's people only. */
-export const IDENTITY = ["user", "account", "passkey"] as const;
+export const IDENTITY = ["user", "passkey"] as const;
 
 /** Who counts as one of the camp's people: their user rows (and sign-in
  * methods) travel with the camp. Anyone else a camp row points at (someone
@@ -47,35 +49,6 @@ export const PEOPLE_SOURCES: readonly { table: string; column: string }[] = [
   { table: "membership", column: "user_id" },
   { table: "recruit_application", column: "user_id" },
 ];
-
-/** Account columns that are secrets of the old install or its OAuth apps. */
-const ACCOUNT_SECRETS = [
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "access_token_expires_at",
-  "refresh_token_expires_at",
-  "scope",
-  "password",
-] as const;
-
-/**
- * An identity row as it may leave the install, or null to leave it out.
- * Passwords never move (decision 6): the `credential` account row is dropped,
- * and every OAuth token (minted for the old install's app) is cleared. What's
- * left of a Discord account is the Discord user id, which is what sign-in
- * matches on.
- */
-export function scrubIdentityRow(
-  table: (typeof IDENTITY)[number],
-  row: Record<string, unknown>,
-): Record<string, unknown> | null {
-  if (table !== "account") return row;
-  if (row.provider_id === "credential") return null;
-  const out = { ...row };
-  for (const c of ACCOUNT_SECRETS) if (c in out) out[c] = null;
-  return out;
-}
 
 /** Text columns holding structured data, and whether user ids hide inside. */
 export type JsonColumn =
