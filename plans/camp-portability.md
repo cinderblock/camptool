@@ -161,8 +161,8 @@ test that fails on any unclassified table (same idea as
 | Class | Rule | Tables (examples) |
 | --- | --- | --- |
 | camp | the `camp` row, and every row reachable from it by FK path | membership, map, attendee, wiki, … (derived from the Drizzle FK graph) |
-| member identity | only for users with a `membership` in this camp | `user`, `account` (Discord links only, never password rows), `passkey` public keys |
-| stub identity | users referenced by camp rows but not members (left, removed) | `user` with id + name only: no email, no credentials |
+| member identity | only the camp's people: users with a `membership` or `recruit_application` in this camp (`PEOPLE_SOURCES`) | `user`, `account` (Discord links only, never password rows), `passkey` public keys |
+| not coming | users camp rows point at who aren't the camp's people (a site admin, someone whose membership is gone) | nothing: nullable references cleared, rows that need them left out, cascading like the schema's FKs (same as deleting that account). Counted in `manifest.dropped` |
 | never | instance, transient or other-tenant | password hashes (`account.password`, credential-provider rows), `super_admin`, `instance_setting`, `camp_setup_link`, telemetry, `session`, `verification`, `password_reset`, `user_email_alias`, other camps' memberships |
 
 - Discord `account` rows carry `provider_id` + `account_id` (the Discord user
@@ -320,10 +320,11 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 
 1. [x] Open questions answered (decisions 6–9, 2026-11-20).
    [ ] **Current step: Cameron's go-ahead to build.**
-2. [ ] Table registry + classification test; JSON user-id registry.
-3. [ ] Exporter + bundle writer/reader + `camp-move.ts export|inspect`. Unit
-   tests: no row outside the camp, no super admin or other-camp data, round
-   trip.
+2. [x] Table registry + classification test; JSON user-id registry
+   (`app/lib/camp-move/registry.ts`, `schema-graph.ts`).
+3. [~] Exporter (`export.server.ts`), people remap (`remap.ts`), bundle
+   format, signing, move code, encrypted single file (`bundle.ts`). Unit
+   tests green. **Next:** `scripts/camp-move.ts export|inspect`.
 4. [ ] Importer on Bun: preflight (schema, slug, packs, user matching),
    create/link/claim, re-import and Replace. CLI `import --dry-run`.
 5. [ ] Importer on D1 (resumable batches, files to R2).
@@ -340,6 +341,17 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
     README pointer.
 
 ## Findings / gotchas
+
+- Every camp table but one carries a NOT NULL `camp_id`;
+  `setup_pass_stock_event` reaches the camp through `setup_pass_stock`.
+  `campTables()` derives both kinds of path.
+- `map_snapshot.data` is whole `select()` rows (JS keys) and restoring one
+  re-inserts them, so the `createdById` inside must be remapped like a real
+  column (`JSON_COLUMNS`). Other structured columns hold no user ids.
+- `structure_kind.value` is unique site-wide (`x-<random>`); a clash on import
+  is treated like any other unique conflict (abort).
+- `legacy_passkey` rows from an earlier move are not carried: their RP ID is a
+  third host no browser will use at the new address.
 
 - (Design-time) Passkeys can't change RP ID. Related Origin Requests lets a
   different origin use the old RP ID's passkeys, only while the old RP ID's
