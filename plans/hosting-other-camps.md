@@ -258,9 +258,15 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
       `mathcamp.camptool.org/` → 302 to `https://camptool.org/login?next=…`.
       The short-lived token was deleted by Cameron. `/_version` on the Worker
       says `dev` (no version stamped in Workers builds yet).
-   d. Discord: Cameron makes one "CampTool" application (redirect
-      `https://camptool.org/api/auth/callback/discord`), then its client ID,
-      secret and bot token go on the Worker.
+   d. [x] Discord (Cameron, 2026-11-20): one "CampTool" application (client
+      ID 1573508096523894905), redirect
+      `https://camptool.org/api/auth/callback/discord`, Server Members Intent
+      on. `DISCORD_CLIENT_ID` (Text), `DISCORD_CLIENT_SECRET` and
+      `DISCORD_BOT_TOKEN` (Secret) set on the Worker in the dashboard; no
+      `DISCORD_GUILD_ID` (each camp picks its server). Verified live:
+      `/api/auth/sign-in/social` returns the Discord authorize URL with that
+      client ID and redirect. Next: Math Camp adds the bot and its server ID
+      under Settings → Discord server.
    e. [-] Throwaway-camp smoke test dropped (Cameron, 2026-11-14): the
       import refuses a D1 with any users, and the first sign-up becomes
       super admin, so we cut over and tested with the real data instead.
