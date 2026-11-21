@@ -443,8 +443,12 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   the WAF rule "API circuit breaker" in both openslate.us and camptool.org
   (all camps go offline until the limit is raised or the month turns). The
   openslate-spend-breaker token now also has Zone WAF Edit on camptool.org.
-  Verified: rule exists on camptool.org, disabled; Cloudflare run green. A
-  failed switch sends an alert, so silence after 3:01 PM PST means it works.
+  Verified: rule exists on camptool.org, disabled; Cloudflare run green.
+  First hourly run checked 3:05 PM PST (23:05Z): the 3:01 PM poll wrote the
+  2:00 PM hour's usage rows to UPTIME_DB, both zones' rules still exist and
+  are off, and `notification_log` has no spend-breaker entry (a failed
+  switch logs one). The uptime worker doesn't send logs to Workers
+  Observability, so D1 is the place to check.
 
 ## Open questions for the user
 
