@@ -15,7 +15,7 @@ CREATE TABLE `camp_move_in` (
 --> statement-breakpoint
 CREATE TABLE `camp_move_out` (
 	`id` text PRIMARY KEY NOT NULL,
-	`camp_id` text,
+	`camp_id` text NOT NULL,
 	`camp_slug` text,
 	`camp_name` text NOT NULL,
 	`state` text DEFAULT 'open' NOT NULL,
@@ -32,7 +32,6 @@ CREATE TABLE `camp_move_out` (
 	`window_ends_at` integer,
 	`data_deleted_at` integer,
 	`people` text,
-	FOREIGN KEY (`camp_id`) REFERENCES `camp`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint

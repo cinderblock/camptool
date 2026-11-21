@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "83207f1c-27b1-451b-a866-1f02895fe206",
+  "id": "53c6b705-dcbf-4cb4-a8cc-76c32cf89370",
   "prevId": "769cb8d5-6dfc-439b-a448-6447e95e7366",
   "tables": {
     "announcement": {
@@ -5930,7 +5930,7 @@
           "name": "camp_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "camp_slug": {
@@ -6058,19 +6058,6 @@
         }
       },
       "foreignKeys": {
-        "camp_move_out_camp_id_camp_id_fk": {
-          "name": "camp_move_out_camp_id_camp_id_fk",
-          "tableFrom": "camp_move_out",
-          "tableTo": "camp",
-          "columnsFrom": [
-            "camp_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
         "camp_move_out_created_by_user_id_user_id_fk": {
           "name": "camp_move_out_created_by_user_id_user_id_fk",
           "tableFrom": "camp_move_out",

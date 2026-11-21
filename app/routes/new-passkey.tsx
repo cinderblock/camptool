@@ -88,8 +88,10 @@ export default function NewPasskey({ loaderData }: Route.ComponentProps) {
                 from <b>{oldHost}</b>
               </>
             ) : null}
-            . Passkeys only work at the address they were made for, so your old
-            one can't sign you in here.
+            .{" "}
+            {oldHost
+              ? "Passkeys only work at the address they were made for, so your old one can't sign you in here."
+              : "Passwords from your camp's old site don't come along."}
           </Text>
           <Text>
             Make a new one now; it takes a few seconds. It's how you'll sign in

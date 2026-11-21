@@ -34,6 +34,7 @@ import { authClient, signOut } from "~/lib/auth-client";
 import { getBinsMenu } from "~/lib/bins.server";
 import { weeksUntilEvent } from "~/lib/brc";
 import { campOrigin, isValidCampSlug, pageUrl } from "~/lib/camp-host";
+import { arrivedWithMove } from "~/lib/camp-move/move-in-auth.server";
 import { openMoveFor } from "~/lib/camp-move/move-out.server";
 import { loadCustomKinds } from "~/lib/custom-kinds.server";
 import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
@@ -93,7 +94,9 @@ export async function loader({ request }: Route.LoaderArgs) {
       .from(legacyPasskey)
       .where(eq(legacyPasskey.userId, user.id))
       .limit(1);
-    if (old) {
+    // Or arrived with a camp from another CampTool site (whose passwords
+    // never come along): passkeys from now on.
+    if (old || (await arrivedWithMove(user.id))) {
       const here = pageUrl(request.url);
       throw redirect(
         `/new-passkey?next=${encodeURIComponent(here.pathname + here.search)}`,

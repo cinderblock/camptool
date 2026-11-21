@@ -20,10 +20,9 @@ export const campMoveOut = sqliteTable(
   {
     /** Also the move id in the move code. */
     id: text("id").primaryKey(),
-    /** Cleared when the camp's data is deleted; the move row stays. */
-    campId: text("camp_id").references(() => camp.id, {
-      onDelete: "set null",
-    }),
+    /** The camp's id. Deliberately not a foreign key: the row outlives the
+     * camp's data, and the id is how the camp is recognised if it comes back. */
+    campId: text("camp_id").notNull(),
     /** Kept so forwarding still knows the camp's old address afterwards. */
     campSlug: text("camp_slug"),
     campName: text("camp_name").notNull(),

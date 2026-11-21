@@ -36,6 +36,14 @@ export default [
   route("api/move/:id/:what", "routes/api.move.tsx"),
   route("import-camp", "routes/import-camp.tsx"),
   route("move/bundle", "routes/move.bundle.tsx"),
+  // Arriving from a camp's old install: a signed sign-in, a claim, an old
+  // passkey checked here; and, on the old install, the page that points the
+  // way and the list of sites its passkeys may be used on.
+  route("move-handoff", "routes/move-handoff.tsx"),
+  route("move-claim", "routes/move-claim.tsx"),
+  route("moved/:moveId", "routes/moved.$moveId.tsx"),
+  route("api/move-passkey", "routes/api.move-passkey.tsx"),
+  route(".well-known/webauthn", "routes/well-known.webauthn.tsx"),
   // Starting a camp: with a super admin's setup link, or where anyone may.
   route("new-camp/:token?", "routes/new-camp.tsx"),
   // Super-admin DB backup download (resource route; self-gated).

@@ -14,6 +14,12 @@
  * loader can still come back as HTTP 200).
  */
 import { Database } from "bun:sqlite";
+import {
+  createHash,
+  createSign,
+  generateKeyPairSync,
+  randomBytes,
+} from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
@@ -149,10 +155,35 @@ try {
     db.close();
   }
 
+  // carol: new to B, signs in at A with a passkey (a software key here).
+  const carol = await signUp(A, "carol@example.com", "Carol");
+  const key = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const credId = Buffer.from(randomBytes(16)).toString("base64url");
+  {
+    const jwk = key.publicKey.export({ format: "jwk" });
+    // COSE_Key {1: 2 (EC2), 3: -7 (ES256), -1: 1 (P-256), -2: x, -3: y}
+    const cose = Buffer.concat([
+      Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]),
+      Buffer.from(jwk.x as string, "base64url"),
+      Buffer.from([0x22, 0x58, 0x20]),
+      Buffer.from(jwk.y as string, "base64url"),
+    ]);
+    const db = new Database(A.db);
+    db.run(
+      "INSERT INTO membership (id, camp_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'member', 'active', ?)",
+      [crypto.randomUUID(), camp.id, carol.id, Date.now()],
+    );
+    db.run(
+      "INSERT INTO passkey (id, name, public_key, user_id, credential_id, counter, device_type, backed_up) VALUES (?, 'Carol phone', ?, ?, ?, 0, 'singleDevice', 0)",
+      [crypto.randomUUID(), cose.toString("base64"), carol.id, credId],
+    );
+    db.close();
+  }
+
   // --- Target: people already there. ---
   await signUp(B, "owner-b@example.com", "Owner B");
   const aliceB = await signUp(B, "alice@example.com", "Alice (B)");
-  await signUp(B, "BOB@example.com", "Somebody else");
+  const bobB = await signUp(B, "BOB@example.com", "Somebody else");
 
   // --- Start the move on A. ---
   const start1 = await post(
@@ -228,8 +259,9 @@ try {
       )
       .all(camp.id) as { email: string; role: string }[];
     check(
-      "B: members are alice (her existing account) and a claim placeholder",
-      members.length === 2 &&
+      "B: members are alice (her existing account), carol (new) and a claim placeholder",
+      members.length === 3 &&
+        members.some((m) => m.email === "carol@example.com") &&
         members.some(
           (m) => m.email === "alice@example.com" && m.role === "admin",
         ) &&
@@ -267,7 +299,7 @@ try {
     );
     check(
       "A: it remembers the camp's people",
-      JSON.parse(out?.people ?? "[]").length === 2,
+      JSON.parse(out?.people ?? "[]").length === 3,
     );
     db.close();
     const files = [
@@ -288,6 +320,184 @@ try {
     "B: the code is used up",
     (await again.text()).includes("doesn"),
     `HTTP ${again.status}`,
+  );
+
+  // --- Logins after the move. ---
+  const go = (url: string, cookie = "") =>
+    fetch(url, { headers: cookie ? { cookie } : {}, redirect: "manual" });
+  const loc = (r: Response) => r.headers.get("location") ?? "";
+
+  const anon = await go(`${A.url}/wiki`);
+  check(
+    "A: a signed-out visitor is pointed at the move page",
+    anon.status === 302 && loc(anon).startsWith(`${A.url}/moved/`),
+    loc(anon),
+  );
+  const movedPage = await go(loc(anon));
+  check(
+    "A: the move page names the new home",
+    movedPage.status === 200 &&
+      (await movedPage.text()).includes("localhost:17982"),
+  );
+
+  const carolHop = await go(`${A.url}/wiki`, carol.cookie);
+  const handoff = loc(carolHop);
+  check(
+    "A: carol, signed in there, is handed to B",
+    handoff.startsWith(`${B.url}/move-handoff?t=`),
+    handoff,
+  );
+  const landed = await go(handoff);
+  const carolB = cookieOf(landed);
+  check(
+    "B: the hand-off signs carol in and goes on to the same page",
+    landed.status === 302 && !!carolB && loc(landed) === `${B.url}/wiki`,
+    `${landed.status} ${loc(landed)}`,
+  );
+  const replay = await go(handoff);
+  check(
+    "B: a hand-off works once",
+    !cookieOf(replay) && loc(replay).startsWith("/login"),
+    loc(replay),
+  );
+  const forced = await go(`${B.url}/`, carolB);
+  check(
+    "B: carol must make a passkey here first",
+    loc(forced).startsWith("/new-passkey"),
+    loc(forced),
+  );
+
+  const aliceHop = await go(loc(await go(`${A.url}/`, alice.cookie)));
+  check(
+    "B: no hand-off into an account that was already here (alice)",
+    !cookieOf(aliceHop) && loc(aliceHop).startsWith("/login"),
+    loc(aliceHop),
+  );
+
+  const bobHop = await go(loc(await go(`${A.url}/`, bob.cookie)));
+  const claimUrl = loc(bobHop);
+  check(
+    "B: bob is sent to claim his place",
+    claimUrl.startsWith("/move-claim?c="),
+    claimUrl,
+  );
+  const claimed = await post(B, claimUrl, bobB.cookie, new URLSearchParams());
+  check(
+    "B: bob claims it with the account he has here",
+    claimed.status === 302,
+    `HTTP ${claimed.status}`,
+  );
+  {
+    const db = new Database(B.db, { readonly: true });
+    const m = db
+      .query(
+        "SELECT count(*) AS n FROM membership WHERE camp_id = ? AND user_id = ?",
+      )
+      .get(camp.id, bobB.id) as { n: number };
+    const ph = db
+      .query(
+        "SELECT count(*) AS n FROM user WHERE email LIKE '%@claim.invalid'",
+      )
+      .get() as { n: number };
+    check(
+      "B: bob's account is in the camp; the placeholder is gone",
+      m.n === 1 && ph.n === 0,
+    );
+    db.close();
+  }
+
+  const wk = await go(`${A.url}/.well-known/webauthn`);
+  const wkBody = (await wk.json().catch(() => ({}))) as { origins?: string[] };
+  check(
+    "A: its passkeys may be used at B (related origins)",
+    JSON.stringify(wkBody.origins) === JSON.stringify([B.url]),
+    JSON.stringify(wkBody),
+  );
+
+  // carol's passkey from A, used directly at B.
+  const pk = (body: unknown) =>
+    fetch(`${B.url}/api/move-passkey`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: B.url },
+      body: JSON.stringify(body),
+    });
+  const assertion = (challenge: string, origin: string) => {
+    const clientDataJSON = Buffer.from(
+      JSON.stringify({ type: "webauthn.get", challenge, origin }),
+    );
+    const counter = Buffer.alloc(4);
+    counter.writeUInt32BE(Math.floor(Date.now() / 1000));
+    const authData = Buffer.concat([
+      createHash("sha256").update("localhost").digest(),
+      Buffer.from([0x05]),
+      counter,
+    ]);
+    const signature = createSign("SHA256")
+      .update(
+        Buffer.concat([
+          authData,
+          createHash("sha256").update(clientDataJSON).digest(),
+        ]),
+      )
+      .sign(key.privateKey);
+    return {
+      id: credId,
+      rawId: credId,
+      type: "public-key",
+      clientExtensionResults: {},
+      response: {
+        authenticatorData: Buffer.from(authData).toString("base64url"),
+        clientDataJSON: Buffer.from(clientDataJSON).toString("base64url"),
+        signature: Buffer.from(signature).toString("base64url"),
+      },
+    };
+  };
+  const loginPage = await (await go(`${B.url}/login`)).text();
+  check(
+    "B: the login page offers passkeys from the old site",
+    loginPage.includes("Use a passkey from") &&
+      loginPage.includes(`${A.url}/moved/`),
+  );
+  const o1 = (await (
+    await pk({ step: "options", rpId: "localhost" })
+  ).json()) as {
+    id: string;
+    options: { challenge: string };
+  };
+  const wrong = await pk({
+    step: "verify",
+    id: o1.id,
+    response: assertion(o1.options.challenge, "http://evil.test"),
+  });
+  check(
+    "B: an old passkey signed for another site is refused",
+    wrong.status === 401,
+    `HTTP ${wrong.status}`,
+  );
+  const o2 = (await (
+    await pk({ step: "options", rpId: "localhost" })
+  ).json()) as typeof o1;
+  const good = await pk({
+    step: "verify",
+    id: o2.id,
+    response: assertion(o2.options.challenge, B.url),
+  });
+  check(
+    "B: carol signs in with her passkey from A",
+    good.ok && !!cookieOf(good),
+    `HTTP ${good.status}`,
+  );
+
+  const taken = await post(
+    A,
+    "/new-camp",
+    (await signUp(A, "dora@example.com", "Dora")).cookie,
+    new URLSearchParams({ name: "Squatters", slug: "movers" }),
+  );
+  check(
+    "A: the old address is held while it forwards",
+    (await taken.text()).includes("moved to another site"),
+    `HTTP ${taken.status}`,
   );
 } catch (e) {
   bad++;

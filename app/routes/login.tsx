@@ -14,12 +14,14 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { notifications } from "@mantine/notifications";
+import { startAuthentication } from "@simplewebauthn/browser";
 import { useState } from "react";
 import { redirect, useNavigate } from "react-router";
 import { NoMailRecoveryNote } from "~/components/NoMailRecoveryNote";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";
 import { signIn, signUp } from "~/lib/auth-client";
 import { safeNext } from "~/lib/camp-host";
+import { movedFrom as campsMovedIn } from "~/lib/camp-move/move-in-auth.server";
 import { APEX } from "~/lib/env.server";
 import { getInstanceSettings } from "~/lib/instance.server";
 import { LEGACY_HOSTS } from "~/lib/legacy-host.server";
@@ -47,6 +49,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     // Same scheme and (in local dev) port as here.
     bridge: `${APEX.protocol}//${host}${!host.includes(":") && APEX.port ? `:${APEX.port}` : ""}/moved${next ? `?next=${encodeURIComponent(next)}` : ""}`,
   }));
+  // Camps that moved here from another CampTool site
+  // (plans/camp-portability.md): their passkeys can be used here directly,
+  // where the browser supports it, or once at the old site.
+  const campMoves = (await campsMovedIn()).map((m) => ({
+    rpId: m.rpId,
+    bridge: `${m.sourceOrigin}/moved/${m.moveId}`,
+  }));
   return {
     discordEnabled,
     mailEnabled,
@@ -54,6 +63,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     justReset,
     next,
     movedFrom,
+    campMoves,
   };
 }
 
@@ -144,6 +154,30 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     go();
   }
 
+  async function handleOldSitePasskey(rpId: string) {
+    setBusy(true);
+    try {
+      const post = (body: unknown) =>
+        fetch("/api/move-passkey", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      const start = await post({ step: "options", rpId });
+      const { id, options } = await start.json();
+      const response = await startAuthentication({ optionsJSON: options });
+      const done = await post({ step: "verify", id, response, next });
+      const out = await done.json();
+      if (!done.ok) throw new Error(out.error ?? "Sign in failed");
+      window.location.assign(out.url);
+    } catch (e) {
+      setBusy(false);
+      fail(
+        `${e instanceof Error ? e.message : String(e)} If your browser can't use a passkey from ${rpId} here, use the link to sign in there once instead.`,
+      );
+    }
+  }
+
   async function handleDiscord() {
     await signIn.social({ provider: "discord", callbackURL: next ?? "/" });
   }
@@ -175,6 +209,31 @@ export default function Login({ loaderData }: Route.ComponentProps) {
           here. A passkey made for {host} doesn't, so{" "}
           <Anchor href={bridge}>use it once at {host}</Anchor> to get signed in
           here, then make a new one.
+        </Alert>
+      ))}
+
+      {loaderData.campMoves.map(({ rpId, bridge }) => (
+        <Alert
+          key={rpId}
+          color="blue"
+          mt="lg"
+          title={`Your camp moved here from ${rpId}?`}
+        >
+          <Stack gap="xs">
+            <Text size="sm">
+              Your account came along. Sign in with a passkey you made there, or{" "}
+              <Anchor href={bridge}>sign in at {rpId} once</Anchor> and
+              you&apos;ll arrive here signed in.
+            </Text>
+            <Button
+              size="xs"
+              variant="light"
+              loading={busy}
+              onClick={() => handleOldSitePasskey(rpId)}
+            >
+              Use a passkey from {rpId}
+            </Button>
+          </Stack>
         </Alert>
       ))}
 

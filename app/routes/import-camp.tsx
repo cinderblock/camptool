@@ -37,6 +37,7 @@ import {
   setupLinkState,
 } from "~/lib/camp-admin.server";
 import { campOrigin } from "~/lib/camp-host";
+import { forgetMoves } from "~/lib/camp-move/forward.server";
 import {
   applyImport,
   loadRows,
@@ -178,6 +179,7 @@ export async function action({
       : await preflight(fetched.source, rows, {
           slug,
           importer: { id: session.user.id, email: session.user.email },
+          linkId: link?.id,
         });
 
     const allProblems = [...problems, ...(plan?.problems ?? [])];
@@ -199,6 +201,7 @@ export async function action({
         await recordSetupLinkCamp(link.id, done.campId);
       }
       if (upload) await blobs.delete(upload);
+      forgetMoves();
       const campUrl = CAMP_SUBDOMAINS
         ? `${campOrigin(done.slug, APEX)}/`
         : `${APEX.origin}/`;

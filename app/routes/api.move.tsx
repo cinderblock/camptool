@@ -12,6 +12,7 @@
  */
 import { data } from "react-router";
 import { blobs } from "~/lib/blobs.server";
+import { forgetMoves } from "~/lib/camp-move/forward.server";
 import {
   authorizePull,
   completeMoveOut,
@@ -84,6 +85,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     return data({ error: "Bad origin." }, { status: 400 });
   }
   await completeMoveOut(row, { origin, campUrl });
+  forgetMoves();
   const done = await findMoveOut(row.id);
   return data({
     ok: true,

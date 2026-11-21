@@ -334,15 +334,25 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
    write. Round-trip test green (`import.test.ts`).
 5. [ ] Importer verified on D1 under `wrangler dev` (host-neutral code; no
    separate implementation needed, but unproven there). Folded into step 9.
-6. [ ] Move handshake: move code, freeze, pull API, done callback, UI on both
-   sides (camp settings → "Move this camp"; setup link / Site admin →
-   "Import a camp").
-7. [ ] Logins: signed hand-off, claim flow, `/.well-known/webauthn` + direct
-   legacy passkey sign-in, forced new credential.
-8. [ ] Forwarding, delete-after-move, window expiry cleanup.
-9. [ ] e2e in all four directions (two local installs: Bun and `wrangler
-   dev`), browser test for Related Origin Requests with a virtual
-   authenticator (`camptool.test` style names, see hosting plan Findings).
+6. [x] Move handshake: move code, freeze (in `resolveActiveCamp`, the write
+   chokepoint), pull API (`/api/move/:id/:what`), done callback, `/move`
+   (Camp settings → Move this camp), `/import-camp` (anyone who may start a
+   camp; `?link=` for a setup link), encrypted bundle download
+   (`/move/bundle`), "Finish the move" by hand for file moves.
+7. [x] Logins: signed hand-off (`handoff.server.ts`, `/move-handoff`), claim
+   flow (`/move-claim`), `/.well-known/webauthn` + direct old-passkey
+   sign-in (`/api/move-passkey`, login page), forced new passkey for anyone
+   a move created.
+8. [x] Forwarding (`forward.server.ts` in the root middleware), old address
+   held (`slugProblem`), delete after confirm, window expiry
+   (`endExpiredMoves`, run lazily from the forwarding cache refresh).
+   A camp returning to a site it left ends that site's tombstone.
+9. [~] e2e: `e2e/camp-portability.ts`, Bun → Bun, 35/35 (2026-11-21):
+   import, freeze, delete, forwarding, hand-off (once only, never into an
+   existing account), forced passkey, claim, related origins, old passkey
+   signed for the new origin (software key), old address held. **Still to
+   do:** a `wrangler dev` (D1/R2) side in both directions, subdomain mode on
+   the source, and a real browser exercising Related Origin Requests.
 10. [ ] Docs: `docs/moving-a-camp.md` for camp admins and self-hosters;
     README pointer.
 
@@ -360,6 +370,14 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
   `lower(email)` (found by the import test: `IM-DAVE@…` wasn't matched).
 - Drizzle wraps driver errors ("Failed to run the query …"); the SQLite
   reason ("UNIQUE constraint failed") is on `.cause`.
+- better-auth's organization ids aren't UUIDs (32 random characters);
+  nothing here assumes they are. Move ids are UUIDs.
+- `slugProblem` changed shape on master while this was built (takes
+  `{ campId, linkId }`); the moved-away hold is the last check in it.
+- Keep-a-read-only-copy (decision 8's option) dropped: the camp's old links
+  forward, so nobody could reach a kept copy anyway. Data goes on confirm.
+- `camp_move_out.camp_id` has no foreign key on purpose: the row outlives the
+  camp, and the id recognises it if it comes back.
 - `legacy_passkey` rows from an earlier move are not carried: their RP ID is a
   third host no browser will use at the new address.
 
@@ -370,6 +388,8 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
   of identity, see User matching.
 
 ## Progress log
+
+- [x] 2026-11-21: steps 2–8 built; e2e Bun → Bun green (35/35).
 
 - [x] 2026-11-20: design written (this file).
 - [x] 2026-11-20: Cameron's answers folded in: no passwords, 1-year window,

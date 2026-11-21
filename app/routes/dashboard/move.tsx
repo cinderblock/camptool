@@ -26,6 +26,7 @@ import {
 import { useState } from "react";
 import { data, Form, redirect, useNavigation } from "react-router";
 import { LocalTime } from "~/components/LocalTime";
+import { forgetMoves } from "~/lib/camp-move/forward.server";
 import {
   CODE_DAYS,
   cancelMoveOut,
@@ -107,6 +108,7 @@ export async function action({ request }: Route.ActionArgs) {
       return data({ error: "Tick the box to confirm." }, { status: 400 });
     }
     await completeMoveOut(move, { origin: url.origin, campUrl: url.href });
+    forgetMoves();
     throw redirect("/");
   }
   return data({ error: "Unknown action." }, { status: 400 });

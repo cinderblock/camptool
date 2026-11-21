@@ -326,7 +326,12 @@ export async function planPeople(
 export async function preflight(
   source: BundleSource,
   rows: Rows,
-  opts: { slug?: string; importer?: { id: string; email: string } | null } = {},
+  opts: {
+    slug?: string;
+    importer?: { id: string; email: string } | null;
+    /** The setup link being used, whose own hold on the address doesn't count. */
+    linkId?: string;
+  } = {},
 ): Promise<Preflight> {
   const m = source.manifest;
   const problems = schemaProblems(m);
@@ -344,7 +349,9 @@ export async function preflight(
     );
   }
   const slug = (opts.slug ?? m.camp.slug ?? "").trim().toLowerCase();
-  const slugIssue = slug ? await slugProblem(slug) : "Pick an address.";
+  const slugIssue = slug
+    ? await slugProblem(slug, { campId: m.camp.id, linkId: opts.linkId })
+    : "Pick an address.";
 
   const packs = parseStructurePacks(campRow?.structure_packs as string | null);
   const bundled = new Set(PACKS.map((p) => p.key));
@@ -608,7 +615,11 @@ export async function applyImport(
       await blobs.put(f.key, bytes);
       put.push(f.key);
     }
-    await atomic(statements.map((s) => sql.raw(s)));
+    await atomic([
+      ...statements.map((s) => sql.raw(s)),
+      // A camp coming back to a site it once left: stop forwarding it away.
+      sql`UPDATE camp_move_out SET state = 'ended' WHERE camp_id = ${m.camp.id} AND state = 'done'`,
+    ]);
   } catch (e) {
     for (const k of put) await blobs.delete(k).catch(() => {});
     throw new Error(explain(e));

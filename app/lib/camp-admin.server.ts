@@ -4,7 +4,7 @@
  */
 import { and, eq, gt, isNull, ne } from "drizzle-orm";
 import { db } from "../../db/client.server";
-import { camp, campSetupLink, membership } from "../../db/schema";
+import { camp, campMoveOut, campSetupLink, membership } from "../../db/schema";
 import { blobs } from "./blobs.server";
 import { isValidCampSlug, RESERVED_SLUGS } from "./camp-host";
 import { newInviteToken } from "./invite.server";
@@ -48,7 +48,24 @@ export async function slugProblem(
       ),
     )
     .limit(1);
-  return held ? "A camp setup link is holding that address." : null;
+  if (held) return "A camp setup link is holding that address.";
+  // A camp that moved away keeps its old address while its links forward
+  // (plans/camp-portability.md), unless it's that same camp coming back.
+  const [moved] = await db
+    .select({ id: campMoveOut.id })
+    .from(campMoveOut)
+    .where(
+      and(
+        eq(campMoveOut.campSlug, slug),
+        eq(campMoveOut.state, "done"),
+        gt(campMoveOut.windowEndsAt, new Date()),
+        except.campId ? ne(campMoveOut.campId, except.campId) : undefined,
+      ),
+    )
+    .limit(1);
+  return moved
+    ? "That address belonged to a camp that moved to another site; it's kept for its old links for now."
+    : null;
 }
 
 /** Make a camp with `userId` as its first admin. Returns its id, or why not. */

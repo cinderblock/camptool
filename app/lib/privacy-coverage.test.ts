@@ -35,6 +35,14 @@ const EXEMPT: Record<string, string> = {
     "Its loader returns only the viewer's own name and address; the people list comes from the action, after the camp's admin is identified.",
   "routes/move.bundle.tsx":
     "Streams the encrypted camp bundle file for a move; not a rendered payload.",
+  "routes/move-handoff.tsx":
+    "Turns a signed hand-off from a camp's old site into a session and redirects; returns no payload.",
+  "routes/move-claim.tsx":
+    "Shows only the claimer's own address and the viewer's own name.",
+  "routes/moved.$moveId.tsx":
+    "A moved camp's old address: renders only the camp's name and its new host.",
+  "routes/well-known.webauthn.tsx":
+    "Public list of sites this site's passkeys may be used on; no camp or personal data.",
   "routes/dashboard/move.tsx":
     "Returns only the camp's name and its move code; no person data.",
   "routes/export-db.tsx":

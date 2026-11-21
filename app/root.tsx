@@ -23,6 +23,7 @@ import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 
 import { Announcer, SkipLink } from "~/components/Announcer";
+import { movedCampResponse } from "~/lib/camp-move/forward.server";
 import { legacyHostResponse } from "~/lib/legacy-host.server";
 import { installTelemetry, pushCrumb } from "~/lib/telemetry.client";
 import type { Route } from "./+types/root";
@@ -33,6 +34,8 @@ import type { Route } from "./+types/root";
 // route.
 export const middleware: Route.MiddlewareFunction[] = [
   async ({ request }, next) => (await legacyHostResponse(request)) ?? next(),
+  // A camp that moved to another CampTool site: its old links go there.
+  async ({ request }, next) => (await movedCampResponse(request)) ?? next(),
 ];
 
 // Mantine's body background only resolves once its CSS + ColorSchemeScript run.
