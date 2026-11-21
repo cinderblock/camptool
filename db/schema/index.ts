@@ -17,6 +17,7 @@ export * from "./instance";
 export * from "./inventory";
 export * from "./map";
 export * from "./meeting";
+export * from "./move";
 export * from "./programming";
 export * from "./prospect";
 export * from "./question";

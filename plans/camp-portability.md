@@ -183,8 +183,9 @@ existing target row, except the explicit re-import replace below.
 - **Camp id** kept. If the target already has that camp id:
   - only a tombstone (it moved away from here earlier) → import, clear the
     tombstone (the camp is back);
-  - a live camp → refuse, unless the target's super admin chooses **Replace**
-    (a backup is taken first, then `deleteCamp`, then import).
+  - a live camp → refuse: "delete that copy first" (Site admin → Camps, the
+    existing typed-confirmation delete). No in-import Replace: one destructive
+    path, already guarded, is enough.
 - **Slug**: kept if free and valid; otherwise the importer picks a new one
   (same picker as camp setup). The old slug is remembered for forwarding.
 - **Any other PK collision** (a row id that already exists outside this camp)
@@ -194,10 +195,12 @@ existing target row, except the explicit re-import replace below.
   back if the pack is added.
 - **Discord server id** carries; the post-import checklist says to invite the
   target's bot.
-- Atomicity: Bun runs it as one transaction. D1 runs it in resumable batches
-  under a `camp_move_in` row in state `importing`; the camp stays hidden
-  (not reachable, not listed) until the last step flips it live, and a failed
-  import can be rolled back with `deleteCamp`.
+- Atomicity: files are uploaded first (keys are the camp's, so nothing else
+  is touched), then every row goes in one `atomic()` call: one transaction on
+  Bun, one batch on D1 (a batch is a transaction). Multi-row INSERTs with
+  literal values keep D1's statement count low and its 100-parameter limit
+  out of play; each statement stays under 90 kB. If the rows fail, the
+  uploaded files are deleted again. No half-imported camp ever exists.
 
 ### User matching (the hard part)
 
@@ -324,10 +327,13 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
    (`app/lib/camp-move/registry.ts`, `schema-graph.ts`).
 3. [~] Exporter (`export.server.ts`), people remap (`remap.ts`), bundle
    format, signing, move code, encrypted single file (`bundle.ts`). Unit
-   tests green. **Next:** `scripts/camp-move.ts export|inspect`.
-4. [ ] Importer on Bun: preflight (schema, slug, packs, user matching),
-   create/link/claim, re-import and Replace. CLI `import --dry-run`.
-5. [ ] Importer on D1 (resumable batches, files to R2).
+   tests green. CLI moved to step 6 (it drives the same handshake).
+4. [x] Importer (`import.server.ts`): signature + hash checks, ignores
+   tables that aren't a camp's here, schema/column check, preflight (slug,
+   packs, Discord, dropped rows, people), create/link/claim, one atomic
+   write. Round-trip test green (`import.test.ts`).
+5. [ ] Importer verified on D1 under `wrangler dev` (host-neutral code; no
+   separate implementation needed, but unproven there). Folded into step 9.
 6. [ ] Move handshake: move code, freeze, pull API, done callback, UI on both
    sides (camp settings → "Move this camp"; setup link / Site admin →
    "Import a camp").
@@ -350,6 +356,10 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
   column (`JSON_COLUMNS`). Other structured columns hold no user ids.
 - `structure_kind.value` is unique site-wide (`x-<random>`); a clash on import
   is treated like any other unique conflict (abort).
+- SQLite's `=`/`IN` on `user.email` is case-sensitive; matching uses
+  `lower(email)` (found by the import test: `IM-DAVE@…` wasn't matched).
+- Drizzle wraps driver errors ("Failed to run the query …"); the SQLite
+  reason ("UNIQUE constraint failed") is on `.cause`.
 - `legacy_passkey` rows from an earlier move are not carried: their RP ID is a
   third host no browser will use at the new address.
 

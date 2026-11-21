@@ -26,6 +26,11 @@ export const NEVER: Readonly<Record<string, string>> = {
   feedback: "Instance telemetry.",
   password_reset:
     "One-time recovery credentials (decision 6: no passwords move).",
+  camp_move_out:
+    "This install's record of a camp leaving; it stays here to forward links.",
+  camp_move_in:
+    "This install's record of where a camp came from, with that source's key.",
+  camp_move_user: "Who each arriving person became on this install.",
   legacy_passkey:
     "Passkeys for an even older address (a previous move); no browser can use them at a third address.",
 };
