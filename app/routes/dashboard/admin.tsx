@@ -21,6 +21,7 @@ import { notifications } from "@mantine/notifications";
 import { and, asc, count, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
 import { data, redirect, useFetcher } from "react-router";
+import { LocalTime } from "~/components/LocalTime";
 import {
   createSetupLink,
   deleteCamp,
@@ -30,6 +31,7 @@ import {
   setupLinkState,
 } from "~/lib/camp-admin.server";
 import { campOrigin, isValidCampSlug } from "~/lib/camp-host";
+import { listMovesOut } from "~/lib/camp-move/move-out.server";
 import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
 import {
   getInstanceSettings,
@@ -48,6 +50,7 @@ import {
 import { db } from "../../../db/client.server";
 import {
   camp,
+  campMoveIn,
   campSetupLink,
   clientError,
   feedback,
@@ -188,6 +191,34 @@ export async function loader({ request }: Route.LoaderArgs) {
       slug: l.slug,
     }));
 
+  // Camps moving between this site and others (plans/camp-portability.md).
+  const movesOut = (await listMovesOut()).slice(0, 20).map((m) => ({
+    id: m.id,
+    campName: m.campName,
+    state: m.state,
+    target: m.targetCampUrl,
+    created: m.createdAt.toISOString(),
+    windowEnds: m.windowEndsAt?.toISOString() ?? null,
+  }));
+  const movesIn = (
+    await db
+      .select({
+        id: campMoveIn.id,
+        campName: camp.name,
+        from: campMoveIn.sourceCampUrl,
+        created: campMoveIn.createdAt,
+        windowEnds: campMoveIn.windowEndsAt,
+      })
+      .from(campMoveIn)
+      .innerJoin(camp, eq(camp.id, campMoveIn.campId))
+      .orderBy(desc(campMoveIn.createdAt))
+      .limit(20)
+  ).map((m) => ({
+    ...m,
+    created: m.created.toISOString(),
+    windowEnds: m.windowEnds.toISOString(),
+  }));
+
   // Site admin spans every camp, so the lens's free-text vocabulary (which is
   // camp-scoped) won't know other camps' people — but the field rules do the
   // heavy lifting here, and names/emails/telemetry are keyed, not prose.
@@ -203,6 +234,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     recentFeedback,
     camps,
     setupLinks,
+    movesOut,
+    movesIn,
     setupLinkDays: SETUP_LINK_DAYS,
     apexHost: CAMP_SUBDOMAINS ? APEX.host : null,
   });
@@ -329,6 +362,8 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
     recentFeedback,
     camps,
     setupLinks,
+    movesOut,
+    movesIn,
     setupLinkDays,
     apexHost,
   } = loaderData;
@@ -375,6 +410,68 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
               days={setupLinkDays}
               apexHost={apexHost}
             />
+          </Stack>
+        </Card>
+
+        <Card withBorder radius="md" padding="lg">
+          <Stack gap="md">
+            <Title order={4}>Camp moves</Title>
+            <Text size="sm" c="dimmed">
+              Camps moving between this site and other CampTool sites. A camp
+              admin starts a move under Camp settings; the other site brings it
+              in at{" "}
+              <Anchor href="/import-camp" size="sm">
+                Bring a camp here
+              </Anchor>
+              . Old links and sign-ins follow a moved camp for a year.
+            </Text>
+            {movesOut.length + movesIn.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                None yet.
+              </Text>
+            ) : (
+              <Table striped withTableBorder fz="sm">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Camp</Table.Th>
+                    <Table.Th>Where</Table.Th>
+                    <Table.Th>Until</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {movesOut.map((m) => (
+                    <Table.Tr key={`out-${m.id}`}>
+                      <Table.Td>{m.campName}</Table.Td>
+                      <Table.Td>
+                        {m.state === "open"
+                          ? "Leaving (frozen, code issued)"
+                          : m.state === "done"
+                            ? `Moved to ${m.target ?? "?"}`
+                            : m.state === "ended"
+                              ? `Moved to ${m.target ?? "?"} (forwarding over)`
+                              : "Move called off"}
+                      </Table.Td>
+                      <Table.Td>
+                        {m.windowEnds && m.state === "done" ? (
+                          <LocalTime iso={m.windowEnds} format="YYYY-MM-DD" />
+                        ) : (
+                          "—"
+                        )}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                  {movesIn.map((m) => (
+                    <Table.Tr key={`in-${m.id}`}>
+                      <Table.Td>{m.campName}</Table.Td>
+                      <Table.Td>Arrived from {m.from}</Table.Td>
+                      <Table.Td>
+                        <LocalTime iso={m.windowEnds} format="YYYY-MM-DD" />
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            )}
           </Stack>
         </Card>
 

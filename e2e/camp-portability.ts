@@ -224,7 +224,7 @@ try {
   await start(B);
 
   // --- Source: a camp with two people and a picture. ---
-  await signUp(A, "owner-a@example.com", "Owner A"); // first user: site admin
+  const ownerA = await signUp(A, "owner-a@example.com", "Owner A"); // first user: site admin
   const alice = await signUp(A, "alice@example.com", "Alice");
   const H = {
     "content-type": "application/json",
@@ -444,6 +444,12 @@ try {
     "B: the code is used up",
     (await again.text()).includes("doesn"),
     `HTTP ${again.status}`,
+  );
+
+  const adminPage = await (await page(`${A.url}/admin`, ownerA.cookie)).text();
+  check(
+    "A: Site admin lists the move",
+    adminPage.includes("Camp moves") && adminPage.includes("Moved to "),
   );
 
   // --- Logins after the move. ---
