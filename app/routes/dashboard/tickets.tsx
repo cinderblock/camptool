@@ -80,24 +80,60 @@ export async function loader({ request }: Route.LoaderArgs) {
   const published = activeEdition.ticketsPublishedAt != null;
   const myMembershipId = active.membership.id;
 
-  const rawTickets = await db
-    .select({
-      id: ticket.id,
-      tier: ticket.tier,
-      priceCents: ticket.priceCents,
-      status: ticket.status,
-      notes: ticket.notes,
-      assignedAttendeeId: ticket.assignedAttendeeId,
-      attMembershipId: attendee.membershipId,
-      attHostId: attendee.hostMembershipId,
-      guestName: attendee.name,
-      memberName: user.name,
-    })
-    .from(ticket)
-    .leftJoin(attendee, eq(ticket.assignedAttendeeId, attendee.id))
-    .leftJoin(membership, eq(attendee.membershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(eq(ticket.editionId, editionId));
+  // These reads are independent, so they go out together rather than one D1
+  // round trip each (plans/fast-navigation.md). The officer-only picker lists
+  // still run only for officers.
+  const [rawTickets, requestRows, officerMemberRows, officerGuestRows] =
+    await Promise.all([
+      db
+        .select({
+          id: ticket.id,
+          tier: ticket.tier,
+          priceCents: ticket.priceCents,
+          status: ticket.status,
+          notes: ticket.notes,
+          assignedAttendeeId: ticket.assignedAttendeeId,
+          attMembershipId: attendee.membershipId,
+          attHostId: attendee.hostMembershipId,
+          guestName: attendee.name,
+          memberName: user.name,
+        })
+        .from(ticket)
+        .leftJoin(attendee, eq(ticket.assignedAttendeeId, attendee.id))
+        .leftJoin(membership, eq(attendee.membershipId, membership.id))
+        .leftJoin(user, eq(membership.userId, user.id))
+        .where(eq(ticket.editionId, editionId)),
+      db
+        .select({
+          id: ticketRequest.id,
+          membershipId: ticketRequest.membershipId,
+          requesterName: user.name,
+          note: ticketRequest.note,
+          status: ticketRequest.status,
+        })
+        .from(ticketRequest)
+        .leftJoin(membership, eq(ticketRequest.membershipId, membership.id))
+        .leftJoin(user, eq(membership.userId, user.id))
+        .where(eq(ticketRequest.editionId, editionId)),
+      isOfficer
+        ? db
+            .select({ id: membership.id, name: user.name })
+            .from(membership)
+            .innerJoin(user, eq(membership.userId, user.id))
+            .where(eq(membership.organizationId, active.camp.id))
+        : null,
+      isOfficer
+        ? db
+            .select({ id: attendee.id, name: attendee.name })
+            .from(attendee)
+            .where(
+              and(
+                eq(attendee.editionId, editionId),
+                isNotNull(attendee.hostMembershipId),
+              ),
+            )
+        : null,
+    ]);
 
   const allTickets: TicketRow[] = rawTickets
     .map((t) => ({
@@ -136,40 +172,17 @@ export async function loader({ request }: Route.LoaderArgs) {
       ? allTickets.filter((t) => t.mine)
       : [];
 
-  const requests = (await db
-    .select({
-      id: ticketRequest.id,
-      membershipId: ticketRequest.membershipId,
-      requesterName: user.name,
-      note: ticketRequest.note,
-      status: ticketRequest.status,
-    })
-    .from(ticketRequest)
-    .leftJoin(membership, eq(ticketRequest.membershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(eq(ticketRequest.editionId, editionId))) satisfies RequestRow[];
+  const requests = requestRows satisfies RequestRow[];
 
   // Officer assign Select: camp members + all guests, grouped. Members carry a
   // m:<membershipId> ref (their attendee row is created on assign if missing);
   // guests carry a:<attendeeId>.
   let assignGroups: AssignGroup[] = [];
-  if (isOfficer) {
-    const memberRows = (
-      await db
-        .select({ id: membership.id, name: user.name })
-        .from(membership)
-        .innerJoin(user, eq(membership.userId, user.id))
-        .where(eq(membership.organizationId, active.camp.id))
-    ).sort((a, b) => a.name.localeCompare(b.name));
-    const guestRows = await db
-      .select({ id: attendee.id, name: attendee.name })
-      .from(attendee)
-      .where(
-        and(
-          eq(attendee.editionId, editionId),
-          isNotNull(attendee.hostMembershipId),
-        ),
-      );
+  if (officerMemberRows && officerGuestRows) {
+    const memberRows = officerMemberRows.sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    const guestRows = officerGuestRows;
     assignGroups = [
       {
         group: "Campers",

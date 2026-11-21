@@ -683,40 +683,46 @@ export async function earlyArrivalsWithoutStock(
   editionId: string,
   gateOpenIso: string,
 ) {
-  const held = await db
-    .select({ attendeeId: setupPassStock.assignedAttendeeId })
-    .from(setupPassStock)
-    .where(
-      and(
-        eq(setupPassStock.editionId, editionId),
-        ne(setupPassStock.status, "void"),
-      ),
-    );
-  const covered = new Set(held.map((h) => h.attendeeId).filter(Boolean));
-
   // Aliased joins so one query can name BOTH the attendee (via their own
   // membership) and the person hosting them. A guest called "Sam" is unusable
   // in a list of thirty; "Sam — guest of Devon" is the whole point.
   const hostMembership = alias(membership, "host_membership");
   const hostUser = alias(user, "host_user");
-  const rows = await db
-    .select({
-      id: attendee.id,
-      membershipId: attendee.membershipId,
-      hostMembershipId: attendee.hostMembershipId,
-      guestName: attendee.name,
-      memberName: user.name,
-      hostName: hostUser.name,
-      arrivalDate: attendee.arrivalDate,
-      status: attendee.status,
-      ageBand: attendee.ageBand,
-    })
-    .from(attendee)
-    .leftJoin(membership, eq(attendee.membershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .leftJoin(hostMembership, eq(attendee.hostMembershipId, hostMembership.id))
-    .leftJoin(hostUser, eq(hostMembership.userId, hostUser.id))
-    .where(eq(attendee.editionId, editionId));
+  // The two reads are independent, so they share one D1 round trip
+  // (plans/fast-navigation.md).
+  const [held, rows] = await Promise.all([
+    db
+      .select({ attendeeId: setupPassStock.assignedAttendeeId })
+      .from(setupPassStock)
+      .where(
+        and(
+          eq(setupPassStock.editionId, editionId),
+          ne(setupPassStock.status, "void"),
+        ),
+      ),
+    db
+      .select({
+        id: attendee.id,
+        membershipId: attendee.membershipId,
+        hostMembershipId: attendee.hostMembershipId,
+        guestName: attendee.name,
+        memberName: user.name,
+        hostName: hostUser.name,
+        arrivalDate: attendee.arrivalDate,
+        status: attendee.status,
+        ageBand: attendee.ageBand,
+      })
+      .from(attendee)
+      .leftJoin(membership, eq(attendee.membershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .leftJoin(
+        hostMembership,
+        eq(attendee.hostMembershipId, hostMembership.id),
+      )
+      .leftJoin(hostUser, eq(hostMembership.userId, hostUser.id))
+      .where(eq(attendee.editionId, editionId)),
+  ]);
+  const covered = new Set(held.map((h) => h.attendeeId).filter(Boolean));
 
   return (
     rows
@@ -772,14 +778,31 @@ export async function sapCoverage(
   editionId: string,
   gateOpenIso: string,
 ): Promise<SapCoverage> {
-  const stock = await db
-    .select({
-      id: setupPassStock.id,
-      onOrAfterDate: setupPassStock.onOrAfterDate,
-      status: setupPassStock.status,
-    })
-    .from(setupPassStock)
-    .where(eq(setupPassStock.editionId, editionId));
+  // The stock, the demand and the unknowns are independent reads, so they go
+  // out together rather than one D1 round trip each (plans/fast-navigation.md).
+  const [stock, people, noDate] = await Promise.all([
+    db
+      .select({
+        id: setupPassStock.id,
+        onOrAfterDate: setupPassStock.onOrAfterDate,
+        status: setupPassStock.status,
+      })
+      .from(setupPassStock)
+      .where(eq(setupPassStock.editionId, editionId)),
+    earlyArrivalsWithoutStock(editionId, gateOpenIso),
+    // Everyone attending whose arrival we don't know. They can't be counted as
+    // demand and they can't be ruled out either.
+    db
+      .select({
+        id: attendee.id,
+        status: attendee.status,
+        ageBand: attendee.ageBand,
+      })
+      .from(attendee)
+      .where(
+        and(eq(attendee.editionId, editionId), isNull(attendee.arrivalDate)),
+      ),
+  ]);
 
   const live = stock.filter((s) => s.status !== "void");
   const spares = live
@@ -794,20 +817,6 @@ export async function sapCoverage(
     byDateMap.set(s.onOrAfterDate, row);
   }
 
-  const people = await earlyArrivalsWithoutStock(editionId, gateOpenIso);
-
-  // Everyone attending whose arrival we don't know. They can't be counted as
-  // demand and they can't be ruled out either.
-  const noDate = await db
-    .select({
-      id: attendee.id,
-      status: attendee.status,
-      ageBand: attendee.ageBand,
-    })
-    .from(attendee)
-    .where(
-      and(eq(attendee.editionId, editionId), isNull(attendee.arrivalDate)),
-    );
   const unknownArrival = noDate.filter(
     (a) =>
       (a.status === "coming" || a.status === "maybe") &&

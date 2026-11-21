@@ -60,31 +60,33 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
   const campId = active.camp.id;
 
-  const apps = await db
-    .select()
-    .from(recruitApplication)
-    .where(eq(recruitApplication.campId, campId))
-    .orderBy(desc(recruitApplication.createdAt));
+  // Independent reads, so they go out together rather than one D1 round trip
+  // each (plans/fast-navigation.md). The officer check above still runs first.
+  const [apps, [campRow], questionRows] = await Promise.all([
+    db
+      .select()
+      .from(recruitApplication)
+      .where(eq(recruitApplication.campId, campId))
+      .orderBy(desc(recruitApplication.createdAt)),
+    db
+      .select({ description: camp.description })
+      .from(camp)
+      .where(eq(camp.id, campId))
+      .limit(1),
+    // All camp questions (archived included) so old applications' answers
+    // still resolve to their prompt.
+    db
+      .select({
+        id: campQuestion.id,
+        prompt: campQuestion.prompt,
+        type: campQuestion.type,
+      })
+      .from(campQuestion)
+      .where(eq(campQuestion.campId, campId)),
+  ]);
 
   const baseUrl = PUBLIC_BASE_URL;
   const applyUrl = active.camp.slug ? `${baseUrl}/c/${active.camp.slug}` : null;
-
-  const [campRow] = await db
-    .select({ description: camp.description })
-    .from(camp)
-    .where(eq(camp.id, campId))
-    .limit(1);
-
-  // All camp questions (archived included) so old applications' answers still
-  // resolve to their prompt.
-  const questionRows = await db
-    .select({
-      id: campQuestion.id,
-      prompt: campQuestion.prompt,
-      type: campQuestion.type,
-    })
-    .from(campQuestion)
-    .where(eq(campQuestion.campId, campId));
   const qById = new Map(questionRows.map((q) => [q.id, q]));
 
   const answerList = (

@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 import { data, Link, useFetcher } from "react-router";
 import { pickerValueToDate } from "~/lib/date-value";
 import { featureVisibleTo } from "~/lib/features";
-import { getFeatureState, requireFeature } from "~/lib/features.server";
+import { featureStatesFor, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -66,21 +66,34 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
   const editionId = activeEdition.id;
 
-  const entries = (await db
-    .select({
-      id: financeEntry.id,
-      kind: financeEntry.kind,
-      amountCents: financeEntry.amountCents,
-      description: financeEntry.description,
-      category: financeEntry.category,
-      memberName: user.name,
-      counterparty: financeEntry.counterparty,
-      occurredAt: financeEntry.occurredAt,
-    })
-    .from(financeEntry)
-    .leftJoin(membership, eq(financeEntry.memberId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(eq(financeEntry.editionId, editionId))) satisfies EntryRow[];
+  // The ledger, the member list and the feature states are independent, so
+  // they go out together rather than one D1 round trip each
+  // (plans/fast-navigation.md). The officer check above still runs first.
+  const [entries, memberRows, featureStates] = await Promise.all([
+    db
+      .select({
+        id: financeEntry.id,
+        kind: financeEntry.kind,
+        amountCents: financeEntry.amountCents,
+        description: financeEntry.description,
+        category: financeEntry.category,
+        memberName: user.name,
+        counterparty: financeEntry.counterparty,
+        occurredAt: financeEntry.occurredAt,
+      })
+      .from(financeEntry)
+      .leftJoin(membership, eq(financeEntry.memberId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(eq(financeEntry.editionId, editionId))
+      .then((rows) => rows satisfies EntryRow[]),
+    db
+      .select({ id: membership.id, name: user.name })
+      .from(membership)
+      .innerJoin(user, eq(membership.userId, user.id))
+      .where(eq(membership.organizationId, active.camp.id)),
+    // Usually already loaded with the camp for this request, so no query.
+    featureStatesFor(active),
+  ]);
 
   entries.sort((a, b) => {
     const ta = a.occurredAt ? a.occurredAt.getTime() : 0;
@@ -95,13 +108,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     .filter((e) => e.kind === "expense")
     .reduce((s, e) => s + e.amountCents, 0);
 
-  const members = (
-    await db
-      .select({ id: membership.id, name: user.name })
-      .from(membership)
-      .innerJoin(user, eq(membership.userId, user.id))
-      .where(eq(membership.organizationId, active.camp.id))
-  ).sort((a, b) => a.name.localeCompare(b.name));
+  const members = memberRows.sort((a, b) => a.name.localeCompare(b.name));
 
   const categories = [
     ...new Set(entries.map((e) => e.category).filter((c): c is string => !!c)),
@@ -112,7 +119,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     year: activeEdition.year,
     // Dues is its own camp feature now (admin-managed on /settings).
     duesEnabled: featureVisibleTo(
-      await getFeatureState(active.camp.id, "dues"),
+      featureStates.get("dues") ?? "off",
       active.membership.role,
     ),
     isAdmin: active.membership.role === "admin",

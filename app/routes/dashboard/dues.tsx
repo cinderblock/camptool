@@ -63,15 +63,49 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!hasAtLeast(active.membership.role, "officer")) {
     throw data("Not authorized", { status: 403 });
   }
-  const tiers = (
-    await db
+  // Everything below is independent, so it goes out together rather than one
+  // D1 round trip per read (plans/fast-navigation.md). The officer check above
+  // still runs first: none of it is read for anyone else.
+  const [tierRows, editions, memberRows, reqs, paidRows] = await Promise.all([
+    db
       .select()
       .from(contributionTier)
-      .where(eq(contributionTier.editionId, activeEdition.id))
-  ).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+      .where(eq(contributionTier.editionId, activeEdition.id)),
+    // Other years of this camp, for "copy tiers from <year>".
+    loadCampEditions(active.camp.id),
+    // Roster: each member, their assigned tier/waive, and what they've paid
+    // (sum of their donation entries for this edition).
+    db
+      .select({ id: membership.id, name: user.name })
+      .from(membership)
+      .innerJoin(user, eq(membership.userId, user.id))
+      .where(eq(membership.organizationId, active.camp.id)),
+    db
+      .select({
+        membershipId: memberRequirement.membershipId,
+        tierId: memberRequirement.tierId,
+        waived: memberRequirement.waived,
+      })
+      .from(memberRequirement)
+      .where(eq(memberRequirement.editionId, activeEdition.id)),
+    db
+      .select({
+        memberId: financeEntry.memberId,
+        cents: sql<number>`sum(${financeEntry.amountCents})`,
+      })
+      .from(financeEntry)
+      .where(
+        and(
+          eq(financeEntry.editionId, activeEdition.id),
+          eq(financeEntry.kind, "donation"),
+        ),
+      )
+      .groupBy(financeEntry.memberId),
+  ]);
 
-  // Other years of this camp, for "copy tiers from <year>".
-  const editions = await loadCampEditions(active.camp.id);
+  const tiers = tierRows.sort(
+    (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+  );
   const otherEditions = editions
     .filter((e) => e.id !== activeEdition.id)
     .map((e) => ({
@@ -79,39 +113,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       label: e.label ? `${e.year} · ${e.label}` : String(e.year),
     }));
 
-  // Roster: each member, their assigned tier/waive, and what they've paid (sum of
-  // their donation entries for this edition).
-  const members = (
-    await db
-      .select({ id: membership.id, name: user.name })
-      .from(membership)
-      .innerJoin(user, eq(membership.userId, user.id))
-      .where(eq(membership.organizationId, active.camp.id))
-  ).sort((a, b) => a.name.localeCompare(b.name));
+  const members = memberRows.sort((a, b) => a.name.localeCompare(b.name));
 
-  const reqs = await db
-    .select({
-      membershipId: memberRequirement.membershipId,
-      tierId: memberRequirement.tierId,
-      waived: memberRequirement.waived,
-    })
-    .from(memberRequirement)
-    .where(eq(memberRequirement.editionId, activeEdition.id));
   const reqByMember = new Map(reqs.map((r) => [r.membershipId, r]));
 
-  const paidRows = await db
-    .select({
-      memberId: financeEntry.memberId,
-      cents: sql<number>`sum(${financeEntry.amountCents})`,
-    })
-    .from(financeEntry)
-    .where(
-      and(
-        eq(financeEntry.editionId, activeEdition.id),
-        eq(financeEntry.kind, "donation"),
-      ),
-    )
-    .groupBy(financeEntry.memberId);
   const paidByMember = new Map(
     paidRows
       .filter((r) => r.memberId)

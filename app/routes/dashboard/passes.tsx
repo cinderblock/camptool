@@ -168,23 +168,113 @@ export async function loader({ request }: Route.LoaderArgs) {
   const isOfficer = hasAtLeast(active.membership.role, "officer");
 
   const myMembershipId = active.membership.id;
-  const rawPasses = await db
-    .select({
-      id: setupPass.id,
-      passDateId: setupPass.passDateId,
-      attendeeId: setupPass.attendeeId,
-      attMembershipId: attendee.membershipId,
-      attHostId: attendee.hostMembershipId,
-      guestName: attendee.name,
-      memberName: user.name,
-      status: setupPass.status,
-      note: setupPass.note,
-    })
-    .from(setupPass)
-    .leftJoin(attendee, eq(setupPass.attendeeId, attendee.id))
-    .leftJoin(membership, eq(attendee.membershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(eq(setupPass.editionId, editionId));
+  const gateOpen = eventStartIso(activeEdition.year);
+  // Join THIS edition's attendee row so the officer picker knows who is
+  // actually coming. Without it the list was every membership the camp has
+  // ever had, and somebody who answered "not this year" was as selectable as
+  // anyone else — an easy way to hand a scarce pass to a person who won't use
+  // it.
+  const memberAttendee = alias(attendee, "member_attendee");
+
+  // None of these reads depends on another, so they go out together: on D1
+  // each is a network round trip, and one after another they were most of
+  // this page's load (plans/fast-navigation.md). The officer-only ones still
+  // run only for officers. Only the pass codes wait, because which codes may
+  // be fetched depends on the stock.
+  const [
+    rawPasses,
+    officerMemberRows,
+    officerGuestRows,
+    attendeeRows,
+    rawStock,
+    earlyArrivals,
+    coverage,
+  ] = await Promise.all([
+    db
+      .select({
+        id: setupPass.id,
+        passDateId: setupPass.passDateId,
+        attendeeId: setupPass.attendeeId,
+        attMembershipId: attendee.membershipId,
+        attHostId: attendee.hostMembershipId,
+        guestName: attendee.name,
+        memberName: user.name,
+        status: setupPass.status,
+        note: setupPass.note,
+      })
+      .from(setupPass)
+      .leftJoin(attendee, eq(setupPass.attendeeId, attendee.id))
+      .leftJoin(membership, eq(attendee.membershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(eq(setupPass.editionId, editionId)),
+    // Officer grant Select: camp members.
+    isOfficer
+      ? db
+          .select({
+            id: membership.id,
+            name: user.name,
+            status: memberAttendee.status,
+            arrivalDate: memberAttendee.arrivalDate,
+            ageBand: memberAttendee.ageBand,
+          })
+          .from(membership)
+          .innerJoin(user, eq(membership.userId, user.id))
+          .leftJoin(
+            memberAttendee,
+            and(
+              eq(memberAttendee.membershipId, membership.id),
+              eq(memberAttendee.editionId, editionId),
+            ),
+          )
+          .where(eq(membership.organizationId, active.camp.id))
+      : null,
+    // Officer grant Select: guests. A GUEST is `membership_id IS NULL` — "has
+    // a host" is not the same test, because a party-linked MEMBER also has
+    // one. Using the host column alone listed those members twice: once under
+    // Campers and again under Guests.
+    isOfficer
+      ? db
+          .select({
+            id: attendee.id,
+            name: attendee.name,
+            arrivalDate: attendee.arrivalDate,
+            ageBand: attendee.ageBand,
+            hostName: user.name,
+          })
+          .from(attendee)
+          .leftJoin(membership, eq(attendee.hostMembershipId, membership.id))
+          .leftJoin(user, eq(membership.userId, user.id))
+          .where(
+            and(
+              eq(attendee.editionId, editionId),
+              isNull(attendee.membershipId),
+              isNotNull(attendee.hostMembershipId),
+              ne(attendee.status, "not_coming"),
+            ),
+          )
+      : null,
+    // Everyone attending this year: their planned arrivals, and the viewer's
+    // party, are both read off this.
+    db
+      .select({
+        id: attendee.id,
+        membershipId: attendee.membershipId,
+        hostMembershipId: attendee.hostMembershipId,
+        guestName: attendee.name,
+        memberName: user.name,
+        arrivalDate: attendee.arrivalDate,
+        departureDate: attendee.departureDate,
+        ageBand: attendee.ageBand,
+        status: attendee.status,
+      })
+      .from(attendee)
+      .leftJoin(membership, eq(attendee.membershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(eq(attendee.editionId, editionId)),
+    stockForEdition(editionId),
+    isOfficer ? earlyArrivalsWithoutStock(editionId, gateOpen) : null,
+    isOfficer ? sapCoverage(editionId, gateOpen) : null,
+  ]);
   const passes: PassRow[] = rawPasses.map((p) => ({
     id: p.id,
     passDateId: p.passDateId,
@@ -210,60 +300,14 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   // Officer grant Select: camp members (m:) + all guests (a:), grouped.
   let grantGroups: GrantGroup[] = [];
-  if (isOfficer) {
-    // Join THIS edition's attendee row so the picker knows who is actually
-    // coming. Without it the list was every membership the camp has ever had,
-    // and somebody who answered "not this year" was as selectable as anyone
-    // else — an easy way to hand a scarce pass to a person who won't use it.
-    const memberAttendee = alias(attendee, "member_attendee");
-    const memberRows = (
-      await db
-        .select({
-          id: membership.id,
-          name: user.name,
-          status: memberAttendee.status,
-          arrivalDate: memberAttendee.arrivalDate,
-          ageBand: memberAttendee.ageBand,
-        })
-        .from(membership)
-        .innerJoin(user, eq(membership.userId, user.id))
-        .leftJoin(
-          memberAttendee,
-          and(
-            eq(memberAttendee.membershipId, membership.id),
-            eq(memberAttendee.editionId, editionId),
-          ),
-        )
-        .where(eq(membership.organizationId, active.camp.id))
-    )
+  if (officerMemberRows && officerGuestRows) {
+    const memberRows = officerMemberRows
       // "Not this year" is a no. Everything else stays, including people who
       // haven't answered — an unanswered RSVP is not a refusal, and an officer
       // may well be setting a pass aside for someone they've spoken to offline.
       .filter((m) => m.status !== "not_coming")
       .filter((m) => needsSetupPass(m.ageBand))
       .sort((a, b) => a.name.localeCompare(b.name));
-    // A GUEST is `membership_id IS NULL` — "has a host" is not the same test,
-    // because a party-linked MEMBER also has one. Using the host column alone
-    // listed those members twice: once under Campers and again under Guests.
-    const guestRows = await db
-      .select({
-        id: attendee.id,
-        name: attendee.name,
-        arrivalDate: attendee.arrivalDate,
-        ageBand: attendee.ageBand,
-        hostName: user.name,
-      })
-      .from(attendee)
-      .leftJoin(membership, eq(attendee.hostMembershipId, membership.id))
-      .leftJoin(user, eq(membership.userId, user.id))
-      .where(
-        and(
-          eq(attendee.editionId, editionId),
-          isNull(attendee.membershipId),
-          isNotNull(attendee.hostMembershipId),
-          ne(attendee.status, "not_coming"),
-        ),
-      );
     grantGroups = [
       {
         group: "Campers",
@@ -277,11 +321,11 @@ export async function loader({ request }: Route.LoaderArgs) {
           return { value: `m:${m.id}`, label: `${m.name}${doubt}${when}` };
         }),
       },
-      ...(guestRows.length > 0
+      ...(officerGuestRows.length > 0
         ? [
             {
               group: "Guests",
-              items: guestRows
+              items: officerGuestRows
                 // Under-13s are admitted free and need no pass, so they are not
                 // offered here — the note under the picker says so, because a
                 // silently missing name reads as a bug.
@@ -310,47 +354,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   // Planned arrivals (from onboarding) — shown next to requests so officers can
   // pick a pass date that covers the holder's arrival. Keyed by attendee id.
-  const arrivalRows = await db
-    .select({
-      id: attendee.id,
-      membershipId: attendee.membershipId,
-      arrivalDate: attendee.arrivalDate,
-    })
-    .from(attendee)
-    .where(eq(attendee.editionId, editionId));
   const arrivals: Record<string, string> = {};
   let myArrival: string | null = null;
-  for (const r of arrivalRows) {
+  for (const r of attendeeRows) {
     if (r.arrivalDate) arrivals[r.id] = r.arrivalDate;
     if (r.membershipId === myMembershipId) myArrival = r.arrivalDate ?? null;
   }
 
-  // --- the viewer's party ------------------------------------------------
-  // Self plus everyone attending under them. This is the card a camper
-  // actually needs: who's in my group, when are they arriving, and has anybody
-  // sorted them a pass — in one place, with the buttons next to the answer.
-  const gateOpenIso = eventStartIso(activeEdition.year);
-  const partyRows = await db
-    .select({
-      id: attendee.id,
-      membershipId: attendee.membershipId,
-      hostMembershipId: attendee.hostMembershipId,
-      guestName: attendee.name,
-      memberName: user.name,
-      arrivalDate: attendee.arrivalDate,
-      departureDate: attendee.departureDate,
-      ageBand: attendee.ageBand,
-      status: attendee.status,
-    })
-    .from(attendee)
-    .leftJoin(membership, eq(attendee.membershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(eq(attendee.editionId, editionId));
-
   // --- imported pass stock ----------------------------------------------
   // Two different reads, because they answer two different questions and only
   // one of them is allowed to carry secrets.
-  const rawStock = await stockForEdition(editionId);
   const allStock: StockRow[] = rawStock.map((s) => ({
     id: s.id,
     onOrAfterDate: s.onOrAfterDate,
@@ -406,9 +419,8 @@ export async function loader({ request }: Route.LoaderArgs) {
   //   - they asked for one outright (plans changed, or they want to help build
   //     without having said so on the calendar).
   // Anyone already holding a live pass is served and drops off.
-  const gateOpen = eventStartIso(activeEdition.year);
   const needsPass: NeedRow[] = [];
-  if (isOfficer) {
+  if (earlyArrivals) {
     const held = new Set(
       allStock
         .filter((s) => s.status !== "void")
@@ -416,7 +428,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         .filter(Boolean),
     );
     const seen = new Set<string>();
-    for (const r of await earlyArrivalsWithoutStock(editionId, gateOpen)) {
+    for (const r of earlyArrivals) {
       seen.add(r.id);
       needsPass.push({
         attendeeId: r.id,
@@ -457,11 +469,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
   }
 
-  const coverage = isOfficer ? await sapCoverage(editionId, gateOpen) : null;
-
+  // --- the viewer's party ------------------------------------------------
+  // Self plus everyone attending under them. This is the card a camper
+  // actually needs: who's in my group, when are they arriving, and has anybody
+  // sorted them a pass — in one place, with the buttons next to the answer.
   // Assembled after `allStock`, because a person's row needs to know whether a
   // pass is already set aside for them.
-  const myParty: PartyRow[] = partyRows
+  const myParty: PartyRow[] = attendeeRows
     .filter((r) =>
       inMyParty(
         { membershipId: r.membershipId, hostMembershipId: r.hostMembershipId },
@@ -489,7 +503,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         needsPass:
           needsSetupPass(r.ageBand) &&
           !!r.arrivalDate &&
-          r.arrivalDate < gateOpenIso,
+          r.arrivalDate < gateOpen,
         requested: Boolean(request) && request?.status === "requested",
         requestId: request?.status === "requested" ? request.id : null,
         passState: held ? (held.status as "assigned" | "released") : null,

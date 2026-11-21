@@ -54,20 +54,40 @@ export type ProspectListRow = {
 export async function loadProspects(
   campId: string,
 ): Promise<ProspectListRow[]> {
-  const rows = await db
-    .select()
+  // The handles and the log summary pick their prospects by camp in a
+  // subquery rather than from the first query's ids, so all four reads go out
+  // together instead of one D1 round trip after another
+  // (plans/fast-navigation.md). The camp's prospect ids, as a subquery:
+  const campProspects = db
+    .select({ id: prospect.id })
     .from(prospect)
-    .where(eq(prospect.campId, campId))
-    .orderBy(desc(prospect.updatedAt));
+    .where(eq(prospect.campId, campId));
+  const [rows, names, handles, stats] = await Promise.all([
+    db
+      .select()
+      .from(prospect)
+      .where(eq(prospect.campId, campId))
+      .orderBy(desc(prospect.updatedAt)),
+    officerNames(campId),
+    db
+      .select()
+      .from(prospectHandle)
+      .where(inArray(prospectHandle.prospectId, campProspects)),
+    // One grouped query rather than a per-row count — a camp courting a
+    // hundred people would otherwise fire a hundred queries to render one
+    // table.
+    db
+      .select({
+        prospectId: prospectInteraction.prospectId,
+        count: sql<number>`count(*)`,
+        last: sql<number>`max(${prospectInteraction.occurredAt})`,
+      })
+      .from(prospectInteraction)
+      .where(inArray(prospectInteraction.prospectId, campProspects))
+      .groupBy(prospectInteraction.prospectId),
+  ]);
   if (rows.length === 0) return [];
 
-  const ids = rows.map((r) => r.id);
-  const names = await officerNames(campId);
-
-  const handles = await db
-    .select()
-    .from(prospectHandle)
-    .where(inArray(prospectHandle.prospectId, ids));
   const handlesBy = new Map<string, ProspectListRow["handles"]>();
   for (const h of handles) {
     const list = handlesBy.get(h.prospectId) ?? [];
@@ -75,17 +95,6 @@ export async function loadProspects(
     handlesBy.set(h.prospectId, list);
   }
 
-  // One grouped query rather than a per-row count — a camp courting a hundred
-  // people would otherwise fire a hundred queries to render one table.
-  const stats = await db
-    .select({
-      prospectId: prospectInteraction.prospectId,
-      count: sql<number>`count(*)`,
-      last: sql<number>`max(${prospectInteraction.occurredAt})`,
-    })
-    .from(prospectInteraction)
-    .where(inArray(prospectInteraction.prospectId, ids))
-    .groupBy(prospectInteraction.prospectId);
   const statsBy = new Map(stats.map((s) => [s.prospectId, s]));
 
   return rows.map((r) => {
@@ -388,21 +397,25 @@ export async function countProspectsNeedingAttention(
 /** Applications with no prospect yet — the backfill offered on the list page
  * when a camp turns this on with a queue already sitting there. */
 export async function unlinkedApplications(campId: string) {
-  const linked = await db
-    .select({ id: prospect.recruitApplicationId })
-    .from(prospect)
-    .where(eq(prospect.campId, campId));
+  // Two independent reads: one D1 round trip, not two
+  // (plans/fast-navigation.md).
+  const [linked, apps] = await Promise.all([
+    db
+      .select({ id: prospect.recruitApplicationId })
+      .from(prospect)
+      .where(eq(prospect.campId, campId)),
+    db
+      .select({
+        id: recruitApplication.id,
+        name: recruitApplication.name,
+        email: recruitApplication.email,
+        playaName: recruitApplication.playaName,
+        status: recruitApplication.status,
+        createdAt: recruitApplication.createdAt,
+      })
+      .from(recruitApplication)
+      .where(eq(recruitApplication.campId, campId)),
+  ]);
   const taken = new Set(linked.map((l) => l.id).filter(Boolean) as string[]);
-  const apps = await db
-    .select({
-      id: recruitApplication.id,
-      name: recruitApplication.name,
-      email: recruitApplication.email,
-      playaName: recruitApplication.playaName,
-      status: recruitApplication.status,
-      createdAt: recruitApplication.createdAt,
-    })
-    .from(recruitApplication)
-    .where(eq(recruitApplication.campId, campId));
   return apps.filter((a) => !taken.has(a.id));
 }
