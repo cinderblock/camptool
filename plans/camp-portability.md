@@ -404,6 +404,12 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
   10. Bundle file size: 95 MB upload, 128 MiB unpacked (Workers' zlib caps
       `maxOutputLength` at 134217728). Pulls still hash every file per
       request; fine at today's camp sizes, revisit for photo-heavy camps.
+- **master's Workers rate limits (`0fcea6e`, 120 anonymous requests a
+  minute per IP)** would have failed any pull of a camp with more than ~100
+  files from camptool.org. Files now come in batches (`/files?start=`, a tar
+  of up to 16 MB or 200 files) and a 429 is waited out (`Retry-After`).
+  Still unmeasured: Workers' per-invocation subrequest limit for a very large
+  camp imported *into* camptool.org in one request.
 - Residual, accepted: a camp admin on a shared site can list any HTTPS
   origin in that site's `/.well-known/webauthn` for a year by completing a
   move to it. That origin can then *request* assertions for the shared
@@ -458,6 +464,9 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 ## Progress log
 
 - [x] 2026-11-21: steps 2–8 built; e2e Bun → Bun green (35/35).
+- [x] 2026-11-21: independent security review; all findings fixed
+  (`39ca1b1`), PoC now refused. Rebased on master (rate limits); batched
+  file pulls. e2e 46/46 in all four directions after both.
 - [x] 2026-11-21: Cloudflare side, return trip, file transport, Site admin
   list, docs, `scripts/camp-move.ts inspect`; e2e 45–46 checks × 4 directions.
 
