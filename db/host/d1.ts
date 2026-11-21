@@ -12,9 +12,10 @@ import { drizzle } from "drizzle-orm/d1";
 import { SQLiteAsyncDialect } from "drizzle-orm/sqlite-core";
 import journal from "../migrations/meta/_journal.json";
 import * as schema from "../schema";
+import { instrumentD1 } from "./d1-metrics";
 import type { AtomicStatement, Db, DbSnapshot } from "./types";
 
-const d1 = env.DB;
+const d1 = instrumentD1(env.DB);
 const d1Db = drizzle(d1, { schema });
 
 export const db = d1Db as unknown as Db;

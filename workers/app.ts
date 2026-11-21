@@ -7,6 +7,7 @@
  */
 import { env } from "cloudflare:workers";
 import { createRequestHandler } from "react-router";
+import { serverTiming, withDbMetrics } from "../db/host/d1-metrics";
 import { type RateLimitEnv, rateLimitResponse } from "./rate-limit";
 
 /** The commit this build came from (vite.config.ts), or "" outside CI. */
@@ -33,6 +34,15 @@ export default {
       url.pathname,
     );
     if (limited) return limited;
-    return handler(request);
+    // Report how long the page waited on D1 (plans/fast-navigation.md): on
+    // Workers every query is a round trip, so this is where time goes.
+    const started = performance.now();
+    const { result, metrics } = await withDbMetrics(() => handler(request));
+    const response = new Response(result.body, result);
+    response.headers.append(
+      "Server-Timing",
+      serverTiming(metrics, performance.now() - started),
+    );
+    return response;
   },
 };
