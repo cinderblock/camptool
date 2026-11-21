@@ -6,7 +6,7 @@ import { and, desc, eq, inArray, like, or } from "drizzle-orm";
 import { db } from "../../db/client.server";
 import { wikiLink, wikiPage, wikiRevision } from "../../db/schema";
 import { featureVisibleTo } from "./features";
-import { getFeatureState } from "./features.server";
+import { featureStatesFor } from "./features.server";
 import { type WikiSubjectType, wikiLinkSlugs, wikiSlug } from "./wiki";
 
 export type WikiPageRow = typeof wikiPage.$inferSelect;
@@ -237,7 +237,9 @@ export async function wikiTiesFor(
   byObject: Record<string, { slug: string; title: string }>;
 }> {
   const campId = active.camp.id;
-  const state = await getFeatureState(campId, "wiki");
+  // From the states loaded with the camp when there are some, so the gate costs
+  // no round trip of its own (plans/fast-navigation.md).
+  const state = (await featureStatesFor(active)).get("wiki") ?? "off";
   if (!featureVisibleTo(state, active.membership.role)) {
     return { enabled: false, byKind: {}, byObject: {} };
   }

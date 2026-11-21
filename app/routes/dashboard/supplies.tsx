@@ -21,7 +21,7 @@ import { data, useFetcher } from "react-router";
 import { type BinSummary, binHref, binTitle, searchBins } from "~/lib/bins";
 import { getBinsStock } from "~/lib/bins-api.server";
 import { featureVisibleTo } from "~/lib/features";
-import { getFeatureState, requireFeature } from "~/lib/features.server";
+import { featureStatesFor, requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
 import { requireActiveEdition } from "~/lib/session.server";
@@ -52,36 +52,67 @@ export async function loader({ request }: Route.LoaderArgs) {
   const role = active.membership.role;
   const canManage = hasAtLeast(role, "officer");
 
-  const categories = await db
-    .select()
-    .from(inventoryCategory)
-    .where(eq(inventoryCategory.campId, campId))
-    .orderBy(
-      asc(inventoryCategory.sortOrder),
-      asc(inventoryCategory.createdAt),
-    );
-
-  const itemRows = await db
-    .select({
-      id: inventoryItem.id,
-      categoryId: inventoryItem.categoryId,
-      name: inventoryItem.name,
-      quantity: inventoryItem.quantity,
-      notes: inventoryItem.notes,
-      ownerMembershipId: inventoryItem.ownerMembershipId,
-      ownerName: user.name,
-      ownerPlaya: membership.playaName,
-    })
-    .from(inventoryItem)
-    .leftJoin(membership, eq(inventoryItem.ownerMembershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(
-      and(
-        eq(inventoryItem.campId, campId),
-        eq(inventoryItem.editionId, editionId),
+  // Every read below is independent, so they go out together rather than one
+  // after another: on D1 each is a network round trip
+  // (plans/fast-navigation.md).
+  const [categories, itemRows, rosterRows, warehouse] = await Promise.all([
+    db
+      .select()
+      .from(inventoryCategory)
+      .where(eq(inventoryCategory.campId, campId))
+      .orderBy(
+        asc(inventoryCategory.sortOrder),
+        asc(inventoryCategory.createdAt),
       ),
-    )
-    .orderBy(asc(inventoryItem.sortOrder), asc(inventoryItem.createdAt));
+    db
+      .select({
+        id: inventoryItem.id,
+        categoryId: inventoryItem.categoryId,
+        name: inventoryItem.name,
+        quantity: inventoryItem.quantity,
+        notes: inventoryItem.notes,
+        ownerMembershipId: inventoryItem.ownerMembershipId,
+        ownerName: user.name,
+        ownerPlaya: membership.playaName,
+      })
+      .from(inventoryItem)
+      .leftJoin(membership, eq(inventoryItem.ownerMembershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(
+        and(
+          eq(inventoryItem.campId, campId),
+          eq(inventoryItem.editionId, editionId),
+        ),
+      )
+      .orderBy(asc(inventoryItem.sortOrder), asc(inventoryItem.createdAt)),
+    canManage
+      ? db
+          .select({
+            id: membership.id,
+            name: user.name,
+            playa: membership.playaName,
+          })
+          .from(membership)
+          .leftJoin(user, eq(membership.userId, user.id))
+          .where(
+            and(
+              eq(membership.organizationId, campId),
+              eq(membership.status, "active"),
+            ),
+          )
+      : undefined,
+    // What's already in the camp's storage, read live from its bins instance
+    // (plans/bins-integration.md). Absent unless the camp runs bins, has the
+    // feature on and has pasted a read token — and it degrades to nothing at
+    // all if the warehouse is unreachable, because not being able to reach a
+    // warehouse must never stop anyone claiming a supply. The feature state
+    // comes from the ones loaded with the camp, so it costs no query.
+    featureStatesFor(active).then((states) =>
+      featureVisibleTo(states.get("bins") ?? "off", role)
+        ? getBinsStock(campId)
+        : null,
+    ),
+  ]);
 
   const items = itemRows.map((r) => ({
     id: r.id,
@@ -93,38 +124,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     ownerName: r.ownerPlaya || r.ownerName || null,
   }));
 
-  let roster: { value: string; label: string }[] = [];
-  if (canManage) {
-    const rows = await db
-      .select({
-        id: membership.id,
-        name: user.name,
-        playa: membership.playaName,
-      })
-      .from(membership)
-      .leftJoin(user, eq(membership.userId, user.id))
-      .where(
-        and(
-          eq(membership.organizationId, campId),
-          eq(membership.status, "active"),
-        ),
-      );
-    roster = rows.map((r) => ({
+  const roster: { value: string; label: string }[] = (rosterRows ?? []).map(
+    (r) => ({
       value: r.id,
       label: r.playa || r.name || "Member",
-    }));
-  }
-
-  // What's already in the camp's storage, read live from its bins instance
-  // (plans/bins-integration.md). Absent unless the camp runs bins, has the
-  // feature on and has pasted a read token — and it degrades to nothing at all
-  // if the warehouse is unreachable, because not being able to reach a
-  // warehouse must never stop anyone claiming a supply.
-  const binsVisible = featureVisibleTo(
-    await getFeatureState(campId, "bins"),
-    role,
+    }),
   );
-  const warehouse = binsVisible ? await getBinsStock(campId) : null;
 
   return redact(privacy, {
     canManage,

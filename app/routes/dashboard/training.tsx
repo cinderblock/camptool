@@ -56,8 +56,23 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireFeature(active, "training");
   const isOfficer = hasAtLeast(active.membership.role, "officer");
 
-  const trainings = await loadTrainings(active.camp.id);
-  const signoffs = await loadSignoffs(active.camp.id);
+  // Independent reads, so they go out together: on D1 each is a network round
+  // trip (plans/fast-navigation.md).
+  const [trainings, signoffs, memberRows] = await Promise.all([
+    loadTrainings(active.camp.id),
+    loadSignoffs(active.camp.id),
+    isOfficer
+      ? db
+          .select({
+            id: membership.id,
+            playaName: membership.playaName,
+            name: userTable.name,
+          })
+          .from(membership)
+          .innerJoin(userTable, eq(userTable.id, membership.userId))
+          .where(eq(membership.organizationId, active.camp.id))
+      : [],
+  ]);
   const now = new Date();
   const validityOf = new Map(trainings.map((t) => [t.id, t.validity]));
   const rows = signoffs.map((s) => ({
@@ -74,21 +89,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     }),
   }));
 
-  const members = isOfficer
-    ? (
-        await db
-          .select({
-            id: membership.id,
-            playaName: membership.playaName,
-            name: userTable.name,
-          })
-          .from(membership)
-          .innerJoin(userTable, eq(userTable.id, membership.userId))
-          .where(eq(membership.organizationId, active.camp.id))
-      )
-        .map((m) => ({ value: m.id, label: m.playaName || m.name }))
-        .sort((a, b) => a.label.localeCompare(b.label))
-    : [];
+  const members = memberRows
+    .map((m) => ({ value: m.id, label: m.playaName || m.name }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   return redact(privacy, {
     isOfficer,

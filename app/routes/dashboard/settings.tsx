@@ -60,9 +60,13 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request }: Route.LoaderArgs) {
   const { active, privacy } = await requireActiveCamp(request);
   if (active.membership.role !== "admin") throw redirect("/");
-  const states = await loadFeatureStates(active.camp.id);
-  const binsLink = await getBinsLink(active.camp.id);
-  const room = await getMeetingRoom(active.camp.id);
+  // Independent reads, so they go out together: on D1 each is a network round
+  // trip (plans/fast-navigation.md).
+  const [states, binsLink, room] = await Promise.all([
+    loadFeatureStates(active.camp.id),
+    getBinsLink(active.camp.id),
+    getMeetingRoom(active.camp.id),
+  ]);
   return redact(privacy, {
     campName: active.camp.name,
     // Not a secret — every member gets this link on every meeting — so unlike

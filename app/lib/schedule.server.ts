@@ -110,24 +110,28 @@ export async function hasScheduledDays(editionId: string): Promise<boolean> {
 
 /** The edition's gatherings with occurrence counts + next upcoming date. */
 export async function loadGatherings(editionId: string, todayIso: string) {
-  const gatherings = await db
-    .select()
-    .from(gathering)
-    .where(
-      and(eq(gathering.editionId, editionId), eq(gathering.status, "active")),
-    );
-  const occ = await db
-    .select({
-      id: gatheringOccurrence.id,
-      gatheringId: gatheringOccurrence.gatheringId,
-      date: gatheringOccurrence.date,
-      startTime: gatheringOccurrence.startTime,
-      endTime: gatheringOccurrence.endTime,
-      status: gatheringOccurrence.status,
-    })
-    .from(gatheringOccurrence)
-    .where(eq(gatheringOccurrence.editionId, editionId))
-    .orderBy(asc(gatheringOccurrence.date));
+  // Independent reads, so they go out together: on D1 each is a network round
+  // trip (plans/fast-navigation.md).
+  const [gatherings, occ] = await Promise.all([
+    db
+      .select()
+      .from(gathering)
+      .where(
+        and(eq(gathering.editionId, editionId), eq(gathering.status, "active")),
+      ),
+    db
+      .select({
+        id: gatheringOccurrence.id,
+        gatheringId: gatheringOccurrence.gatheringId,
+        date: gatheringOccurrence.date,
+        startTime: gatheringOccurrence.startTime,
+        endTime: gatheringOccurrence.endTime,
+        status: gatheringOccurrence.status,
+      })
+      .from(gatheringOccurrence)
+      .where(eq(gatheringOccurrence.editionId, editionId))
+      .orderBy(asc(gatheringOccurrence.date)),
+  ]);
   const byGathering = new Map<string, typeof occ>();
   for (const o of occ) {
     const list = byGathering.get(o.gatheringId) ?? [];
@@ -415,7 +419,24 @@ export async function loadGatheringDetail(
  * Feeds the Agenda/Calendar/Mine views and the Overview card.
  */
 export async function loadAgenda(editionId: string, membershipId: string) {
-  const rows = await db
+  const where = and(
+    eq(gatheringOccurrence.editionId, editionId),
+    eq(gathering.status, "active"),
+  );
+  // The shifts and their signups are selected through subqueries rather than
+  // by the ids the first query returns, so all three go out in one round trip
+  // instead of three: on D1 each wait is a network round trip
+  // (plans/fast-navigation.md). The sets are the same either way.
+  const occurrenceIds = db
+    .select({ id: gatheringOccurrence.id })
+    .from(gatheringOccurrence)
+    .innerJoin(gathering, eq(gathering.id, gatheringOccurrence.gatheringId))
+    .where(where);
+  const shiftIds = db
+    .select({ id: gatheringShift.id })
+    .from(gatheringShift)
+    .where(inArray(gatheringShift.occurrenceId, occurrenceIds));
+  const agendaRows = db
     .select({
       occurrenceId: gatheringOccurrence.id,
       date: gatheringOccurrence.date,
@@ -431,39 +452,31 @@ export async function loadAgenda(editionId: string, membershipId: string) {
     })
     .from(gatheringOccurrence)
     .innerJoin(gathering, eq(gathering.id, gatheringOccurrence.gatheringId))
-    .where(
-      and(
-        eq(gatheringOccurrence.editionId, editionId),
-        eq(gathering.status, "active"),
-      ),
-    )
+    .where(where)
     .orderBy(asc(gatheringOccurrence.date), asc(gatheringOccurrence.startTime));
 
-  const occurrenceIds = rows.map((r) => r.occurrenceId);
-  const shifts = occurrenceIds.length
-    ? await db
-        .select({
-          id: gatheringShift.id,
-          occurrenceId: gatheringShift.occurrenceId,
-          role: gatheringShift.role,
-          staffing: gatheringShift.staffing,
-          minNeeded: gatheringShift.minNeeded,
-          capacity: gatheringShift.capacity,
-        })
-        .from(gatheringShift)
-        .where(inArray(gatheringShift.occurrenceId, occurrenceIds))
-    : [];
-  const shiftIds = shifts.map((s) => s.id);
-  const signups = shiftIds.length
-    ? await db
-        .select({
-          shiftId: gatheringSignup.shiftId,
-          membershipId: gatheringSignup.membershipId,
-          status: gatheringSignup.status,
-        })
-        .from(gatheringSignup)
-        .where(inArray(gatheringSignup.shiftId, shiftIds))
-    : [];
+  const [rows, shifts, signups] = await Promise.all([
+    agendaRows,
+    db
+      .select({
+        id: gatheringShift.id,
+        occurrenceId: gatheringShift.occurrenceId,
+        role: gatheringShift.role,
+        staffing: gatheringShift.staffing,
+        minNeeded: gatheringShift.minNeeded,
+        capacity: gatheringShift.capacity,
+      })
+      .from(gatheringShift)
+      .where(inArray(gatheringShift.occurrenceId, occurrenceIds)),
+    db
+      .select({
+        shiftId: gatheringSignup.shiftId,
+        membershipId: gatheringSignup.membershipId,
+        status: gatheringSignup.status,
+      })
+      .from(gatheringSignup)
+      .where(inArray(gatheringSignup.shiftId, shiftIds)),
+  ]);
 
   return rows.map((r) => {
     const myStatuses: string[] = [];

@@ -65,12 +65,18 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition, privacy } =
     await requireActiveEdition(request);
   await requireFeature(active, "schedule");
+  // Independent reads, so they go out together: on D1 each is a network round
+  // trip (plans/fast-navigation.md).
+  const [agenda, gatherings] = await Promise.all([
+    loadAgenda(activeEdition.id, active.membership.id),
+    loadGatherings(activeEdition.id, todayIso()),
+  ]);
   return redact(privacy, {
     year: activeEdition.year,
     locked: activeEdition.locked,
     isOfficer: hasAtLeast(active.membership.role, "officer"),
-    agenda: await loadAgenda(activeEdition.id, active.membership.id),
-    gatherings: await loadGatherings(activeEdition.id, todayIso()),
+    agenda,
+    gatherings,
   });
 }
 

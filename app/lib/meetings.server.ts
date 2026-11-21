@@ -11,7 +11,15 @@
  * Everything here is camp/edition scoped; route loaders and actions own
  * authorization (role, lock, feature), these own data shape.
  */
-import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  type SQLWrapper,
+} from "drizzle-orm";
 import { db } from "../../db/client.server";
 import {
   campMeetingRoom,
@@ -106,7 +114,21 @@ export async function loadMeetings(opts: {
   membershipId: string;
   isOfficer: boolean;
 }): Promise<MeetingRow[]> {
-  const rows = await db
+  const where = and(
+    eq(gatheringOccurrence.editionId, opts.editionId),
+    eq(gathering.kind, MEETING_KIND),
+    eq(gathering.status, "active"),
+  );
+  // The year's meeting occurrences as a subquery, so the per-meeting lookups
+  // below go out in the same round trip as the meetings themselves instead of
+  // waiting for their ids: on D1 each wait is a network round trip
+  // (plans/fast-navigation.md). With no meetings they simply come back empty.
+  const ids = db
+    .select({ id: gatheringOccurrence.id })
+    .from(gatheringOccurrence)
+    .innerJoin(gathering, eq(gathering.id, gatheringOccurrence.gatheringId))
+    .where(where);
+  const meetingRows = db
     .select({
       occurrenceId: gatheringOccurrence.id,
       gatheringId: gathering.id,
@@ -122,19 +144,11 @@ export async function loadMeetings(opts: {
     })
     .from(gatheringOccurrence)
     .innerJoin(gathering, eq(gathering.id, gatheringOccurrence.gatheringId))
-    .where(
-      and(
-        eq(gatheringOccurrence.editionId, opts.editionId),
-        eq(gathering.kind, MEETING_KIND),
-        eq(gathering.status, "active"),
-      ),
-    )
+    .where(where)
     .orderBy(asc(gatheringOccurrence.date), asc(gatheringOccurrence.startTime));
 
-  const ids = rows.map((r) => r.occurrenceId);
-  if (ids.length === 0) return [];
-
-  const [agenda, summaries, attendance] = await Promise.all([
+  const [rows, agenda, summaries, attendance, readRows] = await Promise.all([
+    meetingRows,
     db
       .select({ occurrenceId: meetingAgendaItem.occurrenceId })
       .from(meetingAgendaItem)
@@ -148,24 +162,23 @@ export async function loadMeetings(opts: {
       .from(meetingSummary)
       .where(inArray(meetingSummary.occurrenceId, ids)),
     signupsForOccurrences(ids),
-  ]);
-
-  const summaryIds = summaries.map((s) => s.id);
-  const readMine = summaryIds.length
-    ? new Set(
-        (
-          await db
-            .select({ summaryId: meetingSummaryRead.summaryId })
-            .from(meetingSummaryRead)
-            .where(
-              and(
-                inArray(meetingSummaryRead.summaryId, summaryIds),
-                eq(meetingSummaryRead.membershipId, opts.membershipId),
-              ),
-            )
-        ).map((r) => r.summaryId),
+    // The viewer's reads of those meetings' summaries.
+    db
+      .select({ summaryId: meetingSummaryRead.summaryId })
+      .from(meetingSummaryRead)
+      .innerJoin(
+        meetingSummary,
+        eq(meetingSummary.id, meetingSummaryRead.summaryId),
       )
-    : new Set<string>();
+      .where(
+        and(
+          inArray(meetingSummary.occurrenceId, ids),
+          eq(meetingSummaryRead.membershipId, opts.membershipId),
+        ),
+      ),
+  ]);
+  if (rows.length === 0) return [];
+  const readMine = new Set(readRows.map((r) => r.summaryId));
 
   const agendaCounts = new Map<string, number>();
   for (const a of agenda) {
@@ -209,10 +222,11 @@ export async function loadMeetings(opts: {
 
 /** Per-occurrence RSVP rollup: how many are coming, and each member's status. */
 async function signupsForOccurrences(
-  occurrenceIds: string[],
+  /** The occurrence ids, or a subquery selecting them. */
+  occurrenceIds: string[] | SQLWrapper,
 ): Promise<Map<string, { coming: number; mine: Map<string, string> }>> {
   const out = new Map<string, { coming: number; mine: Map<string, string> }>();
-  if (occurrenceIds.length === 0) return out;
+  if (Array.isArray(occurrenceIds) && occurrenceIds.length === 0) return out;
   const rows = await db
     .select({
       occurrenceId: gatheringShift.occurrenceId,

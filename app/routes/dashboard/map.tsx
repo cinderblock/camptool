@@ -488,35 +488,37 @@ async function recordOfficialHistory(
 
 /** Undo/redo availability for the current cursor. */
 async function historyState(editionId: string) {
-  const [ed] = await db
+  // The cursor is read inside both lookups instead of first on its own, so this
+  // is one round trip rather than three (plans/fast-navigation.md). With no
+  // cursor the comparisons are NULL and match nothing: neither undo nor redo.
+  const cursor = db
     .select({ cursor: campEdition.mapUndoCursor })
     .from(campEdition)
-    .where(eq(campEdition.id, editionId))
-    .limit(1);
-  const cursor = ed?.cursor ?? null;
-  if (cursor == null) return { canUndo: false, canRedo: false };
-  const [lower] = await db
-    .select({ seq: mapSnapshot.seq })
-    .from(mapSnapshot)
-    .where(
-      and(
-        eq(mapSnapshot.editionId, editionId),
-        eq(mapSnapshot.kind, "auto"),
-        lt(mapSnapshot.seq, cursor),
-      ),
-    )
-    .limit(1);
-  const [higher] = await db
-    .select({ seq: mapSnapshot.seq })
-    .from(mapSnapshot)
-    .where(
-      and(
-        eq(mapSnapshot.editionId, editionId),
-        eq(mapSnapshot.kind, "auto"),
-        gt(mapSnapshot.seq, cursor),
-      ),
-    )
-    .limit(1);
+    .where(eq(campEdition.id, editionId));
+  const [[lower], [higher]] = await Promise.all([
+    db
+      .select({ seq: mapSnapshot.seq })
+      .from(mapSnapshot)
+      .where(
+        and(
+          eq(mapSnapshot.editionId, editionId),
+          eq(mapSnapshot.kind, "auto"),
+          lt(mapSnapshot.seq, cursor),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ seq: mapSnapshot.seq })
+      .from(mapSnapshot)
+      .where(
+        and(
+          eq(mapSnapshot.editionId, editionId),
+          eq(mapSnapshot.kind, "auto"),
+          gt(mapSnapshot.seq, cursor),
+        ),
+      )
+      .limit(1),
+  ]);
   return { canUndo: !!lower, canRedo: !!higher };
 }
 
@@ -812,77 +814,100 @@ export async function loader({ request }: Route.LoaderArgs) {
   await requireFeature(active, "map");
   const editionId = activeEdition.id;
 
-  const [lot] = await db
-    .select()
-    .from(placement)
-    .where(eq(placement.editionId, editionId))
-    .limit(1);
-
-  const objectRows = await db
-    .select(objSelect)
-    .from(mapObject)
-    .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(and(eq(mapObject.editionId, editionId), onMap));
-
-  const zoneRows = await db
-    .select()
-    .from(mapZone)
-    .where(eq(mapZone.editionId, editionId));
-
-  const cableRows = await db
-    .select()
-    .from(mapCable)
-    .where(eq(mapCable.editionId, editionId));
-
-  const roadRows = await db
-    .select()
-    .from(mapRoad)
-    .where(eq(mapRoad.editionId, editionId));
-
   const canManage = hasAtLeast(active.membership.role, "officer");
-  // Aerial photos of this year's camp (plans/map-aerial-photo.md).
-  const aerials = await loadAerials(active.camp.id, editionId);
-  // Declared-but-unplaced items (the officer placement queue), with owner names.
-  // Includes items parked in the staging apron: staging is a way to LOOK at
-  // something's real size, not a decision about where it goes, so it must not
-  // quietly clear the queue. The tray badges those so the difference is visible.
-  const unplacedRows = canManage
-    ? await db
-        .select({
-          id: mapObject.id,
-          kind: mapObject.kind,
-          width: mapObject.width,
-          height: mapObject.height,
-          staged: mapObject.staged,
-          placeNearVehicle: mapObject.placeNearVehicle,
-          needsPumpout: mapObject.needsPumpout,
-          ownerName: user.name,
-        })
-        .from(mapObject)
-        .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
-        .leftJoin(user, eq(membership.userId, user.id))
-        .where(
-          and(eq(mapObject.editionId, editionId), eq(mapObject.placed, false)),
-        )
-    : [];
+  const params = new URL(request.url).searchParams;
 
-  // Official-map undo/redo availability + saved snapshots (officer tools) +
-  // per-camper edit suggestions (ghosts everyone sees).
-  const [history, snapshots, suggestions] = await Promise.all([
+  // The map's own objects, started first: the wiki ties below need them. A
+  // real promise, so awaiting it twice doesn't run the query twice (a Drizzle
+  // query builder runs again on every `then`).
+  const objectsQuery = Promise.resolve(
+    db
+      .select(objSelect)
+      .from(mapObject)
+      .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(and(eq(mapObject.editionId, editionId), onMap)),
+  );
+
+  // Every read here is independent of the others (only the wiki ties wait, for
+  // the objects), so they all go out together rather than one after another:
+  // on D1 each is a network round trip (plans/fast-navigation.md).
+  const [
+    [lot],
+    objectRows,
+    wiki,
+    zoneRows,
+    cableRows,
+    roadRows,
+    aerials,
+    unplacedRows,
+    history,
+    snapshots,
+    suggestions,
+    partyFocus,
+    groupFocus,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(placement)
+      .where(eq(placement.editionId, editionId))
+      .limit(1),
+    objectsQuery,
+    // Wiki pages tied to what's on the map (see plans/camp-wiki.md). Empty when
+    // the camp hasn't enabled the wiki — the panel then shows nothing.
+    objectsQuery.then((rows) =>
+      wikiTiesFor(
+        active,
+        rows.map((o) => ({ id: o.id, kind: o.kind })),
+      ),
+    ),
+    db.select().from(mapZone).where(eq(mapZone.editionId, editionId)),
+    db.select().from(mapCable).where(eq(mapCable.editionId, editionId)),
+    db.select().from(mapRoad).where(eq(mapRoad.editionId, editionId)),
+    // Aerial photos of this year's camp (plans/map-aerial-photo.md).
+    loadAerials(active.camp.id, editionId),
+    // Declared-but-unplaced items (the officer placement queue), with owner
+    // names. Includes items parked in the staging apron: staging is a way to
+    // LOOK at something's real size, not a decision about where it goes, so it
+    // must not quietly clear the queue. The tray badges those so the
+    // difference is visible.
+    canManage
+      ? db
+          .select({
+            id: mapObject.id,
+            kind: mapObject.kind,
+            width: mapObject.width,
+            height: mapObject.height,
+            staged: mapObject.staged,
+            placeNearVehicle: mapObject.placeNearVehicle,
+            needsPumpout: mapObject.needsPumpout,
+            ownerName: user.name,
+          })
+          .from(mapObject)
+          .leftJoin(membership, eq(mapObject.ownerMembershipId, membership.id))
+          .leftJoin(user, eq(membership.userId, user.id))
+          .where(
+            and(
+              eq(mapObject.editionId, editionId),
+              eq(mapObject.placed, false),
+            ),
+          )
+      : [],
+    // Official-map undo/redo availability + saved snapshots (officer tools) +
+    // per-camper edit suggestions (ghosts everyone sees).
     historyState(editionId),
     listSnapshots(editionId),
     loadSuggestions(editionId),
+    // `/map?party=<membershipId>` — arriving from the roster's "N on map"
+    // link. Resolved here rather than by shipping object ids in the URL: ids
+    // go stale the moment the map changes, and a membership id stays
+    // meaningful and shareable. Costs nothing on a normal map load, since the
+    // param is absent. `?group=` is looked up alongside rather than after it;
+    // a party, when there is one, still wins.
+    resolveParty(active.camp.id, editionId, params.get("party")),
+    resolveGroupFocus(active.camp.id, editionId, params.get("group")),
   ]);
-
-  // `/map?party=<membershipId>` — arriving from the roster's "N on map" link.
-  // Resolved here rather than by shipping object ids in the URL: ids go stale
-  // the moment the map changes, and a membership id stays meaningful and
-  // shareable. Costs nothing on a normal map load, since the param is absent.
-  const params = new URL(request.url).searchParams;
-  const party =
-    (await resolveParty(active.camp.id, editionId, params.get("party"))) ??
-    (await resolveGroupFocus(active.camp.id, editionId, params.get("group")));
+  const party = partyFocus ?? groupFocus;
 
   return redact(privacy, {
     party,
@@ -942,12 +967,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
       : null,
     objects: objectRows.map(toObjRow) satisfies ObjRow[],
-    // Wiki pages tied to what's on the map (see plans/camp-wiki.md). Empty when
-    // the camp hasn't enabled the wiki — the panel then shows nothing.
-    wiki: await wikiTiesFor(
-      active,
-      objectRows.map((o) => ({ id: o.id, kind: o.kind })),
-    ),
+    wiki,
     zones: zoneRows.map((z) => ({
       id: z.id,
       name: z.name,

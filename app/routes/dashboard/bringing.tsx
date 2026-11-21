@@ -73,34 +73,121 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { active, activeEdition, privacy } =
     await requireActiveEdition(request);
   await requireFeature(active, "bringing");
-  const rows = await db
-    .select()
-    .from(mapObject)
-    .where(
-      and(
-        eq(mapObject.editionId, activeEdition.id),
-        eq(mapObject.ownerMembershipId, active.membership.id),
+  // Every read below is independent, so they go out together rather than one
+  // after another: on D1 each is a network round trip
+  // (plans/fast-navigation.md).
+  const [
+    rows,
+    prior,
+    neighbourRows,
+    occupantRows,
+    myGuests,
+    beddedRows,
+    partyRows,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(mapObject)
+      .where(
+        and(
+          eq(mapObject.editionId, activeEdition.id),
+          eq(mapObject.ownerMembershipId, active.membership.id),
+        ),
       ),
-    );
-  // "Same as last year": the caller's items from the most recent PRIOR edition
-  // (year < this one). We DON'T copy anything automatically — campers re-commit
-  // each year; this just offers a one-click way to re-declare the same things.
-  const prior = await db
-    .select({
-      kind: mapObject.kind,
-      name: mapObject.name,
-      width: mapObject.width,
-      height: mapObject.height,
-      year: campEdition.year,
-    })
-    .from(mapObject)
-    .innerJoin(campEdition, eq(mapObject.editionId, campEdition.id))
-    .where(
-      and(
-        eq(mapObject.ownerMembershipId, active.membership.id),
-        eq(mapObject.campId, active.camp.id),
+    // "Same as last year": the caller's items from the most recent PRIOR
+    // edition (year < this one). We DON'T copy anything automatically — campers
+    // re-commit each year; this just offers a one-click way to re-declare the
+    // same things.
+    db
+      .select({
+        kind: mapObject.kind,
+        name: mapObject.name,
+        width: mapObject.width,
+        height: mapObject.height,
+        year: campEdition.year,
+      })
+      .from(mapObject)
+      .innerJoin(campEdition, eq(mapObject.editionId, campEdition.id))
+      .where(
+        and(
+          eq(mapObject.ownerMembershipId, active.membership.id),
+          eq(mapObject.campId, active.camp.id),
+        ),
       ),
-    );
+    // Everyone else in the camp, for the "put me near…" picker. Camp-wide
+    // rather than this year's roster: memberships aren't per-year, and a camper
+    // setting this up in March shouldn't be limited to whoever has already
+    // committed. A wish naming someone with nothing on the map simply draws no
+    // line.
+    db
+      .select({ id: membership.id, name: user.name })
+      .from(membership)
+      .innerJoin(user, eq(membership.userId, user.id))
+      .where(eq(membership.organizationId, active.camp.id)),
+    // — who's sleeping in the caller's structures —
+    //
+    // This is the permanent home for the wizard's "sharing" step: occupants
+    // hang off the structures they sleep in, which is what this page is
+    // (plans/wizard-step-homes.md).
+    db
+      .select({
+        objectId: mapObjectOccupant.objectId,
+        attendeeId: attendee.id,
+        membershipId: attendee.membershipId,
+        guestName: attendee.name,
+        memberName: user.name,
+      })
+      .from(mapObjectOccupant)
+      .innerJoin(mapObject, eq(mapObjectOccupant.objectId, mapObject.id))
+      .innerJoin(attendee, eq(mapObjectOccupant.attendeeId, attendee.id))
+      .leftJoin(membership, eq(attendee.membershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(
+        and(
+          eq(mapObject.ownerMembershipId, active.membership.id),
+          eq(mapObjectOccupant.editionId, activeEdition.id),
+        ),
+      ),
+    // The caller's own guests (attendee rows with no account of their own).
+    db
+      .select({
+        attendeeId: attendee.id,
+        name: attendee.name,
+        status: attendee.status,
+      })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, activeEdition.id),
+          eq(attendee.hostMembershipId, active.membership.id),
+        ),
+      ),
+    // Who's sleeping anywhere this year, and everyone attending under this
+    // member: for `withoutBed` below.
+    db
+      .select({ attendeeId: mapObjectOccupant.attendeeId })
+      .from(mapObjectOccupant)
+      .where(eq(mapObjectOccupant.editionId, activeEdition.id)),
+    db
+      .select({
+        id: attendee.id,
+        name: attendee.name,
+        memberName: user.name,
+        membershipId: attendee.membershipId,
+        status: attendee.status,
+      })
+      .from(attendee)
+      .leftJoin(membership, eq(attendee.membershipId, membership.id))
+      .leftJoin(user, eq(membership.userId, user.id))
+      .where(
+        and(
+          eq(attendee.editionId, activeEdition.id),
+          eq(attendee.hostMembershipId, active.membership.id),
+          isNotNull(attendee.hostMembershipId),
+        ),
+      ),
+  ]);
+
   const priorYears = prior
     .map((p) => p.year)
     .filter((y) => y < activeEdition.year);
@@ -120,97 +207,23 @@ export async function loader({ request }: Route.LoaderArgs) {
         }
       : null;
 
-  // Everyone else in the camp, for the "put me near…" picker. Camp-wide rather
-  // than this year's roster: memberships aren't per-year, and a camper setting
-  // this up in March shouldn't be limited to whoever has already committed.
-  // A wish naming someone with nothing on the map simply draws no line.
-  const neighbourRows = await db
-    .select({ id: membership.id, name: user.name })
-    .from(membership)
-    .innerJoin(user, eq(membership.userId, user.id))
-    .where(eq(membership.organizationId, active.camp.id));
   const neighbours = neighbourRows
     .filter((m) => m.id !== active.membership.id && m.name)
     .map((m) => ({ id: m.id, name: m.name as string }))
     .sort((a, b) => a.name.localeCompare(b.name)) satisfies Neighbour[];
 
-  // — who's sleeping in the caller's structures —
-  //
-  // This is the permanent home for the wizard's "sharing" step: occupants hang
-  // off the structures they sleep in, which is what this page is
-  // (plans/wizard-step-homes.md).
-  const occupants: Occupant[] = (
-    await db
-      .select({
-        objectId: mapObjectOccupant.objectId,
-        attendeeId: attendee.id,
-        membershipId: attendee.membershipId,
-        guestName: attendee.name,
-        memberName: user.name,
-      })
-      .from(mapObjectOccupant)
-      .innerJoin(mapObject, eq(mapObjectOccupant.objectId, mapObject.id))
-      .innerJoin(attendee, eq(mapObjectOccupant.attendeeId, attendee.id))
-      .leftJoin(membership, eq(attendee.membershipId, membership.id))
-      .leftJoin(user, eq(membership.userId, user.id))
-      .where(
-        and(
-          eq(mapObject.ownerMembershipId, active.membership.id),
-          eq(mapObjectOccupant.editionId, activeEdition.id),
-        ),
-      )
-  ).map((o) => ({
+  const occupants: Occupant[] = occupantRows.map((o) => ({
     objectId: o.objectId,
     attendeeId: o.attendeeId,
     membershipId: o.membershipId,
     name: o.guestName ?? o.memberName,
   }));
 
-  // The caller's own guests (attendee rows with no account of their own).
-  const myGuests = await db
-    .select({
-      attendeeId: attendee.id,
-      name: attendee.name,
-      status: attendee.status,
-    })
-    .from(attendee)
-    .where(
-      and(
-        eq(attendee.editionId, activeEdition.id),
-        eq(attendee.hostMembershipId, active.membership.id),
-      ),
-    );
-
   // Anyone attending UNDER this member — guests and party-linked members — who
   // isn't listed as sleeping anywhere yet. Exactly what the `sharing` ask
   // counts (`partyWithoutBed` in asks.server.ts), named rather than counted so
   // the to-do says who it's about.
-  const bedded = new Set(
-    (
-      await db
-        .select({ attendeeId: mapObjectOccupant.attendeeId })
-        .from(mapObjectOccupant)
-        .where(eq(mapObjectOccupant.editionId, activeEdition.id))
-    ).map((r) => r.attendeeId),
-  );
-  const partyRows = await db
-    .select({
-      id: attendee.id,
-      name: attendee.name,
-      memberName: user.name,
-      membershipId: attendee.membershipId,
-      status: attendee.status,
-    })
-    .from(attendee)
-    .leftJoin(membership, eq(attendee.membershipId, membership.id))
-    .leftJoin(user, eq(membership.userId, user.id))
-    .where(
-      and(
-        eq(attendee.editionId, activeEdition.id),
-        eq(attendee.hostMembershipId, active.membership.id),
-        isNotNull(attendee.hostMembershipId),
-      ),
-    );
+  const bedded = new Set(beddedRows.map((r) => r.attendeeId));
   const withoutBed = partyRows
     .filter(
       (a) =>
