@@ -1,5 +1,6 @@
 import {
   AppShell,
+  Avatar,
   Badge,
   Burger,
   Button,
@@ -15,7 +16,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure, useLocalStorage, useMediaQuery } from "@mantine/hooks";
 import { eq } from "drizzle-orm";
-import { useEffect } from "react";
+import { type ReactNode, useEffect } from "react";
 import {
   Form,
   NavLink,
@@ -25,7 +26,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router";
-import { FeedbackButton } from "~/components/FeedbackButton";
+import { FeedbackModal } from "~/components/FeedbackButton";
 import { ShellBanner } from "~/components/ShellBanner";
 import { outstandingAsks } from "~/lib/asks";
 import { loadAskSnapshots } from "~/lib/asks.server";
@@ -571,6 +572,47 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     navigate("/login");
   }
 
+  const [feedbackOpen, { open: openFeedback, close: closeFeedback }] =
+    useDisclosure();
+
+  // Shared by the wide header's Privacy button and the phone menu.
+  const privacyItems = (
+    <>
+      <Menu.Label>Privacy mode</Menu.Label>
+      <Menu.Item onClick={() => setPrivacy({ on: false, keepSelf: false })}>
+        {!privacyMode.on ? "✓ " : ""}Off — show real people
+      </Menu.Item>
+      <Menu.Item onClick={() => setPrivacy({ on: true, keepSelf: false })}>
+        {privacyMode.on && !privacyMode.keepSelf ? "✓ " : ""}
+        On — fake names for everyone
+      </Menu.Item>
+      <Menu.Item onClick={() => setPrivacy({ on: true, keepSelf: true })}>
+        {privacyMode.on && privacyMode.keepSelf ? "✓ " : ""}
+        On — but keep my own name
+      </Menu.Item>
+    </>
+  );
+
+  const yearSelect = (width: number, leftSection?: ReactNode) => (
+    <Select
+      size="xs"
+      aria-label="Year"
+      value={activeEditionId}
+      onChange={(id) =>
+        id &&
+        id !== activeEditionId &&
+        editionFetcher.submit(
+          { intent: "setActive", editionId: id },
+          { method: "post", action: "/editions" },
+        )
+      }
+      data={editions.map((e) => ({ value: e.id, label: e.label }))}
+      allowDeselect={false}
+      leftSection={leftSection}
+      w={width}
+    />
+  );
+
   const renderNavLink = (item: NavItem) => (
     <MantineNavLink
       key={item.to}
@@ -645,10 +687,11 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             />
             <Title order={4}>CampTool</Title>
           </Group>
+          {/* Wide screens: everything laid out in a row. */}
           <Group
             gap="md"
-            wrap="wrap"
-            justify="flex-end"
+            wrap="nowrap"
+            visibleFrom="md"
             style={{ minWidth: 0 }}
           >
             {camps.length > 1 ? (
@@ -659,27 +702,12 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                 onChange={switchCamp}
                 data={camps.map((c) => ({ value: c.id, label: c.name }))}
                 allowDeselect={false}
-                w={{ base: 120, sm: 180 }}
+                w={180}
               />
             ) : null}
             {editions.length > 0 ? (
               <Group gap={6} wrap="nowrap">
-                <Select
-                  size="xs"
-                  aria-label="Year"
-                  value={activeEditionId}
-                  onChange={(id) =>
-                    id &&
-                    id !== activeEditionId &&
-                    editionFetcher.submit(
-                      { intent: "setActive", editionId: id },
-                      { method: "post", action: "/editions" },
-                    )
-                  }
-                  data={editions.map((e) => ({ value: e.id, label: e.label }))}
-                  allowDeselect={false}
-                  w={{ base: 104, sm: 130 }}
-                />
+                {yearSelect(130)}
                 {activeEditionLocked ? (
                   <Badge size="sm" color="gray" variant="light">
                     locked
@@ -698,26 +726,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                     {privacyMode.on ? "Privacy on" : "Privacy"}
                   </Button>
                 </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Label>Privacy mode</Menu.Label>
-                  <Menu.Item
-                    onClick={() => setPrivacy({ on: false, keepSelf: false })}
-                  >
-                    {!privacyMode.on ? "✓ " : ""}Off — show real people
-                  </Menu.Item>
-                  <Menu.Item
-                    onClick={() => setPrivacy({ on: true, keepSelf: false })}
-                  >
-                    {privacyMode.on && !privacyMode.keepSelf ? "✓ " : ""}
-                    On — fake names for everyone
-                  </Menu.Item>
-                  <Menu.Item
-                    onClick={() => setPrivacy({ on: true, keepSelf: true })}
-                  >
-                    {privacyMode.on && privacyMode.keepSelf ? "✓ " : ""}
-                    On — but keep my own name
-                  </Menu.Item>
-                </Menu.Dropdown>
+                <Menu.Dropdown>{privacyItems}</Menu.Dropdown>
               </Menu>
             ) : null}
             {binsMenu ? (
@@ -734,11 +743,18 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                 {binsMenu.label} ↗
               </Button>
             ) : null}
-            <FeedbackButton />
+            <Button
+              variant="subtle"
+              size="xs"
+              color="gray"
+              onClick={openFeedback}
+            >
+              Feedback
+            </Button>
             <Menu position="bottom-end" withinPortal>
               <Menu.Target>
                 <UnstyledButton aria-label={`Account menu — ${user.name}`}>
-                  <Text size="sm" fw={500}>
+                  <Text size="sm" fw={500} truncate maw={180}>
                     {user.name}
                   </Text>
                 </UnstyledButton>
@@ -749,8 +765,73 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               </Menu.Dropdown>
             </Menu>
           </Group>
+          {/* Narrow screens: the year stays in view, since it changes what
+              every page shows, and everything else folds into one menu behind
+              your initials. As a wrapping row it spilled out of the 56px
+              header. */}
+          <Group gap="xs" wrap="nowrap" hiddenFrom="md">
+            {editions.length > 0
+              ? yearSelect(
+                  96,
+                  activeEditionLocked ? (
+                    <LockGlyph label="Year is locked" />
+                  ) : undefined,
+                )
+              : null}
+            <Menu position="bottom-end" withinPortal width={240}>
+              <Menu.Target>
+                <UnstyledButton aria-label={`Menu — ${user.name}`}>
+                  <Avatar
+                    name={user.name}
+                    color={privacyMode.on ? "orange" : "initials"}
+                    variant={privacyMode.on ? "filled" : "light"}
+                    size={32}
+                  />
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>
+                  {user.name}
+                  <br />
+                  {user.email}
+                </Menu.Label>
+                {camps.length > 1 ? (
+                  <>
+                    <Menu.Divider />
+                    <Menu.Label>Camp</Menu.Label>
+                    {camps.map((c) => (
+                      <Menu.Item key={c.id} onClick={() => switchCamp(c.id)}>
+                        {c.id === activeCampId ? "✓ " : ""}
+                        {c.name}
+                      </Menu.Item>
+                    ))}
+                  </>
+                ) : null}
+                {canUsePrivacy ? (
+                  <>
+                    <Menu.Divider />
+                    {privacyItems}
+                  </>
+                ) : null}
+                <Menu.Divider />
+                {binsMenu ? (
+                  <Menu.Item
+                    component="a"
+                    href="/bins"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {binsMenu.label} ↗
+                  </Menu.Item>
+                ) : null}
+                <Menu.Item onClick={openFeedback}>Send feedback</Menu.Item>
+                <Menu.Item onClick={handleSignOut}>Sign out</Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Group>
         </Group>
       </AppShell.Header>
+      <FeedbackModal opened={feedbackOpen} onClose={closeFeedback} />
 
       <AppShell.Navbar
         p="sm"
@@ -950,5 +1031,27 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         </KindsProvider>
       </AppShell.Main>
     </AppShell>
+  );
+}
+
+/** A small padlock for the phone header's year picker, which has no room for
+ * the wide header's "locked" badge. */
+function LockGlyph({ label }: { label: string }) {
+  return (
+    <svg
+      role="img"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <title>{label}</title>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
   );
 }

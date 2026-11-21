@@ -22,11 +22,30 @@ const KINDS = [
   { value: "other", label: "Other" },
 ];
 
-/** Header button → modal for users to send a bug/issue/suggestion/etc. Bug type
- * gets a structured template; everything captures the current URL + breadcrumbs
- * (recent navigation/errors) so we can trace what happened. */
+/** Header button → modal for users to send a bug/issue/suggestion/etc. */
 export function FeedbackButton() {
   const [opened, { open, close }] = useDisclosure(false);
+  return (
+    <>
+      <Button variant="subtle" size="xs" color="gray" onClick={open}>
+        Feedback
+      </Button>
+      <FeedbackModal opened={opened} onClose={close} />
+    </>
+  );
+}
+
+/** The feedback form on its own, for callers with their own trigger — the
+ * phone header opens it from a menu item. Bug type gets a structured template;
+ * everything captures the current URL + breadcrumbs (recent navigation/errors)
+ * so we can trace what happened. */
+export function FeedbackModal({
+  opened,
+  onClose: close,
+}: {
+  opened: boolean;
+  onClose: () => void;
+}) {
   const [kind, setKind] = useState("bug");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -93,81 +112,76 @@ export function FeedbackButton() {
   }
 
   return (
-    <>
-      <Button variant="subtle" size="xs" color="gray" onClick={open}>
-        Feedback
-      </Button>
-      <Modal opened={opened} onClose={close} title="Send feedback" size="lg">
-        <Stack gap="sm">
-          <Select
-            label="Type"
-            data={KINDS}
-            value={kind}
-            onChange={(v) => setKind(v ?? "other")}
-            allowDeselect={false}
-            comboboxProps={{ withinPortal: true }}
-          />
-          <TextInput
-            label="Summary (optional)"
-            placeholder="One line"
-            value={title}
-            onChange={(e) => setTitle(e.currentTarget.value)}
-          />
-          {isBug ? (
-            <>
-              <Textarea
-                label="What were you doing?"
-                autosize
-                minRows={2}
-                value={doing}
-                onChange={(e) => setDoing(e.currentTarget.value)}
-              />
-              <Textarea
-                label="What did you try?"
-                autosize
-                minRows={2}
-                value={trying}
-                onChange={(e) => setTrying(e.currentTarget.value)}
-              />
-              <Textarea
-                label="What did you expect to happen?"
-                autosize
-                minRows={2}
-                value={expected}
-                onChange={(e) => setExpected(e.currentTarget.value)}
-              />
-              <Textarea
-                label="What actually happened?"
-                autosize
-                minRows={2}
-                value={actual}
-                onChange={(e) => setActual(e.currentTarget.value)}
-              />
-            </>
-          ) : (
+    <Modal opened={opened} onClose={close} title="Send feedback" size="lg">
+      <Stack gap="sm">
+        <Select
+          label="Type"
+          data={KINDS}
+          value={kind}
+          onChange={(v) => setKind(v ?? "other")}
+          allowDeselect={false}
+          comboboxProps={{ withinPortal: true }}
+        />
+        <TextInput
+          label="Summary (optional)"
+          placeholder="One line"
+          value={title}
+          onChange={(e) => setTitle(e.currentTarget.value)}
+        />
+        {isBug ? (
+          <>
             <Textarea
-              label={kind === "question" ? "Your question" : "Message"}
-              placeholder={
-                kind === "question"
-                  ? "What would you like to know?"
-                  : "Tell us what's on your mind…"
-              }
+              label="What were you doing?"
               autosize
-              minRows={4}
-              value={body}
-              onChange={(e) => setBody(e.currentTarget.value)}
+              minRows={2}
+              value={doing}
+              onChange={(e) => setDoing(e.currentTarget.value)}
             />
-          )}
-          <Group justify="flex-end">
-            <Button variant="default" onClick={close}>
-              Cancel
-            </Button>
-            <Button onClick={submit} loading={busy}>
-              Send
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
-    </>
+            <Textarea
+              label="What did you try?"
+              autosize
+              minRows={2}
+              value={trying}
+              onChange={(e) => setTrying(e.currentTarget.value)}
+            />
+            <Textarea
+              label="What did you expect to happen?"
+              autosize
+              minRows={2}
+              value={expected}
+              onChange={(e) => setExpected(e.currentTarget.value)}
+            />
+            <Textarea
+              label="What actually happened?"
+              autosize
+              minRows={2}
+              value={actual}
+              onChange={(e) => setActual(e.currentTarget.value)}
+            />
+          </>
+        ) : (
+          <Textarea
+            label={kind === "question" ? "Your question" : "Message"}
+            placeholder={
+              kind === "question"
+                ? "What would you like to know?"
+                : "Tell us what's on your mind…"
+            }
+            autosize
+            minRows={4}
+            value={body}
+            onChange={(e) => setBody(e.currentTarget.value)}
+          />
+        )}
+        <Group justify="flex-end">
+          <Button variant="default" onClick={close}>
+            Cancel
+          </Button>
+          <Button onClick={submit} loading={busy}>
+            Send
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
