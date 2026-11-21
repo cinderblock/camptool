@@ -63,27 +63,36 @@ It should feel instant. Find where the time goes, then remove it.
    [ ] Later, only if still needed after placement: per-route loaders, and
    better-auth `session.cookieCache` (drops 2 waits per request; trade-off:
    a revoked session lingers up to its maxAge).
-4. [current] **Move D1 + R2 west** (Cameron, 2026-11-21: "fix that now, while
+4. [x] **Move D1 + R2 west** (Cameron, 2026-11-21: "fix that now, while
    I don't have users"; pinning the Worker east was rejected, users are in
-   California). Each step needs Cameron's yes:
-   a. ops `1e60e624` (worktree `ops-camptool-wnam`, not pushed): D1/R2
-      `location` support + new D1 `camptool-db` and R2 `camptool-files` in
-      `wnam`. Dry run: 2 creates, nothing else.
-   b. Copy data: `wrangler d1 export camptool --remote` →
-      `wrangler d1 execute camptool-db --remote --file` (the export carries
-      `d1_migrations`, so the deploy's `migrations apply` is a no-op); copy
-      R2 objects. Keep the export as a backup. Writes in between are lost
-      (no users yet).
-   c. CampTool: `wrangler.jsonc` binds `camptool-db` / `camptool-files`
-      (staged, uncommitted). Wrangler rebinds by name: an inherited binding
-      is only kept when its database's name matches.
-   d. Verify live: per-wait time in `Server-Timing`, sign-in, pages.
-   e. Then tombstone `camptool` + `camptool-uploads` in ops (separate yes).
-5. Re-measure live; record before/after here.
+   California). Done 2026-11-21 1:19–1:45 PM PST (21:19–21:45Z):
+   a. [x] ops `1e60e624`: D1/R2 `location`; created D1 `camptool-db`
+      (`a3acbd48-…`, `running_in_region: WNAM`) and R2 `camptool-files`
+      (`WNAM`).
+   b. [x] Data copied. The raw `wrangler d1 export` would not load (see
+      Findings); `scripts/order-d1-dump.ts` reordered it. Row counts match in
+      all 84 tables (1,351 rows); the old database had no writes after the
+      export. 3 R2 objects copied, sha256 verified. Backups (the export, the
+      ordered copy, the R2 files) in the main checkout's
+      `data/backups/` (git-ignored).
+   c. [x] CampTool `c68a4d4`: binds `camptool-db` / `camptool-files`. Live as
+      `7d047f8`.
+   d. [x] Live: Server-Timing at SJC shows ~12 ms per wait warm (e.g. 4 waits
+      in 48 ms, 2 in 38 ms) vs 75–110 ms before; `camptool-db` is serving the
+      queries. Signed-in page switches not measured by me (no session); 7–16
+      waits should now be ~100–200 ms.
+   e. [ ] Tombstone `camptool` + `camptool-uploads` in ops (separate yes).
+5. [x] Re-measured live (4d).
+6. [ ] ops `7fa35386` (local, not pushed): D1/R2 default to `wnam` when an
+   entry names no location (Cameron, 2026-11-21: "our default locations
+   should be us west/california/San Jose"). Dry run: 0 changes. Needs
+   Cameron's yes to push.
 
 ## Decisions already made (don't re-ask)
 
 - "Best, not fastest" applies.
+- Default region for anything new is US West / California / San Jose
+  (Cloudflare `wnam`), never a provider's default.
 
 ## Why the data was in the east
 
@@ -92,6 +101,17 @@ Cloudflare places a new database or bucket near the API caller, and the ops
 sync runs on a GitHub runner in the eastern US. Confirmed: `wrangler r2
 bucket info camptool-uploads` → `location: ENAM`; Cameron saw Eastern North
 America on the D1. Ops now takes `location` on `d1:`/`r2:` entries.
+
+## Restoring a `wrangler d1 export` into D1
+
+Loading the export as is failed twice: `no such table: main.user`, then
+`FOREIGN KEY constraint failed`. D1 checks foreign keys statement by
+statement during an import, so the export's `PRAGMA defer_foreign_keys`
+doesn't span it, and the export writes each table's rows right after its
+CREATE, in creation order. A failed import rolled back cleanly (1 object in
+`sqlite_master`). `scripts/order-d1-dump.ts` writes the tables first, then the
+rows parent-first, and checks the result locally with foreign keys on. The
+app's own backup likely has the same problem (ISSUES.md).
 
 ## Things not to do
 
@@ -109,5 +129,7 @@ America on the D1. Ops now takes `location` on `d1:`/`r2:` entries.
 - [x] 2026-11-21: D1 is in Eastern North America (Cameron, from the
       dashboard). Most users are in California.
 - [-] Pin the Worker east: dropped. Cameron chose moving the data west.
-- [ ] Step 4a–d: waiting on Cameron's yes.
+- [x] 2026-11-21: step 4a–d done (Cameron's yes); live `7d047f8`, ~12 ms
+      per wait.
 - [ ] Step 4e: tombstone the eastern pair (later, separate yes).
+- [ ] Step 6: push ops default-`wnam` (`7fa35386`), needs yes.
