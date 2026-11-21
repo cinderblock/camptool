@@ -44,7 +44,9 @@ It should feel instant. Find where the time goes, then remove it.
   waits per request**, before → after the shell changes:
   - full load: `/members` 36 → 6, `/roster` 43 → 13, `/trip` 35 → 5,
     `/map` 43 → 10, `/` 55 → 12.
-  - page switch (only the page's own loader runs): 7–16 waits, unchanged.
+  - page switch: 7–16 waits, unchanged. (These curl runs asked for the
+    page's loader only, with `_routes=`; a real browser switch also reran
+    the layout's loader until step 8b, see Findings.)
     Every route loader is serial; that long tail is what placement fixes in
     one move.
 - Breakdown of a switch: root middleware's camp-move check (2, cached 30 s per
@@ -117,6 +119,25 @@ It should feel instant. Find where the time goes, then remove it.
       active-camp sync go stale; once the Worker sits next to D1 those 2
       waits cost a few ms). D1 read replication + Sessions API: worth it only
       if most traffic were far away; placement covers our case with no code.
+8. [current] **Measure real phones, then fix the client side** (Cameron,
+   2026-11-21: "Seems better. Still could be better?" → yes to a timing
+   reporter).
+   a. [x] Reporter (`466b45a`): `app/lib/nav-timing.ts` times every load
+      and switch in the signed-in app (tap → drawn, data, Server-Timing incl.
+      colo, code, render, network type) → `/api/log-nav` → `nav_timing`
+      (30 days). Read with `GET /api/dev/nav?token=…&since=24h` (per-page
+      medians/90th percentiles) or `&group=0` (rows).
+   b. [x] Layout opts out of reloading on page switches (`e1d42c1`):
+      single fetch reran it every time (~45 queries, half the response).
+   c. [x] `routeDiscovery: "initial"` (`5d3a87b`): touch prefetch no longer
+      waits on `/__manifest`.
+   d. [x] Page code in one round (`4fc7abe`): modulepreload a route's
+      module + imports on pointerdown and on navigation start.
+   e. [ ] Let Cameron use it for a day, read `/api/dev/nav`, fix the biggest
+      remaining part. Candidates: preload all page code when idle (416 KB
+      gz for the dashboard; needs Cameron's call on data use), keep
+      visited pages' data and refresh in the background, render cost on
+      heavy pages (map, members).
 
 ## Decisions already made (don't re-ask)
 
@@ -143,6 +164,28 @@ CREATE, in creation order. A failed import rolled back cleanly (1 object in
 rows parent-first, and checks the result locally with foreign keys on. The
 app's own backup likely has the same problem (ISSUES.md).
 
+## Client-side findings (throttled Pixel 7 headless: 4x CPU, 80 ms, 9 Mbps)
+
+- **Single fetch reruns every loader on every page switch** unless the
+  route has `shouldRevalidate` (React Router 8.5:
+  `singleFetchLoaderNavigationStrategy` calls `shouldCallHandler(true)` for
+  existing matches). The browser asked for `/account.data` with no
+  `_routes`, so root + layout + page all ran: 45 queries, 1652 bytes. With
+  the layout opting out: `_routes=routes/dashboard/account`, 11 queries, 883
+  bytes.
+- **Page code loaded as a chain**: React Router `import()`s the route
+  module only; its imports and theirs followed one round trip at a time
+  (roster: 3 levels, last chunk 370 ms after the click). Fixed by
+  modulepreloading the manifest's `imports` list at touch.
+- **Touch prefetch didn't help**: lazy route discovery fetched
+  `/__manifest` before rendering the prefetch links, so the prefetch began
+  after the click and the data was fetched twice. React Router's intent
+  prefetch also waits 100 ms after touchstart.
+- Full page load on that throttled phone: ~4.7–5.3 s, of which code ~2.1 s
+  and render ~2.7 s; the server ~0.15 s.
+- The D1 "waits" metric undercounts when loaders overlap (parallel
+  loaders = one long busy stretch); it's a lower bound on sequential depth.
+
 ## Things not to do
 
 - Don't change Cloudflare settings (placement, D1 replication) without a
@@ -167,3 +210,5 @@ app's own backup likely has the same problem (ISSUES.md).
 - [x] 2026-11-21: step 7a, shell feature gate folded into the camps query.
 - [x] 2026-11-21: step 7b, per-route loaders (most pages 4 waits).
 - [x] Step 7c: placement pin (Cameron's yes).
+- [x] 2026-11-21: step 8a–d, timing reporter + client fixes.
+- [ ] Step 8e: read a day of real timings with Cameron.
