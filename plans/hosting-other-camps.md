@@ -294,7 +294,7 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
         `https://mathcamp.camptool.org/`, `/login` → 302
         `https://camptool.org/login`, `/moved` → 200 "We've moved".
    g. Retire firefly's camptool stack (Cameron: "do it", 2026-11-21).
-      [x] Backup: `P:\Backupsirefly\camptool-retired-2026-11-21\camptool-firefly.tar.gz`
+      [x] Backup: `P:\Backups\firefly\camptool-retired-2026-11-21\camptool-firefly.tar.gz`
       on uberfall (VACUUM INTO snapshot + uploads + the pre-0066 repair copy;
       integrity ok, 42 users, 8 passkeys, 1 camp; sha256 `2c791fe6…6731`).
       [ ] Ops change staged on ops branch `retire-firefly-camptool`
