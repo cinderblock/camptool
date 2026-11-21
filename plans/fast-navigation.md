@@ -32,17 +32,38 @@ It should feel instant. Find where the time goes, then remove it.
   `requireFeature`, then its own queries, all awaited in series. 15–25 serial
   round trips × ~75 ms ≈ 1–2 s of server time per page switch before the phone's
   own latency.
+- **Live, with the header deployed** (`28c9bbb`, 11:35 AM PST, 19:35Z):
+  `/c/mathcamp` = `db;dur=660;desc="6 queries, 6 round trips", total;dur=667`.
+  ~75–110 ms per round trip, and D1 is 100% of server time.
+- **Smart Placement won't help at our traffic.** Per the Workers docs it only
+  moves a Worker with "consistent traffic … from multiple locations", and it
+  doesn't place by D1 binding. `placement.region` (`{provider}:{region}`, e.g.
+  `aws:us-east-1`) pins it explicitly. Which region D1 lives in isn't visible
+  from here: this machine's wrangler login doesn't include the isozilla account.
+- **Counted locally (wrangler preview, dev data, member account), sequential
+  waits per request**, before → after the shell changes:
+  - full load: `/members` 36 → 6, `/roster` 43 → 13, `/trip` 35 → 5,
+    `/map` 43 → 10, `/` 55 → 12.
+  - page switch (only the page's own loader runs): 7–16 waits, unchanged.
+    Every route loader is serial; that long tail is what placement fixes in
+    one move.
+- Breakdown of a switch: root middleware's camp-move check (2, cached 30 s per
+  isolate), better-auth session + user (2), camps ∥ editions (1, was 2),
+  feature gate (1), then the page's own queries.
 - **No prefetch and no pending feedback.** Nav links don't prefetch, and
   nothing on screen changes until the new page's data arrives.
 
 ## Plan / steps
 
-1. [current] Measure: per-request `Server-Timing` (D1 query count + time,
+1. [x] Measure: per-request `Server-Timing` (D1 query count + time,
    total) from the Worker, so every fix is checked against numbers.
-2. Client: immediate feedback (pending bar) and prefetch nav links on intent.
-3. Server: cut serial round trips — parallelize independent queries, share
-   per-request lookups (session/camps/editions/features), batch where possible.
-4. Placement: pin the Worker near D1 — **Cloudflare change, needs Cameron's
+2. [x] Client: immediate feedback (pending bar) and prefetch nav links on intent.
+3. [x] Server, shell: ask snapshot (19 queries) and layout loader in parallel
+   waves; camps ∥ editions in `resolveActiveCamp`.
+   [ ] Later, only if still needed after placement: per-route loaders, and
+   better-auth `session.cookieCache` (drops 2 waits per request; trade-off:
+   a revoked session lingers up to its maxAge).
+4. [current] Placement: pin the Worker near D1 — **Cloudflare change, needs Cameron's
    explicit yes for that exact change.**
 5. Re-measure live; record before/after here.
 
@@ -58,3 +79,10 @@ It should feel instant. Find where the time goes, then remove it.
 ## Progress log
 
 - [x] 2026-11-21: diagnosed D1 round-trip cost and serial loaders.
+- [x] 2026-11-21: `Server-Timing` live (`28c9bbb`); now reports sequential
+      waits.
+- [x] 2026-11-21: shell loaders parallel; loading bar (`NavigationProgress`,
+      shows after 120 ms); nav links `prefetch="intent"`. Verified in a
+      headless Pixel 7 against the local Workers preview.
+- [ ] Placement change: waiting on Cameron (D1 region + yes).
+- [ ] Re-measure live after placement.
