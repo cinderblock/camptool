@@ -657,12 +657,33 @@ try {
   const code2 =
     backPage.match(/camptool-move:1:[^<"\s]+/)?.[0]?.replaceAll("&amp;", "&") ??
     "";
-  const check2 = await post(
-    A,
-    "/import-camp",
-    alice.cookie,
-    new URLSearchParams({ intent: "check", code: code2 }),
+  // This time by file: download it, look inside, and import from it.
+  const file = await page(`${campBase(B)}/move/bundle`, aliceB.cookie);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const bundlePath = join(ROOT, "movers.camptool");
+  await Bun.write(bundlePath, bytes);
+  check(
+    "B: the camp downloads as a file",
+    file.status === 200 && bytes.length > 100,
+    `HTTP ${file.status}`,
   );
+  const inspect = Bun.spawnSync([
+    "bun",
+    "scripts/camp-move.ts",
+    "inspect",
+    bundlePath,
+    code2,
+  ]);
+  check(
+    "the CLI opens the file and finds it intact",
+    inspect.exitCode === 0 && inspect.stdout.toString().includes("Intact."),
+    inspect.stdout.toString().trim().split(/\r?\n/).slice(-2).join(" / "),
+  );
+  const form = new FormData();
+  form.set("intent", "check");
+  form.set("code", code2);
+  form.set("file", new Blob([bytes]), "movers.camptool");
+  const check2 = await post(A, "/import-camp", alice.cookie, form);
   const check2Html = await check2.text();
   check(
     "A: carol comes back to her own account",
@@ -672,7 +693,12 @@ try {
     A,
     "/import-camp",
     alice.cookie,
-    new URLSearchParams({ intent: "import", code: code2, slug: "movers" }),
+    new URLSearchParams({
+      intent: "import",
+      code: code2,
+      slug: "movers",
+      upload: check2Html.match(/name="upload" value="([^"]+)"/)?.[1] ?? "",
+    }),
   );
   check(
     "A: the camp is back, at its old address",

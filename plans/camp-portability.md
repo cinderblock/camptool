@@ -3,8 +3,9 @@
 > Task plan. Parent plans: `plans/camptool.md`, `plans/hosting-other-camps.md`
 > (step 7 and 8f are the one-way, whole-database move this generalises).
 > Plan path: `plans/camp-portability.md`. Branch `camp-portability`.
-> **Status (2026-11-20): design revised with Cameron's answers (decisions
-> 6–9); waiting on his go-ahead to build. No code yet.**
+> **Status (2026-11-21): built and verified locally in all four directions
+> (Bun and Cloudflare/wrangler dev, both ways, plus the return trip), on
+> branch `camp-portability`, not merged or deployed.**
 
 ## Goal
 
@@ -322,7 +323,7 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 ## Plan / steps
 
 1. [x] Open questions answered (decisions 6–9, 2026-11-20).
-   [ ] **Current step: Cameron's go-ahead to build.**
+   [x] Cameron's go-ahead to build (2026-11-21).
 2. [x] Table registry + classification test; JSON user-id registry
    (`app/lib/camp-move/registry.ts`, `schema-graph.ts`).
 3. [~] Exporter (`export.server.ts`), people remap (`remap.ts`), bundle
@@ -347,16 +348,36 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
    held (`slugProblem`), delete after confirm, window expiry
    (`endExpiredMoves`, run lazily from the forwarding cache refresh).
    A camp returning to a site it left ends that site's tombstone.
-9. [~] e2e: `e2e/camp-portability.ts`, Bun → Bun, 35/35 (2026-11-21):
-   import, freeze, delete, forwarding, hand-off (once only, never into an
-   existing account), forced passkey, claim, related origins, old passkey
-   signed for the new origin (software key), old address held. **Still to
-   do:** a `wrangler dev` (D1/R2) side in both directions, subdomain mode on
-   the source, and a real browser exercising Related Origin Requests.
-10. [ ] Docs: `docs/moving-a-camp.md` for camp admins and self-hosters;
-    README pointer.
+9. [x] e2e: `bun e2e/camp-portability.ts [bun|cf] [bun|cf]`, 45/45 in all
+   four combinations (2026-11-21; `cf` = the Cloudflare build under local
+   `wrangler dev`, D1 + R2, subdomains on). Covers: import by pull, freeze,
+   delete, Site admin listing, forwarding (whole site and old subdomain),
+   hand-off (once only, never into an existing account), forced passkey,
+   claim, related origins, an old passkey signed for the new origin
+   (software key), old address held, then the return trip by **file** (CLI
+   inspect, import from the file, tombstone ended, forwarding reversed).
+   Not covered: a real browser using Related Origin Requests (needs two real
+   HTTPS names; see Open questions).
+10. [x] Docs: `docs/moving-a-camp.md`; README pointer.
+11. [ ] Merge to `master` (deploys camptool.org via Workers Builds): Cameron's
+    call. The migration (0094) only adds tables, so it is D1-safe.
 
 ## Findings / gotchas
+
+- **Workers reject `fetch(…, { redirect: "error" })`** ("Invalid redirect
+  value, must be one of \"follow\" or \"manual\""). Use `"manual"` and treat
+  3xx as failure. Bun accepted it, so only the Cloudflare e2e caught it.
+- **The dev server doesn't enforce the server-only boundary; the production
+  build does.** `/move` read a constant from a `.server` module in its
+  component: fine under `react-router dev`, "Server-only module referenced
+  by client" under `build`. Build before trusting a dev-server e2e.
+- **workerd resolves `localhost` to IPv4 only**, and Vite binds the IPv6
+  `localhost` on Windows, so a `wrangler dev` site couldn't fetch a Bun dev
+  site until the e2e started Bun with `--host 127.0.0.1`.
+- Killing `bunx wrangler dev` leaves `workerd` running on Windows; the e2e
+  kills the process tree (`taskkill /T /F`).
+- Whole-site forwarding (an old site with no camps left) must leave
+  `/import-camp` and `/new-camp` alone, or the camp can never come back.
 
 - Every camp table but one carries a NOT NULL `camp_id`;
   `setup_pass_stock_event` reaches the camp through `setup_pass_stock`.
@@ -390,6 +411,8 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 ## Progress log
 
 - [x] 2026-11-21: steps 2–8 built; e2e Bun → Bun green (35/35).
+- [x] 2026-11-21: Cloudflare side, return trip, file transport, Site admin
+  list, docs, `scripts/camp-move.ts inspect`; e2e 45/45 × 4 directions.
 
 - [x] 2026-11-20: design written (this file).
 - [x] 2026-11-20: Cameron's answers folded in: no passwords, 1-year window,
@@ -397,7 +420,19 @@ privateKey (encrypted with BETTER_AUTH_SECRET), state, windowEndsAt}`.
 
 ## Open questions for the user
 
-(None; answers recorded as decisions 6–9.)
+1. **Merge and deploy?** Merging to `master` deploys camptool.org. Recommend
+   yes once you've looked; nothing changes for existing camps until someone
+   starts a move.
+2. **A real-browser check of old passkeys at the new site** (Related Origin
+   Requests) needs two real HTTPS names, e.g. a scratch camp moved between
+   camptool.org and a second test site. Server side is verified with a
+   software key; the browser's part (fetching `/.well-known/webauthn`) isn't.
+   Recommend doing it on the first real move, with the sign-in bridge as the
+   fallback that's already proven.
+3. **Not built from the design, by choice:** the CLI's scratch-database path
+   for importing into a *newer* site whose in-between migrations aren't
+   additive. The import refuses with "update the older site first" instead.
+   Recommend leaving it until a move actually hits it.
 
 ## Things not to do
 

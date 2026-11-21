@@ -336,6 +336,13 @@ onto a shared Cloudflare site with its accounts and sign-ins intact
 (`scripts/import-to-d1.ts`; its old address keeps redirecting, see
 `LEGACY_HOSTS` in the same doc).
 
+Any one camp can also **move between any two CampTool sites**, in either
+direction (camptool.org to your own server, back again, or between two
+self-hosted servers): a camp admin starts it under Camp settings → Move this
+camp, and the new site's `/import-camp` brings it in. Old links and sign-ins
+follow the camp for a year; passwords never leave the old site. See
+[`docs/moving-a-camp.md`](docs/moving-a-camp.md).
+
 ## Design notes
 
 - **How joining works** (apply page vs. invite links, the onboarding wizard,
