@@ -8,7 +8,12 @@
  *               address, signed up here too), and someone else using bob's
  *               address.
  *
- *   bun e2e/camp-portability.ts
+ *   bun e2e/camp-portability.ts [bun|cf] [bun|cf]     (source, target)
+ *
+ * `cf` runs the Cloudflare build under local `wrangler dev` (D1 + R2, all
+ * local; run `bun run cf:build` first) with camp subdomains on, the way
+ * camptool.org runs. `bun` is a dev server on one host, the way a camp's own
+ * server runs.
  *
  * Logs: data/portability/{a,b}.log (grep them for SSR errors: a throw in a
  * loader can still come back as HTTP 200).
@@ -38,38 +43,130 @@ const check = (name: string, cond: boolean, detail = "") => {
   );
 };
 
+type Kind = "bun" | "cf";
 type Site = {
   name: string;
+  kind: Kind;
   url: string;
+  /** Camp subdomains on (the Cloudflare sites here). */
+  sub: boolean;
   db: string;
   uploads: string;
+  persist: string;
   proc?: Subprocess;
 };
-const site = (name: string, port: number): Site => ({
+const site = (name: string, port: number, kind: Kind): Site => ({
   name,
+  kind,
   url: `http://localhost:${port}`,
+  sub: kind === "cf",
   db: join(ROOT, `${name}.db`),
   uploads: join(ROOT, `${name}-uploads`),
+  persist: join(ROOT, `${name}-wrangler`),
 });
-const A = site("a", 17981);
-const B = site("b", 17982);
+const kindArg = (v: string | undefined): Kind => (v === "cf" ? "cf" : "bun");
+const A = site("a", 17981, kindArg(process.argv[2]));
+const B = site("b", 17982, kindArg(process.argv[3]));
+console.log(`source ${A.kind}, target ${B.kind}`);
+/** Where a site serves the camp. */
+const campBase = (s: Site) =>
+  s.sub ? `http://movers.localhost:${new URL(s.url).port}` : s.url;
+
+/** The database file behind a site (Miniflare's for D1). */
+function dbFile(s: Site): string {
+  if (s.kind === "bun") return s.db;
+  const found = [
+    ...new Bun.Glob("**/miniflare-D1DatabaseObject/*.sqlite").scanSync({
+      cwd: s.persist,
+      onlyFiles: true,
+    }),
+  ];
+  if (!found[0]) throw new Error(`no D1 file under ${s.persist}`);
+  return join(s.persist, found[0]);
+}
+
+/** fetch, reaching `<camp>.localhost:<port>` through the port's own host
+ * name (subdomains of localhost don't resolve everywhere). */
+function req(url: string, init: RequestInit = {}) {
+  const u = new URL(url);
+  const headers = new Headers(init.headers);
+  if (u.hostname.endsWith(".localhost")) {
+    headers.set("host", u.host);
+    u.hostname = "localhost";
+  }
+  return fetch(u.href, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(60_000),
+    ...init,
+    headers,
+  });
+}
 
 async function start(s: Site) {
   const log = Bun.file(join(ROOT, `${s.name}.log`));
-  s.proc = Bun.spawn(["bun", "--bun", "react-router", "dev"], {
-    env: {
-      ...process.env,
-      PORT: new URL(s.url).port,
-      PUBLIC_BASE_URL: s.url,
-      DATABASE_PATH: s.db,
-      UPLOADS_PATH: s.uploads,
-      BETTER_AUTH_SECRET: `secret-${s.name}-${"x".repeat(40)}`,
-      CAMP_SUBDOMAINS: "",
-      LEGACY_HOSTS: "",
-    },
-    stdout: log,
-    stderr: log,
-  });
+  const secret = `secret-${s.name}-${"x".repeat(40)}`;
+  if (s.kind === "cf") {
+    const cfg = "build/server/wrangler.json";
+    const mig = Bun.spawnSync(
+      [
+        "bunx",
+        "wrangler",
+        "d1",
+        "migrations",
+        "apply",
+        "DB",
+        "--local",
+        "--persist-to",
+        s.persist,
+        "--config",
+        cfg,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    if (mig.exitCode !== 0) throw new Error(`D1 migrations: ${mig.stderr}`);
+    s.proc = Bun.spawn(
+      [
+        "bunx",
+        "wrangler",
+        "dev",
+        "--config",
+        cfg,
+        "--persist-to",
+        s.persist,
+        "--port",
+        new URL(s.url).port,
+        "--ip",
+        "localhost",
+        "--var",
+        `PUBLIC_BASE_URL:${s.url}`,
+        "--var",
+        "CAMP_SUBDOMAINS:1",
+        "--var",
+        `BETTER_AUTH_SECRET:${secret}`,
+      ],
+      { stdout: log, stderr: log },
+    );
+  } else {
+    // 127.0.0.1: workerd resolves `localhost` to IPv4 only, and Vite's
+    // default binds the IPv6 one on Windows.
+    s.proc = Bun.spawn(
+      ["bun", "--bun", "react-router", "dev", "--host", "127.0.0.1"],
+      {
+        env: {
+          ...process.env,
+          PORT: new URL(s.url).port,
+          PUBLIC_BASE_URL: s.url,
+          DATABASE_PATH: s.db,
+          UPLOADS_PATH: s.uploads,
+          BETTER_AUTH_SECRET: secret,
+          CAMP_SUBDOMAINS: "",
+          LEGACY_HOSTS: "",
+        },
+        stdout: log,
+        stderr: log,
+      },
+    );
+  }
   for (let i = 0; i < 120; i++) {
     try {
       const r = await fetch(`${s.url}/login`);
@@ -100,12 +197,23 @@ async function signUp(s: Site, email: string, name: string) {
 }
 
 const post = (s: Site, path: string, cookie: string, body: BodyInit) =>
-  fetch(`${s.url}${path}`, {
+  req(`${s.url}${path}`, {
     method: "POST",
     headers: { cookie, origin: s.url },
     body,
-    redirect: "manual",
   });
+
+/** GET, following redirects (across camp subdomains too). */
+async function page(url: string, cookie = "") {
+  let at = url;
+  for (let i = 0; i < 5; i++) {
+    const r = await req(at, { headers: cookie ? { cookie } : {} });
+    const to = r.headers.get("location");
+    if (!to || r.status < 300 || r.status >= 400) return r;
+    at = new URL(to, at).href;
+  }
+  throw new Error(`too many redirects from ${url}`);
+}
 
 // biome-ignore format: a 1x1 PNG
 const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
@@ -144,10 +252,14 @@ try {
   const fd = new FormData();
   fd.append("file", new Blob([png], { type: "image/png" }), "dot.png");
   const up = await post(A, "/api/media", alice.cookie, fd);
+  const media = (await up
+    .clone()
+    .json()
+    .catch(() => ({}))) as { id?: string };
   check("A: upload a picture", up.ok, `HTTP ${up.status}`);
   const bob = await signUp(A, "bob@example.com", "Bob");
   {
-    const db = new Database(A.db);
+    const db = new Database(dbFile(A));
     db.run(
       "INSERT INTO membership (id, camp_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'member', 'active', ?)",
       [crypto.randomUUID(), camp.id, bob.id, Date.now()],
@@ -168,7 +280,7 @@ try {
       Buffer.from([0x22, 0x58, 0x20]),
       Buffer.from(jwk.y as string, "base64url"),
     ]);
-    const db = new Database(A.db);
+    const db = new Database(dbFile(A));
     db.run(
       "INSERT INTO membership (id, camp_id, user_id, role, status, created_at) VALUES (?, ?, ?, 'member', 'active', ?)",
       [crypto.randomUUID(), camp.id, carol.id, Date.now()],
@@ -193,11 +305,10 @@ try {
     new URLSearchParams({ intent: "start", understood: "on" }),
   );
   check("A: start the move", start1.status < 400, `HTTP ${start1.status}`);
-  const page = await (
-    await fetch(`${A.url}/move`, { headers: { cookie: alice.cookie } })
-  ).text();
+  const movePage = await (await page(`${A.url}/move`, alice.cookie)).text();
   const code =
-    page.match(/camptool-move:1:[^<"\s]+/)?.[0]?.replaceAll("&amp;", "&") ?? "";
+    movePage.match(/camptool-move:1:[^<"\s]+/)?.[0]?.replaceAll("&amp;", "&") ??
+    "";
   check(
     "A: the move page shows the code",
     code.startsWith("camptool-move:1:http://localhost:17981:"),
@@ -222,10 +333,16 @@ try {
     new URLSearchParams({ intent: "check", code }),
   );
   const checkHtml = await checkRes.text();
+  await Bun.write(join(ROOT, "check.html"), checkHtml);
   check(
     "B: the check lists the camp",
     checkHtml.includes("Movers") && checkHtml.includes("Import the camp"),
-    `HTTP ${checkRes.status}`,
+    `HTTP ${checkRes.status} ${
+      checkHtml
+        .match(/(?:didn.t work|t import this)[\s\S]{0,600}/)?.[0]
+        ?.replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ") ?? ""
+    }`,
   );
   check(
     "B: alice is recognised as herself",
@@ -252,7 +369,7 @@ try {
 
   // --- Results. ---
   {
-    const db = new Database(B.db, { readonly: true });
+    const db = new Database(dbFile(B), { readonly: true });
     const members = db
       .query(
         "SELECT u.email, m.role FROM membership m JOIN user u ON u.id = m.user_id WHERE m.camp_id = ? ORDER BY u.email",
@@ -281,11 +398,16 @@ try {
       .get(camp.id) as { n: number };
     check("B: the picture's row came", pics.n === 1);
     db.close();
-    const files = [...new Bun.Glob(`${camp.id}/*`).scanSync(B.uploads)];
-    check("B: the picture's files came", files.length >= 1, files.join(","));
+    const pic = await page(`${campBase(B)}/media/${media.id}`, aliceB.cookie);
+    check(
+      "B: the picture itself came",
+      pic.status === 200 &&
+        Buffer.from(await pic.arrayBuffer()).equals(Buffer.from(png)),
+      `HTTP ${pic.status}`,
+    );
   }
   {
-    const db = new Database(A.db, { readonly: true });
+    const db = new Database(dbFile(A), { readonly: true });
     const left = db
       .query("SELECT count(*) AS n FROM camp WHERE id = ?")
       .get(camp.id) as { n: number };
@@ -302,13 +424,15 @@ try {
       JSON.parse(out?.people ?? "[]").length === 3,
     );
     db.close();
-    const files = [
-      ...new Bun.Glob(`${camp.id}/*`).scanSync({
-        cwd: A.uploads,
-        onlyFiles: true,
-      }),
-    ];
-    check("A: the camp's files are deleted", files.length === 0);
+    if (A.kind === "bun") {
+      const files = [
+        ...new Bun.Glob(`${camp.id}/*`).scanSync({
+          cwd: A.uploads,
+          onlyFiles: true,
+        }),
+      ];
+      check("A: the camp's files are deleted", files.length === 0);
+    }
   }
   const again = await post(
     B,
@@ -324,7 +448,7 @@ try {
 
   // --- Logins after the move. ---
   const go = (url: string, cookie = "") =>
-    fetch(url, { headers: cookie ? { cookie } : {}, redirect: "manual" });
+    req(url, { headers: cookie ? { cookie } : {} });
   const loc = (r: Response) => r.headers.get("location") ?? "";
 
   const anon = await go(`${A.url}/wiki`);
@@ -351,7 +475,7 @@ try {
   const carolB = cookieOf(landed);
   check(
     "B: the hand-off signs carol in and goes on to the same page",
-    landed.status === 302 && !!carolB && loc(landed) === `${B.url}/wiki`,
+    landed.status === 302 && !!carolB && loc(landed) === `${campBase(B)}/wiki`,
     `${landed.status} ${loc(landed)}`,
   );
   const replay = await go(handoff);
@@ -360,13 +484,22 @@ try {
     !cookieOf(replay) && loc(replay).startsWith("/login"),
     loc(replay),
   );
-  const forced = await go(`${B.url}/`, carolB);
+  const forced = await go(`${campBase(B)}/`, carolB);
   check(
     "B: carol must make a passkey here first",
     loc(forced).startsWith("/new-passkey"),
     loc(forced),
   );
 
+  if (A.sub) {
+    const viaSub = await go(`${campBase(A)}/map?x=1`, carol.cookie);
+    check(
+      "A: the camp's old subdomain forwards, signed in",
+      loc(viaSub).startsWith(`${B.url}/move-handoff?t=`) &&
+        decodeURIComponent(loc(viaSub)).includes(`${campBase(B)}/map?x=1`),
+      loc(viaSub),
+    );
+  }
   const aliceHop = await go(loc(await go(`${A.url}/`, alice.cookie)));
   check(
     "B: no hand-off into an account that was already here (alice)",
@@ -388,7 +521,7 @@ try {
     `HTTP ${claimed.status}`,
   );
   {
-    const db = new Database(B.db, { readonly: true });
+    const db = new Database(dbFile(B), { readonly: true });
     const m = db
       .query(
         "SELECT count(*) AS n FROM membership WHERE camp_id = ? AND user_id = ?",
@@ -499,12 +632,87 @@ try {
     (await taken.text()).includes("moved to another site"),
     `HTTP ${taken.status}`,
   );
+
+  // --- And back again: the camp returns to the site it left. ---
+  const back = await post(
+    B,
+    "/move",
+    aliceB.cookie,
+    new URLSearchParams({ intent: "start", understood: "on" }),
+  );
+  check(
+    "B: alice starts moving it back",
+    back.status < 400,
+    `HTTP ${back.status}`,
+  );
+  const backPage = await (
+    await page(`${campBase(B)}/move`, aliceB.cookie)
+  ).text();
+  const code2 =
+    backPage.match(/camptool-move:1:[^<"\s]+/)?.[0]?.replaceAll("&amp;", "&") ??
+    "";
+  const check2 = await post(
+    A,
+    "/import-camp",
+    alice.cookie,
+    new URLSearchParams({ intent: "check", code: code2 }),
+  );
+  const check2Html = await check2.text();
+  check(
+    "A: carol comes back to her own account",
+    check2Html.includes("The same account, coming back."),
+  );
+  const imp2 = await post(
+    A,
+    "/import-camp",
+    alice.cookie,
+    new URLSearchParams({ intent: "import", code: code2, slug: "movers" }),
+  );
+  check(
+    "A: the camp is back, at its old address",
+    (await imp2.text()).includes("Movers is here"),
+    `HTTP ${imp2.status}`,
+  );
+  {
+    const db = new Database(dbFile(A), { readonly: true });
+    const states = db
+      .query("SELECT state FROM camp_move_out ORDER BY created_at")
+      .all() as { state: string }[];
+    check(
+      "A: its old move stops forwarding",
+      states[0]?.state === "ended",
+      JSON.stringify(states),
+    );
+    const slug = db
+      .query("SELECT slug FROM camp WHERE id = ?")
+      .get(camp.id) as { slug: string } | null;
+    check("A: same camp, same address", slug?.slug === "movers");
+    db.close();
+  }
+  const home = await go(`${campBase(A)}/wiki`, carol.cookie);
+  check(
+    "A: carol's old sign-in works there again (no forwarding)",
+    !loc(home).includes("/move-handoff") && !loc(home).includes("/moved/"),
+    `${home.status} ${loc(home)}`,
+  );
+  const bOld = await go(`${campBase(B)}/wiki`, carolB);
+  check(
+    "B: now B forwards the camp to A",
+    loc(bOld).startsWith(`${A.url}/move-handoff?t=`) ||
+      loc(bOld).startsWith(`${B.url}/moved/`),
+    loc(bOld),
+  );
 } catch (e) {
   bad++;
   console.error(e);
 } finally {
-  A.proc?.kill();
-  B.proc?.kill();
+  // wrangler leaves workerd running if only its own process is killed.
+  for (const s of [A, B]) {
+    if (!s.proc) continue;
+    if (process.platform === "win32") {
+      Bun.spawnSync(["taskkill", "/T", "/F", "/PID", String(s.proc.pid)]);
+    } else s.proc.kill();
+  }
 }
 console.log(`\n${ok} ok, ${bad} failed`);
 process.exit(bad ? 1 : 0);
