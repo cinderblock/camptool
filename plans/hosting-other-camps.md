@@ -435,9 +435,16 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   rate limits in the Worker (`workers/rate-limit.ts`): 120/min per IP
   anonymous, 600/min per signed-in session (signature checked with the auth
   secret, no DB), 30/min per IP on sign-in, sign-up and /new-camp. Verified on
-  a local Workers preview: 120 × 200 then 429, another IP still 200. The ops
-  spend breaker change for camptool.org is staged in ops (`88119afa`, branch
-  `spend-breaker-camptool`), waiting on the breaker token gaining camptool.org.
+  a local Workers preview: 120 × 200 then 429, another IP still 200. Live as
+  `0fcea6e`.
+- [x] 2026-11-21: spend breaker covers camptool.org (ops `f9c59603`, applied
+  ~1:59 PM PST (21:59Z)). The ops uptime worker estimates the month's
+  Cloudflare bill at :01 each hour and, at $75 (`SPEND_BREAKER_USD`), turns on
+  the WAF rule "API circuit breaker" in both openslate.us and camptool.org
+  (all camps go offline until the limit is raised or the month turns). The
+  openslate-spend-breaker token now also has Zone WAF Edit on camptool.org.
+  Verified: rule exists on camptool.org, disabled; Cloudflare run green. A
+  failed switch sends an alert, so silence after 3:01 PM PST means it works.
 
 ## Open questions for the user
 
