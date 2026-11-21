@@ -71,7 +71,9 @@ jackson, any Docker host). Donations later; **no billing code**.
 15. **One CampTool Discord app and bot for the whole site**; each camp picks
     its own server at runtime (camp Settings, already built). Firefly never
     had Discord configured (all `DISCORD_*` empty), so there is no Math Camp
-    app to carry over. (Cameron, 2026-11-13.)
+    app to carry over. (Cameron, 2026-11-13.) Camps on camptool.org don't
+    bring their own Discord app or bot ("probably not", Cameron,
+    2026-11-20); a self-hosted copy uses its own `DISCORD_*`.
 16. **Copy firefly's `BETTER_AUTH_SECRET`** to the Worker, so people signed
     in on the old site arrive signed in. Passkeys are redone regardless (new
     RP ID); that's the `/moved` bridge plus the forced new passkey. (Cameron,
