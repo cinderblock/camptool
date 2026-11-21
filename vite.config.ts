@@ -57,7 +57,16 @@ function campThemePacks(): Plugin {
 // condition picks D1/R2 for `#host/db` and `#host/blobs`.
 const onCloudflare = process.env.CAMPTOOL_TARGET === "cloudflare";
 
+// The commit a Cloudflare build came from, served at /_version so a deploy can
+// be checked (workers/app.ts). Workers Builds sets WORKERS_CI_COMMIT_SHA; a
+// manual `cf:deploy` can pass BUILD_SHA.
+const buildSha =
+  process.env.WORKERS_CI_COMMIT_SHA?.trim() ||
+  process.env.BUILD_SHA?.trim() ||
+  "";
+
 export default defineConfig({
+  define: { __BUILD_SHA__: JSON.stringify(buildSha) },
   plugins: [
     campThemePacks(),
     ...(onCloudflare ? [cloudflare({ viteEnvironment: { name: "ssr" } })] : []),

@@ -8,6 +8,9 @@
 import { env } from "cloudflare:workers";
 import { createRequestHandler } from "react-router";
 
+/** The commit this build came from (vite.config.ts), or "" outside CI. */
+declare const __BUILD_SHA__: string;
+
 const handler = createRequestHandler(
   // Provided by @cloudflare/vite-plugin + React Router at build time.
   () => import("virtual:react-router/server-build"),
@@ -19,7 +22,7 @@ export default {
     const url = new URL(request.url);
     // Build marker for deploy checks, same contract as server.ts.
     if (url.pathname === "/_version") {
-      return new Response(String(env.BUILD_SHA ?? "dev"), {
+      return new Response(String(env.BUILD_SHA || __BUILD_SHA__ || "dev"), {
         headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
       });
     }

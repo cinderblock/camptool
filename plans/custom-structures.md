@@ -196,8 +196,11 @@ None open.
   unknown route 404s. (The Worker's `/_version` says `dev`: no `BUILD_SHA` is
   set on Workers Builds, so it can't confirm a SHA.)
 
+- 2026-11-20: `/_version` on the Worker now reports the commit: the build
+  bakes in Workers Builds' own `WORKERS_CI_COMMIT_SHA` (vite.config.ts
+  `define`), so no dashboard setting was needed. Verified under `wrangler dev`.
+
 ## Follow-ups (not started)
 
 - Hide built-in kinds per camp (declutter, not ban). Agreed as separate work.
 - Uploaded icons (R2) for camp kinds.
-- Set `BUILD_SHA` on Workers Builds so `/_version` proves which commit is live.
