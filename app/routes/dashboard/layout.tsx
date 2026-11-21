@@ -75,34 +75,75 @@ export async function loader({ request }: Route.LoaderArgs) {
     canUsePrivacy,
   } = await resolveActiveCamp(request);
 
-  // The passkey banner. Queried per USER rather than read off the ask snapshot
-  // below, because a credential belongs to the human: someone who hasn't joined
-  // a camp yet (so has no edition, and therefore no snapshot) still needs the
-  // prompt. The quiet, permanent half of this lives in the ask registry.
-  const [anyPasskey] = await db
-    .select({ id: passkey.id })
-    .from(passkey)
-    .where(eq(passkey.userId, user.id))
-    .limit(1);
+  const isOfficer = !!active && hasAtLeast(active.membership.role, "officer");
+  // Everything this shell shows is independent, so the queries go out together
+  // in two waves rather than one after another: on D1 each query is a network
+  // round trip, and in series they were most of a page load
+  // (plans/fast-navigation.md). The first wave also runs a few lookups that
+  // only matter for a redirect; they're cheap, and waiting to find out whether
+  // they're needed would cost a whole round trip.
+  const [
+    anyPasskey,
+    oldPasskey,
+    movedIn,
+    me,
+    superAdmin,
+    campMoving,
+    featureStates,
+    snapshots,
+    customKinds,
+  ] = await Promise.all([
+    // The passkey banner. Queried per USER rather than read off the ask
+    // snapshot below, because a credential belongs to the human: someone who
+    // hasn't joined a camp yet (so has no edition, and therefore no snapshot)
+    // still needs the prompt. The quiet, permanent half of this lives in the
+    // ask registry.
+    db
+      .select({ id: passkey.id })
+      .from(passkey)
+      .where(eq(passkey.userId, user.id))
+      .limit(1)
+      .then((rows) => rows[0]),
+    impersonatedBy
+      ? undefined
+      : db
+          .select({ id: legacyPasskey.id })
+          .from(legacyPasskey)
+          .where(eq(legacyPasskey.userId, user.id))
+          .limit(1)
+          .then((rows) => rows[0]),
+    impersonatedBy ? false : arrivedWithMove(user.id),
+    active && activeEdition && !isOfficer
+      ? db
+          .select({ wizardStep: membership.wizardStep })
+          .from(membership)
+          .where(eq(membership.id, active.membership.id))
+          .limit(1)
+          .then((rows) => rows[0])
+      : undefined,
+    isSuperAdmin(user.id),
+    // A camp on its way to another CampTool site is read-only meanwhile
+    // (plans/camp-portability.md); say so on every page.
+    active ? openMoveFor(active.camp.id).then(Boolean) : false,
+    active ? loadFeatureStates(active.camp.id) : undefined,
+    active && activeEdition
+      ? loadAskSnapshots(active.camp.id, activeEdition.id, activeEdition.year)
+      : undefined,
+    // The camp's own structure kinds, so every page's palette includes them
+    // (`KindsProvider` below; plans/custom-structures.md).
+    active ? loadCustomKinds(active.camp.id) : [],
+  ]);
 
   // Someone whose passkeys were all made for the camp's old address can't sign
   // in here with any of them. Before anything else, they make one that works
   // (app/lib/legacy-host.server.ts). Not while an officer is working as them:
-  // that's not their browser.
-  if (!anyPasskey && !impersonatedBy) {
-    const [old] = await db
-      .select({ id: legacyPasskey.id })
-      .from(legacyPasskey)
-      .where(eq(legacyPasskey.userId, user.id))
-      .limit(1);
-    // Or arrived with a camp from another CampTool site (whose passwords
-    // never come along): passkeys from now on.
-    if (old || (await arrivedWithMove(user.id))) {
-      const here = pageUrl(request.url);
-      throw redirect(
-        `/new-passkey?next=${encodeURIComponent(here.pathname + here.search)}`,
-      );
-    }
+  // that's not their browser. Or they arrived with a camp from another
+  // CampTool site (whose passwords never come along): passkeys from now on.
+  if (!anyPasskey && !impersonatedBy && (oldPasskey || movedIn)) {
+    const here = pageUrl(request.url);
+    throw redirect(
+      `/new-passkey?next=${encodeURIComponent(here.pathname + here.search)}`,
+    );
   }
 
   // Guide brand-new campers through the wizard. The forced redirect fires at
@@ -115,115 +156,83 @@ export async function loader({ request }: Route.LoaderArgs) {
   // they walked the wizard. Officers were previously exempt, which meant the
   // people most likely to be asked "what do I still need to do?" were the only
   // ones the app never told.
-  if (
-    active &&
-    activeEdition &&
-    !hasAtLeast(active.membership.role, "officer")
-  ) {
-    const [me] = await db
-      .select({ wizardStep: membership.wizardStep })
-      .from(membership)
-      .where(eq(membership.id, active.membership.id))
-      .limit(1);
-    if (me && me.wizardStep === 0) {
-      throw redirect("/start");
-    }
+  if (me && me.wizardStep === 0) {
+    throw redirect("/start");
   }
-
-  const superAdmin = await isSuperAdmin(user.id);
-
-  // A camp on its way to another CampTool site is read-only meanwhile
-  // (plans/camp-portability.md); say so on every page.
-  const campMoving = active ? !!(await openMoveFor(active.camp.id)) : false;
 
   const showPasskeyNag = !anyPasskey && !passkeyNagSnoozed(request);
 
   // Per-camp feature states (off / preview / on) drive which nav links exist
   // for this viewer; route loaders enforce the same via requireFeature.
-  const features: Partial<Record<FeatureKey, FeatureState>> = active
-    ? Object.fromEntries(await loadFeatureStates(active.camp.id))
+  const features: Partial<Record<FeatureKey, FeatureState>> = featureStates
+    ? Object.fromEntries(featureStates)
     : {};
+  /** Can this viewer see the feature? Same rule as the nav links. */
+  const visible = (key: FeatureKey) =>
+    !!active &&
+    !!features[key] &&
+    featureVisibleTo(features[key], active.membership.role);
 
   // What this camper still owes, derived from their data rather than from
   // whether they walked the wizard — so bailing out of /start no longer hides
   // it. Reuses `features` above: an ask for a feature they can't see is dropped,
   // same rule the nav itself follows.
   let outstandingCount = 0;
-  if (active && activeEdition) {
-    const snapshot = (
-      await loadAskSnapshots(
-        active.camp.id,
-        activeEdition.id,
-        activeEdition.year,
-      )
-    ).get(active.membership.id);
-    if (snapshot) {
-      outstandingCount = outstandingAsks(snapshot, {
-        weeksUntilEvent: weeksUntilEvent(activeEdition.year),
-        featureStates: features,
-        capabilities: { discord: discordEnabled },
-      }).length;
-    }
+  const snapshot = active ? snapshots?.get(active.membership.id) : undefined;
+  if (snapshot && activeEdition) {
+    outstandingCount = outstandingAsks(snapshot, {
+      weeksUntilEvent: weeksUntilEvent(activeEdition.year),
+      featureStates: features,
+      capabilities: { discord: discordEnabled },
+    }).length;
   }
 
-  // A feature that's switched on but has nothing in it yet is worse than a
-  // missing one — a camper clicked Schedule looking for the camp's programme
-  // and found a blank page. Hide it from members until it has content; officers
-  // keep it, since they're the ones who have to put something there.
-  const scheduleEmpty =
-    active && activeEdition && features.schedule && features.schedule !== "off"
-      ? !(await hasScheduledDays(activeEdition.id))
-      : false;
-
-  // Questions the camp has asked that nobody has answered yet. Officers are the
-  // only ones who can act on them, so only they pay for the query — and the
-  // badge is the whole reason the queue doesn't rot (plans/camp-faq.md).
-  const faqPending =
-    active &&
-    features.faq &&
-    featureVisibleTo(features.faq, active.membership.role) &&
-    hasAtLeast(active.membership.role, "officer")
-      ? await countPendingEntries(active.camp.id)
-      : 0;
-
-  // Prospects nobody has claimed, or whose follow-up date has passed. Same
-  // reasoning as the FAQ badge: the queue only stays alive if being behind on
-  // it is visible. Officer-only, so only officers pay for the query.
-  const prospectsPending =
-    active &&
-    features.prospects &&
-    featureVisibleTo(features.prospects, active.membership.role) &&
-    hasAtLeast(active.membership.role, "officer")
-      ? await countProspectsNeedingAttention(active.camp.id)
-      : 0;
-
-  // Meeting write-ups this member hasn't read. Unlike the officer-only badges
-  // above, everyone pays for this one — it IS the distribution mechanism for a
-  // summary (plans/camp-meetings.md), so a member not seeing it defeats it.
-  const unreadSummaries =
-    active &&
-    activeEdition &&
-    features.meetings &&
-    featureVisibleTo(features.meetings, active.membership.role)
-      ? await countUnreadSummaries({
+  // The second wave: what the feature states decide whether to look up.
+  const [
+    scheduleEmpty,
+    faqPending,
+    prospectsPending,
+    unreadSummaries,
+    binsMenu,
+  ] = await Promise.all([
+    // A feature that's switched on but has nothing in it yet is worse than a
+    // missing one — a camper clicked Schedule looking for the camp's
+    // programme and found a blank page. Hide it from members until it has
+    // content; officers keep it, since they're the ones who have to put
+    // something there.
+    activeEdition && features.schedule && features.schedule !== "off"
+      ? hasScheduledDays(activeEdition.id).then((has) => !has)
+      : false,
+    // Questions the camp has asked that nobody has answered yet. Officers
+    // are the only ones who can act on them, so only they pay for the query
+    // — and the badge is the whole reason the queue doesn't rot
+    // (plans/camp-faq.md).
+    active && visible("faq") && isOfficer
+      ? countPendingEntries(active.camp.id)
+      : 0,
+    // Prospects nobody has claimed, or whose follow-up date has passed. Same
+    // reasoning as the FAQ badge: the queue only stays alive if being behind
+    // on it is visible. Officer-only, so only officers pay for the query.
+    active && visible("prospects") && isOfficer
+      ? countProspectsNeedingAttention(active.camp.id)
+      : 0,
+    // Meeting write-ups this member hasn't read. Unlike the officer-only
+    // badges above, everyone pays for this one — it IS the distribution
+    // mechanism for a summary (plans/camp-meetings.md), so a member not
+    // seeing it defeats it.
+    active && activeEdition && visible("meetings")
+      ? countUnreadSummaries({
           editionId: activeEdition.id,
           membershipId: active.membership.id,
         })
-      : 0;
-
-  // The top-bar shortcut into the camp's bins app. Only the LABEL crosses the
-  // wire — the access code stays server-side until /bins issues the redirect.
-  const binsMenu =
-    active &&
-    features.bins &&
-    featureVisibleTo(features.bins, active.membership.role) &&
-    hasAtLeast(active.membership.role, "member")
-      ? await getBinsMenu(active.camp.id)
-      : null;
-
-  // The camp's own structure kinds, so every page's palette includes them
-  // (`KindsProvider` below; plans/custom-structures.md).
-  const customKinds = active ? await loadCustomKinds(active.camp.id) : [];
+      : 0,
+    // The top-bar shortcut into the camp's bins app. Only the LABEL crosses
+    // the wire — the access code stays server-side until /bins issues the
+    // redirect.
+    active && visible("bins") && hasAtLeast(active.membership.role, "member")
+      ? getBinsMenu(active.camp.id)
+      : null,
+  ]);
 
   return redact(privacy, {
     user,

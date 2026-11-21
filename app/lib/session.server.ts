@@ -310,6 +310,18 @@ export async function loadUserCamps(userId: string): Promise<CampMembership[]> {
   return rows;
 }
 
+/** Editions of every camp the user belongs to, newest year first (the same
+ * order as `loadCampEditions`). */
+async function loadUserEditions(userId: string): Promise<Edition[]> {
+  return db
+    .select({ edition: campEdition })
+    .from(campEdition)
+    .innerJoin(membership, eq(membership.organizationId, campEdition.campId))
+    .where(eq(membership.userId, userId))
+    .orderBy(desc(campEdition.year), desc(campEdition.createdAt))
+    .then((rows) => rows.map((r) => r.edition));
+}
+
 export type ActiveCampContext = {
   user: { id: string; name: string; email: string; image?: string | null };
   camps: CampMembership[];
@@ -347,7 +359,14 @@ export async function resolveActiveCamp(
   opts: ResolveOptions = {},
 ): Promise<ActiveCampContext> {
   const session = await requireUser(request);
-  const camps = await loadUserCamps(session.user.id);
+  // The camps and every one of their editions go out together: which camp is
+  // active isn't known until the camps are back, and waiting for that before
+  // asking for its editions cost a whole D1 round trip on every page
+  // (plans/fast-navigation.md). People belong to few camps.
+  const [camps, allEditions] = await Promise.all([
+    loadUserCamps(session.user.id),
+    loadUserEditions(session.user.id),
+  ]);
   const activeId = session.session.activeOrganizationId;
   let active = camps.find((c) => c.camp.id === activeId) ?? camps[0] ?? null;
 
@@ -382,7 +401,8 @@ export async function resolveActiveCamp(
   let editions: Edition[] = [];
   let activeEdition: Edition | null = null;
   if (active) {
-    editions = await loadCampEditions(active.camp.id);
+    const campId = active.camp.id;
+    editions = allEditions.filter((e) => e.campId === campId);
     const wantId = readCookie(request, EDITION_COOKIE);
     // The cookie may point at another camp's edition; only honor it if it's one
     // of THIS camp's editions, else default to the newest.

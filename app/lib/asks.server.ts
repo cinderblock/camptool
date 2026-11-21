@@ -85,19 +85,214 @@ export async function loadAskSnapshots(
   editionId: string,
   year: number,
 ): Promise<Map<string, AskSnapshot>> {
+  // Every query here is independent of the others, so they all go out at
+  // once. On D1 each one is a network round trip, and run one after another
+  // they were most of a page load (plans/fast-navigation.md). The few that
+  // used to be skipped when an earlier one came back empty (answers, checklist
+  // completions, payments) are cheap enough to just run.
+  const [
+    members,
+    attendees,
+    questions,
+    answers,
+    objects,
+    occupants,
+    hosted,
+    tasks,
+    done,
+    tickets,
+    ticketRequests,
+    setupPasses,
+    heldPasses,
+    fuel,
+    reqs,
+    paidRows,
+    discordUsers,
+    passkeyUsers,
+    wizardAsks,
+  ] = await Promise.all([
+    db
+      .select({
+        membershipId: membership.id,
+        role: membership.role,
+        playaName: membership.playaName,
+        userId: membership.userId,
+        userName: user.name,
+      })
+      .from(membership)
+      .innerJoin(user, eq(user.id, membership.userId))
+      .where(eq(membership.organizationId, campId)),
+    db
+      .select({
+        id: attendee.id,
+        membershipId: attendee.membershipId,
+        status: attendee.status,
+        arrivalDate: attendee.arrivalDate,
+        departureDate: attendee.departureDate,
+        note: attendee.note,
+        pendingHostMembershipId: attendee.pendingHostMembershipId,
+      })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          isNotNull(attendee.membershipId),
+        ),
+      ),
+    db
+      .select({
+        id: campQuestion.id,
+        audience: campQuestion.audience,
+        scope: campQuestion.scope,
+      })
+      .from(campQuestion)
+      .where(
+        and(
+          eq(campQuestion.campId, campId),
+          eq(campQuestion.required, true),
+          isNull(campQuestion.archivedAt),
+        ),
+      ),
+    db
+      .select({
+        questionId: questionAnswer.questionId,
+        membershipId: questionAnswer.membershipId,
+        editionId: questionAnswer.editionId,
+      })
+      .from(questionAnswer)
+      .where(
+        and(
+          eq(questionAnswer.campId, campId),
+          or(
+            eq(questionAnswer.editionId, editionId),
+            isNull(questionAnswer.editionId),
+          ),
+        ),
+      ),
+    db
+      .select({
+        id: mapObject.id,
+        ownerMembershipId: mapObject.ownerMembershipId,
+        placed: mapObject.placed,
+      })
+      .from(mapObject)
+      .where(
+        and(
+          eq(mapObject.editionId, editionId),
+          isNotNull(mapObject.ownerMembershipId),
+        ),
+      ),
+    db
+      .select({ attendeeId: mapObjectOccupant.attendeeId })
+      .from(mapObjectOccupant)
+      .where(eq(mapObjectOccupant.editionId, editionId)),
+    db
+      .select({
+        id: attendee.id,
+        membershipId: attendee.membershipId,
+        hostMembershipId: attendee.hostMembershipId,
+        status: attendee.status,
+      })
+      .from(attendee)
+      .where(
+        and(
+          eq(attendee.editionId, editionId),
+          isNotNull(attendee.hostMembershipId),
+        ),
+      ),
+    db
+      .select({ id: onboardingTask.id })
+      .from(onboardingTask)
+      .where(eq(onboardingTask.campId, campId)),
+    db
+      .select({
+        membershipId: onboardingCompletion.membershipId,
+        taskId: onboardingCompletion.taskId,
+      })
+      .from(onboardingCompletion)
+      .where(eq(onboardingCompletion.campId, campId)),
+    db
+      .select({
+        status: ticket.status,
+        assignedAttendeeId: ticket.assignedAttendeeId,
+      })
+      .from(ticket)
+      .where(
+        and(
+          eq(ticket.editionId, editionId),
+          isNotNull(ticket.assignedAttendeeId),
+        ),
+      ),
+    db
+      .select({ membershipId: ticketRequest.membershipId })
+      .from(ticketRequest)
+      .where(
+        and(
+          eq(ticketRequest.editionId, editionId),
+          ne(ticketRequest.status, "denied"),
+        ),
+      ),
+    db
+      .select({ attendeeId: setupPass.attendeeId })
+      .from(setupPass)
+      .where(
+        and(eq(setupPass.editionId, editionId), ne(setupPass.status, "denied")),
+      ),
+    db
+      .select({ attendeeId: setupPassStock.assignedAttendeeId })
+      .from(setupPassStock)
+      .where(
+        and(
+          eq(setupPassStock.editionId, editionId),
+          ne(setupPassStock.status, "void"),
+        ),
+      ),
+    db
+      .selectDistinct({ membershipId: fuelDeclaration.membershipId })
+      .from(fuelDeclaration)
+      .where(eq(fuelDeclaration.editionId, editionId)),
+    db
+      .select({
+        membershipId: memberRequirement.membershipId,
+        waived: memberRequirement.waived,
+        expectedCents: contributionTier.expectedCents,
+      })
+      .from(memberRequirement)
+      .leftJoin(
+        contributionTier,
+        eq(contributionTier.id, memberRequirement.tierId),
+      )
+      .where(eq(memberRequirement.editionId, editionId)),
+    db
+      .select({
+        memberId: financeEntry.memberId,
+        cents: sql<number>`sum(${financeEntry.amountCents})`,
+      })
+      .from(financeEntry)
+      .where(
+        and(
+          eq(financeEntry.editionId, editionId),
+          eq(financeEntry.kind, "donation"),
+        ),
+      )
+      .groupBy(financeEntry.memberId),
+    db
+      .selectDistinct({ userId: account.userId })
+      .from(account)
+      .where(eq(account.providerId, "discord")),
+    db.selectDistinct({ userId: passkey.userId }).from(passkey),
+    db
+      .select({
+        membershipId: wizardAsk.membershipId,
+        askKey: wizardAsk.askKey,
+        status: wizardAsk.status,
+      })
+      .from(wizardAsk)
+      .where(eq(wizardAsk.editionId, editionId)),
+  ]);
+
   // Seed from the roster so every member gets a row even with no data anywhere
   // — a brand-new camper who has done nothing is exactly who this is for.
-  const members = await db
-    .select({
-      membershipId: membership.id,
-      role: membership.role,
-      playaName: membership.playaName,
-      userId: membership.userId,
-      userName: user.name,
-    })
-    .from(membership)
-    .innerJoin(user, eq(user.id, membership.userId))
-    .where(eq(membership.organizationId, campId));
 
   const snaps = new Map<string, AskSnapshot>();
   const userToMembership = new Map<string, string>();
@@ -117,20 +312,6 @@ export async function loadAskSnapshots(
   // Pass" to-do, while /start and the roster chips both told them they were
   // arriving during setup. Same boundary in all three places now.
   const gateOpen = eventStartIso(year);
-  const attendees = await db
-    .select({
-      id: attendee.id,
-      membershipId: attendee.membershipId,
-      status: attendee.status,
-      arrivalDate: attendee.arrivalDate,
-      departureDate: attendee.departureDate,
-      note: attendee.note,
-      pendingHostMembershipId: attendee.pendingHostMembershipId,
-    })
-    .from(attendee)
-    .where(
-      and(eq(attendee.editionId, editionId), isNotNull(attendee.membershipId)),
-    );
   /** attendee.id → membershipId, for the tables that key off an attendee. */
   const attendeeToMembership = new Map<string, string>();
   for (const a of attendees) {
@@ -153,37 +334,7 @@ export async function loadAskSnapshots(
   // — required questions still unanswered —
   // Scope matters: a `once` question is answered for life (edition_id NULL), a
   // `per_edition` one has to be answered again each year.
-  const questions = await db
-    .select({
-      id: campQuestion.id,
-      audience: campQuestion.audience,
-      scope: campQuestion.scope,
-    })
-    .from(campQuestion)
-    .where(
-      and(
-        eq(campQuestion.campId, campId),
-        eq(campQuestion.required, true),
-        isNull(campQuestion.archivedAt),
-      ),
-    );
   if (questions.length > 0) {
-    const answers = await db
-      .select({
-        questionId: questionAnswer.questionId,
-        membershipId: questionAnswer.membershipId,
-        editionId: questionAnswer.editionId,
-      })
-      .from(questionAnswer)
-      .where(
-        and(
-          eq(questionAnswer.campId, campId),
-          or(
-            eq(questionAnswer.editionId, editionId),
-            isNull(questionAnswer.editionId),
-          ),
-        ),
-      );
     const answered = new Set(
       answers.map((a) => `${a.membershipId}:${a.questionId}`),
     );
@@ -198,19 +349,6 @@ export async function loadAskSnapshots(
   }
 
   // — gear on the map —
-  const objects = await db
-    .select({
-      id: mapObject.id,
-      ownerMembershipId: mapObject.ownerMembershipId,
-      placed: mapObject.placed,
-    })
-    .from(mapObject)
-    .where(
-      and(
-        eq(mapObject.editionId, editionId),
-        isNotNull(mapObject.ownerMembershipId),
-      ),
-    );
   for (const o of objects) {
     const s = o.ownerMembershipId ? snaps.get(o.ownerMembershipId) : null;
     if (!s) continue;
@@ -224,29 +362,9 @@ export async function loadAskSnapshots(
   // and asking a solo camper who's sleeping in their own tent is noise. So the
   // question is only ever about the people whose bed nobody else can infer.
   const bedded = new Set(
-    (
-      await db
-        .select({ attendeeId: mapObjectOccupant.attendeeId })
-        .from(mapObjectOccupant)
-        .where(eq(mapObjectOccupant.editionId, editionId))
-    )
-      .map((r) => r.attendeeId)
-      .filter((id): id is string => id != null),
+    occupants.map((r) => r.attendeeId).filter((id): id is string => id != null),
   );
-  for (const a of await db
-    .select({
-      id: attendee.id,
-      membershipId: attendee.membershipId,
-      hostMembershipId: attendee.hostMembershipId,
-      status: attendee.status,
-    })
-    .from(attendee)
-    .where(
-      and(
-        eq(attendee.editionId, editionId),
-        isNotNull(attendee.hostMembershipId),
-      ),
-    )) {
+  for (const a of hosted) {
     // Someone who isn't coming needs no bed; nor does a self-hosted row.
     if (a.status === "not_coming") continue;
     if (a.membershipId && a.membershipId === a.hostMembershipId) continue;
@@ -256,18 +374,7 @@ export async function loadAskSnapshots(
   }
 
   // — camp checklist —
-  const tasks = await db
-    .select({ id: onboardingTask.id })
-    .from(onboardingTask)
-    .where(eq(onboardingTask.campId, campId));
   if (tasks.length > 0) {
-    const done = await db
-      .select({
-        membershipId: onboardingCompletion.membershipId,
-        taskId: onboardingCompletion.taskId,
-      })
-      .from(onboardingCompletion)
-      .where(eq(onboardingCompletion.campId, campId));
     const doneBy = new Map<string, Set<string>>();
     for (const d of done) {
       const set = doneBy.get(d.membershipId) ?? new Set<string>();
@@ -281,18 +388,7 @@ export async function loadAskSnapshots(
   }
 
   // — tickets —
-  for (const t of await db
-    .select({
-      status: ticket.status,
-      assignedAttendeeId: ticket.assignedAttendeeId,
-    })
-    .from(ticket)
-    .where(
-      and(
-        eq(ticket.editionId, editionId),
-        isNotNull(ticket.assignedAttendeeId),
-      ),
-    )) {
+  for (const t of tickets) {
     const mid = t.assignedAttendeeId
       ? attendeeToMembership.get(t.assignedAttendeeId)
       : null;
@@ -301,15 +397,7 @@ export async function loadAskSnapshots(
     s.hasTicket = true;
     if (t.status !== "purchased") s.ticketsAwaitingPurchase += 1;
   }
-  for (const r of await db
-    .select({ membershipId: ticketRequest.membershipId })
-    .from(ticketRequest)
-    .where(
-      and(
-        eq(ticketRequest.editionId, editionId),
-        ne(ticketRequest.status, "denied"),
-      ),
-    )) {
+  for (const r of ticketRequests) {
     bump(snaps, r.membershipId, "ticketRequested", true);
   }
 
@@ -320,65 +408,24 @@ export async function loadAskSnapshots(
   // officer can set a pass aside for someone who never filed a request, and
   // that person was then told to "Request a Setup Access Pass" while holding
   // one — with the request form correctly hidden, so the to-do was unclearable.
-  for (const p of await db
-    .select({ attendeeId: setupPass.attendeeId })
-    .from(setupPass)
-    .where(
-      and(eq(setupPass.editionId, editionId), ne(setupPass.status, "denied")),
-    )) {
+  for (const p of setupPasses) {
     const mid = p.attendeeId ? attendeeToMembership.get(p.attendeeId) : null;
     bump(snaps, mid ?? null, "setupPassSettled", true);
   }
   // Actually holding one settles it too, and this is the common path now.
-  for (const p of await db
-    .select({ attendeeId: setupPassStock.assignedAttendeeId })
-    .from(setupPassStock)
-    .where(
-      and(
-        eq(setupPassStock.editionId, editionId),
-        ne(setupPassStock.status, "void"),
-      ),
-    )) {
+  for (const p of heldPasses) {
     const mid = p.attendeeId ? attendeeToMembership.get(p.attendeeId) : null;
     bump(snaps, mid ?? null, "setupPassSettled", true);
   }
 
   // — fuel —
-  for (const f of await db
-    .selectDistinct({ membershipId: fuelDeclaration.membershipId })
-    .from(fuelDeclaration)
-    .where(eq(fuelDeclaration.editionId, editionId))) {
+  for (const f of fuel) {
     bump(snaps, f.membershipId, "fuelDeclared", true);
   }
 
   // — dues — expected comes from the assigned tier (waived = nothing owed);
   // paid is the sum of their donations this edition.
-  const reqs = await db
-    .select({
-      membershipId: memberRequirement.membershipId,
-      waived: memberRequirement.waived,
-      expectedCents: contributionTier.expectedCents,
-    })
-    .from(memberRequirement)
-    .leftJoin(
-      contributionTier,
-      eq(contributionTier.id, memberRequirement.tierId),
-    )
-    .where(eq(memberRequirement.editionId, editionId));
   if (reqs.length > 0) {
-    const paidRows = await db
-      .select({
-        memberId: financeEntry.memberId,
-        cents: sql<number>`sum(${financeEntry.amountCents})`,
-      })
-      .from(financeEntry)
-      .where(
-        and(
-          eq(financeEntry.editionId, editionId),
-          eq(financeEntry.kind, "donation"),
-        ),
-      )
-      .groupBy(financeEntry.memberId);
     const paidBy = new Map(
       paidRows.map((p) => [p.memberId ?? "", Number(p.cents) || 0]),
     );
@@ -394,30 +441,18 @@ export async function loadAskSnapshots(
   }
 
   // — Discord linked — keyed by user, not membership.
-  for (const a of await db
-    .selectDistinct({ userId: account.userId })
-    .from(account)
-    .where(eq(account.providerId, "discord"))) {
+  for (const a of discordUsers) {
     bump(snaps, userToMembership.get(a.userId) ?? null, "discordLinked", true);
   }
 
   // — Passkey enrolled — keyed by user, not membership (a credential belongs to
   // the human, not to their place in this camp).
-  for (const p of await db
-    .selectDistinct({ userId: passkey.userId })
-    .from(passkey)) {
+  for (const p of passkeyUsers) {
     bump(snaps, userToMembership.get(p.userId) ?? null, "hasPasskey", true);
   }
 
   // — dismissals and acknowledgements —
-  for (const w of await db
-    .select({
-      membershipId: wizardAsk.membershipId,
-      askKey: wizardAsk.askKey,
-      status: wizardAsk.status,
-    })
-    .from(wizardAsk)
-    .where(eq(wizardAsk.editionId, editionId))) {
+  for (const w of wizardAsks) {
     const s = snaps.get(w.membershipId);
     if (!s) continue;
     if (w.status === "skipped") s.dismissed[w.askKey] = true;
