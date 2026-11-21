@@ -4,9 +4,9 @@
  *
  * On Workers every D1 query is a network round trip, so a page's speed is
  * mostly "how many queries, and how many of them ran one after another". This
- * counts queries and measures the time at least one was in flight: when that
- * busy time is close to the request's total, the page is waiting on queries in
- * series.
+ * counts queries, how many times the request had to wait for D1 (queries sent
+ * together are one wait), and the time at least one was in flight. Waits ×
+ * round-trip time is roughly what the page costs.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type {
@@ -17,8 +17,9 @@ import type {
 export type DbMetrics = {
   /** Statements sent (a batch counts each statement, in one round trip). */
   queries: number;
-  /** Round trips to D1 (a batch is one). */
-  roundTrips: number;
+  /** Times the request went from no query in flight to one: queries sent
+   * together (`Promise.all`, a batch) count once. */
+  waits: number;
   /** Time with at least one round trip in flight. */
   busyMs: number;
   inFlight: number;
@@ -33,7 +34,7 @@ export async function withDbMetrics<T>(
 ): Promise<{ result: T; metrics: DbMetrics }> {
   const metrics: DbMetrics = {
     queries: 0,
-    roundTrips: 0,
+    waits: 0,
     busyMs: 0,
     inFlight: 0,
     busySince: 0,
@@ -46,8 +47,10 @@ async function track<T>(statements: number, run: () => Promise<T>) {
   const m = store.getStore();
   if (!m) return run();
   m.queries += statements;
-  m.roundTrips += 1;
-  if (m.inFlight++ === 0) m.busySince = performance.now();
+  if (m.inFlight++ === 0) {
+    m.waits += 1;
+    m.busySince = performance.now();
+  }
   try {
     return await run();
   } finally {
@@ -97,7 +100,7 @@ export function instrumentD1(d1: D1Database): D1Database {
 /** `Server-Timing` value for a finished request. */
 export function serverTiming(metrics: DbMetrics, totalMs: number): string {
   return [
-    `db;dur=${metrics.busyMs.toFixed(0)};desc="${metrics.queries} queries, ${metrics.roundTrips} round trips"`,
+    `db;dur=${metrics.busyMs.toFixed(0)};desc="${metrics.queries} queries in ${metrics.waits} waits"`,
     `total;dur=${totalMs.toFixed(0)}`,
   ].join(", ");
 }
