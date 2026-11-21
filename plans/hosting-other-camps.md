@@ -430,6 +430,15 @@ own host code (`workerd` condition on Cloudflare, `default` elsewhere):
   `camptool.mathcamp.us/moved` ("worked for me"); the earlier Chrome failure
   didn't come back.
 
+- [x] 2026-11-21: runaway-usage limits (Cameron: yes to the spend breaker
+  and rate limits, no to a CPU cap; billing alert already set). Per-visitor
+  rate limits in the Worker (`workers/rate-limit.ts`): 120/min per IP
+  anonymous, 600/min per signed-in session (signature checked with the auth
+  secret, no DB), 30/min per IP on sign-in, sign-up and /new-camp. Verified on
+  a local Workers preview: 120 × 200 then 429, another IP still 200. The ops
+  spend breaker change for camptool.org is staged in ops (`88119afa`, branch
+  `spend-breaker-camptool`), waiting on the breaker token gaining camptool.org.
+
 ## Open questions for the user
 
 (None open, 2026-11-14.)

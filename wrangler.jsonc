@@ -35,6 +35,30 @@
     }
   ],
   "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "camptool-uploads" }],
+  // Per-visitor request limits (workers/rate-limit.ts). Cloudflare has no
+  // spending cap, so these bound what one client can cost. Periods can only
+  // be 10 or 60 seconds. Namespace IDs are account-wide counters: keep these
+  // distinct from the other Workers on the account (1001, 1002, 2001 taken).
+  "ratelimits": [
+    // Not signed in, per IP.
+    {
+      "name": "RATE_LIMIT_ANON",
+      "namespace_id": "4101",
+      "simple": { "limit": 120, "period": 60 }
+    },
+    // Signed in, per session: a page and its data loads are several requests.
+    {
+      "name": "RATE_LIMIT_SIGNED_IN",
+      "namespace_id": "4102",
+      "simple": { "limit": 600, "period": 60 }
+    },
+    // Sign-in, sign-up and starting a camp, per IP, on top of the above.
+    {
+      "name": "RATE_LIMIT_AUTH",
+      "namespace_id": "4103",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
   // Deploys leave the Worker's variables alone. Without this, every deploy
   // would replace them with whatever `vars` this file has (none).
   "keep_vars": true

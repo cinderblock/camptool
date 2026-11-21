@@ -14,6 +14,14 @@ row writes and 5 GB a month; R2 includes 10 GB free. The Free plan's 10 ms CPU
 limit per request is too tight for this app's server rendering, so plan on
 Paid.
 
+Cloudflare has no spending cap, so the Worker limits what one visitor can make
+it do (`workers/rate-limit.ts`, numbers in `wrangler.jsonc` `ratelimits`): 120
+requests a minute per IP for anyone not signed in, 600 a minute per session
+for someone signed in, and 30 a minute per IP for sign-in, sign-up and
+starting a camp. Over the limit gets a 429 for up to a minute. If your account
+already uses rate-limit namespace IDs 4101–4103 for something else, change
+them; they're account-wide counters.
+
 ## Try it locally (no account)
 
 ```sh
