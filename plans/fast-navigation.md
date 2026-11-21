@@ -83,20 +83,28 @@ It should feel instant. Find where the time goes, then remove it.
       waits should now be ~100–200 ms.
    e. [ ] Tombstone `camptool` + `camptool-uploads` in ops (separate yes).
 5. [x] Re-measured live (4d).
-6. [ ] ops `7fa35386` (local, not pushed): D1/R2 default to `wnam` when an
+6. [x] ops `92534fbd` (pushed 2026-11-21): D1/R2 default to `wnam` when an
    entry names no location (Cameron, 2026-11-21: "our default locations
-   should be us west/california/San Jose"). Dry run: 0 changes. Needs
-   Cameron's yes to push.
+   should be us west/california/San Jose"). Dry run: 0 changes; CI
+   green.
 
-7. [current] **Fast far from the database too** (Cameron, 2026-11-21: "so
+7. [x] **Fast far from the database too** (Cameron, 2026-11-21: "so
    that it's still faster for people on east coast/around the world").
    a. [x] Shell floor: feature states load with the camps
       (`loadUserFeatureStates`), so `requireFeature` needs no query. Floor
       4 → 3 waits on every page (`34a32c3`).
-   b. [ ] Per-route loaders: parallelize the heavy ones (officer, page
-      switch, after 7a: roster 15, passes 15, map 14, members 13, bringing
-      10, guide/questions/onboarding/supplies/dues/trip/account 8). Three
-      agents, by page group; measured after with `nav-speed-measure.sh`.
+   b. [x] Per-route loaders parallelized (`eb15915`, `3f86b88`, `0ac74f8`).
+      Officer page switch on a local copy of the live data, before → after:
+      members 18 → 8 (the Discord sync's per-member writes stay serial),
+      roster 16 → 4, passes 15 → 4, map 14 → 4; every other page 4–6.
+      Verified: `.data` responses byte-identical to the old build for 35
+      pages, as officer and member, on dev data and on the live-data copy;
+      an independent review found no gating or data changes; headless
+      Pixel 7 page switches through 19 pages, no errors.
+      Left for later: `loadResponseMatrix` (questions/responses 6 → 4),
+      `loadMySapState` (trip −1), batching `syncDiscordLinksForCamp`'s
+      upserts (members −N), and an unused `partyRows` query in the passes
+      action.
    c. [x] **Pin the Worker next to D1**: `placement: { region:
       "aws:us-west-1" }` (D1 primary answers from SJC: `served_by_colo:
       SJC`). Cameron said yes 2026-11-21; wrangler dry run accepts it. Effect: a far
@@ -154,7 +162,8 @@ app's own backup likely has the same problem (ISSUES.md).
 - [x] 2026-11-21: step 4a–d done (Cameron's yes); live `7d047f8`, ~12 ms
       per wait.
 - [ ] Step 4e: tombstone the eastern pair (later, separate yes).
-- [ ] Step 6: push ops default-`wnam` (`7fa35386`), needs yes.
+- [x] Step 6: ops default-`wnam` pushed (`92534fbd`, Cameron's yes); CI
+      green, 0 changes.
 - [x] 2026-11-21: step 7a, shell feature gate folded into the camps query.
-- [ ] Step 7b: per-route loaders (in progress).
+- [x] 2026-11-21: step 7b, per-route loaders (most pages 4 waits).
 - [x] Step 7c: placement pin (Cameron's yes).
