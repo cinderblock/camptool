@@ -98,3 +98,16 @@ None. B and C wait until other events are picked up.
 - [x] 2026-11-13: surveyed the event layer and edition model (above).
 - [x] 2026-11-13: rollover shipped to master (`f08991d`).
 - [x] 2026-11-21: start-the-new-year banner (step A4).
+- [x] 2026-11-21: `/editions` "Add year" form fixed. It defaulted the new year
+  to `currentEventYear()` even when that year already existed, and offered
+  every year (including the one being added) as a copy source. Now the new
+  year defaults to the first season not yet created, copy sources exclude the
+  target year, and the copy defaults to the newest earlier year.
+  - What a copy carries: only the `placement` row (street, address, frontage,
+    depth, taper). Not map objects, not RSVPs. The real placement address is
+    entered later by editing the lot on `/map` (`savePlacement`). Campers
+    re-declare gear each year ("Same as last year" on `/bringing` re-adds
+    their items unplaced).
+  - Reminding campers to RSVP is in-app only today (the `rsvp` ask on the
+    dashboard to-do list). There is no email or Discord delivery; see
+    `plans/outstanding-asks.md` decision 1 and its Phase E (officer roll-up).

@@ -13,6 +13,7 @@ import {
   Title,
 } from "@mantine/core";
 import { and, eq } from "drizzle-orm";
+import { useState } from "react";
 import { data, Form, redirect } from "react-router";
 import {
   defaultBannedKinds,
@@ -225,6 +226,28 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
       : String(activeEdition.year)
     : "";
 
+  // The "Add year" form defaults to the next season that doesn't exist yet, so
+  // it never suggests a year that would just clash. Copy sources are only the
+  // other years, and default to the newest year before the one being added:
+  // that's whose lot is the right starting point.
+  const takenYears = new Set(editions.map((e) => e.year));
+  const [newYear, setNewYear] = useState<number>(() => {
+    let y = currentEventYear();
+    while (takenYears.has(y)) y++;
+    return y;
+  });
+  // undefined = follow the default; null = the officer chose "Start blank".
+  const [copyChoice, setCopyChoice] = useState<string | null | undefined>();
+  const copySources = editions
+    .filter((e) => e.year !== newYear)
+    .sort((a, b) => b.year - a.year);
+  const defaultCopy = copySources.find((e) => e.year < newYear)?.id ?? null;
+  const copyFrom =
+    copyChoice === undefined ||
+    (copyChoice !== null && !copySources.some((e) => e.id === copyChoice))
+      ? defaultCopy
+      : copyChoice;
+
   return (
     <Container size="md">
       <Stack gap="lg">
@@ -249,7 +272,11 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                   size="xs"
                   label="New year"
                   name="year"
-                  defaultValue={currentEventYear()}
+                  value={newYear}
+                  onChange={(v) => {
+                    const n = typeof v === "number" ? v : Number(v);
+                    if (Number.isFinite(n)) setNewYear(n);
+                  }}
                   min={1900}
                   max={3000}
                   w={110}
@@ -266,11 +293,13 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
                 />
                 <Select
                   size="xs"
-                  label="Copy lot setup from (optional)"
+                  label="Copy lot setup from"
                   name="copyFromId"
                   placeholder="Start blank"
                   clearable
-                  data={editions.map((e) => ({
+                  value={copyFrom}
+                  onChange={setCopyChoice}
+                  data={copySources.map((e) => ({
                     value: e.id,
                     label: e.label ? `${e.year} · ${e.label}` : String(e.year),
                   }))}
