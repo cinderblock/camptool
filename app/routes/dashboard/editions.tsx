@@ -22,7 +22,13 @@ import {
 } from "~/lib/bans";
 import { currentEventYear } from "~/lib/brc";
 import { loadKindRegistry } from "~/lib/custom-kinds.server";
-import { BURNING_MAN, EVENTS, eventLabel, isEvent } from "~/lib/events";
+import {
+  BURNING_MAN,
+  EVENTS,
+  eventLabel,
+  isBurningMan,
+  isEvent,
+} from "~/lib/events";
 import { useKinds } from "~/lib/kinds-context";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
@@ -155,8 +161,11 @@ export async function action({ request }: Route.ActionArgs) {
       if (src) forkedFromId = src.id;
     }
 
-    const eventRaw = String(form.get("event") ?? BURNING_MAN);
-    const event = isEvent(eventRaw) ? eventRaw : BURNING_MAN;
+    const eventRaw = String(form.get("event") ?? "").trim();
+    if (!isEvent(eventRaw)) {
+      return data({ error: "Choose an event." }, { status: 400 });
+    }
+    const event = eventRaw;
 
     const id = crypto.randomUUID();
     await db.insert(campEdition).values({
@@ -216,7 +225,10 @@ export async function action({ request }: Route.ActionArgs) {
   return data({ error: "Unknown action." }, { status: 400 });
 }
 
-export default function Editions({ loaderData }: Route.ComponentProps) {
+export default function Editions({
+  loaderData,
+  actionData,
+}: Route.ComponentProps) {
   const { editions, activeEditionId, canManage, hiddenKinds } = loaderData;
   const kindGroups = useKinds().groups;
   const activeEdition = editions.find((e) => e.id === activeEditionId) ?? null;
@@ -225,14 +237,21 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
       ? `${activeEdition.year} · ${activeEdition.label}`
       : String(activeEdition.year)
     : "";
+  const actionError =
+    actionData && "error" in actionData ? actionData.error : null;
 
-  // The "Add year" form defaults to the next season that doesn't exist yet, so
-  // it never suggests a year that would just clash. Copy sources are only the
-  // other years, and default to the newest year before the one being added:
-  // that's whose lot is the right starting point.
+  // The "Add year" form defaults to the next year that doesn't exist yet, so it
+  // never suggests a year that would just clash. Copy sources exclude the year
+  // being added and default to the newest earlier year. Event inherits from the
+  // copied year (or the camp's newest year), and stays blank for a camp's first
+  // year so we never silently assume Burning Man.
+  const newestEdition = editions[0] ?? null;
   const takenYears = new Set(editions.map((e) => e.year));
   const [newYear, setNewYear] = useState<number>(() => {
-    let y = currentEventYear();
+    let y =
+      newestEdition && !isBurningMan(newestEdition.event)
+        ? new Date().getFullYear()
+        : currentEventYear();
     while (takenYears.has(y)) y++;
     return y;
   });
@@ -247,6 +266,20 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
     (copyChoice !== null && !copySources.some((e) => e.id === copyChoice))
       ? defaultCopy
       : copyChoice;
+  const copySource = copyFrom
+    ? (editions.find((e) => e.id === copyFrom) ?? null)
+    : null;
+  const copySourceLabel = copySource
+    ? copySource.label
+      ? `${copySource.year} · ${copySource.label}`
+      : String(copySource.year)
+    : null;
+
+  // undefined = follow the copied year (or newest existing year); explicit
+  // selection overrides it.
+  const [eventChoice, setEventChoice] = useState<string | null | undefined>();
+  const defaultEvent = copySource?.event ?? newestEdition?.event ?? null;
+  const selectedEvent = eventChoice === undefined ? defaultEvent : eventChoice;
 
   return (
     <Container size="md">
@@ -254,12 +287,8 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Years</Title>
           <Text c="dimmed" size="sm">
-            Each year is its own edition of the camp — the map and everyone's
-            inventory are scoped to it. Editing this year never changes a past
-            one. Lock a year to make it read-only. Copying a year brings forward
-            only the lot setup as a starting point — the map is redrawn and
-            campers re-commit what they're bringing (with a one-click "same as
-            last year" on the Bringing page).
+            Each year has its own map, roster, and gear list. Editing a year
+            never changes past years, and locking a year makes it read-only.
           </Text>
         </div>
 
@@ -267,49 +296,81 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
           <Card withBorder padding="md" radius="md">
             <Form method="post">
               <input type="hidden" name="intent" value="create" />
-              <Group align="flex-end" wrap="wrap">
-                <NumberInput
-                  size="xs"
-                  label="New year"
-                  name="year"
-                  value={newYear}
-                  onChange={(v) => {
-                    const n = typeof v === "number" ? v : Number(v);
-                    if (Number.isFinite(n)) setNewYear(n);
-                  }}
-                  min={1900}
-                  max={3000}
-                  w={110}
-                />
-                <Select
-                  size="xs"
-                  label="Event"
-                  name="event"
-                  defaultValue={BURNING_MAN}
-                  data={EVENTS.map((e) => ({ value: e.value, label: e.label }))}
-                  allowDeselect={false}
-                  comboboxProps={{ withinPortal: true }}
-                  w={150}
-                />
-                <Select
-                  size="xs"
-                  label="Copy lot setup from"
-                  name="copyFromId"
-                  placeholder="Start blank"
-                  clearable
-                  value={copyFrom}
-                  onChange={setCopyChoice}
-                  data={copySources.map((e) => ({
-                    value: e.id,
-                    label: e.label ? `${e.year} · ${e.label}` : String(e.year),
-                  }))}
-                  comboboxProps={{ withinPortal: true }}
-                  w={220}
-                />
-                <Button type="submit" size="xs">
-                  Add year
-                </Button>
-              </Group>
+              <Stack gap="sm">
+                <Text fw={600} size="sm">
+                  Start a new year
+                </Text>
+                <Group align="flex-end" wrap="wrap">
+                  <NumberInput
+                    size="xs"
+                    label="New year"
+                    name="year"
+                    value={newYear}
+                    onChange={(v) => {
+                      const n = typeof v === "number" ? v : Number(v);
+                      if (Number.isFinite(n)) setNewYear(n);
+                    }}
+                    min={1900}
+                    max={3000}
+                    w={110}
+                  />
+                  <Select
+                    size="xs"
+                    label="Event"
+                    name="event"
+                    placeholder="Choose an event"
+                    required
+                    value={selectedEvent}
+                    onChange={setEventChoice}
+                    data={EVENTS.map((e) => ({
+                      value: e.value,
+                      label: e.label,
+                    }))}
+                    allowDeselect={false}
+                    comboboxProps={{ withinPortal: true }}
+                    w={170}
+                  />
+                  <Select
+                    size="xs"
+                    label="Copy lot setup from"
+                    name="copyFromId"
+                    placeholder="Start blank"
+                    clearable
+                    value={copyFrom}
+                    onChange={setCopyChoice}
+                    data={copySources.map((e) => ({
+                      value: e.id,
+                      label: e.label
+                        ? `${e.year} · ${e.label}`
+                        : String(e.year),
+                    }))}
+                    comboboxProps={{ withinPortal: true }}
+                    w={220}
+                  />
+                  <Button type="submit" size="xs">
+                    Add year
+                  </Button>
+                </Group>
+                <Stack gap={4}>
+                  <Text size="xs" c="dimmed">
+                    {copySourceLabel
+                      ? `Copies only ${copySourceLabel}'s lot dimensions and location as a starting point — update them on the Camp map once final placement arrives. Placed gear and RSVPs don't carry over; campers confirm they're coming on Your trip and can re-add their gear in one click on Your gear.`
+                      : "Starts with a blank map, roster, and gear list. Set your lot dimensions on the Camp map whenever you're ready; returning campers can still re-add their gear in one click on Your gear."}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {selectedEvent === BURNING_MAN
+                      ? "Burning Man sets up the Black Rock City street grid and starts with pop-up canopies disallowed (adjustable below)."
+                      : selectedEvent
+                        ? "Uses a generic lot and terminology with no structures disallowed by default (adjustable below)."
+                        : "Pick an event to choose map layout, terminology, and default disallowed structures."}
+                  </Text>
+                </Stack>
+                {actionError ? (
+                  <Text size="xs" c="red">
+                    {actionError}
+                  </Text>
+                ) : null}
+              </Stack>
             </Form>
           </Card>
         ) : null}
@@ -320,15 +381,15 @@ export default function Editions({ loaderData }: Route.ComponentProps) {
               <div>
                 <Title order={4}>Disallowed structures · {activeLabel}</Title>
                 <Text c="dimmed" size="sm">
-                  Checked kinds are hidden from the palette and rejected on add
-                  for this year. Burning Man, for example, disallows pop-up
-                  canopies. Already-placed items of a disallowed kind stay on
-                  the map but are flagged for an officer to resolve.
+                  Checked items are hidden when campers add gear on Your gear or
+                  the Camp map for this year. Items already on the map stay
+                  visible and are flagged for an officer to review.
                 </Text>
               </div>
               {activeEdition.locked ? (
                 <Text size="sm" c="dimmed">
-                  This year is locked — unlock it to change the disallowed list.
+                  This year is locked — unlock it below to change the disallowed
+                  list.
                 </Text>
               ) : (
                 <Form method="post">

@@ -4098,11 +4098,16 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
       <Stack gap="lg" maw={620}>
         <Title order={2}>Camp map</Title>
         <Text c="dimmed">
-          Set your lot dimensions to start laying out camp. You can refine the
-          street and city placement anytime.
+          {isBurningMan(event)
+            ? "Set your lot dimensions to start laying out camp. You can refine the street and city placement anytime."
+            : "Set your lot dimensions to start laying out camp. You can update the size or location anytime."}
         </Text>
         {canEdit ? (
-          <PlacementForm lot={null} fetcher={fetcher} />
+          <PlacementForm
+            lot={null}
+            burningMan={isBurningMan(event)}
+            fetcher={fetcher}
+          />
         ) : (
           <Text c="dimmed">No lot has been set up yet.</Text>
         )}
@@ -4701,6 +4706,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             ) : null}
             <SidePanel
               lot={shownLot}
+              burningMan={isBurningMan(event)}
               objects={shown.objects}
               setObjects={readOnly ? noop : setObjects}
               selectedId={selectedId}
@@ -9541,6 +9547,7 @@ function describeChange(o: ObjRow, prev: PendingPrev): string[] {
 
 function SidePanel({
   lot,
+  burningMan,
   objects,
   setObjects,
   selectedId,
@@ -9554,6 +9561,7 @@ function SidePanel({
   wiki,
 }: {
   lot: Lot;
+  burningMan: boolean;
   objects: ObjRow[];
   setObjects: React.Dispatch<React.SetStateAction<ObjRow[]>>;
   selectedId: string | null;
@@ -10109,7 +10117,11 @@ function SidePanel({
             <Text fw={600} size="sm" mb="sm">
               Lot settings
             </Text>
-            <PlacementForm lot={lot} fetcher={fetcher} />
+            <PlacementForm
+              lot={lot}
+              burningMan={burningMan}
+              fetcher={fetcher}
+            />
           </Paper>
         </Collapse>
       ) : null}
@@ -10681,9 +10693,11 @@ function RoadPanel({
 
 function PlacementForm({
   lot,
+  burningMan,
   fetcher,
 }: {
   lot: Lot | null;
+  burningMan: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const [year, setYear] = useState<string>(
@@ -10698,59 +10712,75 @@ function PlacementForm({
   return (
     <fetcher.Form method="post">
       <input type="hidden" name="intent" value="savePlacement" />
-      {/* Mantine Select isn't a native form control, so mirror it into hidden
-          inputs the action can read. */}
-      <input type="hidden" name="streetLetter" value={streetLetter ?? ""} />
-      <input type="hidden" name="year" value={year} />
+      {burningMan ? (
+        <>
+          {/* Mantine Select isn't a native form control, so mirror it into hidden
+              inputs the action can read. */}
+          <input type="hidden" name="streetLetter" value={streetLetter ?? ""} />
+          <input type="hidden" name="year" value={year} />
+        </>
+      ) : null}
       <Stack gap="sm">
-        <Group grow>
-          <Select
-            size="xs"
-            label="BRC year"
-            data={eventYearOptions()}
-            value={year}
-            onChange={(v) => v && setYear(v)}
-            allowDeselect={false}
-            comboboxProps={{ withinPortal: true }}
-          />
-          <Select
-            size="xs"
-            label="Street"
-            placeholder="Pick a street"
-            data={streetOptions(Number(year))}
-            value={streetLetter}
-            onChange={setStreetLetter}
-            clearable
-            comboboxProps={{ withinPortal: true }}
-          />
-        </Group>
-        <Group grow>
-          <Autocomplete
-            size="xs"
-            label="Address (clock)"
-            name="address"
-            defaultValue={lot?.address ?? ""}
-            data={clockOptions()}
-            placeholder="3:00 (or 3:14)"
-          />
+        {burningMan ? (
+          <>
+            <Group grow>
+              <Select
+                size="xs"
+                label="BRC year"
+                data={eventYearOptions()}
+                value={year}
+                onChange={(v) => v && setYear(v)}
+                allowDeselect={false}
+                comboboxProps={{ withinPortal: true }}
+              />
+              <Select
+                size="xs"
+                label="Street"
+                placeholder="Pick a street"
+                data={streetOptions(Number(year))}
+                value={streetLetter}
+                onChange={setStreetLetter}
+                clearable
+                comboboxProps={{ withinPortal: true }}
+              />
+            </Group>
+            <Group grow>
+              <Autocomplete
+                size="xs"
+                label="Address (clock)"
+                name="address"
+                defaultValue={lot?.address ?? ""}
+                data={clockOptions()}
+                placeholder="3:00 (or 3:14)"
+              />
+              <TextInput
+                size="xs"
+                label="Street name (optional)"
+                name="street"
+                defaultValue={lot?.street ?? ""}
+                placeholder="overrides the year's name"
+              />
+            </Group>
+            <Checkbox
+              size="xs"
+              name="frontsToMan"
+              defaultChecked={lot?.frontsToMan ?? true}
+              label="Frontage faces the Man (uncheck for mountain-facing)"
+            />
+          </>
+        ) : (
           <TextInput
             size="xs"
-            label="Street name (optional)"
-            name="street"
-            defaultValue={lot?.street ?? ""}
-            placeholder="overrides the year's name"
+            label="Location / plot (optional)"
+            name="address"
+            defaultValue={lot?.address ?? ""}
+            placeholder="e.g. Meadow lot 4"
           />
-        </Group>
-        <Checkbox
-          size="xs"
-          name="frontsToMan"
-          defaultChecked={lot?.frontsToMan ?? true}
-          label="Frontage faces the Man (uncheck for mountain-facing)"
-        />
+        )}
         <Group grow>
           <NumberInput
             size="xs"
-            label="Frontage (ft)"
+            label={burningMan ? "Frontage (ft)" : "Width (ft)"}
             name="frontageFt"
             defaultValue={lot?.frontageFt ?? 100}
             min={1}
@@ -10763,18 +10793,26 @@ function PlacementForm({
             min={1}
           />
         </Group>
-        <NumberInput
-          size="xs"
-          label="Frontage radius override (ft, optional)"
-          description={
-            derivedRadius
-              ? `Auto from street: ${Math.round(derivedRadius)}′ from the Man${usingFallbackGeometry ? " (latest BRC layout — this year's measurements not loaded)" : ""}. Set only to override.`
-              : "Man→frontage distance; draws the wedge taper. Set if no street is picked."
-          }
-          name="innerRadiusFt"
-          defaultValue={lot?.innerRadiusFt ?? undefined}
-          min={1}
-        />
+        {burningMan ? (
+          <NumberInput
+            size="xs"
+            label="Frontage radius override (ft, optional)"
+            description={
+              derivedRadius
+                ? `Auto from street: ${Math.round(derivedRadius)}′ from the Man${usingFallbackGeometry ? " (latest BRC layout — this year's measurements not loaded)" : ""}. Set only to override.`
+                : "Man→frontage distance; draws the wedge taper. Set if no street is picked."
+            }
+            name="innerRadiusFt"
+            defaultValue={lot?.innerRadiusFt ?? undefined}
+            min={1}
+          />
+        ) : null}
+        {lot ? (
+          <Text size="xs" c="dimmed">
+            Updating the lot adjusts the boundary without removing placed gear;
+            reposition anything that falls outside if the lot shrinks.
+          </Text>
+        ) : null}
         <Button size="xs" type="submit" loading={fetcher.state !== "idle"}>
           {lot ? "Save lot" : "Create lot"}
         </Button>
