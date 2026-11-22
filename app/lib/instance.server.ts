@@ -18,20 +18,23 @@ const SETTINGS_ID = "singleton";
 export type InstanceSettings = {
   allowCampCreation: boolean;
   allowOpenSignups: boolean;
+  allowPasswordLogin: boolean;
 };
 
 const DEFAULT_SETTINGS: InstanceSettings = {
   allowCampCreation: true,
   allowOpenSignups: true,
+  allowPasswordLogin: false,
 };
 
-/** The deployment toggles. Falls back to permissive defaults if the singleton
- * row is somehow absent (e.g. a DB predating the migration seed). */
+/** The deployment toggles. Falls back to defaults if the singleton row is
+ * somehow absent (e.g. a DB predating the migration seed). */
 export async function getInstanceSettings(): Promise<InstanceSettings> {
   const [row] = await db
     .select({
       allowCampCreation: instanceSetting.allowCampCreation,
       allowOpenSignups: instanceSetting.allowOpenSignups,
+      allowPasswordLogin: instanceSetting.allowPasswordLogin,
     })
     .from(instanceSetting)
     .where(eq(instanceSetting.id, SETTINGS_ID))

@@ -42,6 +42,8 @@ export function isAuthAttempt(method: string, pathname: string): boolean {
     pathname.startsWith("/api/auth/forget-password") ||
     pathname.startsWith("/api/auth/request-password-reset") ||
     pathname.startsWith("/api/auth/passkey/") ||
+    pathname.startsWith("/api/passkey-signup") ||
+    pathname.startsWith("/api/passkey-recovery") ||
     pathname.startsWith("/api/legacy-passkey") ||
     pathname.startsWith("/new-camp")
   );

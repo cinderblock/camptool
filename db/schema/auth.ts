@@ -94,7 +94,7 @@ export const passkey = sqliteTable("passkey", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-  credentialID: text("credential_id").notNull(),
+  credentialID: text("credential_id").notNull().unique(),
   counter: integer("counter").notNull(),
   deviceType: text("device_type").notNull(),
   backedUp: integer("backed_up", { mode: "boolean" }).notNull(),

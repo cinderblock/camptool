@@ -59,6 +59,13 @@ const devOrigins =
 const apex = new URL(baseURL);
 const campSubdomains = process.env.CAMP_SUBDOMAINS === "1";
 
+const PASSWORD_AUTH_PATHS = new Set([
+  "/sign-in/email",
+  "/sign-up/email",
+  "/sign-in/magic-link",
+  "/magic-link/verify",
+]);
+
 export const auth = betterAuth({
   baseURL,
   secret: process.env.BETTER_AUTH_SECRET,
@@ -95,6 +102,22 @@ export const auth = betterAuth({
   // recovery). The label still arrives with verify-registration and is saved.
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      // Server-side kill switch for password / magic-link auth
+      // (plans/passkey-first-auth.md Layer 1). Hiding buttons alone is not
+      // enforcement; refuse the endpoints directly when disabled.
+      if (PASSWORD_AUTH_PATHS.has(ctx.path)) {
+        const { allowPasswordLogin } = await getInstanceSettings();
+        if (!allowPasswordLogin) {
+          throw new APIError("FORBIDDEN", {
+            message:
+              ctx.path === "/sign-up/email"
+                ? "Password sign-up is disabled on this site. Create an account with a passkey instead."
+                : "Password sign-in is disabled on this site. Sign in with a passkey, or ask an officer for a recovery link.",
+          });
+        }
+        return;
+      }
+
       if (ctx.path !== "/passkey/generate-register-options") return;
       if (!ctx.query?.name) return;
       // Hook results are merged in with defu, which skips undefined, so the

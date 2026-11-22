@@ -59,6 +59,8 @@ describe("isAuthAttempt", () => {
   test("covers sign-in, sign-up and starting a camp, POSTs only", () => {
     expect(isAuthAttempt("POST", "/api/auth/sign-in/email")).toBe(true);
     expect(isAuthAttempt("POST", "/api/auth/sign-up/email")).toBe(true);
+    expect(isAuthAttempt("POST", "/api/passkey-signup")).toBe(true);
+    expect(isAuthAttempt("POST", "/api/passkey-recovery")).toBe(true);
     expect(isAuthAttempt("POST", "/new-camp/abc")).toBe(true);
     expect(isAuthAttempt("GET", "/new-camp/abc")).toBe(false);
     expect(isAuthAttempt("POST", "/members")).toBe(false);

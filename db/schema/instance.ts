@@ -27,6 +27,13 @@ export const instanceSetting = sqliteTable("instance_setting", {
   allowOpenSignups: integer("allow_open_signups", { mode: "boolean" })
     .notNull()
     .default(true),
+  // When false, email/password sign-in, password sign-up, and magic-link
+  // sign-in are refused server-side instance-wide. Passkeys (and optional
+  // Discord) remain; existing password-only accounts recover via a recovery
+  // link that enrols a passkey (plans/passkey-first-auth.md).
+  allowPasswordLogin: integer("allow_password_login", { mode: "boolean" })
+    .notNull()
+    .default(false),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .notNull()
     .default(now),
