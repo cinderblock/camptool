@@ -64,10 +64,13 @@ async function mayCreateWithoutLink(userId: string) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   // The real session: a super admin working as someone shouldn't start a
-  // camp in their name.
-  const [session, { allowOpenSignups, allowPasswordLogin }] = await Promise.all(
-    [getRealSession(request), getInstanceSettings()],
-  );
+  // camp in their name. Fetch the link in the same wave to save a D1 hop.
+  const [session, { allowOpenSignups, allowPasswordLogin }, link] =
+    await Promise.all([
+      getRealSession(request),
+      getInstanceSettings(),
+      params.token ? findSetupLink(params.token) : Promise.resolve(null),
+    ]);
   const hasPasskey = session ? await hasUserPasskey(session.user.id) : false;
   const common = {
     apexHost: CAMP_SUBDOMAINS ? APEX.host : null,
@@ -81,7 +84,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   };
 
   if (params.token) {
-    const link = await findSetupLink(params.token);
     if (!link) throw data("Not found", { status: 404 });
     const state = setupLinkState(link);
     const payload = {

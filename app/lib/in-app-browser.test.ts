@@ -18,7 +18,7 @@ describe("detectInAppBrowser", () => {
     });
   });
 
-  test("recognizes Facebook, Instagram, and generic Android WebViews", () => {
+  test("recognizes Facebook, Instagram, Google app, and generic WebViews", () => {
     expect(
       detectInAppBrowser(
         "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 [FBAN/FBIOS;FBAV/475.0]",
@@ -33,14 +33,32 @@ describe("detectInAppBrowser", () => {
 
     expect(
       detectInAppBrowser(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) GSA/330.0.0 Mobile/15E148 Safari/604.1",
+      ),
+    ).toEqual({ appName: "The Google app", realBrowser: "Safari" });
+
+    // Generic iOS WKWebView (e.g. Gmail app) omits `Safari/`.
+    const iosWkWebView =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
+    expect(detectInAppBrowser(iosWkWebView)).toEqual({
+      appName: "This app",
+      realBrowser: "Safari",
+    });
+    // Installed iOS standalone PWA uses the same UA shape — never flag it.
+    expect(detectInAppBrowser(iosWkWebView, { standalone: true })).toBeNull();
+
+    expect(
+      detectInAppBrowser(
         "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP2A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/128.0.0.0 Mobile Safari/537.36",
       ),
     ).toEqual({ appName: "This app", realBrowser: "Chrome" });
   });
 
-  test("returns null for real browsers", () => {
+  test("returns null for real browsers including iOS Chrome, Firefox, and SFSafariViewController", () => {
     const realUAs = [
       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/128.0.6613.98 Mobile/15E148 Safari/604.1",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/129.0 Mobile/15E148 Safari/605.1.15",
       "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36",
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0",

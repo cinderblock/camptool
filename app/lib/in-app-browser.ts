@@ -1,7 +1,8 @@
 /**
- * Detect embedded in-app browsers (Facebook Messenger, Instagram, TikTok, etc.)
- * where WebAuthn / passkeys are missing or broken, and tell the visitor which
- * real browser to open the link in instead.
+ * Detect embedded in-app browsers (Facebook Messenger, Instagram, TikTok,
+ * Gmail / Google app WKWebView, generic Android WebViews, etc.) where WebAuthn
+ * passkeys are missing or fail, and tell the visitor which real browser to
+ * open the link in instead.
  *
  * Pure and client-safe — takes a user-agent string rather than reading
  * `navigator` directly so it can be unit-tested cleanly.
@@ -36,12 +37,28 @@ const RULES: ReadonlyArray<{ pattern: RegExp; appName: string }> = [
   { pattern: /\bLinkedInApp\b/i, appName: "LinkedIn" },
   { pattern: /\bTwitter\b/i, appName: "X" },
   { pattern: /\bMicroMessenger\b/i, appName: "WeChat" },
-  { pattern: /\bSlack\b/i, appName: "Slack" },
+  { pattern: /\bGSA\//i, appName: "The Google app" },
   // Generic Android embedded WebView token (`; wv)` in Chromium-based WebViews).
   { pattern: /;\s*wv\)/i, appName: "This app" },
 ];
 
-export function detectInAppBrowser(userAgent: string): InAppBrowser | null {
+/**
+ * True when running inside an installed standalone PWA (which on iOS omits
+ * `Safari/` from its UA just like a WKWebView, yet DOES support passkeys).
+ */
+export function isStandalonePwa(): boolean {
+  if (typeof window === "undefined") return false;
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  return (
+    nav.standalone === true ||
+    window.matchMedia?.("(display-mode: standalone)").matches === true
+  );
+}
+
+export function detectInAppBrowser(
+  userAgent: string,
+  opts?: { standalone?: boolean },
+): InAppBrowser | null {
   if (!userAgent) return null;
   for (const rule of RULES) {
     if (rule.pattern.test(userAgent)) {
@@ -50,6 +67,19 @@ export function detectInAppBrowser(userAgent: string): InAppBrowser | null {
         realBrowser: realBrowserFor(userAgent),
       };
     }
+  }
+  // Generic iOS WKWebView heuristic (Gmail, Outlook, etc.): real iOS browsers
+  // — Safari, Chrome (`CriOS`), Firefox (`FxiOS`), Edge (`EdgiOS`), and
+  // SFSafariViewController — all include `Safari/` in their UA string, whereas
+  // embedded WKWebViews carry `AppleWebKit/... Mobile/...` without `Safari/`.
+  // Skip when running as an installed standalone PWA, which also omits it.
+  if (
+    !opts?.standalone &&
+    /iPhone|iPad|iPod/i.test(userAgent) &&
+    /AppleWebKit\//i.test(userAgent) &&
+    !/\bSafari\//i.test(userAgent)
+  ) {
+    return { appName: "This app", realBrowser: "Safari" };
   }
   return null;
 }

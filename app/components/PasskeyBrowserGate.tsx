@@ -7,7 +7,11 @@ import {
   TextInput,
 } from "@mantine/core";
 import { type ReactNode, useEffect, useState } from "react";
-import { detectInAppBrowser, type InAppBrowser } from "~/lib/in-app-browser";
+import {
+  detectInAppBrowser,
+  type InAppBrowser,
+  isStandalonePwa,
+} from "~/lib/in-app-browser";
 
 type BlockedState =
   | { kind: "in-app"; browser: InAppBrowser }
@@ -49,7 +53,9 @@ export function PasskeyBrowserGate({
       setBlocked(null);
       return;
     }
-    const browser = detectInAppBrowser(navigator.userAgent);
+    const browser = detectInAppBrowser(navigator.userAgent, {
+      standalone: isStandalonePwa(),
+    });
     if (browser) {
       setBlocked({ kind: "in-app", browser });
       return;

@@ -22,16 +22,12 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ error: "Expected a JSON body." }, { status: 400 });
   }
 
-  const { name, email, inviteToken } = body as Record<string, unknown>;
+  const { name, email } = body as Record<string, unknown>;
   if (typeof name !== "string" || typeof email !== "string") {
     return data({ error: "name and email are required." }, { status: 400 });
   }
 
-  const result = await startPasskeySignup({
-    name,
-    email,
-    inviteToken: typeof inviteToken === "string" ? inviteToken : undefined,
-  });
+  const result = await startPasskeySignup({ name, email });
 
   if (!result.ok) return data({ error: result.reason }, { status: 400 });
   return data({ context: result.context });

@@ -11,9 +11,29 @@
  *     PORT=17925 bun run dev
  *   node --experimental-strip-types e2e/passkey-nag.ts
  */
+import { execFileSync } from "node:child_process";
 import { type Browser, chromium, type Page } from "playwright";
 
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17925";
+const DB_PATH = process.env.E2E_DB_PATH ?? "./data/verify/nag.db";
+
+/** Toggle allow_password_login on the scratch DB via bun:sqlite (this script
+ * runs under Node because Playwright hangs under Bun). */
+function setAllowPasswordLogin(allow: boolean) {
+  execFileSync(
+    "bun",
+    [
+      "-e",
+      `import { Database } from "bun:sqlite";
+       const db = new Database(${JSON.stringify(DB_PATH)});
+       db.run(\`INSERT INTO instance_setting (id, allow_camp_creation, allow_open_signups, allow_password_login, updated_at)
+               VALUES ('singleton', 1, 1, ?, ?)
+               ON CONFLICT(id) DO UPDATE SET allow_password_login = excluded.allow_password_login\`, [${allow ? 1 : 0}, Date.now()]);
+       db.close();`,
+    ],
+    { stdio: "inherit" },
+  );
+}
 
 let failures = 0;
 function check(label: string, ok: boolean, detail = "") {
@@ -82,6 +102,7 @@ async function main() {
   }
 
   const email = `nag-${Date.now()}@example.com`;
+  setAllowPasswordLogin(true);
 
   try {
     const ctx = await browser.newContext();
@@ -217,6 +238,7 @@ async function main() {
 
     await ctx.close();
   } finally {
+    setAllowPasswordLogin(false);
     await browser.close();
   }
 

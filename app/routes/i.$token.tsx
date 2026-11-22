@@ -208,7 +208,6 @@ export async function action({ request, params }: Route.ActionArgs) {
 export default function RedeemInvite({
   loaderData,
   actionData,
-  params,
 }: Route.ComponentProps) {
   const {
     campName,
@@ -256,7 +255,6 @@ export default function RedeemInvite({
             discordEnabled={loaderData.discordEnabled}
             mailEnabled={loaderData.mailEnabled}
             allowPasswordLogin={loaderData.allowPasswordLogin}
-            inviteToken={params.token}
           />
         </Paper>
       </Stack>
@@ -276,7 +274,6 @@ function InviteBody({
   discordEnabled,
   mailEnabled,
   allowPasswordLogin,
-  inviteToken,
 }: {
   campName: string;
   state: InviteState;
@@ -289,7 +286,6 @@ function InviteBody({
   discordEnabled: boolean;
   mailEnabled: boolean;
   allowPasswordLogin: boolean;
-  inviteToken: string;
 }) {
   if (state !== "ok") {
     return (
@@ -321,7 +317,6 @@ function InviteBody({
           discordEnabled={discordEnabled}
           mailEnabled={mailEnabled}
           allowPasswordLogin={allowPasswordLogin}
-          inviteToken={inviteToken}
         />
       ) : !allowPasswordLogin && !hasPasskey ? (
         <PasskeySetupGate

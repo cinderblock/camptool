@@ -47,10 +47,13 @@ From Cameron, 2026-08-07:
    today — `magicLink.sendMagicLink` only `console.log`s the URL
    (`app/lib/auth.server.ts:127-133`), so email recovery is not currently
    buildable, and a camp has real-world social trust to fall back on.
-2. **Cutover = grace period, then flip a switch.** Legacy methods (password,
-   magic link, Discord) keep working. Users without a passkey are pushed to
-   enroll. An instance setting later disables legacy sign-in. **Nobody gets
-   locked out of the live deployment.**
+2. **Cutover = immediate (updated 2026-11-21, Cameron).** Originally planned
+   as a grace period with `allow_password_login` defaulting to `true`. On
+   2026-11-21 Cameron decided to cut over immediately (`allow_password_login`
+   default `false`), handling any remaining password-only MathCamp users
+   manually via officer or site-admin recovery links (which enrol a passkey
+   directly). The toggle stays on `/admin` if a deployment ever needs to
+   temporarily allow legacy passwords.
 3. **Per-camp auth policy controls doors + a membership requirement** — NOT
    which credentials exist on an account. A camp chooses which sign-in buttons
    appear at *its* doors (`/c/:slug`, `/i/:token`) and whether an enrolled

@@ -36,9 +36,6 @@ export type PendingSignup = {
   userId: string;
   name: string;
   email: string;
-  /** Invite token, when the signup came in via `/i/:token`. Carried through so
-   * the redemption can happen server-side once the account exists. */
-  inviteToken?: string;
 };
 
 export type StartResult =
@@ -56,7 +53,6 @@ export type StartResult =
 export async function startPasskeySignup(input: {
   name: string;
   email: string;
-  inviteToken?: string;
 }): Promise<StartResult> {
   const name = input.name.trim();
   const email = input.email.trim().toLowerCase();
@@ -74,7 +70,8 @@ export async function startPasskeySignup(input: {
   if (existing) {
     return {
       ok: false,
-      reason: "An account with that email already exists. Sign in instead.",
+      reason:
+        "An account with that email already exists. Sign in with your passkey instead, or ask an officer of your camp for a recovery link.",
     };
   }
 
@@ -85,7 +82,6 @@ export async function startPasskeySignup(input: {
     userId: crypto.randomUUID(),
     name,
     email,
-    ...(input.inviteToken ? { inviteToken: input.inviteToken } : {}),
   };
 
   await db.insert(verification).values({

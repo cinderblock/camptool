@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>CampTool</title>
   <rect width="512" height="512" rx="112" fill="#1971c2"/>
   <path d="M256 140 L420 408 H92 Z" fill="#fff" stroke="#fff" stroke-width="24" stroke-linejoin="round"/>
   <path d="M256 260 L310 408 H202 Z" fill="#1971c2"/>

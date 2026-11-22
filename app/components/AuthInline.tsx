@@ -29,7 +29,6 @@ export function AuthInline({
   discordEnabled,
   mailEnabled,
   allowPasswordLogin,
-  inviteToken,
 }: {
   intro: string;
   discordEnabled: boolean;
@@ -37,8 +36,6 @@ export function AuthInline({
   mailEnabled: boolean;
   /** True only while legacy password sign-in is enabled on this deployment. */
   allowPasswordLogin: boolean;
-  /** Carried through on `/i/:token` so the signup handle knows its invite. */
-  inviteToken?: string;
 }) {
   const { revalidate } = useRevalidator();
   const [busy, setBusy] = useState(false);
@@ -69,7 +66,6 @@ export function AuthInline({
     const res = await signUpWithPasskey({
       name: values.name,
       email: values.email,
-      inviteToken,
     });
     setBusy(false);
     if (!res.ok) return fail(res.error);

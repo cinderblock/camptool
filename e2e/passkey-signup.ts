@@ -110,6 +110,17 @@ async function main() {
       `HTTP ${pwIn.status}`,
     );
 
+    const magicIn = await fetch(`${BASE}/api/auth/sign-in/magic-link`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE },
+      body: JSON.stringify({ email: "nobody@example.com" }),
+    });
+    check(
+      "magic-link sign-in is refused server-side (403)",
+      magicIn.status === 403,
+      `HTTP ${magicIn.status}`,
+    );
+
     // --- 1. Sign up with a passkey via real /login UI ----------------------
     stage("creating context");
     const ctx = await browser.newContext();
@@ -241,6 +252,48 @@ async function main() {
       Boolean(setupUrl),
       setupUrl ?? "none",
     );
+
+    // Super admin can also issue a site-level recovery link for a user who
+    // belongs to no camp yet (here, the admin themselves has no camp).
+    const camplessRecoveryUrl = await page.evaluate(async (targetEmail) => {
+      const res = await fetch("/admin", {
+        method: "POST",
+        body: new URLSearchParams({
+          intent: "issueRecoveryLink",
+          email: targetEmail,
+        }),
+      });
+      const text = await res.text();
+      const m = text.match(/\/reset\/[A-Za-z0-9_-]+/);
+      return m ? `${location.origin}${m[0]}` : null;
+    }, email);
+    check(
+      "super admin can issue a recovery link for a user with no camp",
+      Boolean(camplessRecoveryUrl),
+      camplessRecoveryUrl ?? "none",
+    );
+    if (camplessRecoveryUrl) {
+      const resetHtml = await (await fetch(camplessRecoveryUrl)).text();
+      check(
+        "site-admin recovery link renders 'a site admin'",
+        resetHtml.includes("a site admin"),
+      );
+      const pwReset = await fetch(camplessRecoveryUrl, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          email,
+          password: "blocked-password-1",
+          confirm: "blocked-password-1",
+        }),
+        redirect: "manual",
+      });
+      check(
+        "password POST on /reset/:token is refused (403) when passwords are off",
+        pwReset.status === 403,
+        `HTTP ${pwReset.status}`,
+      );
+    }
 
     await ctx.close();
 

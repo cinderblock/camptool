@@ -1,6 +1,10 @@
 import { Alert, Button, CopyButton, Group, Stack, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
-import { detectInAppBrowser, type InAppBrowser } from "~/lib/in-app-browser";
+import {
+  detectInAppBrowser,
+  type InAppBrowser,
+  isStandalonePwa,
+} from "~/lib/in-app-browser";
 
 type WarningState =
   | { kind: "in-app"; browser: InAppBrowser; href: string }
@@ -18,7 +22,9 @@ export function InAppBrowserWarning() {
 
   useEffect(() => {
     const href = window.location.href;
-    const browser = detectInAppBrowser(navigator.userAgent);
+    const browser = detectInAppBrowser(navigator.userAgent, {
+      standalone: isStandalonePwa(),
+    });
     if (browser) {
       setWarning({ kind: "in-app", browser, href });
       return;
