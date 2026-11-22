@@ -420,7 +420,7 @@ it retires the only assumption that could invalidate the rest of the design.
       it when open signups are on. 9/9 + 2/2 checks pass.
 - [ ] 2. Schema + migration (all six changes above), verified on a VACUUM copy.
 - [x] **3. `authenticatorSelection` + the `credential_id` unique index — DONE (2026-11-21).**
-      `residentKey: "required"` was already set; migration `0095_passkey_only`
+      `residentKey: "required"` was already set; migration `0096_passkey_only`
       added the unique index on `passkey.credential_id`.
 - [x] **4. `/account` page — DONE (2026-08-08).** List / add / rename / delete
       with a server-enforced ownership check and a last-passkey guard (add the

@@ -463,6 +463,8 @@ export default function Account({ loaderData }: Route.ComponentProps) {
               </Badge>
             </Group>
 
+            <InAppBrowserWarning />
+
             {passkeys.length === 0 ? (
               <Text size="sm" c="dimmed">
                 You don't have a passkey yet. Add one below — it takes a few
@@ -509,90 +511,16 @@ export default function Account({ loaderData }: Route.ComponentProps) {
           <DiscordCard linked={discordLinked} impersonating={impersonating} />
         ) : null}
 
-<<<<<<< HEAD
         {/* No "add a password" counterpart on purpose: passwords are a legacy
             credential here, so this card can only ever appear for accounts that
             already have one (plans/password-recovery.md decision 1). */}
         {hasPassword ? (
           <PasswordCard
             canRemove={passkeys.length > 0}
+            allowPasswordLogin={allowPasswordLogin}
             impersonating={impersonating}
           />
         ) : null}
-=======
-        <Stack gap="md">
-          <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-            Sign-in &amp; security
-          </Text>
-
-          <Card withBorder>
-            <Stack gap="md">
-              <Group justify="space-between" align="center">
-                <Text fw={600}>Your passkeys</Text>
-                <Badge
-                  variant="light"
-                  color={passkeys.length ? "green" : "red"}
-                >
-                  {passkeys.length
-                    ? `${passkeys.length} set up`
-                    : "None set up yet"}
-                </Badge>
-              </Group>
-
-              <InAppBrowserWarning />
-
-              {passkeys.length === 0 ? (
-                <Text size="sm" c="dimmed">
-                  Add a passkey to sign in with your face, fingerprint, or
-                  device PIN — no password needed.
-                </Text>
-              ) : (
-                <Stack gap="xs">
-                  {passkeys.map((k) => (
-                    <PasskeyRow
-                      key={k.id}
-                      pk={k}
-                      canDelete={passkeys.length > 1}
-                    />
-                  ))}
-                </Stack>
-              )}
-
-              {err ? (
-                <Text size="sm" c="red">
-                  {err}
-                </Text>
-              ) : null}
-
-              <Group align="end" gap="sm">
-                <TextInput
-                  label="Device name"
-                  description="Helps you tell your passkeys apart later."
-                  placeholder={defaultDeviceName()}
-                  value={label}
-                  onChange={(e) => setLabel(e.currentTarget.value)}
-                  style={{ flex: 1 }}
-                />
-                <Button onClick={addPasskey} loading={busy}>
-                  Add a passkey
-                </Button>
-              </Group>
-            </Stack>
-          </Card>
-
-          {discordEnabled ? (
-            <DiscordCard linked={discordLinked} impersonating={impersonating} />
-          ) : null}
-
-          {hasPassword ? (
-            <PasswordCard
-              canRemove={passkeys.length > 0}
-              allowPasswordLogin={allowPasswordLogin}
-              impersonating={impersonating}
-            />
-          ) : null}
-        </Stack>
->>>>>>> 7e50590 (Auth: passkey-first signup/sign-in and in-app browser warning)
       </Stack>
     </Container>
   );
@@ -697,15 +625,9 @@ function PasswordCard({
         </Group>
 
         <Text size="sm" c="dimmed">
-<<<<<<< HEAD
-          A password is the part of your account somebody else can guess, phish,
-          or find in an unrelated site's breach. A passkey can't be any of those
-          things — once you have one, you don't need this.
-=======
           {allowPasswordLogin
-            ? "Once you've added a passkey, you don't need a password and can remove it here."
+            ? "A password is the part of your account somebody else can guess, phish, or find in an unrelated site's breach. A passkey can't be any of those things — once you have one, you don't need this."
             : "Password sign-in is turned off on this site. Once you've added a passkey, you can remove your old password here."}
->>>>>>> 7e50590 (Auth: passkey-first signup/sign-in and in-app browser warning)
         </Text>
 
         {impersonating ? (
