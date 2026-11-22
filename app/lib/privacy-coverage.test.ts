@@ -65,6 +65,9 @@ const EXEMPT: Record<string, string> = {
     "telemetry on purpose — that is the whole point of the endpoint.",
   "routes/api.dev.feedback.tsx": "Token-gated ops API; same as api.dev.errors.",
   "routes/api.dev.nav.tsx": "Token-gated ops API; same as api.dev.errors.",
+  "routes/manifest.webmanifest.tsx":
+    "Web app manifest: only the camp's name and fixed app metadata, and the " +
+    "name only for a signed-in member of that camp.",
   "routes/c.$slug.tsx":
     "Public camp page — shows only what the camp chose to publish, and has no " +
     "session to carry a privacy cookie.",

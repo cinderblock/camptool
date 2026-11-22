@@ -47,7 +47,9 @@ function serveAsset(pathname: string): Response | undefined {
   if (!file.size) return undefined;
   const cacheControl = pathname.startsWith("/assets/")
     ? "public, max-age=31536000, immutable"
-    : "public, max-age=3600";
+    : pathname === "/sw.js"
+      ? "no-cache"
+      : "public, max-age=3600";
   return new Response(file, { headers: { "Cache-Control": cacheControl } });
 }
 

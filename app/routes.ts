@@ -79,6 +79,8 @@ export default [
   // Page load / switch timings from real browsers (nav-timing.ts →
   // nav_timing table; plans/fast-navigation.md).
   route("api/log-nav", "routes/api.log-nav.tsx"),
+  // The web app manifest (installable to a home screen; plans/pwa.md).
+  route("manifest.webmanifest", "routes/manifest.webmanifest.tsx"),
   // User feedback submissions (FeedbackButton → feedback table).
   route("api/feedback", "routes/api.feedback.tsx"),
   // Dev-only telemetry read APIs (token-gated via DEV_API_TOKEN; for tracing).

@@ -4,3 +4,7 @@
 # again. Without this a phone re-checks every file on each visit.
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+# The service worker: always check for a new one (plans/pwa.md).
+/sw.js
+  Cache-Control: no-cache

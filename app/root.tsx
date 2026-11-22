@@ -78,6 +78,28 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
+        {/* Installable to a home screen (plans/pwa.md). The manifest names
+            the camp for its members, so it's fetched with credentials. */}
+        <link
+          rel="manifest"
+          href="/manifest.webmanifest"
+          crossOrigin="use-credentials"
+        />
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: light)"
+          content="#ffffff"
+        />
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: dark)"
+          content="#242424"
+        />
         <Links />
         <ColorSchemeScript defaultColorScheme="auto" />
         <style>{earlyColorSchemeCss}</style>
@@ -110,6 +132,12 @@ export default function App() {
   // Install client error forwarding once, and breadcrumb each navigation.
   useEffect(() => {
     installTelemetry();
+  }, []);
+  // The service worker only stands in for the browser's offline error
+  // (public/sw.js). Not in dev, where it would only get in Vite's way.
+  useEffect(() => {
+    if (import.meta.env.DEV || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
   }, []);
   const firstRender = useRef(true);
   useEffect(() => {
