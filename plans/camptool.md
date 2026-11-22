@@ -74,10 +74,13 @@ gated on the active *event* being Burning Man, once an event-type seam exists.
    back up/export (requirement #10), fine for this scale. Keep the Drizzle schema
    reasonably portable so a later Postgres move (if we go SaaS / want PostGIS) is
    low-friction. Don't lean on SQLite-only quirks without noting it here.
-3. **Auth = better-auth.** TS-native, clean React Router integration. Use:
-   Discord social provider, email/password, magic link, passkeys; org + roles
-   plugin to model admin/officer/member/recruit. Reason: matches "lots of auth options"
-   plus first-class Discord.
+3. **Auth = better-auth (passkey-first / passkey-only by default).** TS-native,
+   clean React Router integration. Passkeys are the default and primary way to
+   create an account and sign in (plus optional Discord OAuth); legacy password
+   sign-in is off by default behind `instance_setting.allow_password_login`
+   (`plans/passkey-first-auth.md`). Recovery uses officer- or super-admin-issued
+   one-time links that enrol a passkey (`plans/password-recovery.md`). Org +
+   roles plugin models admin/officer/member/recruit.
 4. **First slice = Foundation:** auth + admin/officer/member/recruit roles + member
    directory + Discord account link. Everything else hangs off member identity.
 5. **Stack (from the user's other projects, not re-asked):** Bun runtime, React

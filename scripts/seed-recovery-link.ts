@@ -5,38 +5,28 @@
  * (Playwright hangs under Bun) while this needs the app's Bun-only DB layer.
  * The harness runs this first and passes the URL through E2E_RECOVERY_URL.
  *
+ * Inserts the user directly so this works even when `allowPasswordLogin` is
+ * false (the default).
+ *
  *   bun scripts/seed-recovery-link.ts <email>
  */
-import { eq } from "drizzle-orm";
 import { issuePasswordReset } from "../app/lib/password-reset.server";
 import { db } from "../db/client.server";
 import { camp, membership, user } from "../db/schema";
 
-const email = process.argv[2];
+const email = process.argv[2]?.trim().toLowerCase();
 if (!email) {
   console.error("usage: bun scripts/seed-recovery-link.ts <email>");
   process.exit(1);
 }
-const BASE = process.env.PUBLIC_BASE_URL ?? "http://localhost:17934";
 
-// Create the account through the real signup endpoint so it's shaped exactly
-// like any other member (it starts WITH a password, and no passkey — the state
-// a locked-out member is actually in).
-const res = await fetch(`${BASE}/api/auth/sign-up/email`, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ name: "Recovery Tester", email, password: "start-1" }),
+const userId = crypto.randomUUID();
+await db.insert(user).values({
+  id: userId,
+  name: "Recovery Tester",
+  email,
+  emailVerified: false,
 });
-if (!res.ok) {
-  console.error("signup failed", res.status, await res.text());
-  process.exit(1);
-}
-
-const [u] = await db.select().from(user).where(eq(user.email, email)).limit(1);
-if (!u) {
-  console.error("no user row after signup");
-  process.exit(1);
-}
 
 const campId = crypto.randomUUID();
 await db.insert(camp).values({
@@ -47,13 +37,13 @@ await db.insert(camp).values({
 await db.insert(membership).values({
   id: crypto.randomUUID(),
   organizationId: campId,
-  userId: u.id,
+  userId,
   role: "member",
 });
 
 const { url } = await issuePasswordReset({
   campId,
-  userId: u.id,
+  userId,
   issuedByMembershipId: null,
 });
 console.log(url);

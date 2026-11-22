@@ -86,9 +86,9 @@ try {
     await page.isVisible("text=Set up a passkey"),
   );
   check(
-    "3. the password form is hidden behind an escape hatch",
+    "3. the password fallback is hidden when password sign-in is off",
     !(await page.isVisible('input[name="password"]')) &&
-      (await page.isVisible("text=can't do passkeys")),
+      !(await page.isVisible("text=can't do passkeys")),
   );
 
   // Wrong email must be refused on the passkey path exactly as on the password

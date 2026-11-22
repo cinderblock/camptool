@@ -90,19 +90,29 @@ async function main() {
     await addVirtualAuthenticator(page);
 
     // — 1. Sign up the old way: password, no passkey ----------------------
-    stage("signing up with a password");
+    // Requires `allow_password_login = 1` on the scratch DB; new accounts in
+    // the UI are passkey-only now, so hit the legacy endpoint directly to
+    // simulate an existing password-only member.
+    stage("signing up with a legacy password");
     await page.goto(`${BASE}/login`, { timeout: 60000 });
-    await page.getByRole("tab", { name: "Create account" }).click();
-    // Both tab panels stay in the DOM, so scope to the visible one or the
-    // locators match twice.
-    const signup = page.locator('[role="tabpanel"]:visible');
-    await signup.getByLabel("Name").fill("Nag Tester");
-    await signup.getByLabel("Email").fill(email);
-    await signup.getByLabel("Password").fill("hunter2");
-    await signup.getByRole("button", { name: "Create account" }).click();
-    await page.waitForURL((u) => !u.pathname.startsWith("/login"), {
-      timeout: 30000,
-    });
+    const signedUp = await page.evaluate(async (e) => {
+      const res = await fetch("/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Nag Tester",
+          email: e,
+          password: "hunter2",
+        }),
+      });
+      return res.status;
+    }, email);
+    check(
+      "legacy password signup succeeds when enabled on scratch DB",
+      signedUp === 200,
+      `HTTP ${signedUp}`,
+    );
+    await page.goto(`${BASE}/`, { timeout: 30000 });
 
     check("password signup lands in the app", !page.url().includes("/login"));
     check(

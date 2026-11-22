@@ -41,6 +41,7 @@ import {
   revokeSuperAdmin,
   setInstanceSettings,
 } from "~/lib/instance.server";
+import { issuePasswordReset } from "~/lib/password-reset.server";
 import { redact } from "~/lib/privacy.server";
 import {
   assertWritable,
@@ -256,11 +257,79 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "toggle") {
     const field = String(form.get("field") ?? "");
     const value = String(form.get("value") ?? "") === "true";
-    if (field !== "allowCampCreation" && field !== "allowOpenSignups") {
+    if (
+      field !== "allowCampCreation" &&
+      field !== "allowOpenSignups" &&
+      field !== "allowPasswordLogin"
+    ) {
       return data({ error: "Unknown setting." }, { status: 400 });
     }
     await setInstanceSettings({ [field]: value });
     return data({ ok: true });
+  }
+
+  if (intent === "issueRecoveryLink") {
+    let targetUserId = String(form.get("userId") ?? "").trim();
+    let targetCampId = String(form.get("campId") ?? "").trim();
+    const rawEmail = String(form.get("email") ?? "")
+      .trim()
+      .toLowerCase();
+
+    if (rawEmail) {
+      const [u] = await db
+        .select({ id: userTable.id, name: userTable.name })
+        .from(userTable)
+        .where(eq(userTable.email, rawEmail))
+        .limit(1);
+      if (!u) {
+        return data(
+          { error: "No account with that email address." },
+          { status: 404 },
+        );
+      }
+      targetUserId = u.id;
+      if (!targetCampId) {
+        const [m] = await db
+          .select({ campId: membership.organizationId })
+          .from(membership)
+          .where(eq(membership.userId, u.id))
+          .limit(1);
+        if (!m) {
+          return data(
+            { error: "That account doesn't belong to any camp yet." },
+            { status: 400 },
+          );
+        }
+        targetCampId = m.campId;
+      }
+    }
+
+    if (!targetUserId || !targetCampId) {
+      return data({ error: "Choose an account first." }, { status: 400 });
+    }
+    const [target] = await db
+      .select({ name: userTable.name })
+      .from(membership)
+      .innerJoin(userTable, eq(userTable.id, membership.userId))
+      .where(
+        and(
+          eq(membership.userId, targetUserId),
+          eq(membership.organizationId, targetCampId),
+        ),
+      )
+      .limit(1);
+    if (!target) {
+      return data({ error: "Member not found in that camp." }, { status: 404 });
+    }
+
+    const { url, expires } = await issuePasswordReset({
+      campId: targetCampId,
+      userId: targetUserId,
+      issuedByMembershipId: null,
+    });
+    return data({
+      resetLink: { url, expires, name: target.name || "this member" },
+    });
   }
 
   if (intent === "createSetupLink") {
@@ -368,6 +437,35 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
     apexHost,
   } = loaderData;
 
+  const recoveryFetcher = useFetcher<{
+    resetLink?: { url: string; expires: string; name: string };
+    error?: string;
+  }>();
+  const [dismissedRecoveryUrl, setDismissedRecoveryUrl] = useState<
+    string | null
+  >(null);
+  const recoveryEmailRef = useRef<HTMLFormElement>(null);
+  const recoveryLink = recoveryFetcher.data?.resetLink ?? null;
+
+  useEffect(() => {
+    if (recoveryFetcher.data?.error) {
+      notifications.show({
+        color: "red",
+        title: "Couldn't issue recovery link",
+        message: recoveryFetcher.data.error,
+      });
+    } else if (recoveryFetcher.data?.resetLink) {
+      recoveryEmailRef.current?.reset();
+    }
+  }, [recoveryFetcher.data]);
+
+  function issueRecoveryForCampAdmin(campId: string, userId: string) {
+    recoveryFetcher.submit(
+      { intent: "issueRecoveryLink", campId, userId },
+      { method: "post" },
+    );
+  }
+
   return (
     <Container size="sm">
       <Stack gap="lg">
@@ -394,6 +492,43 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
               label="Allow open sign-ups"
               description="When off, new accounts are invite-only — only people who follow a camp invite link or a camp's public apply page can register."
             />
+            <ToggleRow
+              field="allowPasswordLogin"
+              checked={settings.allowPasswordLogin}
+              label="Allow password sign-in"
+              description="When off, accounts use passkeys (and Discord, if configured). Existing password-only members can get back in with a recovery link."
+            />
+          </Stack>
+        </Card>
+
+        <Card withBorder radius="md" padding="lg">
+          <Stack gap="md">
+            <Title order={4}>Account recovery</Title>
+            <Text size="sm" c="dimmed">
+              Generate a one-time recovery link for any member or camp admin who
+              lost their passkey or hasn&rsquo;t set one up yet. Send it to them
+              directly — they&rsquo;ll confirm their email and enrol a passkey
+              in their browser.
+            </Text>
+            <recoveryFetcher.Form method="post" ref={recoveryEmailRef}>
+              <input type="hidden" name="intent" value="issueRecoveryLink" />
+              <Group align="flex-end" gap="sm">
+                <TextInput
+                  name="email"
+                  type="email"
+                  label="Member's email"
+                  placeholder="person@example.com"
+                  style={{ flex: 1 }}
+                  required
+                />
+                <Button
+                  type="submit"
+                  loading={recoveryFetcher.state !== "idle"}
+                >
+                  Issue recovery link
+                </Button>
+              </Group>
+            </recoveryFetcher.Form>
           </Stack>
         </Card>
 
@@ -404,7 +539,11 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
               Every camp on this deployment. Each camp's admins run their own
               camp. You can work as any of them without joining it.
             </Text>
-            <CampsTable camps={camps} apexHost={apexHost} />
+            <CampsTable
+              camps={camps}
+              apexHost={apexHost}
+              onIssueRecovery={issueRecoveryForCampAdmin}
+            />
             <SetupLinks
               links={setupLinks}
               days={setupLinkDays}
@@ -635,6 +774,52 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           </Stack>
         </Card>
       </Stack>
+
+      <Modal
+        opened={
+          recoveryLink !== null && dismissedRecoveryUrl !== recoveryLink?.url
+        }
+        onClose={() => setDismissedRecoveryUrl(recoveryLink?.url ?? null)}
+        title={`Recovery link for ${recoveryLink?.name ?? "member"}`}
+        centered
+        size="lg"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Send this link directly to them (text, Signal, or Discord DM) —
+            CampTool doesn&rsquo;t email it. They&rsquo;ll open it in Safari or
+            Chrome, confirm their email, and set up a passkey. Nothing changes
+            on their account until they finish.
+          </Text>
+          <TextInput
+            readOnly
+            value={recoveryLink?.url ?? ""}
+            onFocus={(e) => e.currentTarget.select()}
+            aria-label="Recovery link"
+          />
+          <Group justify="space-between">
+            <Text size="xs" c="dimmed">
+              Valid until {recoveryLink?.expires}. Safe to preview yourself —
+              finishing recovery also requires their email address.
+            </Text>
+            <CopyButton value={recoveryLink?.url ?? ""}>
+              {({ copied, copy }) => (
+                <Button
+                  onClick={copy}
+                  color={copied ? "green" : undefined}
+                  style={{ flexShrink: 0 }}
+                >
+                  {copied ? "Copied" : "Copy link"}
+                </Button>
+              )}
+            </CopyButton>
+          </Group>
+          <Text size="xs" c="dimmed">
+            Copy this now — you won&rsquo;t be able to view it again. Issuing a
+            new link replaces this one.
+          </Text>
+        </Stack>
+      </Modal>
     </Container>
   );
 }
@@ -692,9 +877,11 @@ type CampRow = {
 function CampsTable({
   camps,
   apexHost,
+  onIssueRecovery,
 }: {
   camps: CampRow[];
   apexHost: string | null;
+  onIssueRecovery: (campId: string, userId: string) => void;
 }) {
   if (camps.length === 0) {
     return (
@@ -734,7 +921,11 @@ function CampsTable({
               </Table.Td>
               <Table.Td>{c.members}</Table.Td>
               <Table.Td>
-                <CampActions camp={c} apexHost={apexHost} />
+                <CampActions
+                  camp={c}
+                  apexHost={apexHost}
+                  onIssueRecovery={onIssueRecovery}
+                />
               </Table.Td>
             </Table.Tr>
           ))}
@@ -768,9 +959,11 @@ function workAs(origin: string, campId: string, userId: string) {
 function CampActions({
   camp: c,
   apexHost,
+  onIssueRecovery,
 }: {
   camp: CampRow;
   apexHost: string | null;
+  onIssueRecovery: (campId: string, userId: string) => void;
 }) {
   const [open, setOpen] = useState<"rename" | "delete" | null>(null);
   return (
@@ -789,6 +982,16 @@ function CampActions({
                 <Menu.Item
                   key={a.userId}
                   onClick={() => workAs(c.origin, c.id, a.userId)}
+                >
+                  {a.adminName}
+                </Menu.Item>
+              ))}
+              <Menu.Divider />
+              <Menu.Label>Recovery link</Menu.Label>
+              {c.admins.map((a) => (
+                <Menu.Item
+                  key={`recovery-${a.userId}`}
+                  onClick={() => onIssueRecovery(c.id, a.userId)}
                 >
                   {a.adminName}
                 </Menu.Item>

@@ -16,6 +16,7 @@
  *   E2E_BASE_URL=http://localhost:17931 bun e2e/password-reset.ts
  */
 import { eq } from "drizzle-orm";
+import { setInstanceSettings } from "../app/lib/instance.server";
 import { issuePasswordReset } from "../app/lib/password-reset.server";
 import { db } from "../db/client.server";
 import { camp, membership, user } from "../db/schema";
@@ -63,6 +64,10 @@ async function postReset(url: string, email: string, password: string) {
 }
 
 console.log(`\npassword reset e2e → ${BASE}\n`);
+
+// Legacy password flows are off by default; enable them on this scratch DB so
+// this suite can exercise the password fallback path.
+await setInstanceSettings({ allowPasswordLogin: true });
 
 // 1. A normal password account.
 const signUp = await fetch(`${BASE}/api/auth/sign-up/email`, {

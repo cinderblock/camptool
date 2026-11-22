@@ -1,26 +1,19 @@
 /**
- * Passkey-first signup spike test.
+ * Passkey-first signup, sign-in, password kill-switch, and in-app browser
+ * warning E2E test — driving the real `/login` UI with a CDP virtual
+ * authenticator.
  *
- * WebAuthn can't be exercised by hand-driving a browser (it needs a real
- * authenticator — Windows Hello, a phone, a security key), so this uses
- * Chrome's CDP *virtual* authenticator to run the ceremony headlessly and
- * deterministically. This is the only practical way to regression-test
- * passkey-only auth; see plans/passkey-first-auth.md.
- *
- * Run with the dev server already up on DEV_PORT:
- *   bun run dev            # in one shell
- *   bun run e2e:passkey    # in another
+ * Run under NODE, not bun (Playwright hangs under bun — see
+ * plans/passkey-first-auth.md), against a SCRATCH database:
+ *   DATABASE_PATH=./data/verify/pk-signup.db PUBLIC_BASE_URL=http://localhost:17923 \
+ *     PORT=17923 bun run dev
+ *   E2E_BASE_URL=http://localhost:17923 bun run e2e:passkey
  *
  * Deliberately NOT named *.spec.ts: `bun test` globs that pattern and would try
  * to run this without a live server.
  */
 import { type Browser, chromium, type Page } from "playwright";
 
-// Must be "localhost", not an IP: a WebAuthn RP ID has to be a DOMAIN, so
-// http://127.0.0.1 / http://[::1] can't host a passkey ceremony at all. The dev
-// server must therefore be started with a matching PUBLIC_BASE_URL, since that
-// is what auth.server.ts derives rpID and origin from:
-//   PUBLIC_BASE_URL=http://localhost:17923 bun run dev
 const BASE = process.env.E2E_BASE_URL ?? "http://localhost:17923";
 
 const stage = (m: string) => console.log(`[${new Date().toISOString()}] ${m}`);
@@ -56,25 +49,7 @@ async function addVirtualAuthenticator(page: Page) {
   return { cdp, authenticatorId };
 }
 
-async function waitForLog(page: Page, timeoutMs = 20000): Promise<string> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const text = (await page.getByTestId("log").textContent()) ?? "";
-    if (
-      text.includes("DONE-OK") ||
-      text.includes("FAIL") ||
-      text.includes("THREW")
-    ) {
-      return text;
-    }
-    await page.waitForTimeout(150);
-  }
-  return (await page.getByTestId("log").textContent()) ?? "(timed out)";
-}
-
 async function main() {
-  // Prefer Playwright's own chromium (what CI would use); fall back to the
-  // locally installed Chrome so a dev without `playwright install` can still run.
   const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
   stage("launching browser");
   let browser: Browser | undefined;
@@ -101,17 +76,47 @@ async function main() {
     process.exit(1);
   }
 
-  // A unique email per run so reruns don't collide on the unique constraint.
-  const email = `spike-${Date.now()}@example.com`;
+  const email = `passkey-${Date.now()}@example.com`;
 
   try {
-    // --- 1. Sign up with a passkey, no password anywhere ------------------
+    // --- 0. Password endpoints are refused server-side by default ----------
+    stage("checking password kill switch");
+    const pwUp = await fetch(`${BASE}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE },
+      body: JSON.stringify({
+        name: "Blocked",
+        email: `blocked-${Date.now()}@example.com`,
+        password: "password123",
+      }),
+    });
+    check(
+      "password sign-up is refused server-side (403)",
+      pwUp.status === 403,
+      `HTTP ${pwUp.status}`,
+    );
+
+    const pwIn = await fetch(`${BASE}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE },
+      body: JSON.stringify({
+        email: "nobody@example.com",
+        password: "password123",
+      }),
+    });
+    check(
+      "password sign-in is refused server-side (403)",
+      pwIn.status === 403,
+      `HTTP ${pwIn.status}`,
+    );
+
+    // --- 1. Sign up with a passkey via real /login UI ----------------------
     stage("creating context");
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
-    page.on("console", (m) =>
-      console.log(`    [browser:${m.type()}] ${m.text()}`),
-    );
+    page.on("console", (m) => {
+      if (m.type() === "error") console.log(`    [browser:error] ${m.text()}`);
+    });
     page.on("pageerror", (e) =>
       console.log(`    [browser:pageerror] ${e.message}`),
     );
@@ -119,29 +124,65 @@ async function main() {
     stage("attaching virtual authenticator");
     const { cdp, authenticatorId } = await addVirtualAuthenticator(page);
 
-    stage(`navigating to ${BASE}/spike/passkey`);
-    await page.goto(`${BASE}/spike/passkey`, { timeout: 60000 });
-    stage("page loaded, waiting for hydration");
+    stage(`navigating to ${BASE}/login`);
+    await page.goto(`${BASE}/login`, {
+      waitUntil: "load",
+      timeout: 60000,
+    });
     await page
-      .getByTestId("signup")
+      .getByRole("button", { name: "Sign in with a passkey" })
       .waitFor({ state: "visible", timeout: 30000 });
 
-    stage("filling form");
-    await page.getByTestId("email").fill(email);
-    await page.getByTestId("name").fill("Spike Tester");
-    stage("clicking signup");
-    await page.getByTestId("signup").click();
-
-    const log = await waitForLog(page);
-    console.log(`\n--- signup log ---\n${log}\n------------------`);
     check(
-      "passkey signup completes with no password",
-      log.includes("DONE-OK"),
-      log,
+      "login page shows Sign in with a passkey as primary CTA",
+      await page
+        .getByRole("button", { name: "Sign in with a passkey" })
+        .isVisible(),
     );
-    check("session belongs to the new email", log.includes(email));
+    check(
+      "login page hides password input when passwords are off",
+      (await page.locator('input[type="password"]').count()) === 0,
+    );
 
-    // A credential really lives on the authenticator.
+    // Wait for React hydration before clicking the Mantine tab (in Vite dev,
+    // SSR HTML arrives before client bundles finish hydrating).
+    const createTab = page.getByRole("tab", { name: "Create account" });
+    for (let i = 0; i < 20; i++) {
+      await createTab.click();
+      if ((await createTab.getAttribute("aria-selected")) === "true") break;
+      await page.waitForTimeout(250);
+    }
+    const signupPanel = page.locator('[role="tabpanel"]:visible');
+    await signupPanel.getByLabel("Name").waitFor({ state: "visible" });
+    check(
+      "Create account tab has no password field",
+      (await signupPanel.locator('input[type="password"]').count()) === 0,
+    );
+
+    await signupPanel.getByLabel("Name").fill("Passkey Tester");
+    await signupPanel.getByLabel("Email").fill(email);
+    await signupPanel
+      .getByRole("button", { name: "Create account with a passkey" })
+      .click();
+
+    await page.waitForURL((u) => !u.pathname.startsWith("/login"), {
+      timeout: 30000,
+    });
+    check(
+      "passkey signup lands signed-in inside the app",
+      !page.url().includes("/login"),
+      page.url(),
+    );
+
+    const session1 = await page.evaluate(async () =>
+      (await fetch("/api/auth/get-session")).json(),
+    );
+    check(
+      "session belongs to the new email",
+      session1?.user?.email === email,
+      JSON.stringify(session1?.user ?? null),
+    );
+
     const { credentials } = await cdp.send("WebAuthn.getCredentials", {
       authenticatorId,
     });
@@ -152,53 +193,56 @@ async function main() {
       "usernameless signIn.passkey() depends on this",
     );
 
-    // --- 2. Sign out (and PROVE it), then sign back in with only the passkey
-    stage("signing out");
-    await page.getByTestId("signout").click();
-    const logOut = await waitForLog(page);
-    console.log(`\n--- sign-out log ---\n${logOut}\n--------------------`);
-    // This guard matters: an earlier version of this test signed out with a
-    // bare fetch that better-auth rejected (415), so the "sign back in" step
-    // was silently just re-reading the still-live session and always passed.
+    // --- 2. Clear session, then sign back in with only the passkey ---------
+    stage("clearing cookies and signing back in with passkey");
+    await ctx.clearCookies();
+    await page.goto(`${BASE}/login`, { waitUntil: "networkidle" });
     check(
-      "sign-out actually clears the session",
-      logOut.includes("SESSION-AFTER-SIGNOUT: none"),
-      logOut,
+      "cleared session lands back on /login",
+      page.url().includes("/login"),
+      page.url(),
     );
 
-    stage("signing back in with only the passkey");
-    await page.reload();
-    await page
-      .getByTestId("signin")
-      .waitFor({ state: "visible", timeout: 30000 });
-    await page.getByTestId("signin").click();
-    const log2 = await waitForLog(page);
-    console.log(`\n--- sign-in log ---\n${log2}\n-------------------`);
-    check(
-      "usernameless sign-in with the passkey works",
-      log2.includes("DONE-OK"),
-      log2,
+    await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+    await page.waitForURL((u) => !u.pathname.startsWith("/login"), {
+      timeout: 30000,
+    });
+    const session2 = await page.evaluate(async () =>
+      (await fetch("/api/auth/get-session")).json(),
     );
-    check("signs in as the same account", log2.includes(email));
+    check(
+      "usernameless sign-in with passkey restores the same account",
+      session2?.user?.email === email,
+      JSON.stringify(session2?.user ?? null),
+    );
 
     await ctx.close();
 
-    // --- 3. Abandoned ceremony must not create an orphan account ----------
+    // --- 3. Abandoned ceremony must not create an orphan account -----------
+    stage("testing aborted ceremony leaves no orphan");
     const ctx2 = await browser.newContext();
     const page2 = await ctx2.newPage();
-    // No virtual authenticator at all => the ceremony cannot complete.
-    await page2.goto(`${BASE}/spike/passkey`);
+    await page2.goto(`${BASE}/login`, { waitUntil: "load" });
+    const createTab2 = page2.getByRole("tab", { name: "Create account" });
+    for (let i = 0; i < 20; i++) {
+      await createTab2.click();
+      if ((await createTab2.getAttribute("aria-selected")) === "true") break;
+      await page2.waitForTimeout(250);
+    }
+    const panel2 = page2.locator('[role="tabpanel"]:visible');
+    await panel2.getByLabel("Name").waitFor({ state: "visible" });
     const orphanEmail = `orphan-${Date.now()}@example.com`;
-    await page2.getByTestId("email").fill(orphanEmail);
-    await page2.getByTestId("signup").click();
-    const log3 = await waitForLog(page2, 12000);
+    await panel2.getByLabel("Name").fill("Orphan Tester");
+    await panel2.getByLabel("Email").fill(orphanEmail);
+    await panel2
+      .getByRole("button", { name: "Create account with a passkey" })
+      .click();
+    await page2.waitForTimeout(2500);
     check(
-      "aborted ceremony reports failure rather than succeeding",
-      !log3.includes("DONE-OK"),
-      log3,
+      "aborted ceremony stays on /login",
+      page2.url().includes("/login"),
+      page2.url(),
     );
-    // Re-requesting a handle for the same email must still be allowed, which
-    // proves no user row was created and the email is not squatted.
     const retry = await page2.evaluate(
       async (e) =>
         (
@@ -215,8 +259,28 @@ async function main() {
       retry === 200,
       `status ${retry}`,
     );
-
     await ctx2.close();
+
+    // --- 4. In-app browser warning shows for Messenger UA ------------------
+    stage("checking in-app browser warning");
+    const ctx3 = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/22A3354 [FBAN/MessengerForiOS;FBAV/475.0.0.48.108]",
+    });
+    const page3 = await ctx3.newPage();
+    await page3.goto(`${BASE}/login`, { waitUntil: "networkidle" });
+    await page3
+      .getByText("Open this link in Safari")
+      .waitFor({ timeout: 8000 });
+    check(
+      "Messenger WebView sees 'Open this link in Safari' warning",
+      await page3.getByText("Open this link in Safari").isVisible(),
+    );
+    check(
+      "warning includes a Copy this link button",
+      await page3.getByRole("button", { name: "Copy this link" }).isVisible(),
+    );
+    await ctx3.close();
   } finally {
     await browser.close();
   }

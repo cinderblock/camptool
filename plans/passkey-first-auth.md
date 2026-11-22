@@ -419,7 +419,9 @@ it retires the only assumption that could invalidate the rest of the design.
       invite-only lockdown still refuses the passkey path (403) while allowing
       it when open signups are on. 9/9 + 2/2 checks pass.
 - [ ] 2. Schema + migration (all six changes above), verified on a VACUUM copy.
-- [ ] 3. `authenticatorSelection` + the `credential_id` unique index.
+- [x] **3. `authenticatorSelection` + the `credential_id` unique index — DONE (2026-11-21).**
+      `residentKey: "required"` was already set; migration `0095_passkey_only`
+      added the unique index on `passkey.credential_id`.
 - [x] **4. `/account` page — DONE (2026-08-08).** List / add / rename / delete
       with a server-enforced ownership check and a last-passkey guard (add the
       replacement first). Enrolment prompts for a device name instead of
@@ -442,14 +444,27 @@ it retires the only assumption that could invalidate the rest of the design.
         banner simply returns tomorrow.
       Extracted `app/components/ShellBanner.tsx` while doing it — the shell had
       three copy-pasted banner blocks and this would have been the fourth.
-- [ ] 5. Passkey-first signup in `AuthInline` (doors) and `/login`, passkey as
-      the primary CTA everywhere.
+- [x] **5. Passkey-first signup in `AuthInline` (doors) and `/login` — DONE (2026-11-21).**
+      New accounts across `/login`, `/new-camp/:token`, `/i/:token`, and
+      `/c/:slug` are passkey-only (Name + Email → WebAuthn ceremony, no password
+      field). Passkey sign-in is the primary CTA everywhere; `/spike/passkey`
+      removed. Also added `InAppBrowserWarning` (Messenger, Instagram, Facebook,
+      TikTok, Android WebView, or missing `PublicKeyCredential`) with a one-tap
+      "Copy this link" button on all passkey surfaces.
 - [ ] 6. Camp `authPolicy` — settings UI + door filtering + the `required`
-      interstitial.
-- [ ] 7. Officer recovery: `passkey_reset`, the members-page action, the
-      redeem route, rank check, revoke-old-passkeys-and-sessions.
-- [ ] 8. Members-page adoption column + summary.
-- [ ] 9. `allowLegacyLogin` kill switch on `/admin`, **enforced server-side**.
+      interstitial (optional; instance-wide passkey-only already active).
+- [x] **7. Officer & super-admin recovery — DONE (2026-08-14 / 2026-11-21).**
+      Officer recovery links on `/members` enrol a passkey as the primary path
+      (`/reset/:token`), and super admins can now issue recovery links for any
+      camp admin or member by email from `/admin`.
+- [x] **8. Members-page adoption column + summary — DONE (2026-08-12).**
+- [x] **9. `allowPasswordLogin` kill switch on `/admin`, enforced server-side — DONE (2026-11-21).**
+      Added `instance_setting.allow_password_login` (default `false` — live
+      deployment cuts over immediately on deploy), enforced in `auth.server.ts`
+      `hooks.before` (403 on `/sign-in/email`, `/sign-up/email`,
+      `/sign-in/magic-link`, `/magic-link/verify`), `/reset/:token` action, and
+      `/account` password change. Toggle lives under Site admin → Access
+      controls.
 - [ ] 10. Docs: `README.md`, a `docs/passkeys.md` for self-hosters, and update
       `plans/camptool.md` decision #3 (which currently reads "Discord +
       email/password + magic link + passkeys" as co-equals).
