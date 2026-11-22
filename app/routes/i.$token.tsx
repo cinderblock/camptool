@@ -68,7 +68,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!invite) throw data("Invite not found", { status: 404 });
 
   const state = inviteState(invite);
-  const session = await getSession(request);
+  const [session, { allowOpenSignups, allowPasswordLogin }] = await Promise.all(
+    [getSession(request), getInstanceSettings()],
+  );
 
   const alreadyMember = session
     ? await isMemberOf(session.user.id, invite.campId)
@@ -86,18 +88,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     alreadyMember,
     discordEnabled,
     mailEnabled,
+    allowPasswordLogin,
   };
 
   // A valid invite is a sanctioned signup entry point. Only in invite-only mode
   // do we drop the signup-unlock cookie that lets a logged-out invitee create an
   // account; in open mode nothing is set so behavior is unchanged.
-  if (!session && state === "ok") {
-    const { allowOpenSignups } = await getInstanceSettings();
-    if (!allowOpenSignups) {
-      return data(payload, {
-        headers: { "Set-Cookie": setSignupUnlockCookie() },
-      });
-    }
+  if (!session && state === "ok" && !allowOpenSignups) {
+    return data(payload, {
+      headers: { "Set-Cookie": setSignupUnlockCookie() },
+    });
   }
   return payload;
 }
@@ -181,7 +181,10 @@ export async function action({ request, params }: Route.ActionArgs) {
   throw redirect("/");
 }
 
-export default function RedeemInvite({ loaderData }: Route.ComponentProps) {
+export default function RedeemInvite({
+  loaderData,
+  params,
+}: Route.ComponentProps) {
   const {
     campName,
     logo,
@@ -218,6 +221,8 @@ export default function RedeemInvite({ loaderData }: Route.ComponentProps) {
             alreadyMember={alreadyMember}
             discordEnabled={loaderData.discordEnabled}
             mailEnabled={loaderData.mailEnabled}
+            allowPasswordLogin={loaderData.allowPasswordLogin}
+            inviteToken={params.token}
           />
         </Paper>
       </Stack>
@@ -232,6 +237,8 @@ function InviteBody({
   alreadyMember,
   discordEnabled,
   mailEnabled,
+  allowPasswordLogin,
+  inviteToken,
 }: {
   campName: string;
   state: InviteState;
@@ -239,6 +246,8 @@ function InviteBody({
   alreadyMember: boolean;
   discordEnabled: boolean;
   mailEnabled: boolean;
+  allowPasswordLogin: boolean;
+  inviteToken: string;
 }) {
   if (state !== "ok") {
     return (
@@ -263,6 +272,8 @@ function InviteBody({
         intro={`Create an account to accept your invite to ${campName} — so you can sign back in later.`}
         discordEnabled={discordEnabled}
         mailEnabled={mailEnabled}
+        allowPasswordLogin={allowPasswordLogin}
+        inviteToken={inviteToken}
       />
     );
   }

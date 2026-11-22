@@ -12,30 +12,48 @@ import { useForm } from "@mantine/form";
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
 import { useRevalidator } from "react-router";
-import { signIn, signUp } from "~/lib/auth-client";
+import { signIn } from "~/lib/auth-client";
+import { signUpWithPasskey } from "~/lib/passkey-client";
+import { InAppBrowserWarning } from "./InAppBrowserWarning";
 import { NoMailRecoveryNote } from "./NoMailRecoveryNote";
 
 /**
- * Inline account gate shared by the public apply page and the invite-redeem
- * page. Lets a logged-out visitor create an account (with a password) or sign
- * in by any supported method, then revalidates so the surrounding loader
- * re-runs and reveals the now-authenticated flow.
+ * Inline account gate shared by the public apply page, camp setup links, and
+ * the invite-redeem page. New accounts are always passkey-first (no password).
+ * Existing members sign in with a passkey (or Discord if enabled, or a legacy
+ * password when `allowPasswordLogin` is still on). Revalidates after auth so
+ * the surrounding loader re-runs and reveals the authenticated flow.
  */
 export function AuthInline({
   intro,
   discordEnabled,
   mailEnabled,
+  allowPasswordLogin,
+  inviteToken,
 }: {
   intro: string;
   discordEnabled: boolean;
   /** False when this deployment has no mail transport — see auth.server.ts. */
   mailEnabled: boolean;
+  /** True only while legacy password sign-in is enabled on this deployment. */
+  allowPasswordLogin: boolean;
+  /** Carried through on `/i/:token` so the signup handle knows its invite. */
+  inviteToken?: string;
 }) {
   const { revalidate } = useRevalidator();
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const form = useForm({
-    initialValues: { name: "", email: "", password: "" },
+  const signUpForm = useForm({
+    initialValues: { name: "", email: "" },
+    validate: {
+      name: (v) => (v.trim() ? null : "Required"),
+      email: (v) => (/^\S+@\S+\.\S+$/.test(v.trim()) ? null : "Invalid email"),
+    },
+  });
+
+  const signInForm = useForm({
+    initialValues: { email: "", password: "" },
     validate: {
       email: (v) => (/^\S+@\S+$/.test(v) ? null : "Invalid email"),
       password: (v) => (v.length >= 6 ? null : "At least 6 characters"),
@@ -46,23 +64,19 @@ export function AuthInline({
     notifications.show({ color: "red", title: "Auth error", message });
   }
 
-  async function handleSignUp(values: typeof form.values) {
-    if (!values.name.trim()) {
-      form.setFieldError("name", "Required");
-      return;
-    }
+  async function handlePasskeySignUp(values: typeof signUpForm.values) {
     setBusy(true);
-    const { error } = await signUp.email({
+    const res = await signUpWithPasskey({
       name: values.name,
       email: values.email,
-      password: values.password,
+      inviteToken,
     });
     setBusy(false);
-    if (error) return fail(error.message ?? "Sign up failed");
+    if (!res.ok) return fail(res.error);
     revalidate();
   }
 
-  async function handleSignIn(values: typeof form.values) {
+  async function handlePasswordSignIn(values: typeof signInForm.values) {
     setBusy(true);
     const { error } = await signIn.email({
       email: values.email,
@@ -76,9 +90,11 @@ export function AuthInline({
   async function handleMagicLink() {
     // The link-styled button has no loading spinner — guard against double-fires.
     if (busy) return;
-    if (form.validateField("email").hasError) return;
+    if (signInForm.validateField("email").hasError) return;
     setBusy(true);
-    const { error } = await signIn.magicLink({ email: form.values.email });
+    const { error } = await signIn.magicLink({
+      email: signInForm.values.email,
+    });
     setBusy(false);
     if (error) return fail(error.message ?? "Could not send link");
     notifications.show({
@@ -88,7 +104,7 @@ export function AuthInline({
     });
   }
 
-  async function handlePasskey() {
+  async function handlePasskeySignIn() {
     setBusy(true);
     const res = await signIn.passkey();
     setBusy(false);
@@ -102,6 +118,7 @@ export function AuthInline({
 
   return (
     <Stack gap="md">
+      <InAppBrowserWarning />
       <Text size="sm" c="dimmed">
         {intro}
       </Text>
@@ -112,74 +129,100 @@ export function AuthInline({
         </Tabs.List>
 
         <Tabs.Panel value="signup" pt="md">
-          <form onSubmit={form.onSubmit(handleSignUp)}>
+          <form onSubmit={signUpForm.onSubmit(handlePasskeySignUp)}>
             <Stack>
               <TextInput
                 label="Your name"
                 placeholder="Jane Doe"
-                {...form.getInputProps("name")}
+                autoComplete="name"
+                {...signUpForm.getInputProps("name")}
               />
               <TextInput
                 label="Email"
                 placeholder="jane@example.com"
-                {...form.getInputProps("email")}
-              />
-              <PasswordInput
-                label="Password"
-                {...form.getInputProps("password")}
+                autoComplete="email"
+                {...signUpForm.getInputProps("email")}
               />
               <Button type="submit" loading={busy} fullWidth>
-                Create account &amp; continue
+                Create account with a passkey
               </Button>
+              <Text size="xs" c="dimmed" ta="center">
+                Your device asks for your face, fingerprint, or PIN. Nothing to
+                remember, no password to type later.
+              </Text>
             </Stack>
           </form>
         </Tabs.Panel>
 
         <Tabs.Panel value="signin" pt="md">
-          <form onSubmit={form.onSubmit(handleSignIn)}>
-            <Stack>
-              <TextInput
-                label="Email"
-                placeholder="jane@example.com"
-                {...form.getInputProps("email")}
-              />
-              <PasswordInput
-                label="Password"
-                {...form.getInputProps("password")}
-              />
-              <Button type="submit" loading={busy} fullWidth>
-                Sign in &amp; continue
-              </Button>
-              {mailEnabled ? (
-                <Anchor
-                  component="button"
-                  type="button"
-                  size="sm"
-                  ta="center"
-                  onClick={handleMagicLink}
-                >
-                  Email me a magic link instead
-                </Anchor>
+          <Stack>
+            <Button onClick={handlePasskeySignIn} loading={busy} fullWidth>
+              Sign in with a passkey
+            </Button>
+
+            {allowPasswordLogin ? (
+              showPassword ? (
+                <>
+                  <Divider label="or use a password" labelPosition="center" />
+                  <form onSubmit={signInForm.onSubmit(handlePasswordSignIn)}>
+                    <Stack>
+                      <TextInput
+                        label="Email"
+                        placeholder="jane@example.com"
+                        autoComplete="email"
+                        {...signInForm.getInputProps("email")}
+                      />
+                      <PasswordInput
+                        label="Password"
+                        autoComplete="current-password"
+                        {...signInForm.getInputProps("password")}
+                      />
+                      <Button
+                        type="submit"
+                        variant="default"
+                        loading={busy}
+                        fullWidth
+                      >
+                        Sign in with password
+                      </Button>
+                      {mailEnabled ? (
+                        <Anchor
+                          component="button"
+                          type="button"
+                          size="sm"
+                          ta="center"
+                          onClick={handleMagicLink}
+                        >
+                          Email me a magic link instead
+                        </Anchor>
+                      ) : null}
+                    </Stack>
+                  </form>
+                </>
               ) : (
-                <NoMailRecoveryNote />
-              )}
-            </Stack>
-          </form>
+                <Button
+                  variant="subtle"
+                  size="compact-sm"
+                  onClick={() => setShowPassword(true)}
+                >
+                  Sign in with a legacy password instead
+                </Button>
+              )
+            ) : null}
+
+            <NoMailRecoveryNote allowPasswordLogin={allowPasswordLogin} />
+          </Stack>
         </Tabs.Panel>
       </Tabs>
 
-      <Divider label="or" labelPosition="center" />
-
-      <Stack>
-        <Button variant="default" onClick={handlePasskey} disabled={busy}>
-          Continue with a passkey
-        </Button>
-        {discordEnabled ? (
+      {discordEnabled ? (
+        <>
+          <Divider label="or" labelPosition="center" />
           <Button color="indigo" onClick={handleDiscord} disabled={busy}>
             Continue with Discord
           </Button>
-        ) : null}
-      </Stack>
+        </>
+      ) : null}
     </Stack>
   );
 }

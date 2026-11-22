@@ -17,6 +17,7 @@ import {
 import { eq } from "drizzle-orm";
 import { useState } from "react";
 import { redirect } from "react-router";
+import { InAppBrowserWarning } from "~/components/InAppBrowserWarning";
 import { authClient, signOut } from "~/lib/auth-client";
 import { defaultDeviceName } from "~/lib/device-name";
 import { requireUser } from "~/lib/session.server";
@@ -80,6 +81,7 @@ export default function NewPasskey({ loaderData }: Route.ComponentProps) {
       </Title>
       <Paper withBorder shadow="sm" p="lg" radius="md" mt="xl">
         <Stack>
+          <InAppBrowserWarning />
           <Text>
             Your camp moved to this address
             {oldHost ? (

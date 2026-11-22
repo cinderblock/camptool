@@ -73,7 +73,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     exclusiveOption: q.exclusiveOption,
   }));
 
-  const session = await getSession(request);
+  const [session, { allowOpenSignups, allowPasswordLogin }] = await Promise.all(
+    [getSession(request), getInstanceSettings()],
+  );
   if (!session) {
     const payload = {
       campName: found.name,
@@ -86,13 +88,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       alreadyApplied: false,
       discordEnabled,
       mailEnabled,
+      allowPasswordLogin,
       questions,
     };
     // The public apply page is a sanctioned signup entry point. Only when the
     // instance is in invite-only mode do we drop the signup-unlock cookie that
     // lets a new account be created; in open mode we set nothing so behavior is
     // unchanged.
-    const { allowOpenSignups } = await getInstanceSettings();
     if (allowOpenSignups) return payload;
     return data(payload, {
       headers: { "Set-Cookie": setSignupUnlockCookie() },
@@ -116,6 +118,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     alreadyApplied: Boolean(pending),
     discordEnabled,
     mailEnabled,
+    allowPasswordLogin,
     questions,
   };
 }
@@ -243,6 +246,7 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
               intro="Create an account to apply — so you can sign back in later and check on your application."
               discordEnabled={loaderData.discordEnabled}
               mailEnabled={loaderData.mailEnabled}
+              allowPasswordLogin={loaderData.allowPasswordLogin}
             />
           )}
         </Paper>

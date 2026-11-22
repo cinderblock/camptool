@@ -39,8 +39,10 @@ import {
   useNavigation,
   useParams,
 } from "react-router";
+import { InAppBrowserWarning } from "~/components/InAppBrowserWarning";
 import { authClient } from "~/lib/auth-client";
 import { defaultDeviceName } from "~/lib/device-name";
+import { getInstanceSettings } from "~/lib/instance.server";
 import {
   inspectPasswordReset,
   type ResetLinkState,
@@ -53,10 +55,24 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ params }: Route.LoaderArgs) {
-  return { status: await inspectPasswordReset(params.token) };
+  const [status, { allowPasswordLogin }] = await Promise.all([
+    inspectPasswordReset(params.token),
+    getInstanceSettings(),
+  ]);
+  return { status, allowPasswordLogin };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
+  const { allowPasswordLogin } = await getInstanceSettings();
+  if (!allowPasswordLogin) {
+    return data(
+      {
+        error:
+          "Password sign-in is disabled on this site. Use the passkey button above to get back in.",
+      },
+      { status: 403 },
+    );
+  }
   const form = await request.formData();
   const email = String(form.get("email") ?? "");
   const password = String(form.get("password") ?? "");
@@ -110,7 +126,7 @@ export default function ResetPassword({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { status } = loaderData;
+  const { status, allowPasswordLogin } = loaderData;
   const nav = useNavigation();
   const navigate = useNavigate();
   const params = useParams();
@@ -157,7 +173,9 @@ export default function ResetPassword({
       if (added?.error) {
         setPasskeyError(
           added.error.message ??
-            "Your browser cancelled that. You can try again, or set a password instead.",
+            (allowPasswordLogin
+              ? "Your browser cancelled that. You can try again, or set a password instead."
+              : "Your browser cancelled that. Make sure you're in Safari, Chrome, or another modern browser and try again."),
         );
         return;
       }
@@ -214,6 +232,7 @@ export default function ResetPassword({
           </Stack>
         ) : (
           <Stack>
+            <InAppBrowserWarning />
             <Text size="sm">
               This link was issued by <strong>{status.campName}</strong> for{" "}
               <strong>{status.name}</strong>. To use it, confirm the email
@@ -251,56 +270,58 @@ export default function ResetPassword({
               nothing that can be leaked in someone else's breach.
             </Text>
 
-            <Divider label="or" labelPosition="center" my={4} />
+            {allowPasswordLogin ? (
+              <>
+                <Divider label="or" labelPosition="center" my={4} />
 
-            {/* The escape hatch stays, deliberately: an old browser, a
-                locked-down work laptop or a shared machine can't do WebAuthn,
-                and this link is the holder's only way back in. Demoted, not
-                removed — see plans/passkey-first-auth.md "Things not to do". */}
-            {showPassword ? (
-              <Form method="post">
-                <input type="hidden" name="email" value={email} />
-                <Stack>
-                  {/* Nothing here is password-specific: the value is never
-                      trimmed and the only limit is better-auth's 128 chars, so
-                      a passphrase round-trips intact. Say so — people assume
-                      "password" means one short mangled word. */}
-                  <PasswordInput
-                    name="password"
-                    label="New password or passphrase"
-                    description="A few unrelated words — “rusty kettle dawn patrol” — beat one short mangled word. Spaces count."
-                    autoComplete="new-password"
-                    required
-                  />
-                  <PasswordInput
-                    name="confirm"
-                    label="Type it again"
-                    autoComplete="new-password"
-                    required
-                  />
+                {/* The escape hatch stays only while legacy password login is
+                    still enabled on this deployment. */}
+                {showPassword ? (
+                  <Form method="post">
+                    <input type="hidden" name="email" value={email} />
+                    <Stack>
+                      {/* Nothing here is password-specific: the value is never
+                          trimmed and the only limit is better-auth's 128 chars, so
+                          a passphrase round-trips intact. Say so — people assume
+                          "password" means one short mangled word. */}
+                      <PasswordInput
+                        name="password"
+                        label="New password or passphrase"
+                        description="A few unrelated words — “rusty kettle dawn patrol” — beat one short mangled word. Spaces count."
+                        autoComplete="new-password"
+                        required
+                      />
+                      <PasswordInput
+                        name="confirm"
+                        label="Type it again"
+                        autoComplete="new-password"
+                        required
+                      />
+                      <Button
+                        type="submit"
+                        loading={busy}
+                        variant="default"
+                        fullWidth
+                      >
+                        Set my password
+                      </Button>
+                      <Text size="xs" c="dimmed">
+                        Signs you out everywhere else. You can still add a
+                        passkey later from your account page.
+                      </Text>
+                    </Stack>
+                  </Form>
+                ) : (
                   <Button
-                    type="submit"
-                    loading={busy}
-                    variant="default"
-                    fullWidth
+                    variant="subtle"
+                    size="compact-sm"
+                    onClick={() => setShowPassword(true)}
                   >
-                    Set my password
+                    My device can't do passkeys — set a password instead
                   </Button>
-                  <Text size="xs" c="dimmed">
-                    Signs you out everywhere else. You can still add a passkey
-                    later from your account page.
-                  </Text>
-                </Stack>
-              </Form>
-            ) : (
-              <Button
-                variant="subtle"
-                size="compact-sm"
-                onClick={() => setShowPassword(true)}
-              >
-                My device can't do passkeys — set a password instead
-              </Button>
-            )}
+                )}
+              </>
+            ) : null}
           </Stack>
         )}
       </Paper>

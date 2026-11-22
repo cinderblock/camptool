@@ -12,12 +12,18 @@ import { Text } from "@mantine/core";
  * (`plans/password-recovery.md`), so say that plainly and inline — no hover,
  * no dead end.
  */
-export function NoMailRecoveryNote() {
+export function NoMailRecoveryNote({
+  allowPasswordLogin = false,
+}: {
+  allowPasswordLogin?: boolean;
+}) {
   return (
     <Text size="sm" c="dimmed" ta="center">
-      Forgot your password? This site doesn&rsquo;t send email, so there&rsquo;s
-      no automatic reset. Ask an officer of your camp to generate a recovery
-      link for you — that&rsquo;s how you get back in.
+      {allowPasswordLogin
+        ? "Forgot your password or lost your passkey? "
+        : "Lost your passkey or on a new device? "}
+      This site doesn&rsquo;t send email, so ask an officer of your camp for a
+      recovery link — that&rsquo;s how you get back in.
     </Text>
   );
 }

@@ -87,9 +87,6 @@ const EXEMPT: Record<string, string> = {
   "routes/sap.group.tsx":
     "Same as sap.pass: streams a generated PDF of real pass codes, and " +
     "privacy mode refuses it outright (403) rather than transforming it.",
-  "routes/spike.passkey.tsx":
-    "Dev-only passkey harness (its loader 404s in production) and it returns " +
-    "no data at all — the loader exists purely to gate the route.",
 };
 
 function routeFiles(): string[] {

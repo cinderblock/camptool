@@ -48,11 +48,13 @@ import {
   useRevalidator,
   useSearchParams,
 } from "react-router";
+import { InAppBrowserWarning } from "~/components/InAppBrowserWarning";
 import { auth, discordEnabled } from "~/lib/auth.server";
 import { authClient } from "~/lib/auth-client";
 import { defaultDeviceName } from "~/lib/device-name";
 import { isBurningMan } from "~/lib/events";
 import { addToGroup, listGroups, removeFromGroup } from "~/lib/groups.server";
+import { getInstanceSettings } from "~/lib/instance.server";
 import { redact } from "~/lib/privacy.server";
 import { resolveActiveCamp } from "~/lib/session.server";
 import { db } from "../../../db/client.server";
@@ -104,41 +106,48 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   // Independent reads, so they go out together rather than one D1 round trip
   // each (plans/fast-navigation.md).
-  const [keys, [discordAccount], allGroups, [rsvp], hasPassword] =
-    await Promise.all([
-      db
-        .select({
-          id: passkey.id,
-          name: passkey.name,
-          deviceType: passkey.deviceType,
-          backedUp: passkey.backedUp,
-          createdAt: passkey.createdAt,
-        })
-        .from(passkey)
-        .where(eq(passkey.userId, user.id)),
-      // Discord is a linked identity on the same account, so it belongs here
-      // next to the other credentials — and the "link your Discord" ask points
-      // at this page, which means the control has to exist for anyone the ask
-      // reaches.
-      db
-        .select({ id: account.id })
-        .from(account)
-        .where(
-          and(eq(account.userId, user.id), eq(account.providerId, "discord")),
-        )
-        .limit(1),
-      campId ? listGroups(campId) : [],
-      // Their RSVP, so the card can say what it is and point at the one place
-      // that changes it, rather than quietly duplicating the control.
-      mid
-        ? db
-            .select({ status: attendee.status })
-            .from(attendee)
-            .where(eq(attendee.membershipId, mid))
-            .limit(1)
-        : [],
-      hasPasswordFor(user.id),
-    ]);
+  const [
+    keys,
+    [discordAccount],
+    allGroups,
+    [rsvp],
+    hasPassword,
+    { allowPasswordLogin },
+  ] = await Promise.all([
+    db
+      .select({
+        id: passkey.id,
+        name: passkey.name,
+        deviceType: passkey.deviceType,
+        backedUp: passkey.backedUp,
+        createdAt: passkey.createdAt,
+      })
+      .from(passkey)
+      .where(eq(passkey.userId, user.id)),
+    // Discord is a linked identity on the same account, so it belongs here
+    // next to the other credentials — and the "link your Discord" ask points
+    // at this page, which means the control has to exist for anyone the ask
+    // reaches.
+    db
+      .select({ id: account.id })
+      .from(account)
+      .where(
+        and(eq(account.userId, user.id), eq(account.providerId, "discord")),
+      )
+      .limit(1),
+    campId ? listGroups(campId) : [],
+    // Their RSVP, so the card can say what it is and point at the one place
+    // that changes it, rather than quietly duplicating the control.
+    mid
+      ? db
+          .select({ status: attendee.status })
+          .from(attendee)
+          .where(eq(attendee.membershipId, mid))
+          .limit(1)
+      : [],
+    hasPasswordFor(user.id),
+    getInstanceSettings(),
+  ]);
 
   return redact(privacy, {
     identity: active
@@ -158,6 +167,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       memberCount: g.memberIds.length,
     })),
     hasPassword,
+    allowPasswordLogin,
     discordEnabled,
     discordLinked: Boolean(discordAccount),
     // Password controls are hidden (and refused server-side) while an officer
@@ -299,6 +309,12 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "change-password") {
+    if (!(await getInstanceSettings()).allowPasswordLogin) {
+      return data(
+        { error: "Password sign-in is disabled on this site." },
+        { status: 403 },
+      );
+    }
     const currentPassword = String(form.get("currentPassword") ?? "");
     const newPassword = String(form.get("newPassword") ?? "");
     const confirm = String(form.get("confirmPassword") ?? "");
@@ -391,6 +407,7 @@ export default function Account({ loaderData }: Route.ComponentProps) {
     groups,
     passkeys,
     hasPassword,
+    allowPasswordLogin,
     impersonating,
     discordEnabled,
     discordLinked,
@@ -492,6 +509,7 @@ export default function Account({ loaderData }: Route.ComponentProps) {
           <DiscordCard linked={discordLinked} impersonating={impersonating} />
         ) : null}
 
+<<<<<<< HEAD
         {/* No "add a password" counterpart on purpose: passwords are a legacy
             credential here, so this card can only ever appear for accounts that
             already have one (plans/password-recovery.md decision 1). */}
@@ -501,6 +519,80 @@ export default function Account({ loaderData }: Route.ComponentProps) {
             impersonating={impersonating}
           />
         ) : null}
+=======
+        <Stack gap="md">
+          <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+            Sign-in &amp; security
+          </Text>
+
+          <Card withBorder>
+            <Stack gap="md">
+              <Group justify="space-between" align="center">
+                <Text fw={600}>Your passkeys</Text>
+                <Badge
+                  variant="light"
+                  color={passkeys.length ? "green" : "red"}
+                >
+                  {passkeys.length
+                    ? `${passkeys.length} set up`
+                    : "None set up yet"}
+                </Badge>
+              </Group>
+
+              <InAppBrowserWarning />
+
+              {passkeys.length === 0 ? (
+                <Text size="sm" c="dimmed">
+                  Add a passkey to sign in with your face, fingerprint, or
+                  device PIN — no password needed.
+                </Text>
+              ) : (
+                <Stack gap="xs">
+                  {passkeys.map((k) => (
+                    <PasskeyRow
+                      key={k.id}
+                      pk={k}
+                      canDelete={passkeys.length > 1}
+                    />
+                  ))}
+                </Stack>
+              )}
+
+              {err ? (
+                <Text size="sm" c="red">
+                  {err}
+                </Text>
+              ) : null}
+
+              <Group align="end" gap="sm">
+                <TextInput
+                  label="Device name"
+                  description="Helps you tell your passkeys apart later."
+                  placeholder={defaultDeviceName()}
+                  value={label}
+                  onChange={(e) => setLabel(e.currentTarget.value)}
+                  style={{ flex: 1 }}
+                />
+                <Button onClick={addPasskey} loading={busy}>
+                  Add a passkey
+                </Button>
+              </Group>
+            </Stack>
+          </Card>
+
+          {discordEnabled ? (
+            <DiscordCard linked={discordLinked} impersonating={impersonating} />
+          ) : null}
+
+          {hasPassword ? (
+            <PasswordCard
+              canRemove={passkeys.length > 0}
+              allowPasswordLogin={allowPasswordLogin}
+              impersonating={impersonating}
+            />
+          ) : null}
+        </Stack>
+>>>>>>> 7e50590 (Auth: passkey-first signup/sign-in and in-app browser warning)
       </Stack>
     </Container>
   );
@@ -565,9 +657,11 @@ function DiscordCard({
 
 function PasswordCard({
   canRemove,
+  allowPasswordLogin,
   impersonating,
 }: {
   canRemove: boolean;
+  allowPasswordLogin: boolean;
   impersonating: boolean;
 }) {
   // Its own fetcher so password errors don't render inside the passkey card.
@@ -603,9 +697,15 @@ function PasswordCard({
         </Group>
 
         <Text size="sm" c="dimmed">
+<<<<<<< HEAD
           A password is the part of your account somebody else can guess, phish,
           or find in an unrelated site's breach. A passkey can't be any of those
           things — once you have one, you don't need this.
+=======
+          {allowPasswordLogin
+            ? "Once you've added a passkey, you don't need a password and can remove it here."
+            : "Password sign-in is turned off on this site. Once you've added a passkey, you can remove your old password here."}
+>>>>>>> 7e50590 (Auth: passkey-first signup/sign-in and in-app browser warning)
         </Text>
 
         {impersonating ? (
@@ -696,17 +796,20 @@ function PasswordCard({
               </Stack>
             ) : (
               <Group gap="sm">
-                <Button
-                  variant="light"
-                  onClick={() => {
-                    // Clear the ?changed=1 confirmation so a second change
-                    // doesn't open with a stale success banner above it.
-                    if (params.has("changed")) setParams({}, { replace: true });
-                    setChanging(true);
-                  }}
-                >
-                  Change password
-                </Button>
+                {allowPasswordLogin ? (
+                  <Button
+                    variant="light"
+                    onClick={() => {
+                      // Clear the ?changed=1 confirmation so a second change
+                      // doesn't open with a stale success banner above it.
+                      if (params.has("changed"))
+                        setParams({}, { replace: true });
+                      setChanging(true);
+                    }}
+                  >
+                    Change password
+                  </Button>
+                ) : null}
                 <Button
                   variant="subtle"
                   color="red"

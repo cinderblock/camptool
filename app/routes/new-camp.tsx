@@ -59,11 +59,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // The real session: a super admin working as someone shouldn't start a
   // camp in their name.
   const session = await getRealSession(request);
+  const { allowOpenSignups, allowPasswordLogin } = await getInstanceSettings();
   const common = {
     apexHost: CAMP_SUBDOMAINS ? APEX.host : null,
     viewer: session ? { name: session.user.name } : null,
     discordEnabled,
     mailEnabled,
+    allowPasswordLogin,
   };
 
   if (params.token) {
@@ -77,13 +79,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       fixedSlug: link.slug,
     };
     // Like a camp invite, a good link is a way in on an invite-only site.
-    if (!session && state === "ok") {
-      const { allowOpenSignups } = await getInstanceSettings();
-      if (!allowOpenSignups) {
-        return data(payload, {
-          headers: { "Set-Cookie": setSignupUnlockCookie() },
-        });
-      }
+    if (!session && state === "ok" && !allowOpenSignups) {
+      return data(payload, {
+        headers: { "Set-Cookie": setSignupUnlockCookie() },
+      });
     }
     return payload;
   }
@@ -175,6 +174,7 @@ export default function NewCamp({ loaderData, params }: Route.ComponentProps) {
             intro="First, make your account (or sign in). Then you'll name your camp and pick its address."
             discordEnabled={loaderData.discordEnabled}
             mailEnabled={loaderData.mailEnabled}
+            allowPasswordLogin={loaderData.allowPasswordLogin}
           />
         ) : (
           <Stack gap="md">
