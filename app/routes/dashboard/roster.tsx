@@ -49,6 +49,7 @@ import {
 } from "~/lib/attendee.server";
 import { eventStartIso } from "~/lib/brc";
 import { PUBLIC_BASE_URL } from "~/lib/env.server";
+import { isBurningMan } from "~/lib/events";
 import { type FeatureKey, featureVisibleTo } from "~/lib/features";
 import { featureStatesFor, requireFeature } from "~/lib/features.server";
 import { buildForest, flattenForest } from "~/lib/forest";
@@ -173,6 +174,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     groups,
     locked: activeEdition.locked,
     year: activeEdition.year,
+    event: activeEdition.event,
   });
 }
 
@@ -443,6 +445,7 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
     myGuests,
     locked,
     year,
+    event,
     myMembershipId,
     mapVisible,
     mapLot,
@@ -492,8 +495,9 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
           // is a ticket or a pass, and that difference is worth stating next to
           // the number rather than discovering when the allocation looks short.
           <Text size="xs" c="dimmed">
-            Includes {minorsNote} — no ticket or setup access pass needed for
-            under-13s.
+            Includes {minorsNote} — no ticket or{" "}
+            {isBurningMan(event) ? "setup access pass" : "early-arrival pass"}{" "}
+            needed for under-13s.
           </Text>
         ) : null}
 
@@ -509,7 +513,9 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
           />
         ) : null}
 
-        {!locked ? <MyParty guests={myGuests} year={year} /> : null}
+        {!locked ? (
+          <MyParty guests={myGuests} year={year} event={event} />
+        ) : null}
 
         <RosterTable
           members={members}
@@ -986,7 +992,15 @@ function CampingWith({
   );
 }
 
-function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
+function MyParty({
+  guests,
+  year,
+  event,
+}: {
+  guests: PartyGuest[];
+  year: number;
+  event: string;
+}) {
   const addFetcher = useFetcher<FetcherData>();
   const rowFetcher = useFetcher<FetcherData>();
   const promoteFetcher = useFetcher<FetcherData>();
@@ -1225,6 +1239,7 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
         {edit ? (
           <EditGuestForm
             year={year}
+            event={event}
             guest={edit}
             fetcher={rowFetcher}
             onCancel={() => setEdit(null)}
@@ -1238,11 +1253,13 @@ function MyParty({ guests, year }: { guests: PartyGuest[]; year: number }) {
 function EditGuestForm({
   guest,
   year,
+  event,
   fetcher,
   onCancel,
 }: {
   guest: PartyGuest;
   year: number;
+  event: string;
   fetcher: ReturnType<typeof useFetcher<FetcherData>>;
   onCancel: () => void;
 }) {
@@ -1276,7 +1293,11 @@ function EditGuestForm({
       />
       <Select
         label="Age"
-        description="Under 13s need no ticket and no setup access pass"
+        description={
+          isBurningMan(event)
+            ? "Under 13s need no ticket and no setup access pass"
+            : "Under 13s need no ticket or early-arrival pass"
+        }
         data={AGE_BANDS}
         value={ageBand}
         onChange={(v) => v && setAgeBand(bandOf(v))}

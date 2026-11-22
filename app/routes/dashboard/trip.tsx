@@ -106,6 +106,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return redact(privacy, {
     trip: {
       year: activeEdition.year,
+      event: activeEdition.event,
       locked: activeEdition.locked,
       status: (me?.status as ParticipationStatus) ?? "unknown",
       arrivalDate: me?.arrivalDate ?? null,

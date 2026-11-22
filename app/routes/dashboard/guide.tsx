@@ -13,6 +13,7 @@ import {
 import { Link } from "react-router";
 import { JoinFlowchart } from "~/components/JoinFlowchart";
 import { weeksUntilEvent } from "~/lib/brc";
+import { eventLabel, isBurningMan } from "~/lib/events";
 import { featureVisibleTo } from "~/lib/features";
 import { featureStatesFor } from "~/lib/features.server";
 import { redact } from "~/lib/privacy.server";
@@ -44,6 +45,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return redact(privacy, {
     campName: active.camp.name,
     year: activeEdition.year,
+    event: activeEdition.event,
     weeksToEvent: weeksUntilEvent(activeEdition.year),
     scheduled: state.scheduled.map((a) => ({
       key: a.key,
@@ -64,6 +66,7 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
   const {
     campName,
     year,
+    event,
     weeksToEvent,
     scheduled,
     resolved,
@@ -71,6 +74,12 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
     features,
   } = loaderData;
   const doneCount = scheduled.filter((s) => resolved[s.key]).length;
+  const burningMan = isBurningMan(event);
+  const destination = burningMan
+    ? "the playa"
+    : event !== "other"
+      ? eventLabel(event)
+      : "the event";
 
   return (
     <Container size="md">
@@ -80,8 +89,11 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
             How {campName} works
           </Title>
           <Text c="dimmed" size="sm">
-            From joining to the playa and back again next year
-            {weeksToEvent > 0 ? ` — about ${weeksToEvent} weeks out` : ""}.
+            From joining to {destination} and back again next year
+            {burningMan && weeksToEvent > 0
+              ? ` — about ${weeksToEvent} weeks out`
+              : ""}
+            .
           </Text>
         </div>
 
@@ -143,7 +155,7 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
           <Title order={2} size="h4" mb="sm">
             Joining {campName} — the big picture
           </Title>
-          <JoinFlowchart year={year} />
+          <JoinFlowchart year={year} event={event} />
         </div>
 
         <div>
@@ -160,17 +172,19 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
               ]}
             />
             <PhaseCard
-              title="2 · Getting ready for the burn"
+              title="2 · Getting ready"
               items={[
-                "The setup wizard asks for what's relevant as the event nears — an RSVP and whatever else the camp collects.",
+                "Guided setup asks for what's relevant as the event nears — your RSVP and whatever else the camp collects.",
                 ...(features.map
                   ? [
-                      "Declare your tents/vehicles; officers place them on the camp map (you can tweak your own spot).",
+                      "List your tents and vehicles on Your gear; officers place them on the camp map (you can suggest moves on your own spot).",
                     ]
                   : []),
                 ...(features.tickets
                   ? [
-                      "Request a Directed Group Sale ticket and any early-arrival passes.",
+                      burningMan
+                        ? "Request a Directed Group Sale ticket and any Setup Access Passes."
+                        : "Request a camp ticket and any early-arrival passes.",
                     ]
                   : []),
               ]}
@@ -178,9 +192,9 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
             <PhaseCard
               title="3 · Next year"
               items={[
-                "We start a new year — your account and camp role carry over.",
+                "Officers start a new year — your account and camp role carry over.",
                 "Per-year things reset: RSVP, answers, what you're bringing, tickets.",
-                "Last year's map can be copied as a starting point.",
+                "Officers can copy last year's lot dimensions as a starting point, and returning campers can re-add their gear in one click on Your gear.",
               ]}
             />
           </Stack>

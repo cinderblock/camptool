@@ -1,19 +1,34 @@
 import { Checkbox, TextInput, type TextInputProps } from "@mantine/core";
 import { useState } from "react";
 import { announce } from "~/components/Announcer";
+import { isBurningMan } from "~/lib/events";
 
 /**
- * "Playa name" is Burning Man jargon — meaningless to first-timers, so the
- * field only appears once the person says they've been. Anyone who already has
- * a playa name saved sees the field straight away. Shared by the public
- * application form and the wizard's profile step. (Event-layer copy; revisit
- * when the event theming layer peels out.)
+ * Event-aware nickname field shared by the public application form and the
+ * guided setup profile step.
+ *
+ * At Burning Man, "Playa name" is event jargon — meaningless to first-timers,
+ * so the field only appears once the person says they've been (or already has
+ * one saved). For other events, show a plain optional camp nickname field
+ * without asking about Burning Man.
  */
 export function PlayaNameField({
+  event,
   defaultValue,
   ...inputProps
-}: TextInputProps) {
+}: TextInputProps & { event?: string | null }) {
   const [beenBefore, setBeenBefore] = useState(Boolean(defaultValue));
+  if (!isBurningMan(event)) {
+    return (
+      <TextInput
+        label="Camp nickname"
+        description="Optional — a nickname you go by with the camp."
+        placeholder="Optional"
+        defaultValue={defaultValue}
+        {...inputProps}
+      />
+    );
+  }
   return (
     <>
       <Checkbox

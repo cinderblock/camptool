@@ -927,7 +927,11 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
     <Container size="lg">
       <Stack gap="lg">
         <div>
-          <Title order={2}>Setup access passes</Title>
+          <Title order={2}>
+            {isBurningMan(event)
+              ? "Setup access passes"
+              : "Early-arrival passes"}
+          </Title>
           <Text c="dimmed" size="sm">
             Early-arrival passes the camp allocates. Each pass admits you on or
             after its date — an earlier-dated pass covers a later arrival.
@@ -1021,19 +1025,20 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
         <PartyCard
           people={myParty}
           year={year}
+          event={event}
           locked={locked}
           fetcher={fetcher}
         />
 
         {/* ----- The actual passes, once they exist ----- */}
         {myStock.length > 0 ? (
-          <MyStockCard stock={myStock} codes={myCodes} />
+          <MyStockCard stock={myStock} codes={myCodes} event={event} />
         ) : null}
 
         {/* ----- Officer management ----- */}
         {isOfficer ? (
           <>
-            <CoverageCard coverage={coverage} />
+            <CoverageCard coverage={coverage} event={event} />
             {needsPass.length > 0 ? (
               <NeedsPassCard
                 people={needsPass}
@@ -1050,7 +1055,9 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
               locked={locked}
               isAdmin={isAdmin}
             />
-            {locked ? null : <ImportCard fetcher={fetcher} year={year} />}
+            {locked ? null : (
+              <ImportCard fetcher={fetcher} year={year} event={event} />
+            )}
           </>
         ) : null}
 
@@ -1084,11 +1091,13 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
 function PartyCard({
   people,
   year,
+  event,
   locked,
   fetcher,
 }: {
   people: PartyRow[];
   year: number;
+  event: string;
   locked: boolean;
   fetcher: ReturnType<typeof useFetcher>;
 }) {
@@ -1102,8 +1111,9 @@ function PartyCard({
           <div>
             <Text fw={600}>Your group</Text>
             <Text size="xs" c="dimmed">
-              Arriving before gates open needs a Setup Access Pass. Under-13s
-              are admitted free and need none.
+              {isBurningMan(event)
+                ? "Anyone arriving before gates open needs a Setup Access Pass (children under 13 are admitted free)."
+                : "Anyone arriving before the event opens needs an early-arrival pass."}
             </Text>
           </div>
 
@@ -1324,9 +1334,11 @@ function StayModal({
 function MyStockCard({
   stock,
   codes,
+  event,
 }: {
   stock: StockRow[];
   codes: Record<string, { scanCode: string; securityCode: string }>;
+  event: string;
 }) {
   const released = stock.filter((s) => s.status === "released");
   const groupHref =
@@ -1338,7 +1350,11 @@ function MyStockCard({
     <Card withBorder padding="md" radius="md">
       <Stack gap="sm">
         <Group justify="space-between" wrap="wrap">
-          <Text fw={600}>Your setup access passes</Text>
+          <Text fw={600}>
+            {isBurningMan(event)
+              ? "Your setup access passes"
+              : "Your early-arrival passes"}
+          </Text>
           {groupHref ? (
             // The point of the whole sheet: one page for people arriving in one
             // vehicle, instead of a stack to shuffle through at the gate.
@@ -1465,26 +1481,33 @@ function RequestPassForm({
 function ImportCard({
   fetcher,
   year,
+  event,
 }: {
   fetcher: ReturnType<typeof useFetcher>;
   year: number;
+  event: string;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const busy = fetcher.state !== "idle";
+  const burningMan = isBurningMan(event);
   return (
     <Card withBorder padding="md" radius="md">
       <Stack gap="sm">
         <div>
           <Text fw={600}>Import passes from the vendor PDF</Text>
           <Text size="xs" c="dimmed">
-            The file Burning Man sends, one pass per page. CampTool reads each
-            page's date and codes, and each date's quota becomes however many
-            passes actually arrived. Uploading the same file twice is safe.
+            {burningMan
+              ? "Upload the pass PDF from Burning Man (one pass per page). Uploading the same file twice is safe."
+              : "Upload the pass PDF (one pass per page). Uploading the same file twice is safe."}
           </Text>
         </div>
         <Group align="flex-end">
           <FileInput
-            label={`Setup Access Pass PDF for ${year}`}
+            label={
+              burningMan
+                ? `Setup Access Pass PDF for ${year}`
+                : `Early-arrival pass PDF for ${year}`
+            }
             placeholder="choose a PDF"
             accept="application/pdf"
             value={file}
@@ -1529,13 +1552,23 @@ function ImportCard({
  * `coverable` comes from an actual matching, which is why it is worth showing
  * beside the raw totals instead of leaving the arithmetic to a tired human.
  */
-function CoverageCard({ coverage }: { coverage: CoverageData }) {
+function CoverageCard({
+  coverage,
+  event,
+}: {
+  coverage: CoverageData;
+  event: string;
+}) {
   if (!coverage) return null;
   const short = coverage.uncoverable.length;
   return (
     <Card withBorder padding="md" radius="md">
       <Stack gap="sm">
-        <Text fw={600}>Setup access at a glance</Text>
+        <Text fw={600}>
+          {isBurningMan(event)
+            ? "Setup access at a glance"
+            : "Early arrival at a glance"}
+        </Text>
 
         <Group gap="xs" wrap="wrap">
           <Badge size="lg" variant="light">

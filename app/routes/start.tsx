@@ -33,6 +33,7 @@ import { blockedKinds } from "~/lib/bans";
 import { eventWindowFor, weeksUntilEvent } from "~/lib/brc";
 import { shownQuestions } from "~/lib/conditions";
 import { loadCustomKinds } from "~/lib/custom-kinds.server";
+import { isBurningMan } from "~/lib/events";
 import { featureVisibleTo } from "~/lib/features";
 import { getFeatureState } from "~/lib/features.server";
 import { KindsProvider, useKinds } from "~/lib/kinds-context";
@@ -278,6 +279,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // pages use, so the wizard and the page can't disagree about it.
   const trip = {
     year: activeEdition.year,
+    event: activeEdition.event,
     locked: activeEdition.locked,
     status: state.participation.status,
     arrivalDate: state.participation.arrivalDate,
@@ -299,6 +301,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     bannedKinds: blockedKinds(activeEdition, active.camp),
     userName: authUser.name,
     year: activeEdition.year,
+    event: activeEdition.event,
     weeksToEvent: weeksUntilEvent(activeEdition.year),
     audience: audienceForRole(role),
     scheduled: state.scheduled.map((a) => ({
@@ -470,7 +473,9 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
             </Title>
             <Text c="dimmed" size="sm">
               We only ask for what's relevant right now
-              {weeksToEvent > 0 ? ` (~${weeksToEvent} weeks to the event)` : ""}
+              {isBurningMan(loaderData.event) && weeksToEvent > 0
+                ? ` (~${weeksToEvent} weeks to the event)`
+                : ""}
               .
               {firstVisit
                 ? " Stop anytime and pick up where you left off."
@@ -696,6 +701,7 @@ function ProfileStep({
         }
       />
       <PlayaNameField
+        event={d.event}
         defaultValue={d.playaName ?? ""}
         onBlur={(e) =>
           fetcher.submit(

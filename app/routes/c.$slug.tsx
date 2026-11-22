@@ -27,7 +27,7 @@ import { linkApplicationToProspect } from "~/lib/prospects.server";
 import { isAnswered, parseOptions, type QuestionType } from "~/lib/questions";
 import { loadApplicationQuestions } from "~/lib/questions.server";
 import { isMemberOf, pendingApplicationWhere } from "~/lib/recruits.server";
-import { getSession } from "~/lib/session.server";
+import { getSession, loadCampEditions } from "~/lib/session.server";
 import { db } from "../../db/client.server";
 import { camp, recruitApplication } from "../../db/schema";
 import type { Route } from "./+types/c.$slug";
@@ -58,7 +58,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   }
 
   // The camp's application-surfaced questions, rendered as part of the form.
-  const questions = (await loadApplicationQuestions(found.id)).map((q) => ({
+  const [questionsRaw, editions] = await Promise.all([
+    loadApplicationQuestions(found.id),
+    loadCampEditions(found.id),
+  ]);
+  const event = editions[0]?.event ?? null;
+  const questions = questionsRaw.map((q) => ({
     id: q.id,
     prompt: q.prompt,
     helpText: q.helpText,
@@ -75,6 +80,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       logo: found.logo,
       description: found.description,
       slug: params.slug,
+      event,
       viewer: null,
       alreadyMember: false,
       alreadyApplied: false,
@@ -104,6 +110,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     logo: found.logo,
     description: found.description,
     slug: params.slug,
+    event,
     viewer: { name: session.user.name, email: session.user.email },
     alreadyMember: await isMemberOf(session.user.id, found.id),
     alreadyApplied: Boolean(pending),
@@ -246,12 +253,14 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
 
 function ApplySection({
   campName,
+  event,
   viewer,
   alreadyMember,
   alreadyApplied,
   questions,
 }: {
   campName: string;
+  event: string | null;
   viewer: { name: string; email: string };
   alreadyMember: boolean;
   alreadyApplied: boolean;
@@ -298,7 +307,7 @@ function ApplySection({
             {result.error}
           </Alert>
         ) : null}
-        <PlayaNameField name="playaName" />
+        <PlayaNameField name="playaName" event={event} />
         {questions.map((q) => (
           <QuestionField
             key={q.id}

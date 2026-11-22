@@ -51,6 +51,7 @@ import {
 import { auth, discordEnabled } from "~/lib/auth.server";
 import { authClient } from "~/lib/auth-client";
 import { defaultDeviceName } from "~/lib/device-name";
+import { isBurningMan } from "~/lib/events";
 import { addToGroup, listGroups, removeFromGroup } from "~/lib/groups.server";
 import { redact } from "~/lib/privacy.server";
 import { resolveActiveCamp } from "~/lib/session.server";
@@ -92,7 +93,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   // resolveActiveCamp rather than requireUser: it works fine with no camp
   // (active is just null) and it's what carries the privacy lens. Passkey names
   // are user-authored labels and are on the redaction list.
-  const { user, active, privacy, impersonatedBy } =
+  const { user, active, activeEdition, privacy, impersonatedBy } =
     await resolveActiveCamp(request);
 
   // Who you are to THIS camp. Null when the account has no camp yet, in which
@@ -146,6 +147,7 @@ export async function loader({ request }: Route.LoaderArgs) {
           email: user.email ?? "",
           playaName: active.membership.playaName ?? "",
           campName: active.camp.name,
+          event: activeEdition?.event ?? null,
           rsvp: rsvp?.status ?? "unknown",
         }
       : null,
@@ -775,9 +777,9 @@ function IdentityCard({
           maxLength={120}
         />
         <TextInput
-          label="Playa name"
+          label={isBurningMan(identity.event) ? "Playa name" : "Camp nickname"}
           description="Optional. Leave blank if you don't have one."
-          placeholder="e.g. Bug"
+          placeholder={isBurningMan(identity.event) ? "e.g. Bug" : "Optional"}
           value={playaName}
           onChange={(e) => setPlayaName(e.currentTarget.value)}
           maxLength={60}

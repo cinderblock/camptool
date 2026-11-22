@@ -1,4 +1,5 @@
 import { Box, Paper, Stack, Text, VisuallyHidden } from "@mantine/core";
+import { eventLabel, isBurningMan } from "~/lib/events";
 
 /**
  * The "joining the camp" journey as a small flowchart: two entry doors (a
@@ -7,11 +8,26 @@ import { Box, Paper, Stack, Text, VisuallyHidden } from "@mantine/core";
  *
  * Pure Mantine/CSS — no chart library — so it follows the app theme. Lives in
  * components so the guide page (and later a public page) can share it.
- * ("Go to Burning Man" is event-layer copy; revisit when that layer peels out.)
  */
-export function JoinFlowchart({ year }: { year?: number }) {
+export function JoinFlowchart({
+  year,
+  event,
+}: {
+  year?: number;
+  event?: string | null;
+}) {
   const border = "2px solid var(--mantine-color-default-border)";
   const dashed = "2px dashed var(--mantine-color-dimmed)";
+  const goToTitle = isBurningMan(event)
+    ? "Go to Burning Man 🔥"
+    : event && event !== "other"
+      ? `Go to ${eventLabel(event)}`
+      : "Go to the event";
+  const goToProse = isBurningMan(event)
+    ? "go to Burning Man"
+    : event && event !== "other"
+      ? `go to ${eventLabel(event)}`
+      : "go to the event";
   return (
     <Box maw={640} pr={44}>
       {/* The chart is drawn with CSS borders and glyph arrows — meaningless
@@ -31,8 +47,8 @@ export function JoinFlowchart({ year }: { year?: number }) {
           </li>
           <li>
             Then you get ready{year ? ` for ${year}` : ""} — tickets and passes,
-            dues, your spot on the camp map — and go to Burning Man (come early
-            for setup or stay for strike if you can).
+            dues, your spot on the camp map — and {goToProse} (come early for
+            setup or stay for strike if you can).
           </li>
           <li>
             After that you're in the camp, and each following year loops back to
@@ -99,7 +115,7 @@ export function JoinFlowchart({ year }: { year?: number }) {
             />
             <FlowArrow />
             <FlowNode
-              title="Go to Burning Man 🔥"
+              title={goToTitle}
               hint="Come early for setup or stay for strike if you can."
               accent
             />

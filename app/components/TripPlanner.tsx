@@ -11,6 +11,7 @@ import dayjs from "dayjs";
 import { useFetcher } from "react-router";
 import { announce } from "~/components/Announcer";
 import { EventCalendar } from "~/components/EventCalendar";
+import { isBurningMan } from "~/lib/events";
 
 /**
  * "Am I coming, and when?" — the shared trip controls.
@@ -29,6 +30,7 @@ export type ParticipationStatus = "unknown" | "coming" | "maybe" | "not_coming";
 /** Everything these controls read. Assembled by `/trip` and by `/start`. */
 export type TripData = {
   year: number;
+  event: string;
   locked: boolean;
   status: ParticipationStatus;
   arrivalDate: string | null;
@@ -128,8 +130,8 @@ export function StayPicker({ trip }: { trip: TripData }) {
           When will you be there?
         </Text>
         <Text size="xs" c="dimmed">
-          Tap the day you'll arrive, then the day you'll head home. Gates open{" "}
-          {longDay(gateOpen)}.
+          Tap the day you'll arrive, then the day you'll head home.
+          {isBurningMan(trip.event) ? ` Gates open ${longDay(gateOpen)}.` : ""}
         </Text>
       </div>
       <EventCalendar
@@ -175,6 +177,7 @@ function SetupPassSwitch({ trip }: { trip: TripData }) {
   const { sap } = trip;
   if (!sap.visible) return null;
 
+  const burningMan = isBurningMan(trip.event);
   const gateOpen = trip.arrivalWindow.focus;
   const arrival = trip.arrivalDate;
   const arrivingEarly = arrival != null && arrival < gateOpen;
@@ -190,11 +193,17 @@ function SetupPassSwitch({ trip }: { trip: TripData }) {
         <Switch
           checked={checked}
           disabled={trip.locked || sap.fixedReason !== null}
-          label="I'm requesting a Setup Access Pass"
+          label={
+            burningMan
+              ? "I'm requesting a Setup Access Pass"
+              : "I'm requesting an early-arrival pass"
+          }
           description={
-            arrivingEarly
-              ? `You're arriving ${fmt(arrival)}, before gates open — you need one.`
-              : `Only needed to get in before gates open on ${fmt(gateOpen)}.`
+            burningMan
+              ? arrivingEarly
+                ? `You're arriving ${fmt(arrival)}, before gates open — you need one.`
+                : `Only needed to get in before gates open on ${fmt(gateOpen)}.`
+              : "Only needed if you're arriving before the event opens."
           }
           onChange={(e) =>
             fetcher.submit(
@@ -226,13 +235,13 @@ function SetupPassSwitch({ trip }: { trip: TripData }) {
             about an earlier pass.
           </Text>
         ) : null}
-        {!checked && arrivingEarly && !sap.fixedReason ? (
+        {!checked && arrivingEarly && burningMan && !sap.fixedReason ? (
           <Text size="sm" c="orange">
             Without one you won't be let in until gates open on{" "}
             {longDay(gateOpen)}.
           </Text>
         ) : null}
-        {checked && !arrivingEarly && !sap.fixedReason ? (
+        {checked && !arrivingEarly && burningMan && !sap.fixedReason ? (
           <Text size="sm" c="dimmed">
             Your arrival is after gates open, so you probably don't need one —
             passes are scarce, so switch this off if you don't.
