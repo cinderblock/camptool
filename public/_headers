@@ -1,0 +1,6 @@
+# Static file headers for Cloudflare Workers static assets (the Bun server sets
+# the same in server.ts). Everything under /assets/ has a content hash in its
+# name, so it never changes: let browsers keep it for a year without asking
+# again. Without this a phone re-checks every file on each visit.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

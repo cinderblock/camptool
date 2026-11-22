@@ -38,7 +38,9 @@ const BUILD_SHA = (() => {
 const handler = createRequestHandler(build, "production");
 
 function serveAsset(pathname: string): Response | undefined {
-  if (pathname === "/" || pathname.includes("..")) return undefined;
+  // `_headers` is Cloudflare's config (public/_headers), not a page asset.
+  if (pathname === "/" || pathname === "/_headers" || pathname.includes(".."))
+    return undefined;
   const file = Bun.file(`${CLIENT_DIR}${pathname}`);
   // `new Response(file)` infers Content-Type from the extension; a 404 body is
   // streamed lazily, so an absent file just falls through to the SSR handler.
