@@ -49,7 +49,7 @@ camptool should be able to be a PWA, right?"
      shared phone leaks nothing.
    Registered from the client after load; a new deploy's worker takes over
    on the next visit.
-5. [current] Verify, deploy, then Cameron installs it on his phone.
+5. [current] Cameron installs it on his phone (deployed and checked live).
 
 ## Findings / gotchas
 
@@ -59,7 +59,6 @@ camptool should be able to be a PWA, right?"
   itself instead.
 - Chrome's offline emulation doesn't fire the page's `online` event, hence
   the 5 s check as well.
-
 - iOS keeps a home-screen app's cookies separate from Safari's. A magic link
   opened from email signs in Safari, not the installed app. Passkeys and
   password sign-in inside the app work. Worth a line of help text if people
@@ -76,7 +75,8 @@ camptool should be able to be a PWA, right?"
       returns to the page by itself once back online. On a camp subdomain
       the manifest says "Math Camp @ Group W" / "Math Camp" to a member and
       "CampTool" to anyone else.
-- [ ] Step 5: deployed and checked live.
+- [x] 2026-11-21: live as `c16b117`; manifest, worker (no-cache), icons and
+      the manifest link all served on camptool.org and camp subdomains.
 - [ ] Cameron installs it on his phone and checks sign-in from a camp
       subdomain install.
 
