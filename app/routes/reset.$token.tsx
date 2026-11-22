@@ -40,9 +40,12 @@ import {
   useParams,
 } from "react-router";
 import { InAppBrowserWarning } from "~/components/InAppBrowserWarning";
+import { PasskeyBrowserGate } from "~/components/PasskeyBrowserGate";
 import { authClient } from "~/lib/auth-client";
+import { pageUrl } from "~/lib/camp-host";
 import { defaultDeviceName } from "~/lib/device-name";
 import { getInstanceSettings } from "~/lib/instance.server";
+import { requestInAppBrowser } from "~/lib/passkey-gate.server";
 import {
   inspectPasswordReset,
   type ResetLinkState,
@@ -54,12 +57,17 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Get back into your account · CampTool" }];
 }
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ request, params }: Route.LoaderArgs) {
   const [status, { allowPasswordLogin }] = await Promise.all([
     inspectPasswordReset(params.token),
     getInstanceSettings(),
   ]);
-  return { status, allowPasswordLogin };
+  return {
+    status,
+    allowPasswordLogin,
+    inAppBrowser: requestInAppBrowser(request),
+    pageUrl: pageUrl(request.url).href,
+  };
 }
 
 export async function action({ request, params }: Route.ActionArgs) {
@@ -126,7 +134,7 @@ export default function ResetPassword({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { status, allowPasswordLogin } = loaderData;
+  const { status, allowPasswordLogin, inAppBrowser, pageUrl: url } = loaderData;
   const nav = useNavigation();
   const navigate = useNavigate();
   const params = useParams();
@@ -231,98 +239,105 @@ export default function ResetPassword({
             </Button>
           </Stack>
         ) : (
-          <Stack>
-            <InAppBrowserWarning />
-            <Text size="sm">
-              This link was issued by <strong>{status.campName}</strong> for{" "}
-              <strong>{status.name}</strong>. To use it, confirm the email
-              address it belongs to — it looks like{" "}
-              <strong>{status.maskedEmail}</strong>.
-            </Text>
-            <Text size="xs" c="dimmed">
-              Valid until {status.expires}. Nothing about your account changes
-              until you finish below.
-            </Text>
+          <PasskeyBrowserGate
+            enabled={!allowPasswordLogin}
+            serverInApp={inAppBrowser}
+            pageUrl={url}
+            reassurance="Your recovery link hasn't been used yet — it's still good."
+          >
+            <Stack>
+              <InAppBrowserWarning />
+              <Text size="sm">
+                This link was issued by <strong>{status.campName}</strong> for{" "}
+                <strong>{status.name}</strong>. To use it, confirm the email
+                address it belongs to — it looks like{" "}
+                <strong>{status.maskedEmail}</strong>.
+              </Text>
+              <Text size="xs" c="dimmed">
+                Valid until {status.expires}. Nothing about your account changes
+                until you finish below.
+              </Text>
 
-            {error ? <Alert color="red">{error}</Alert> : null}
-            {passkeyError ? <Alert color="red">{passkeyError}</Alert> : null}
+              {error ? <Alert color="red">{error}</Alert> : null}
+              {passkeyError ? <Alert color="red">{passkeyError}</Alert> : null}
 
-            <TextInput
-              type="email"
-              label="Your email address"
-              placeholder="you@example.com"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.currentTarget.value)}
-              required
-            />
+              <TextInput
+                type="email"
+                label="Your email address"
+                placeholder="you@example.com"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.currentTarget.value)}
+                required
+              />
 
-            {/* Passkey is the primary path, not an afterthought at the bottom:
+              {/* Passkey is the primary path, not an afterthought at the bottom:
                 this is the one moment a locked-out person is guaranteed to be
                 paying attention, so it's the moment to hand them the better
                 credential rather than another password to forget. */}
-            <Button onClick={enrolPasskey} loading={enrolling} fullWidth>
-              Set up a passkey
-            </Button>
-            <Text size="xs" c="dimmed" mt={-8}>
-              Your device asks for your face, fingerprint or PIN, and that
-              becomes how you sign in. Nothing to remember, nothing to type, and
-              nothing that can be leaked in someone else's breach.
-            </Text>
+              <Button onClick={enrolPasskey} loading={enrolling} fullWidth>
+                Set up a passkey
+              </Button>
+              <Text size="xs" c="dimmed" mt={-8}>
+                Your device asks for your face, fingerprint or PIN, and that
+                becomes how you sign in. Nothing to remember, nothing to type,
+                and nothing that can be leaked in someone else's breach.
+              </Text>
 
-            {allowPasswordLogin ? (
-              <>
-                <Divider label="or" labelPosition="center" my={4} />
+              {allowPasswordLogin ? (
+                <>
+                  <Divider label="or" labelPosition="center" my={4} />
 
-                {/* The escape hatch stays only while legacy password login is
+                  {/* The escape hatch stays only while legacy password login is
                     still enabled on this deployment. */}
-                {showPassword ? (
-                  <Form method="post">
-                    <input type="hidden" name="email" value={email} />
-                    <Stack>
-                      {/* Nothing here is password-specific: the value is never
+                  {showPassword ? (
+                    <Form method="post">
+                      <input type="hidden" name="email" value={email} />
+                      <Stack>
+                        {/* Nothing here is password-specific: the value is never
                           trimmed and the only limit is better-auth's 128 chars, so
                           a passphrase round-trips intact. Say so — people assume
                           "password" means one short mangled word. */}
-                      <PasswordInput
-                        name="password"
-                        label="New password or passphrase"
-                        description="A few unrelated words — “rusty kettle dawn patrol” — beat one short mangled word. Spaces count."
-                        autoComplete="new-password"
-                        required
-                      />
-                      <PasswordInput
-                        name="confirm"
-                        label="Type it again"
-                        autoComplete="new-password"
-                        required
-                      />
-                      <Button
-                        type="submit"
-                        loading={busy}
-                        variant="default"
-                        fullWidth
-                      >
-                        Set my password
-                      </Button>
-                      <Text size="xs" c="dimmed">
-                        Signs you out everywhere else. You can still add a
-                        passkey later from your account page.
-                      </Text>
-                    </Stack>
-                  </Form>
-                ) : (
-                  <Button
-                    variant="subtle"
-                    size="compact-sm"
-                    onClick={() => setShowPassword(true)}
-                  >
-                    My device can't do passkeys — set a password instead
-                  </Button>
-                )}
-              </>
-            ) : null}
-          </Stack>
+                        <PasswordInput
+                          name="password"
+                          label="New password or passphrase"
+                          description="A few unrelated words — “rusty kettle dawn patrol” — beat one short mangled word. Spaces count."
+                          autoComplete="new-password"
+                          required
+                        />
+                        <PasswordInput
+                          name="confirm"
+                          label="Type it again"
+                          autoComplete="new-password"
+                          required
+                        />
+                        <Button
+                          type="submit"
+                          loading={busy}
+                          variant="default"
+                          fullWidth
+                        >
+                          Set my password
+                        </Button>
+                        <Text size="xs" c="dimmed">
+                          Signs you out everywhere else. You can still add a
+                          passkey later from your account page.
+                        </Text>
+                      </Stack>
+                    </Form>
+                  ) : (
+                    <Button
+                      variant="subtle"
+                      size="compact-sm"
+                      onClick={() => setShowPassword(true)}
+                    >
+                      My device can't do passkeys — set a password instead
+                    </Button>
+                  )}
+                </>
+              ) : null}
+            </Stack>
+          </PasskeyBrowserGate>
         )}
       </Paper>
     </Container>

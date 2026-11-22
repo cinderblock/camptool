@@ -12,7 +12,10 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { data, Form, redirect } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { CampHero } from "~/components/CampHero";
+import { PasskeyBrowserGate } from "~/components/PasskeyBrowserGate";
+import { PasskeySetupGate } from "~/components/PasskeySetupGate";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";
+import { pageUrl } from "~/lib/camp-host";
 import { assertNotMoving } from "~/lib/camp-move/move-out.server";
 import {
   getInstanceSettings,
@@ -23,6 +26,11 @@ import {
   type InviteState,
   inviteState,
 } from "~/lib/invite";
+import {
+  hasUserPasskey,
+  passkeyGateError,
+  requestInAppBrowser,
+} from "~/lib/passkey-gate.server";
 import { markProspectJoined } from "~/lib/prospects.server";
 import { isMemberOf } from "~/lib/recruits.server";
 import { getSession } from "~/lib/session.server";
@@ -72,9 +80,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     [getSession(request), getInstanceSettings()],
   );
 
-  const alreadyMember = session
-    ? await isMemberOf(session.user.id, invite.campId)
-    : false;
+  const [alreadyMember, hasPasskey] = session
+    ? await Promise.all([
+        isMemberOf(session.user.id, invite.campId),
+        hasUserPasskey(session.user.id),
+      ])
+    : [false, false];
 
   const payload = {
     campName: invite.campName,
@@ -86,6 +97,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     state,
     viewer: session ? { name: session.user.name } : null,
     alreadyMember,
+    hasPasskey,
+    inAppBrowser: requestInAppBrowser(request),
+    pageUrl: pageUrl(request.url).href,
     discordEnabled,
     mailEnabled,
     allowPasswordLogin,
@@ -118,6 +132,16 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   if (await isMemberOf(session.user.id, invite.campId)) throw redirect("/");
   await assertNotMoving(invite.campId);
+
+  // Require a passkey before consuming the invite when passkey-only mode is
+  // active, so a visitor in an in-app browser doesn't burn a one-use link.
+  const { allowPasswordLogin } = await getInstanceSettings();
+  const gateError = await passkeyGateError(
+    request,
+    session.user.id,
+    allowPasswordLogin,
+  );
+  if (gateError) return data({ error: gateError }, { status: 400 });
 
   // Join directly. We bypass auth.api.addMember because that checks the
   // *caller's* camp permission, and the invitee has none yet — the valid token
@@ -183,6 +207,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 
 export default function RedeemInvite({
   loaderData,
+  actionData,
   params,
 }: Route.ComponentProps) {
   const {
@@ -193,7 +218,12 @@ export default function RedeemInvite({
     state,
     viewer,
     alreadyMember,
+    hasPasskey,
+    inAppBrowser,
+    pageUrl: url,
   } = loaderData;
+  const actionError =
+    actionData && "error" in actionData ? actionData.error : null;
 
   return (
     <Container size="sm" py="xl">
@@ -219,6 +249,10 @@ export default function RedeemInvite({
             state={state}
             viewer={viewer}
             alreadyMember={alreadyMember}
+            hasPasskey={hasPasskey}
+            inAppBrowser={inAppBrowser}
+            pageUrl={url}
+            actionError={actionError}
             discordEnabled={loaderData.discordEnabled}
             mailEnabled={loaderData.mailEnabled}
             allowPasswordLogin={loaderData.allowPasswordLogin}
@@ -235,6 +269,10 @@ function InviteBody({
   state,
   viewer,
   alreadyMember,
+  hasPasskey,
+  inAppBrowser,
+  pageUrl: url,
+  actionError,
   discordEnabled,
   mailEnabled,
   allowPasswordLogin,
@@ -244,6 +282,10 @@ function InviteBody({
   state: InviteState;
   viewer: { name: string } | null;
   alreadyMember: boolean;
+  hasPasskey: boolean;
+  inAppBrowser: Route.ComponentProps["loaderData"]["inAppBrowser"];
+  pageUrl: string;
+  actionError: string | null;
   discordEnabled: boolean;
   mailEnabled: boolean;
   allowPasswordLogin: boolean;
@@ -266,28 +308,40 @@ function InviteBody({
     );
   }
 
-  if (!viewer) {
-    return (
-      <AuthInline
-        intro={`Create an account to accept your invite to ${campName} — so you can sign back in later.`}
-        discordEnabled={discordEnabled}
-        mailEnabled={mailEnabled}
-        allowPasswordLogin={allowPasswordLogin}
-        inviteToken={inviteToken}
-      />
-    );
-  }
-
   return (
-    <Form method="post">
-      <Stack gap="md">
-        <Text size="sm" c="dimmed">
-          Joining as <b>{viewer.name}</b>.
-        </Text>
-        <Group justify="flex-end">
-          <Button type="submit">Join {campName}</Button>
-        </Group>
-      </Stack>
-    </Form>
+    <PasskeyBrowserGate
+      enabled={!allowPasswordLogin && (!viewer || !hasPasskey)}
+      serverInApp={inAppBrowser}
+      pageUrl={url}
+      reassurance="Your invite link hasn't been used yet — it's still good."
+    >
+      {!viewer ? (
+        <AuthInline
+          intro={`Create an account to accept your invite to ${campName} — so you can sign back in later.`}
+          discordEnabled={discordEnabled}
+          mailEnabled={mailEnabled}
+          allowPasswordLogin={allowPasswordLogin}
+          inviteToken={inviteToken}
+        />
+      ) : !allowPasswordLogin && !hasPasskey ? (
+        <PasskeySetupGate
+          viewerName={viewer.name}
+          nextStepLabel={`join ${campName}`}
+          hasLink
+        />
+      ) : (
+        <Form method="post">
+          <Stack gap="md">
+            {actionError ? <Alert color="red">{actionError}</Alert> : null}
+            <Text size="sm" c="dimmed">
+              Joining as <b>{viewer.name}</b>.
+            </Text>
+            <Group justify="flex-end">
+              <Button type="submit">Join {campName}</Button>
+            </Group>
+          </Stack>
+        </Form>
+      )}
+    </PasskeyBrowserGate>
   );
 }

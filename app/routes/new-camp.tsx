@@ -16,6 +16,8 @@ import { eq } from "drizzle-orm";
 import { data, redirect } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { CreateCampForm } from "~/components/CreateCampForm";
+import { PasskeyBrowserGate } from "~/components/PasskeyBrowserGate";
+import { PasskeySetupGate } from "~/components/PasskeySetupGate";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";
 import {
   claimSetupLink,
@@ -26,13 +28,18 @@ import {
   type SetupLinkState,
   setupLinkState,
 } from "~/lib/camp-admin.server";
-import { campOrigin } from "~/lib/camp-host";
+import { campOrigin, pageUrl } from "~/lib/camp-host";
 import { APEX, CAMP_SUBDOMAINS } from "~/lib/env.server";
 import {
   getInstanceSettings,
   isSuperAdmin,
   setSignupUnlockCookie,
 } from "~/lib/instance.server";
+import {
+  hasUserPasskey,
+  passkeyGateError,
+  requestInAppBrowser,
+} from "~/lib/passkey-gate.server";
 import { getRealSession } from "~/lib/session.server";
 import { db } from "../../db/client.server";
 import { session as sessionTable } from "../../db/schema";
@@ -58,11 +65,16 @@ async function mayCreateWithoutLink(userId: string) {
 export async function loader({ request, params }: Route.LoaderArgs) {
   // The real session: a super admin working as someone shouldn't start a
   // camp in their name.
-  const session = await getRealSession(request);
-  const { allowOpenSignups, allowPasswordLogin } = await getInstanceSettings();
+  const [session, { allowOpenSignups, allowPasswordLogin }] = await Promise.all(
+    [getRealSession(request), getInstanceSettings()],
+  );
+  const hasPasskey = session ? await hasUserPasskey(session.user.id) : false;
   const common = {
     apexHost: CAMP_SUBDOMAINS ? APEX.host : null,
     viewer: session ? { name: session.user.name } : null,
+    hasPasskey,
+    inAppBrowser: requestInAppBrowser(request),
+    pageUrl: pageUrl(request.url).href,
     discordEnabled,
     mailEnabled,
     allowPasswordLogin,
@@ -105,6 +117,17 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (!session) {
     return data({ error: "Sign in first." }, { status: 401 });
   }
+  // Require a passkey before claiming any one-use setup link (or creating a
+  // camp) when passkey-only mode is active — so a visitor in an in-app browser
+  // or without WebAuthn never burns their link.
+  const { allowPasswordLogin } = await getInstanceSettings();
+  const gateError = await passkeyGateError(
+    request,
+    session.user.id,
+    allowPasswordLogin,
+  );
+  if (gateError) return data({ error: gateError }, { status: 400 });
+
   const form = await request.formData();
   const name = String(form.get("name") ?? "");
   let slug = String(form.get("slug") ?? "")
@@ -156,8 +179,19 @@ export async function action({ request, params }: Route.ActionArgs) {
 }
 
 export default function NewCamp({ loaderData, params }: Route.ComponentProps) {
-  const { state, viewer, apexHost, withLink, fixedSlug } = loaderData;
+  const {
+    state,
+    viewer,
+    hasPasskey,
+    inAppBrowser,
+    pageUrl: url,
+    apexHost,
+    withLink,
+    fixedSlug,
+    allowPasswordLogin,
+  } = loaderData;
   const action = params.token ? `/new-camp/${params.token}` : "/new-camp";
+  const needsPasskey = !allowPasswordLogin && !hasPasskey;
 
   return (
     <Container component="main" id="main-content" size={520} py="xl">
@@ -169,28 +203,47 @@ export default function NewCamp({ loaderData, params }: Route.ComponentProps) {
           <Alert color="red" title="Link unavailable">
             {STATE_MESSAGE[state]}
           </Alert>
-        ) : !viewer ? (
-          <AuthInline
-            intro="First, make your account (or sign in). Then you'll name your camp and pick its address."
-            discordEnabled={loaderData.discordEnabled}
-            mailEnabled={loaderData.mailEnabled}
-            allowPasswordLogin={loaderData.allowPasswordLogin}
-          />
         ) : (
-          <Stack gap="md">
-            <Text size="sm" c="dimmed">
-              {withLink
-                ? "You've been invited to start a camp on CampTool. "
-                : ""}
-              You'll be its first admin, as <b>{viewer.name}</b>, and can invite
-              your campers from there.
-            </Text>
-            <CreateCampForm
-              action={action}
-              apexHost={apexHost}
-              fixedSlug={fixedSlug}
-            />
-          </Stack>
+          <PasskeyBrowserGate
+            enabled={!allowPasswordLogin && (!viewer || !hasPasskey)}
+            serverInApp={inAppBrowser}
+            pageUrl={url}
+            reassurance={
+              withLink
+                ? "Your setup link hasn't been used yet — it's still good."
+                : undefined
+            }
+          >
+            {!viewer ? (
+              <AuthInline
+                intro="First, make your account (or sign in). Then you'll name your camp and pick its address."
+                discordEnabled={loaderData.discordEnabled}
+                mailEnabled={loaderData.mailEnabled}
+                allowPasswordLogin={allowPasswordLogin}
+              />
+            ) : needsPasskey ? (
+              <PasskeySetupGate
+                viewerName={viewer.name}
+                nextStepLabel="start your camp"
+                hasLink={withLink}
+              />
+            ) : (
+              <Stack gap="md">
+                <Text size="sm" c="dimmed">
+                  {withLink
+                    ? "You've been invited to start a camp on CampTool. "
+                    : ""}
+                  You'll be its first admin, as <b>{viewer.name}</b>, and can
+                  invite your campers from there.
+                </Text>
+                <CreateCampForm
+                  action={action}
+                  apexHost={apexHost}
+                  fixedSlug={fixedSlug}
+                />
+              </Stack>
+            )}
+          </PasskeyBrowserGate>
         )}
       </Paper>
     </Container>

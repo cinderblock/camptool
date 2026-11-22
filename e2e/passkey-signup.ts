@@ -216,6 +216,32 @@ async function main() {
       JSON.stringify(session2?.user ?? null),
     );
 
+    // First user on a fresh DB is super admin — mint a camp setup link to test
+    // the in-app browser & missing-WebAuthn gates on /new-camp/:token.
+    stage("minting a camp setup link on /admin");
+    await page.goto(`${BASE}/admin`, { waitUntil: "load" });
+    await page.getByLabel("Who it's for").fill("Entheos Test");
+    await page.getByRole("button", { name: "Make link" }).click();
+    await page.getByText("Entheos Test").waitFor({ timeout: 15000 });
+    const setupUrl = await page.evaluate(async () => {
+      const res = await fetch("/admin", {
+        method: "POST",
+        body: new URLSearchParams({
+          intent: "createSetupLink",
+          label: "Gate Test Camp",
+          slug: `gate-${Date.now().toString(36)}`,
+        }),
+      });
+      const text = await res.text();
+      const m = text.match(/\/new-camp\/[A-Za-z0-9_-]+/);
+      return m ? `${location.origin}${m[0]}` : null;
+    });
+    check(
+      "super admin can mint a camp setup link",
+      Boolean(setupUrl),
+      setupUrl ?? "none",
+    );
+
     await ctx.close();
 
     // --- 3. Abandoned ceremony must not create an orphan account -----------
@@ -261,8 +287,8 @@ async function main() {
     );
     await ctx2.close();
 
-    // --- 4. In-app browser warning shows for Messenger UA ------------------
-    stage("checking in-app browser warning");
+    // --- 4. In-app browser warning & hard gate for Messenger UA ------------
+    stage("checking in-app browser warning & /new-camp gate");
     const ctx3 = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/22A3354 [FBAN/MessengerForiOS;FBAV/475.0.0.48.108]",
@@ -273,14 +299,107 @@ async function main() {
       .getByText("Open this link in Safari")
       .waitFor({ timeout: 8000 });
     check(
-      "Messenger WebView sees 'Open this link in Safari' warning",
+      "Messenger WebView sees 'Open this link in Safari' warning on /login",
       await page3.getByText("Open this link in Safari").isVisible(),
     );
     check(
       "warning includes a Copy this link button",
       await page3.getByRole("button", { name: "Copy this link" }).isVisible(),
     );
+
+    if (setupUrl) {
+      await page3.goto(setupUrl, { waitUntil: "networkidle" });
+      check(
+        "Messenger WebView is hard-gated on /new-camp/:token",
+        await page3.getByText("Open this link in Safari first").isVisible(),
+      );
+      check(
+        "hard gate reassures that the setup link hasn't been used yet",
+        await page3
+          .getByText("Your setup link hasn't been used yet")
+          .isVisible(),
+      );
+      check(
+        "Messenger WebView cannot see the signup/camp form",
+        (await page3
+          .getByRole("button", { name: "Create account with a passkey" })
+          .count()) === 0 &&
+          (await page3.getByRole("button", { name: "Create camp" }).count()) ===
+            0,
+      );
+    }
     await ctx3.close();
+
+    // --- 5. Browser lacking PublicKeyCredential is hard-gated too ----------
+    if (setupUrl) {
+      stage("checking missing-WebAuthn hard gate on /new-camp/:token");
+      const ctx4 = await browser.newContext();
+      await ctx4.addInitScript(() => {
+        Object.defineProperty(window, "PublicKeyCredential", {
+          value: undefined,
+          configurable: true,
+        });
+      });
+      const page4 = await ctx4.newPage();
+      await page4.goto(setupUrl, { waitUntil: "networkidle" });
+      await page4
+        .getByText("Open this link in a modern browser first")
+        .waitFor({ timeout: 8000 });
+      check(
+        "browser without PublicKeyCredential is hard-gated on /new-camp/:token",
+        await page4
+          .getByText("Open this link in a modern browser first")
+          .isVisible(),
+      );
+      check(
+        "missing-WebAuthn browser cannot see the signup form",
+        (await page4
+          .getByRole("button", { name: "Create account with a passkey" })
+          .count()) === 0,
+      );
+      await ctx4.close();
+
+      // --- 6. Real browser with passkey support still redeems the link -----
+      stage("redeeming /new-camp/:token in a real passkey-capable browser");
+      const ctx5 = await browser.newContext();
+      const page5 = await ctx5.newPage();
+      page5.on("console", (m) => {
+        if (m.type() === "error") console.log(`    [page5:error] ${m.text()}`);
+      });
+      page5.on("pageerror", (e) =>
+        console.log(`    [page5:pageerror] ${e.message}`),
+      );
+      await addVirtualAuthenticator(page5);
+      await page5.goto(setupUrl, { waitUntil: "networkidle" });
+      await page5
+        .getByRole("button", { name: "Create account with a passkey" })
+        .waitFor({ state: "visible", timeout: 20000 });
+      // Ensure React has hydrated the Mantine form before submitting.
+      const leadEmail = `lead-${Date.now()}@example.com`;
+      await page5.getByLabel("Your name").fill("Camp Lead");
+      await page5.getByLabel("Email").fill(leadEmail);
+      await page5
+        .getByRole("button", { name: "Create account with a passkey" })
+        .click();
+      await page5
+        .getByRole("button", { name: "Create camp" })
+        .waitFor({ state: "visible", timeout: 25000 });
+      check(
+        "passkey signup on /new-camp/:token unlocks Create camp form",
+        await page5.getByRole("button", { name: "Create camp" }).isVisible(),
+      );
+      await page5.getByLabel("Camp name").fill("Entheos Test");
+      await page5.getByRole("button", { name: "Create camp" }).click();
+      await page5.waitForURL((u) => !u.pathname.startsWith("/new-camp"), {
+        timeout: 25000,
+      });
+      check(
+        "real browser completes camp creation from the untouched setup link",
+        !page5.url().includes("/new-camp"),
+        page5.url(),
+      );
+      await ctx5.close();
+    }
   } finally {
     await browser.close();
   }

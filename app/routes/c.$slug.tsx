@@ -13,9 +13,11 @@ import { useState } from "react";
 import { data, useFetcher } from "react-router";
 import { AuthInline } from "~/components/AuthInline";
 import { CampHero } from "~/components/CampHero";
+import { PasskeyBrowserGate } from "~/components/PasskeyBrowserGate";
 import { PlayaNameField } from "~/components/PlayaNameField";
 import { QuestionField } from "~/components/QuestionField";
 import { discordEnabled, mailEnabled } from "~/lib/auth.server";
+import { pageUrl } from "~/lib/camp-host";
 import { assertNotMoving } from "~/lib/camp-move/move-out.server";
 import { shownQuestions } from "~/lib/conditions";
 import { getFeatureState } from "~/lib/features.server";
@@ -23,6 +25,7 @@ import {
   getInstanceSettings,
   setSignupUnlockCookie,
 } from "~/lib/instance.server";
+import { requestInAppBrowser } from "~/lib/passkey-gate.server";
 import { linkApplicationToProspect } from "~/lib/prospects.server";
 import { isAnswered, parseOptions, type QuestionType } from "~/lib/questions";
 import { loadApplicationQuestions } from "~/lib/questions.server";
@@ -76,6 +79,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const [session, { allowOpenSignups, allowPasswordLogin }] = await Promise.all(
     [getSession(request), getInstanceSettings()],
   );
+  const inAppBrowser = requestInAppBrowser(request);
+  const currentUrl = pageUrl(request.url).href;
   if (!session) {
     const payload = {
       campName: found.name,
@@ -86,6 +91,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       viewer: null,
       alreadyMember: false,
       alreadyApplied: false,
+      inAppBrowser,
+      pageUrl: currentUrl,
       discordEnabled,
       mailEnabled,
       allowPasswordLogin,
@@ -116,6 +123,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     viewer: { name: session.user.name, email: session.user.email },
     alreadyMember: await isMemberOf(session.user.id, found.id),
     alreadyApplied: Boolean(pending),
+    inAppBrowser,
+    pageUrl: currentUrl,
     discordEnabled,
     mailEnabled,
     allowPasswordLogin,
@@ -242,12 +251,18 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
           {loaderData.viewer ? (
             <ApplySection {...loaderData} viewer={loaderData.viewer} />
           ) : (
-            <AuthInline
-              intro="Create an account to apply — so you can sign back in later and check on your application."
-              discordEnabled={loaderData.discordEnabled}
-              mailEnabled={loaderData.mailEnabled}
-              allowPasswordLogin={loaderData.allowPasswordLogin}
-            />
+            <PasskeyBrowserGate
+              enabled={!loaderData.allowPasswordLogin}
+              serverInApp={loaderData.inAppBrowser}
+              pageUrl={loaderData.pageUrl}
+            >
+              <AuthInline
+                intro="Create an account to apply — so you can sign back in later and check on your application."
+                discordEnabled={loaderData.discordEnabled}
+                mailEnabled={loaderData.mailEnabled}
+                allowPasswordLogin={loaderData.allowPasswordLogin}
+              />
+            </PasskeyBrowserGate>
           )}
         </Paper>
       </Stack>
