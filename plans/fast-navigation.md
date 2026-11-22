@@ -133,11 +133,18 @@ It should feel instant. Find where the time goes, then remove it.
       waits on `/__manifest`.
    d. [x] Page code in one round (`4fc7abe`): modulepreload a route's
       module + imports on pointerdown and on navigation start.
-   e. [ ] Let Cameron use it for a day, read `/api/dev/nav`, fix the biggest
-      remaining part. Candidates: preload all page code when idle (416 KB
-      gz for the dashboard; needs Cameron's call on data use), keep
-      visited pages' data and refresh in the background, render cost on
-      heavy pages (map, members).
+   e. [x] Hashed assets cached for a year on Cloudflare (`dd53fcf`,
+      `public/_headers`): Workers static assets defaulted to `max-age=0,
+      must-revalidate`, so each visit re-checked every code file.
+   f. [x] Every page's code in the background once signed in (`82e5f7f`,
+      Cameron: "sounds reasonable"): 2 s after a dashboard page settles,
+      idle time, 4 files at a time; 202 files, ~500 KB gz, once per deploy.
+      Skipped with Save-Data / 2G; never on public or sign-in pages.
+      Verified headless against a local production build.
+   g. [ ] Let Cameron use it for a day, read `/api/dev/nav`, fix the biggest
+      remaining part. Candidates: keep visited pages' data and refresh in
+      the background, render cost on heavy pages (map, members), a PWA
+      (open question 1).
 
 ## Decisions already made (don't re-ask)
 
@@ -186,6 +193,14 @@ app's own backup likely has the same problem (ISSUES.md).
 - The D1 "waits" metric undercounts when loaders overlap (parallel
   loaders = one long busy stretch); it's a lower bound on sequential depth.
 
+## Open questions for the user
+
+1. CampTool has never been a PWA (no web manifest, no service worker; the
+   bins tracker is the PWA). Add one? It would make it installable to the
+   home screen without browser chrome, and a service worker could show the
+   app shell instantly even on a bad connection. Recommendation: yes, as its
+   own plan, after a day of timings.
+
 ## Things not to do
 
 - Don't change Cloudflare settings (placement, D1 replication) without a
@@ -211,4 +226,6 @@ app's own backup likely has the same problem (ISSUES.md).
 - [x] 2026-11-21: step 7b, per-route loaders (most pages 4 waits).
 - [x] Step 7c: placement pin (Cameron's yes).
 - [x] 2026-11-21: step 8a–d, timing reporter + client fixes.
-- [ ] Step 8e: read a day of real timings with Cameron.
+- [x] 2026-11-21: step 8e–f, year-long asset caching + background code
+      preload.
+- [ ] Step 8g: read a day of real timings with Cameron.
