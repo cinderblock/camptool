@@ -308,6 +308,11 @@ The SQLite database is created and migrated automatically on first start
 credentials; setting `DISCORD_CLIENT_ID`/`DISCORD_CLIENT_SECRET` lights up the
 Discord login and link features (see [`docs/discord-setup.md`](docs/discord-setup.md)).
 
+Signed-in pages have no `/dashboard` prefix in their URLs: the map is `/map`,
+even though its route file is `app/routes/dashboard/map.tsx`. `app/routes.ts`
+is the source of truth. To drive the app as a signed-in user locally, see
+[`e2e/README.md`](e2e/README.md).
+
 Other scripts: `bun run typecheck`, `bun run build`, `bun run start`,
 `bun run lint`, `bun run format`. Database: `bun run db:generate` (new
 migration from schema changes), `bun run db:migrate`, `bun run db:studio`.
@@ -320,11 +325,16 @@ reverse proxy can terminate TLS in front of it. `bun run start` boots
 `/run/camptool/camptool.sock`). The `Dockerfile` builds that socket server into
 an image; `compose.yaml` runs it for self-hosters.
 
-The canonical deployment (firefly, https://camptool.mathcamp.us) runs that same
-image, but **pushing to `master` does not deploy it**: CI publishes
-`ghcr.io/cinderblock/camptool:<sha>` and stops. Which build actually runs is
-pinned in the ops repo, and only an ops push changes it. Both paths are in
-[`docs/firefly-deploy.md`](docs/firefly-deploy.md).
+CI publishes that image as `ghcr.io/cinderblock/camptool:<sha>` on every push
+to `master`; it doesn't deploy it anywhere. The firefly host that once ran it
+is described in [`docs/firefly-deploy.md`](docs/firefly-deploy.md).
+
+The canonical deployment is the shared Cloudflare site at
+**https://camptool.org**, with Math Camp at **https://mathcamp.camptool.org**.
+Pushing `master` deploys it through Cloudflare Workers Builds, and
+`/_version` reports the commit it's running. The old
+`camptool.mathcamp.us` address now only redirects there (`LEGACY_HOSTS`) and
+serves `/moved`.
 
 It also runs on **Cloudflare** (Workers + D1 + R2, about $5/month for a whole
 multi-camp site): `bun run cf:preview` to try it locally with no account,
