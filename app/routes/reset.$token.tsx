@@ -38,10 +38,11 @@ import {
   useNavigate,
   useNavigation,
   useParams,
+  useRevalidator,
 } from "react-router";
 import { InAppBrowserWarning } from "~/components/InAppBrowserWarning";
 import { PasskeyBrowserGate } from "~/components/PasskeyBrowserGate";
-import { authClient } from "~/lib/auth-client";
+import { authClient, signOut } from "~/lib/auth-client";
 import { pageUrl } from "~/lib/camp-host";
 import { defaultDeviceName } from "~/lib/device-name";
 import { getInstanceSettings } from "~/lib/instance.server";
@@ -51,6 +52,7 @@ import {
   type ResetLinkState,
   redeemPasswordReset,
 } from "~/lib/password-reset.server";
+import { getRealSession } from "~/lib/session.server";
 import type { Route } from "./+types/reset.$token";
 
 export function meta(_: Route.MetaArgs) {
@@ -58,13 +60,15 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const [status, { allowPasswordLogin }] = await Promise.all([
+  const [status, { allowPasswordLogin }, session] = await Promise.all([
     inspectPasswordReset(params.token),
     getInstanceSettings(),
+    getRealSession(request),
   ]);
   return {
     status,
     allowPasswordLogin,
+    signedInAs: session ? { name: session.user.name } : null,
     inAppBrowser: requestInAppBrowser(request),
     pageUrl: pageUrl(request.url).href,
   };
@@ -134,9 +138,16 @@ export default function ResetPassword({
   loaderData,
   actionData,
 }: Route.ComponentProps) {
-  const { status, allowPasswordLogin, inAppBrowser, pageUrl: url } = loaderData;
+  const {
+    status,
+    allowPasswordLogin,
+    signedInAs,
+    inAppBrowser,
+    pageUrl: url,
+  } = loaderData;
   const nav = useNavigation();
   const navigate = useNavigate();
+  const { revalidate } = useRevalidator();
   const params = useParams();
   const busy = nav.state !== "idle";
   const error = actionData && "error" in actionData ? actionData.error : null;
@@ -144,7 +155,18 @@ export default function ResetPassword({
   const [email, setEmail] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
+
+  async function handleSignOutToUse() {
+    setSigningOut(true);
+    try {
+      await signOut();
+      revalidate();
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   /**
    * Enrol a passkey onto the account this link belongs to.
@@ -228,6 +250,37 @@ export default function ResetPassword({
 
             <Button component={Link} to="/login" variant="default" fullWidth>
               Back to sign in
+            </Button>
+          </Stack>
+        ) : signedInAs ? (
+          <Stack gap="md">
+            <Alert
+              color="blue"
+              title={`You're signed in as ${signedInAs.name}`}
+            >
+              <Text size="sm">
+                This recovery link is valid for <strong>{status.name}</strong> (
+                {status.maskedEmail}) until {status.expires}. Opening it here
+                didn&rsquo;t use it.
+              </Text>
+            </Alert>
+            <Text size="sm" c="dimmed">
+              If you&rsquo;re an officer checking the link before sending it,
+              you&rsquo;re all set — just send them this URL.
+            </Text>
+            <Text size="sm" c="dimmed">
+              If this link is for you and you want to use it on this device,
+              sign out first (or add a passkey directly from{" "}
+              <Link to="/account">Your account</Link> if you&rsquo;re already in
+              the right account).
+            </Text>
+            <Button
+              onClick={handleSignOutToUse}
+              loading={signingOut}
+              variant="default"
+              fullWidth
+            >
+              Sign out to use this link
             </Button>
           </Stack>
         ) : (

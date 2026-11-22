@@ -273,6 +273,34 @@ async function main() {
       camplessRecoveryUrl ?? "none",
     );
     if (camplessRecoveryUrl) {
+      // Signed-in session opening a recovery link sees a clear status card and
+      // cannot accidentally burn the link via api.passkey-recovery (409).
+      await page.goto(camplessRecoveryUrl, { waitUntil: "networkidle" });
+      check(
+        "signed-in browser opening /reset/:token sees 'You're signed in as' guard",
+        await page.getByText("You're signed in as").isVisible(),
+      );
+      check(
+        "signed-in guard reassures that opening it didn't use the link",
+        await page.getByText("Opening it here didn").isVisible(),
+      );
+      const token = camplessRecoveryUrl.split("/reset/")[1] ?? "";
+      const signedInRecoveryStatus = await page.evaluate(
+        async ({ t, e }) =>
+          (
+            await fetch("/api/passkey-recovery", {
+              method: "POST",
+              body: new URLSearchParams({ token: t, email: e }),
+            })
+          ).status,
+        { t: token, e: email },
+      );
+      check(
+        "api.passkey-recovery refuses an already-signed-in browser (409)",
+        signedInRecoveryStatus === 409,
+        `HTTP ${signedInRecoveryStatus}`,
+      );
+
       const resetHtml = await (await fetch(camplessRecoveryUrl)).text();
       check(
         "site-admin recovery link renders 'a site admin'",

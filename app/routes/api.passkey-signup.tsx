@@ -1,7 +1,7 @@
 /**
  * Resource route: begin a passkey-first signup.
  *
- * POST { name, email, inviteToken? } -> { context } | { error }
+ * POST { name, email } -> { context } | { error }
  *
  * The returned `context` is an opaque handle the client hands to
  * `authClient.passkey.addPasskey({ context })`; the passkey plugin's

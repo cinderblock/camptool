@@ -13,11 +13,26 @@
  */
 import { data } from "react-router";
 import { startPasskeyRecoveryFor } from "~/lib/password-reset.server";
+import { getRealSession } from "~/lib/session.server";
 import type { Route } from "./+types/api.passkey-recovery";
 
 export async function action({ request }: Route.ActionArgs) {
   if (request.method !== "POST") {
     return data({ error: "Method not allowed." }, { status: 405 });
+  }
+  // Recovery enrols a passkey with NO active session. If a session cookie is
+  // present (e.g. an officer testing a link in their own browser), better-auth
+  // takes the signed-in branch and rejects a user mismatch only AFTER
+  // afterVerification has already spent the link. Refuse cleanly up front so
+  // the link stays untouched.
+  if (await getRealSession(request)) {
+    return data(
+      {
+        error:
+          "You're already signed in. Sign out first to use a recovery link.",
+      },
+      { status: 409 },
+    );
   }
   const body = await request.formData();
   const token = String(body.get("token") ?? "");
