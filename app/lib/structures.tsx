@@ -851,9 +851,28 @@ const CORE_KINDS = [
     controls: [ROOFTOP_TENT_CONTROL],
     shadowVolume: rooftopTentShadow(8),
   },
+  // Black Rock Hardware-style frame: 1" EMT legs (8ft) + 10ft rafters joined by
+  // steel 5-way fittings, flat top, shade cloth strapped on. Kits are 20ft wide
+  // and grow in 12ft bays (12×20, 24×20, 36×20…), so 24×20 is the default.
+  {
+    value: "brh-shade",
+    label: "Black Rock Hardware-style shade",
+    color: "#e67700",
+    w: 20,
+    h: 24,
+    shape: "rect",
+    vehicle: false,
+    rigid: false,
+    group: "Shade",
+    tags: ["structure"],
+    personal: true,
+    canopyShade: true,
+  },
+  // Any other shade: a custom frame, a parachute, a sail… The value stays the
+  // original "shade" so objects placed before the split keep working.
   {
     value: "shade",
-    label: "Shade",
+    label: "Other shade",
     color: "#f59f00",
     w: 20,
     h: 20,
@@ -1285,6 +1304,7 @@ const KIND_HEIGHTS: Record<string, number> = {
   car: 5,
   truck: 11,
   van: 8,
+  "brh-shade": 8, // 8ft legs, flat top
   shade: 10,
   carport: 10,
   popup: 8,

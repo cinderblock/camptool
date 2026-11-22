@@ -104,6 +104,12 @@ sunset, path lights, the pyramid's rainbow top). Most new *kinds* are core
       Sierpinski pyramid's apex tetra lights an **animated SMIL rainbow** at night.
       NOT browser-verified.
 
+- [x] **Shade split (2026-11-21)** — the Shade group's generic "Shade" kind read
+      as "Shade → Shade". Added `brh-shade` ("Black Rock Hardware-style shade":
+      20×24 default, 8ft flat top, 1" EMT + 5-way fittings, 12ft bays) and
+      relabelled the old kind "Other shade". Its value stays `shade`, so placed
+      objects, blocks and ban lists need no migration.
+
 ## Findings / gotchas
 
 - 250-gal vertical poly water tanks run ~30–36″ dia × 62–89″ tall depending on
