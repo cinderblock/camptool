@@ -615,6 +615,7 @@ export async function action({ request }: Route.ActionArgs) {
       campId,
       userId: target.userId,
       issuedByMembershipId: myMid,
+      issuedByUserId: actor.id,
     });
     return data({
       resetLink: { url, expires, name: u?.name ?? "this member" },

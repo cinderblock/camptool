@@ -269,13 +269,13 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "issueRecoveryLink") {
-    let targetUserId = String(form.get("userId") ?? "").trim();
-    let targetCampId = String(form.get("campId") ?? "").trim();
     const rawEmail = String(form.get("email") ?? "")
       .trim()
       .toLowerCase();
 
     if (rawEmail) {
+      // Site-wide super-admin recovery: works even for users who belong to no
+      // camp yet (or belong to several), without arbitrarily picking a camp.
       const [u] = await db
         .select({ id: userTable.id, name: userTable.name })
         .from(userTable)
@@ -287,23 +287,19 @@ export async function action({ request }: Route.ActionArgs) {
           { status: 404 },
         );
       }
-      targetUserId = u.id;
-      if (!targetCampId) {
-        const [m] = await db
-          .select({ campId: membership.organizationId })
-          .from(membership)
-          .where(eq(membership.userId, u.id))
-          .limit(1);
-        if (!m) {
-          return data(
-            { error: "That account doesn't belong to any camp yet." },
-            { status: 400 },
-          );
-        }
-        targetCampId = m.campId;
-      }
+      const { url, expires } = await issuePasswordReset({
+        campId: null,
+        userId: u.id,
+        issuedByMembershipId: null,
+        issuedByUserId: session.user.id,
+      });
+      return data({
+        resetLink: { url, expires, name: u.name || "this member" },
+      });
     }
 
+    const targetUserId = String(form.get("userId") ?? "").trim();
+    const targetCampId = String(form.get("campId") ?? "").trim();
     if (!targetUserId || !targetCampId) {
       return data({ error: "Choose an account first." }, { status: 400 });
     }
@@ -326,6 +322,7 @@ export async function action({ request }: Route.ActionArgs) {
       campId: targetCampId,
       userId: targetUserId,
       issuedByMembershipId: null,
+      issuedByUserId: session.user.id,
     });
     return data({
       resetLink: { url, expires, name: target.name || "this member" },

@@ -149,12 +149,12 @@ export default function ResetPassword({
   /**
    * Enrol a passkey onto the account this link belongs to.
    *
-   * Three steps, and the order matters: the server checks the link + email and
-   * hands back an opaque handle; `addPasskey({ context })` runs the WebAuthn
-   * ceremony with NO session (the plugin's resolveUser points it at the
-   * existing account); then `signIn.passkey()` turns the fresh credential into
-   * a session. The link is only spent once the credential is verified, so
-   * cancelling the browser prompt costs nothing and they can retry.
+   * Single WebAuthn prompt: the server checks the link + email and hands back
+   * an opaque handle, then `addPasskey({ context, createSession: true })` runs
+   * the WebAuthn ceremony with NO existing session (the plugin's resolveUser
+   * points it at the existing account, afterVerification spends the link and
+   * clears old sessions, and createSession mints the fresh session cookie).
+   * Cancelling the prompt costs nothing and they can retry.
    */
   async function enrolPasskey() {
     setPasskeyError(null);
@@ -177,6 +177,7 @@ export default function ResetPassword({
       const added = await authClient.passkey.addPasskey({
         context: body.context,
         name: defaultDeviceName(),
+        createSession: true,
       });
       if (added?.error) {
         setPasskeyError(
@@ -188,15 +189,6 @@ export default function ResetPassword({
         return;
       }
 
-      // verify-registration deliberately does NOT create a session, so sign in
-      // with the credential we just made.
-      const signedIn = await authClient.signIn.passkey();
-      if (signedIn?.error) {
-        setPasskeyError(
-          "Your passkey was saved, but signing in failed. Try signing in from the login page.",
-        );
-        return;
-      }
       navigate("/account");
     } catch {
       setPasskeyError("Something went wrong. Try again.");
@@ -225,8 +217,8 @@ export default function ResetPassword({
                 officer who generated it, checking that it's the right one. */}
             {status.state !== "unknown" ? (
               <Text size="sm" c="dimmed">
-                Issued by {status.campName} for {status.name} (
-                {status.maskedEmail}).
+                Issued by {status.campName ?? "a site admin"} for {status.name}{" "}
+                ({status.maskedEmail}).
                 {status.usedOn ? ` Used on ${status.usedOn}.` : ""}
                 {status.state === "expired"
                   ? ` Expired ${status.expires}.`
@@ -248,7 +240,8 @@ export default function ResetPassword({
             <Stack>
               <InAppBrowserWarning />
               <Text size="sm">
-                This link was issued by <strong>{status.campName}</strong> for{" "}
+                This link was issued by{" "}
+                <strong>{status.campName ?? "a site admin"}</strong> for{" "}
                 <strong>{status.name}</strong>. To use it, confirm the email
                 address it belongs to — it looks like{" "}
                 <strong>{status.maskedEmail}</strong>.

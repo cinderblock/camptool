@@ -35,9 +35,9 @@ const now = sql`(unixepoch() * 1000)`;
  */
 export const passwordReset = sqliteTable("password_reset", {
   id: text("id").primaryKey(),
-  campId: text("camp_id")
-    .notNull()
-    .references(() => camp.id, { onDelete: "cascade" }),
+  // Which camp's officer issued it; NULL for site-admin recovery links (which
+  // can recover users who belong to no camp yet, or belong to several).
+  campId: text("camp_id").references(() => camp.id, { onDelete: "cascade" }),
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
@@ -47,6 +47,11 @@ export const passwordReset = sqliteTable("password_reset", {
     () => membership.id,
     { onDelete: "set null" },
   ),
+  // The user who minted the link (set for both camp officers and site admins,
+  // so super-admin recovery links carry a real audit trail too).
+  issuedByUserId: text("issued_by_user_id").references(() => user.id, {
+    onDelete: "set null",
+  }),
   // SHA-256 hex of the token that appears in the URL. Deliberately NOT the raw
   // token (which is how camp_invite stores its secret): a bearer credential
   // that can set a password is worth more, so a database read must not be

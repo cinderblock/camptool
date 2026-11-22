@@ -58,8 +58,8 @@ export type ResetLinkStatus =
       maskedEmail: string;
       /** Whose account, for the confirmation copy. */
       name: string;
-      /** Which camp's officer issued it. */
-      campName: string;
+      /** Which camp's officer issued it, or null for a site-admin recovery link. */
+      campName: string | null;
       /** ISO date (YYYY-MM-DD). Never locale-formatted. */
       expires: string;
       /** ISO date the reset was completed, when `state` is "used". */
@@ -68,30 +68,44 @@ export type ResetLinkStatus =
     };
 
 /**
- * Mint a link for `userId`, revoking any earlier live link for the same
- * (camp, user) so there's never a pile of live links for one person.
+ * Mint a recovery link for `userId`, revoking earlier live links so there's
+ * never a pile of live links for one person.
  *
- * Authorization (officer+, strictly outranking the target) is the CALLER's
- * job — this function trusts what it's given. See the `issuePasswordReset`
- * intent in `app/routes/dashboard/members.tsx`.
+ * - Camp officer links (`campId` + `issuedByMembershipId`): revokes earlier
+ *   live links for the same (camp, user), so one camp's officer can't silently
+ *   cancel a link issued by another camp.
+ * - Site-admin links (`campId: null` or `issuedByMembershipId: null`): revokes
+ *   ALL earlier live links for `userId` site-wide.
+ *
+ * Authorization (officer+ strictly outranking the target, or super admin) is
+ * the CALLER's job — this function trusts what it's given.
  */
 export async function issuePasswordReset(input: {
-  campId: string;
+  campId: string | null;
   userId: string;
   issuedByMembershipId: string | null;
+  issuedByUserId?: string | null;
 }): Promise<{ url: string; expires: string }> {
   const nowMs = Date.now();
+  const isSiteAdminLink =
+    input.campId === null || input.issuedByMembershipId === null;
 
   await db
     .update(passwordReset)
     .set({ revokedAt: new Date(nowMs) })
     .where(
-      and(
-        eq(passwordReset.campId, input.campId),
-        eq(passwordReset.userId, input.userId),
-        isNull(passwordReset.usedAt),
-        isNull(passwordReset.revokedAt),
-      ),
+      isSiteAdminLink
+        ? and(
+            eq(passwordReset.userId, input.userId),
+            isNull(passwordReset.usedAt),
+            isNull(passwordReset.revokedAt),
+          )
+        : and(
+            eq(passwordReset.campId, input.campId as string),
+            eq(passwordReset.userId, input.userId),
+            isNull(passwordReset.usedAt),
+            isNull(passwordReset.revokedAt),
+          ),
     );
 
   const token = newToken();
@@ -101,6 +115,7 @@ export async function issuePasswordReset(input: {
     campId: input.campId,
     userId: input.userId,
     issuedByMembershipId: input.issuedByMembershipId,
+    issuedByUserId: input.issuedByUserId ?? null,
     tokenHash: hashResetToken(token),
     expiresAt,
   });
@@ -123,7 +138,7 @@ async function findByToken(token: string) {
     })
     .from(passwordReset)
     .innerJoin(user, eq(user.id, passwordReset.userId))
-    .innerJoin(camp, eq(camp.id, passwordReset.campId))
+    .leftJoin(camp, eq(camp.id, passwordReset.campId))
     .where(eq(passwordReset.tokenHash, hashResetToken(token)))
     .limit(1);
   return row ?? null;
