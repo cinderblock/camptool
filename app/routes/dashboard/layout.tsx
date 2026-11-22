@@ -55,6 +55,7 @@ import { KindsProvider } from "~/lib/kinds-context";
 import { countUnreadSummaries } from "~/lib/meetings.server";
 import { useNavTiming } from "~/lib/nav-timing";
 import { hasAtLeast } from "~/lib/permissions";
+import { usePreloadAllRouteCode } from "~/lib/preload-route-code";
 import type { PrivacyMode } from "~/lib/privacy";
 import { redact } from "~/lib/privacy.server";
 import { countProspectsNeedingAttention } from "~/lib/prospects.server";
@@ -340,6 +341,7 @@ type NavGroup = { id: string; label: string; items: NavItem[] };
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   // Real-browser timings of loads and page switches (plans/fast-navigation.md).
   useNavTiming();
+  usePreloadAllRouteCode();
   useEffect(() => {
     if (loaderData) shellLoadedAt = Date.now();
   }, [loaderData]);

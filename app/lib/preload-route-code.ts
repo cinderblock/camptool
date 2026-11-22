@@ -13,8 +13,13 @@
  *   100 ms first, so on a quick tap it never starts);
  * - when any navigation starts, for links and programmatic navigations alike.
  *
- * Only what's needed for the page being opened is fetched, so this costs no
- * extra data. Never throws into the app.
+ * Then, once a signed-in page has settled and the phone is idle, it fetches every
+ * other page's code too, a few files at a time, so a first visit to any page
+ * doesn't wait on the network either: about 400 KB compressed, once per deploy
+ * (the files are cached for a year; public/_headers). Skipped when the visitor
+ * asked to save data or is on a 2G-class connection.
+ *
+ * Never throws into the app.
  */
 import { useContext, useEffect, useRef } from "react";
 import {
@@ -26,13 +31,39 @@ import {
 
 const preloaded = new Set<string>();
 
-function preloadModule(href: string) {
+function preloadModule(href: string): Promise<void> | undefined {
   if (preloaded.has(href)) return;
   preloaded.add(href);
   const link = document.createElement("link");
   link.rel = "modulepreload";
   link.href = href;
+  const done = new Promise<void>((resolve) => {
+    link.onload = link.onerror = () => resolve();
+  });
   document.head.appendChild(link);
+  return done;
+}
+
+/** Start background work after the first page settles, when the phone's idle. */
+const AFTER_LOAD_MS = 2_000;
+/** Files in flight at once, so a tap's own fetches never queue behind these. */
+const IDLE_BATCH = 4;
+
+function whenIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    if ("requestIdleCallback" in window) {
+      requestIdleCallback(() => resolve(), { timeout: 2_000 });
+    } else {
+      setTimeout(resolve, 50);
+    }
+  });
+}
+
+function shouldSkipIdlePreload(): boolean {
+  const c = (
+    navigator as { connection?: { saveData?: boolean; effectiveType?: string } }
+  ).connection;
+  return !!c?.saveData || /(^|-)2g$/.test(c?.effectiveType ?? "");
 }
 
 export function usePreloadRouteCode() {
@@ -87,4 +118,41 @@ export function usePreloadRouteCode() {
     const path = navigation.location?.pathname;
     if (path) preloadPath.current(path);
   }, [navigation.location?.pathname]);
+}
+
+/**
+ * Every other page's code, in the background. Called from the signed-in layout
+ * only, so a stranger opening a public page or the sign-in page doesn't pay for
+ * the whole app.
+ */
+export function usePreloadAllRouteCode() {
+  const manifest = useContext(FrameworkContext)?.manifest;
+  useEffect(() => {
+    if (!manifest || shouldSkipIdlePreload()) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const hrefs = new Set<string>();
+        for (const route of Object.values(manifest.routes)) {
+          if (!route) continue;
+          if (route.module) hrefs.add(route.module);
+          for (const href of route.imports ?? []) hrefs.add(href);
+        }
+        const queue = [...hrefs].filter((h) => !preloaded.has(h));
+        while (queue.length && !cancelled) {
+          await whenIdle();
+          if (cancelled) return;
+          await Promise.all(
+            queue.splice(0, IDLE_BATCH).map((href) => preloadModule(href)),
+          );
+        }
+      } catch {
+        // Preloading is only ever a head start.
+      }
+    }, AFTER_LOAD_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [manifest]);
 }
