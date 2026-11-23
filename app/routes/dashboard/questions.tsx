@@ -178,12 +178,13 @@ export async function action({ request }: Route.ActionArgs) {
 
   // --- Officer question management (camp-scoped config; not edition-gated). ---
   if (!canManage) {
-    return data({ error: "You don't have permission." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
 
   if (intent === "addQuestion") {
     const prompt = String(form.get("prompt") ?? "").trim();
-    if (!prompt) return data({ error: "Prompt is required." }, { status: 400 });
+    if (!prompt)
+      return data({ error: "Question is required." }, { status: 400 });
     const type = String(form.get("type") ?? "short_text") as QuestionType;
     const audience = String(form.get("audience") ?? "all") as QuestionAudience;
     const required = form.get("required") === "on";
@@ -242,7 +243,7 @@ export async function action({ request }: Route.ActionArgs) {
       case "prompt": {
         const p = val.trim();
         if (!p)
-          return data({ error: "Prompt can't be empty." }, { status: 400 });
+          return data({ error: "Question can't be empty." }, { status: 400 });
         set.prompt = p;
         break;
       }
@@ -400,7 +401,7 @@ export default function Questions({ loaderData }: Route.ComponentProps) {
 
         {locked ? (
           <Text size="sm" c="dimmed">
-            This year is locked — answers are read-only.
+            This year is locked — read-only.
           </Text>
         ) : null}
 
@@ -490,7 +491,13 @@ function QuestionEditor({
   return (
     <Card withBorder padding="md" radius="md">
       <Group justify="space-between" mb="sm">
-        <Text fw={600}>Edit questions</Text>
+        <div>
+          <Text fw={600}>Edit questions</Text>
+          <Text size="xs" c="dimmed">
+            Click any text to edit and drag ⠿ to reorder. Your own answers save
+            inline.
+          </Text>
+        </div>
         <Button
           size="xs"
           variant="light"
@@ -644,7 +651,7 @@ function ConditionRow({
       <Select
         size="xs"
         label="Only ask if"
-        placeholder="always ask"
+        placeholder="Always ask"
         clearable
         w={220}
         data={candidates.map((o) => ({ value: o.id, label: o.prompt }))}
@@ -663,7 +670,7 @@ function ConditionRow({
         valueChoices.length > 0 ? (
           <Select
             size="xs"
-            label="answers"
+            label="Equals"
             w={180}
             data={valueChoices}
             value={question.showIfValue}
@@ -676,7 +683,7 @@ function ConditionRow({
         ) : (
           <TextInput
             size="xs"
-            label="answers"
+            label="Equals"
             w={180}
             defaultValue={question.showIfValue ?? ""}
             onBlur={(e) =>
@@ -855,7 +862,7 @@ const SortableQuestion = memo(function SortableQuestion({
               <EditableText
                 value={q.prompt}
                 fw={600}
-                placeholder="Question prompt"
+                placeholder="Question"
                 onSave={(v) => v.trim() && save("prompt", v)}
               />
             </div>
@@ -895,10 +902,10 @@ const SortableQuestion = memo(function SortableQuestion({
               bare
             />
           )}
-          <Group gap="xs" align="center" mt={4} c="dimmed">
+          <Group gap="xs" align="flex-end" mt={4} wrap="wrap">
             <Select
               size="xs"
-              aria-label="Type"
+              label="Type"
               data={QUESTION_TYPES}
               value={q.type}
               onChange={(v) => v && v !== q.type && save("type", v)}
@@ -908,7 +915,7 @@ const SortableQuestion = memo(function SortableQuestion({
             />
             <Select
               size="xs"
-              aria-label="Who answers"
+              label="Audience"
               data={QUESTION_AUDIENCES}
               value={q.audience}
               onChange={(v) => v && v !== q.audience && save("audience", v)}
@@ -918,7 +925,7 @@ const SortableQuestion = memo(function SortableQuestion({
             />
             <Select
               size="xs"
-              aria-label="Wizard placement"
+              label="Setup order"
               data={QUESTION_PLACEMENTS}
               value={q.placement}
               onChange={(v) => v && v !== q.placement && save("placement", v)}
@@ -928,26 +935,27 @@ const SortableQuestion = memo(function SortableQuestion({
             />
             <Select
               size="xs"
-              aria-label="How often it's asked"
+              label="Frequency"
               data={QUESTION_SCOPES}
               value={q.scope}
               onChange={(v) => v && v !== q.scope && save("scope", v)}
               allowDeselect={false}
               comboboxProps={{ withinPortal: true }}
-              w={120}
+              w={140}
             />
             <Select
               size="xs"
-              aria-label="Where it's asked"
+              label="Shown in"
               data={QUESTION_SURFACES}
               value={q.surface}
               onChange={(v) => v && v !== q.surface && save("surface", v)}
               allowDeselect={false}
               comboboxProps={{ withinPortal: true }}
-              w={180}
+              w={190}
             />
             <Checkbox
               size="xs"
+              pb={6}
               label="Required"
               checked={q.required}
               onChange={(e) =>

@@ -24,7 +24,7 @@ export function bandOf(raw: string | null | undefined): AgeBand {
 
 export const AGE_BANDS: { value: AgeBand; label: string }[] = [
   { value: "adult", label: "Adult (18+)" },
-  { value: "under_18", label: "Under 18" },
+  { value: "under_18", label: "Teen (13–17)" },
   { value: "under_13", label: "Under 13" },
 ];
 

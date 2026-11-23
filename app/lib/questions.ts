@@ -57,19 +57,19 @@ export const QUESTION_PLACEMENTS: {
   value: QuestionPlacement;
   label: string;
 }[] = [
-  { value: "before", label: "Before “Bringing”" },
-  { value: "after", label: "After “Bringing”" },
+  { value: "before", label: "Before “Your gear”" },
+  { value: "after", label: "After “Your gear”" },
 ];
 
 export const QUESTION_SCOPES: { value: QuestionScope; label: string }[] = [
   { value: "per_edition", label: "Every year" },
-  { value: "once", label: "Once ever" },
+  { value: "once", label: "Once (all years)" },
 ];
 
 export const QUESTION_SURFACES: { value: QuestionSurface; label: string }[] = [
-  { value: "wizard", label: "Wizard" },
-  { value: "application", label: "Apply form" },
-  { value: "both", label: "Apply form + wizard" },
+  { value: "wizard", label: "Guided setup" },
+  { value: "application", label: "Application form" },
+  { value: "both", label: "Application + guided setup" },
 ];
 
 /** Whether a question shows in the wizard questionnaire (vs apply-form only). */
@@ -163,7 +163,7 @@ export function displayAnswer(
     const { arrival, departure } = parseEventRange(value);
     if (arrival && departure) return `${arrival} → ${departure}`;
     if (arrival) return `arrives ${arrival}`;
-    if (departure) return `leaves ${departure}`;
+    if (departure) return `departs ${departure}`;
     return "";
   }
   return value;

@@ -11,7 +11,6 @@ import {
   Text,
   Textarea,
   Title,
-  Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { and, desc, eq } from "drizzle-orm";
@@ -35,7 +34,7 @@ import {
 import type { Route } from "./+types/recruits";
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "Recruits · CampTool" }];
+  return [{ title: "Applications · CampTool" }];
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -135,7 +134,7 @@ export async function action({ request }: Route.ActionArgs) {
   await requireFeature(active, "recruiting");
   const campId = active.camp.id;
   if (!hasAtLeast(active.membership.role, "officer")) {
-    return data({ error: "You don't have permission." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
 
   const form = await request.formData();
@@ -147,7 +146,7 @@ export async function action({ request }: Route.ActionArgs) {
         .trim()
         .slice(0, 2000) || null;
     await db.update(camp).set({ description }).where(eq(camp.id, campId));
-    return data({ ok: "Public page blurb saved." });
+    return data({ ok: "Camp description saved." });
   }
 
   const applicationId = String(form.get("applicationId"));
@@ -239,7 +238,7 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
   return (
     <Container size="lg">
       <Stack gap="lg">
-        <Title order={2}>Recruits</Title>
+        <Title order={2}>Applications</Title>
 
         {applyUrl ? (
           <Card withBorder padding="md" radius="md">
@@ -259,24 +258,22 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
               </div>
               <CopyButton value={applyUrl}>
                 {({ copied, copy }) => (
-                  <Tooltip label={copied ? "Copied" : "Copy"}>
-                    <Button
-                      size="xs"
-                      variant="light"
-                      color={copied ? "green" : "blue"}
-                      onClick={copy}
-                    >
-                      {copied ? "Copied" : "Copy link"}
-                    </Button>
-                  </Tooltip>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color={copied ? "green" : "blue"}
+                    onClick={copy}
+                  >
+                    {copied ? "Copied" : "Copy link"}
+                  </Button>
                 )}
               </CopyButton>
             </Group>
             <Textarea
               mt="md"
-              label="Public page blurb"
-              description="Shown on the application page — assume the reader found you cold. What's the camp, which event, when, what's expected?"
-              placeholder="We're a theme camp of math nerds who build interactive puzzle art at Burning Man…"
+              label="Camp description"
+              description="Shown on the public application page."
+              placeholder="Describe your camp, event, dates, and what's expected of members…"
               autosize
               minRows={2}
               value={blurb}
@@ -294,7 +291,7 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
                     )
                   }
                 >
-                  Save blurb
+                  Save
                 </Button>
               </Group>
             ) : null}
@@ -310,7 +307,7 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
                 <Table.Tr>
                   <Table.Th>Name</Table.Th>
                   <Table.Th>Email</Table.Th>
-                  <Table.Th>Message</Table.Th>
+                  <Table.Th>Details</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Actions</Table.Th>
                 </Table.Tr>
@@ -357,7 +354,7 @@ export default function Recruits({ loaderData }: Route.ComponentProps) {
                           color={STATUS_COLOR[a.status] ?? "gray"}
                           variant="light"
                         >
-                          {a.status}
+                          {a.status.charAt(0).toUpperCase() + a.status.slice(1)}
                         </Badge>
                       </Table.Td>
                       <Table.Td>

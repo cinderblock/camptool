@@ -212,26 +212,16 @@ export async function action({ request, params }: Route.ActionArgs) {
     const body = str("body", 20000);
     const subject = str("subject", 300);
     if (!body && !subject) {
-      return data(
-        { error: "Paste the message, or at least give it a subject." },
-        { status: 400 },
-      );
+      return data({ error: "Enter a message or subject." }, { status: 400 });
     }
     const sourceRaw = String(form.get("sourceUrl") ?? "").trim();
     const sourceUrl = sourceRaw ? normalizeUrl(sourceRaw) : null;
     if (sourceRaw && !sourceUrl) {
-      return data(
-        { error: "That link doesn't look like a URL." },
-        {
-          status: 400,
-        },
-      );
+      return data({ error: "Enter a valid URL." }, { status: 400 });
     }
-    // An occurredAt in the future is almost always a typo'd year, and it would
-    // pin the entry to the top of the log forever.
     const occurred = occurredRaw ? new Date(occurredRaw) : new Date();
     if (Number.isNaN(occurred.getTime())) {
-      return data({ error: "That date doesn't parse." }, { status: 400 });
+      return data({ error: "Invalid date." }, { status: 400 });
     }
 
     await db.insert(prospectInteraction).values({
@@ -367,7 +357,7 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
             </Badge>
             {p.membershipId ? (
               <Badge color="green" variant="outline">
-                now a member
+                Member
               </Badge>
             ) : null}
           </Group>
@@ -417,18 +407,17 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
                 />
                 <Select
                   name="ownerMembershipId"
-                  label="Looked after by"
-                  description="Who's shepherding this conversation"
+                  label="Owner"
                   data={officers}
                   defaultValue={p.ownerMembershipId ?? null}
-                  placeholder="Nobody yet"
+                  placeholder="Unassigned"
                   searchable
                   clearable
                 />
                 <InstantDateInput
                   name="nextFollowUpAt"
-                  label="Follow up on"
-                  description="Shows in Needs a nudge once it's due"
+                  label="Follow-up"
+                  description="Appears in Needs attention when due"
                   valueFormat="YYYY-MM-DD"
                   defaultValue={
                     p.nextFollowUpAt ? new Date(p.nextFollowUpAt) : null
@@ -442,22 +431,22 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
                   loading={detailFetcher.state !== "idle"}
                   variant="light"
                 >
-                  Save details
+                  Save
                 </Button>
               </Group>
             </Stack>
           </detailFetcher.Form>
         </Card>
 
-        {/* --- Where to reach them ----------------------------------------- */}
+        {/* --- Contact handles --------------------------------------------- */}
         <Card withBorder padding="md" radius="md">
           <Text fw={600} mb="xs">
-            Where to reach them
+            Contact handles
           </Text>
           {thread.handles.length === 0 ? (
             <Text size="sm" c="dimmed" mb="sm">
-              No handles yet. Adding one is also how a future application from
-              them gets matched to this thread instead of starting a new one.
+              No handles yet. Adding one also matches future applications to
+              this record.
             </Text>
           ) : (
             <Stack gap={6} mb="sm">
@@ -510,7 +499,7 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
             <Group align="flex-end" wrap="wrap" gap="sm">
               <Select
                 name="kind"
-                label="Where"
+                label="Channel"
                 data={CHANNEL_OPTIONS}
                 defaultValue="facebook"
                 w={{ base: "100%", xs: 150 }}
@@ -519,13 +508,13 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
               <TextInput
                 name="value"
                 label="Handle or profile link"
-                placeholder="facebook.com/… or @them"
+                placeholder="facebook.com/… or @handle"
                 w={{ base: "100%", xs: 260 }}
               />
               <TextInput
                 name="label"
                 label="Note"
-                placeholder="optional"
+                placeholder="Optional"
                 w={{ base: "100%", xs: 160 }}
               />
               <Button
@@ -541,12 +530,8 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
 
         {/* --- Log a conversation ------------------------------------------ */}
         <Card withBorder padding="md" radius="md">
-          <Text fw={600} mb={4}>
-            Log a conversation
-          </Text>
-          <Text size="sm" c="dimmed" mb="sm">
-            Paste what they said — a screenshot works too. Include the link back
-            to the original so anyone can go read the thread in context.
+          <Text fw={600} mb="sm">
+            Log conversation
           </Text>
           <logFetcher.Form method="post" ref={logFormRef}>
             <input type="hidden" name="intent" value="logInteraction" />
@@ -555,60 +540,58 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
               <Group grow align="flex-start" wrap="wrap">
                 <Select
                   name="channel"
-                  label="Where"
+                  label="Channel"
                   data={CHANNEL_OPTIONS}
                   defaultValue="facebook"
                   allowDeselect={false}
                 />
                 <Select
                   name="direction"
-                  label="Which way"
+                  label="Direction"
                   data={DIRECTION_OPTIONS}
                   defaultValue="inbound"
                   allowDeselect={false}
                 />
                 <InstantDateTimePicker
                   name="occurredAt"
-                  label="When it happened"
-                  description="Not when you're typing it up"
+                  label="Occurred"
                   valueFormat="YYYY-MM-DD HH:mm"
                   defaultValue={new Date()}
                 />
               </Group>
               <TextInput
                 name="subject"
-                label="Subject or gist"
-                placeholder="Re: camping with you all in 2026"
+                label="Subject"
+                placeholder="e.g. Camping in 2026"
               />
               <MarkupTextarea
-                label="What was said"
+                label="Message"
                 value={logBody}
                 onChange={setLogBody}
                 targets={linkTargets}
                 minRows={4}
-                placeholder="Paste the message here. Pictures can be pasted or dropped in."
+                placeholder="Paste text or drop images here."
               />
               <Group grow align="flex-start" wrap="wrap">
                 <TextInput
                   name="sourceUrl"
-                  label="Link to the original"
-                  placeholder="facebook.com/groups/…/posts/…"
+                  label="Source link"
+                  placeholder="Optional URL to original thread"
                 />
                 <TextInput
                   name="counterparty"
-                  label="Who else was on it"
-                  placeholder="optional"
+                  label="Other participants"
+                  placeholder="Optional"
                 />
                 <TextInput
                   name="externalRef"
                   label="Message ID"
-                  description="For email, so it's findable in your mail client"
-                  placeholder="optional"
+                  placeholder="Optional (e.g. email ID)"
                 />
               </Group>
               <Group justify="flex-end">
                 <Button type="submit" loading={logFetcher.state !== "idle"}>
-                  Log it
+                  Save entry
                 </Button>
               </Group>
             </Stack>
@@ -710,12 +693,12 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
             <input type="hidden" name="notes" value={notes} />
             <Stack gap="sm">
               <MarkupTextarea
-                label="Notes on them"
+                label="Officer notes"
                 value={notes}
                 onChange={setNotes}
                 targets={linkTargets}
                 minRows={3}
-                placeholder="The standing summary — what they want to do, what they need, anything the next officer should know."
+                placeholder="Standing summary for officers."
               />
               <Group justify="flex-end">
                 <Button
@@ -735,20 +718,21 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
         {/* --- Turning them into a member ----------------------------------- */}
         <Card withBorder padding="md" radius="md">
           <Text fw={600} mb={4}>
-            Bring them in
+            Invite to camp
           </Text>
           {p.membershipId ? (
             <Text size="sm" c="dimmed">
-              They joined — this history is now attached to their membership.{" "}
+              Joined — this officer-only history is linked to their member
+              profile.{" "}
               <Anchor component={Link} to="/members" size="sm">
-                See them in Members
+                View in Members
               </Anchor>
             </Text>
           ) : inviteUrl ? (
             <Stack gap="xs">
               <Text size="sm" c="dimmed">
-                Send them this. When they use it, this whole conversation
-                follows them into the camp.
+                One-time invite link. When they sign up, this officer-only
+                history links to their member profile.
               </Text>
               <Group wrap="nowrap">
                 <TextInput
@@ -770,7 +754,7 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
           ) : (
             <Group justify="space-between" wrap="wrap">
               <Text size="sm" c="dimmed">
-                Make them a personal invite link tied to this record.
+                Create a one-time invite link linked to this record.
               </Text>
               <Button
                 variant="light"
@@ -796,14 +780,14 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
             onClick={() => setMergeOpen(true)}
             disabled={others.length === 0}
           >
-            Same person as another prospect
+            Merge duplicate…
           </Button>
           <Button
             variant="subtle"
             color="red"
             onClick={() => setDeleteOpen(true)}
           >
-            Delete this record
+            Delete prospect
           </Button>
         </Group>
 
@@ -815,23 +799,19 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
         >
           <Stack gap="md">
             <Text size="sm">
-              Use this when several of us started separate threads with the same
-              person. Every message and handle on <strong>{p.name}</strong>{" "}
-              moves onto the record you pick, the whole history sorts back
-              together, and this duplicate goes away.
+              Moves all logged entries and handles from{" "}
+              <strong>{p.name}</strong> onto the selected prospect, fills any
+              blank contact fields, keeps the further-along status, and deletes
+              this duplicate. This can't be undone.
             </Text>
             <Select
-              label="Keep this record"
-              placeholder="Pick the one to keep"
+              label="Keep prospect"
+              placeholder="Select prospect"
               searchable
               data={others}
               value={mergeInto}
               onChange={setMergeInto}
             />
-            <Text size="xs" c="dimmed">
-              Contact details fill in only where the surviving record is blank,
-              and the further-along status wins. This can't be undone.
-            </Text>
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setMergeOpen(false)}>
                 Cancel
@@ -862,9 +842,8 @@ export default function ProspectDetail({ loaderData }: Route.ComponentProps) {
         >
           <Stack gap="md">
             <Text size="sm">
-              This throws away the whole conversation — every logged message and
-              every handle. If this is the same human as another record, merge
-              instead so nothing is lost.
+              Permanently deletes this prospect, all handles, and all logged
+              entries. If this is a duplicate, merge instead.
             </Text>
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setDeleteOpen(false)}>

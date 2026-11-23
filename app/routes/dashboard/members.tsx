@@ -408,12 +408,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   // --- Officer-only ---------------------------------------------------------
   if (!hasAtLeast(actorRole, "officer")) {
-    return data(
-      { error: "You don't have permission to manage members." },
-      {
-        status: 403,
-      },
-    );
+    return data({ error: "Officers only." }, { status: 403 });
   }
 
   if (intent === "resolveFlag") {
@@ -602,7 +597,7 @@ export async function action({ request }: Route.ActionArgs) {
     // plans/password-recovery.md "Things not to do".
     if (rankOf(actorRole) <= rankOf(target.role)) {
       return data(
-        { error: "You can only issue reset links for members below you." },
+        { error: "You can only issue recovery links for members below you." },
         { status: 403 },
       );
     }
@@ -1060,13 +1055,12 @@ export default function Members({ loaderData }: Route.ComponentProps) {
       <Stack gap="lg">
         <Stack gap={2}>
           <Title order={2}>Members</Title>
-          {/* People clicked the wrong one of these two pages during a camp
-              meeting, so each says what it is and points at the other. */}
           <Text size="sm" c="dimmed">
-            Everyone associated with the camp, carried over year to year. Use
-            this to change roles or remove someone.{" "}
+            {canManage
+              ? "Everyone in the camp across all years. Manage roles, recovery links, and duplicates here."
+              : "Everyone in the camp across all years."}{" "}
             <Anchor component={Link} to="/roster" size="sm">
-              Looking for who's actually coming this year?
+              See who's coming this year
             </Anchor>
           </Text>
         </Stack>
@@ -1079,7 +1073,8 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 <TextInput
                   name="email"
                   type="email"
-                  label="Add a recruit by email"
+                  label="Add recruit by email"
+                  description="For someone who already has a CampTool account."
                   placeholder="person@example.com"
                   w={{ base: "100%", xs: 320 }}
                   required
@@ -1098,8 +1093,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
               Flagged concerns · {officerFlags.length}
             </Text>
             <Text size="sm" c="dimmed" mb="sm">
-              Raised privately by campers — visible to officers only. Handle
-              them discreetly.
+              Private concerns from members — visible to officers only.
             </Text>
             <Stack gap="sm">
               {officerFlags.map((f) => (
@@ -1392,7 +1386,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   )
                                 }
                               >
-                                Work as them
+                                Impersonate
                               </Menu.Item>
                               <Menu.Item
                                 onClick={() =>
@@ -1405,7 +1399,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   )
                                 }
                               >
-                                Issue a recovery link
+                                Issue recovery link
                               </Menu.Item>
                               <Menu.Item
                                 onClick={() =>
@@ -1415,7 +1409,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   })
                                 }
                               >
-                                Merge with a duplicate…
+                                Merge duplicate…
                               </Menu.Item>
                               {canFlag && !isSelf ? (
                                 <Menu.Item
@@ -1426,7 +1420,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                     })
                                   }
                                 >
-                                  Flag a concern…
+                                  Flag concern…
                                 </Menu.Item>
                               ) : null}
                               <Menu.Divider />
@@ -1439,7 +1433,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                                   })
                                 }
                               >
-                                Remove from the camp…
+                                Remove from camp…
                               </Menu.Item>
                             </Menu.Dropdown>
                           </Menu>
@@ -1472,16 +1466,14 @@ export default function Members({ loaderData }: Route.ComponentProps) {
         <Modal
           opened={removeTarget !== null}
           onClose={() => setRemoveTarget(null)}
-          title={`Remove ${removeTarget?.name ?? "member"} from the camp?`}
+          title={`Remove ${removeTarget?.name ?? "member"} from camp?`}
           centered
         >
           <Stack gap="md">
             <Text size="sm">
-              This removes them from the camp and deletes their camp data for
-              all years — RSVPs, questionnaire answers, passes, and ticket
-              requests. Items they declared stay on the map as camp items. Their
-              account itself is not deleted, and they can be re-added or
-              re-invited later.
+              Deletes their camp records for all years (RSVPs, answers, passes,
+              and ticket requests). Map items they owned become communal. Their
+              CampTool account is not deleted, and they can be re-invited later.
             </Text>
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setRemoveTarget(null)}>
@@ -1516,10 +1508,9 @@ export default function Members({ loaderData }: Route.ComponentProps) {
         >
           <Stack gap="md">
             <Text size="sm">
-              Send this to them yourself — over text, Signal, or a Discord DM.
-              CampTool can't email it. It walks them through setting up a
-              passkey; if their device can't do that, they can set a password
-              instead. Nothing about their account changes until they finish.
+              Send this link directly — CampTool does not email it. It lets them
+              set up a passkey (or a password if their device doesn't support
+              passkeys). Nothing changes until they confirm with their email.
             </Text>
             <TextInput
               readOnly
@@ -1529,9 +1520,8 @@ export default function Members({ loaderData }: Route.ComponentProps) {
             />
             <Group justify="space-between">
               <Text size="xs" c="dimmed">
-                Valid until {resetLink?.expires}. Opening it yourself is safe —
-                it only shows the link's status. Finishing the reset also needs
-                their email address.
+                Valid until {resetLink?.expires}. Shown once — issuing a new
+                link invalidates this one.
               </Text>
               <CopyButton value={resetLink?.url ?? ""}>
                 {({ copied, copy }) => (
@@ -1545,35 +1535,25 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 )}
               </CopyButton>
             </Group>
-            <Text size="xs" c="dimmed">
-              This is the only time the link is shown — only its fingerprint is
-              stored. Issuing a new one retires this one.
-            </Text>
           </Stack>
         </Modal>
 
         <Modal
           opened={mergeTarget !== null}
           onClose={closeMerge}
-          title={`Merge ${mergeTarget?.name ?? "member"} with their duplicate`}
+          title={`Merge ${mergeTarget?.name ?? "member"} with duplicate`}
           centered
         >
           <Stack gap="md">
             <Text size="sm">
-              Use this when the same person signed up twice. The two records
-              become one: gear, map placements, tickets, passes, RSVP, answers
-              and guests all end up on the same member, and both accounts'
-              sign-ins keep working.
-            </Text>
-            <Text size="sm" c="dimmed">
-              It doesn't matter which one you call the duplicate — merging{" "}
-              <strong>{mergeTarget?.name}</strong> with someone gives the same
-              result as merging them the other way round.
+              Combine two accounts for the same person. All gear, map
+              placements, tickets, passes, RSVPs, answers, and guests merge into
+              one member, and both sign-in methods keep working. Order doesn't
+              matter.
             </Text>
             <Select
-              label="Their other record"
-              description="The second sign-up for this same person."
-              placeholder="Pick the duplicate"
+              label="Duplicate record"
+              placeholder="Select member"
               searchable
               data={members
                 .filter((m) => m.memberId !== mergeTarget?.memberId)
@@ -1596,8 +1576,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                 {mergePreview.plan.conflicts.map((c) => (
                   <Radio.Group
                     key={c.field}
-                    label={`Which ${c.label.toLowerCase()} is right?`}
-                    description="The two records disagree, so this one needs you."
+                    label={`Which ${c.label.toLowerCase()} should we keep?`}
                     value={
                       mergePicks[c.field] ??
                       (c.field === "playaName"
@@ -1617,7 +1596,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
 
                 <Card withBorder padding="sm" radius="sm">
                   <Text size="sm" fw={500} mb={6}>
-                    They become one member:
+                    Resulting member
                   </Text>
                   <Text size="xs">
                     <strong>{mergePreview.plan.user.name}</strong>
@@ -1637,29 +1616,29 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                   </Text>
                   {mergePreview.plan.aliasEmail ? (
                     <Text size="xs" c="dimmed">
-                      {mergePreview.plan.aliasEmail} is kept on file as a former
-                      address — it will no longer sign them in.
+                      {mergePreview.plan.aliasEmail} is kept as a former address
+                      (no longer signs in).
                     </Text>
                   ) : null}
                   <Text size="xs" mt={6}>
-                    They can still sign in with:{" "}
+                    Sign-in:{" "}
                     {mergePreview.plan.signInMethods.join(", ") ||
-                      "nothing — they will need a recovery link"}
+                      "None — issue a recovery link"}
                   </Text>
                   {mergePreview.plan.droppedPassword ? (
                     <Text size="xs" c="orange">
-                      Both accounts have a password; only one is kept. If the
-                      wrong one survives, issue a recovery link.
+                      Both accounts have a password; only one is kept. Issue a
+                      recovery link if needed.
                     </Text>
                   ) : null}
                   <Text size="xs" fw={500} mt={8}>
                     {mergePreview.total === 0
-                      ? "Nothing else is attached to either record."
-                      : `${mergePreview.total} record${mergePreview.total === 1 ? "" : "s"} will be brought together:`}
+                      ? "No other records attached."
+                      : `${mergePreview.total} record${mergePreview.total === 1 ? "" : "s"} to combine:`}
                   </Text>
                   {mergePreview.moves.map((mv) => (
                     <Text size="xs" c="dimmed" key={`${mv.table}.${mv.column}`}>
-                      {mv.rows} × {mv.table.replace(/_/g, " ")}
+                      {mv.rows} × {mergeTableLabel(mv.table)}
                     </Text>
                   ))}
                 </Card>
@@ -1667,9 +1646,9 @@ export default function Members({ loaderData }: Route.ComponentProps) {
             ) : null}
 
             <Text size="xs" c="dimmed">
-              This can't be undone. Where both records hold the same thing (both
-              answered a question, both signed up for a shift), one copy is
-              kept. Everyone is signed out and will need to sign in again once.
+              This can't be undone. Duplicate entries (e.g. answers to the same
+              question) keep one copy. Both accounts are signed out and will
+              need to sign in again.
             </Text>
             <Group justify="flex-end">
               <Button variant="default" onClick={closeMerge}>
@@ -1697,7 +1676,7 @@ export default function Members({ loaderData }: Route.ComponentProps) {
                     );
                 }}
               >
-                Merge into one member
+                Merge members
               </Button>
             </Group>
           </Stack>
@@ -1764,6 +1743,31 @@ export default function Members({ loaderData }: Route.ComponentProps) {
  * usual answer stays visible in the row as a badge, so nobody has to open a
  * row to discover something is wrong with it.
  */
+const MERGE_TABLE_LABELS: Record<string, string> = {
+  attendee: "RSVPs & guests",
+  question_answer: "question answers",
+  map_object: "map items",
+  map_object_occupant: "tent assignments",
+  ticket_request: "ticket requests",
+  ticket_allocation: "ticket allocations",
+  setup_pass: "passes",
+  onboarding_completion: "checklist items",
+  gathering_signup: "shift sign-ups",
+  meeting_rsvp: "meeting RSVPs",
+  social_group_member: "social groups",
+  camp_invite: "invites",
+  fuel_declaration: "fuel declarations",
+  bin_item: "supply items",
+  finance_entry: "finance entries",
+  dues_payment: "dues records",
+  swap_listing: "spares listings",
+  training_signoff: "training sign-offs",
+};
+
+function mergeTableLabel(table: string): string {
+  return MERGE_TABLE_LABELS[table] ?? table.replace(/_/g, " ");
+}
+
 /** Badges keep their own width; the column grows instead of the label eliding. */
 const NO_SHRINK = { flexShrink: 0 };
 
@@ -1802,7 +1806,7 @@ function MemberDetails({
       ) : null}
       {noSignIn ? (
         <Badge size="xs" color="red" variant="light" style={NO_SHRINK}>
-          no sign-in
+          No sign-in
         </Badge>
       ) : null}
       <Popover
@@ -1835,7 +1839,7 @@ function MemberDetails({
                   {m.discord.discordUsername ?? m.discord.discordUserId}
                   {m.discord.inGuild ? (
                     <Badge ml={6} size="xs" color="green" variant="light">
-                      in server
+                      In server
                     </Badge>
                   ) : null}
                 </>
@@ -1885,7 +1889,7 @@ function MemberDetails({
                     .filter(Boolean)
                     .join(" · ") || (
                     <Text span size="sm" c="red">
-                      nothing — they need a recovery link
+                      None — issue a recovery link
                     </Text>
                   ),
                 )
@@ -1935,7 +1939,7 @@ function GroupsBar({
             data={[
               { value: "none", label: "Flat list" },
               { value: "group", label: "Social groups" },
-              { value: "inviter", label: "Who invited whom" },
+              { value: "inviter", label: "Invite tree" },
             ]}
           />
         </Stack>
@@ -1950,9 +1954,8 @@ function GroupsBar({
           </Group>
           {groups.length === 0 ? (
             <Text size="xs" c="dimmed">
-              No groups yet — a family, a couple, housemates, the friends
-              somebody brought along. Being in one grants nobody anything; it
-              just says who belongs with who.
+              No groups yet. Groups are labels for families, couples, or friend
+              circles — they don't affect permissions.
             </Text>
           ) : (
             <Group gap={6}>
@@ -2063,26 +2066,14 @@ function GroupsPanel({
       centered
     >
       <Stack gap="lg">
-        <Stack gap={4}>
-          <Text size="sm" c="dimmed">
-            A group is a name for people who belong together — a family, a
-            couple, housemates, friends who've been coming together for years.
-            Anyone can make one and add people, and groups can sit inside each
-            other, so a household can live inside the wider family.
-          </Text>
-          {/* People will otherwise use this for "who I'm camping with", which
-              is a different thing that already exists and carries real
-              authority. Say so once, here, where the group is being made. */}
-          <Text size="sm" c="dimmed">
-            This is about relationships, not logistics: it changes nothing about
-            what anyone is allowed to do. For who you're actually sharing a tent
-            or an arrival with, use{" "}
-            <Anchor component={Link} to="/roster" size="sm">
-              who you're camping with
-            </Anchor>{" "}
-            on the roster instead.
-          </Text>
-        </Stack>
+        <Text size="sm" c="dimmed">
+          Label families, couples, or friend circles (nested if helpful). Groups
+          don't change permissions — for sharing tickets or passes, use{" "}
+          <Anchor component={Link} to="/roster" size="sm">
+            Who's coming
+          </Anchor>
+          .
+        </Text>
 
         <Card withBorder padding="sm" radius="sm">
           <Stack gap="xs">
@@ -2265,9 +2256,9 @@ function GroupsPanel({
                     <Group align="flex-end" gap="xs">
                       <Select
                         size="xs"
-                        label="Fold another group into this one"
-                        description="Its people and subgroups move here, then it's gone."
-                        placeholder="Pick a group"
+                        label="Merge another group into this one"
+                        description="Moves its people and subgroups here, then deletes it."
+                        placeholder="Select a group"
                         clearable
                         searchable
                         style={{ flex: 1 }}
@@ -2291,7 +2282,7 @@ function GroupsPanel({
                           setMergeInto({ ...mergeInto, [g.id]: null });
                         }}
                       >
-                        Fold in
+                        Merge
                       </Button>
                     </Group>
                   </Stack>

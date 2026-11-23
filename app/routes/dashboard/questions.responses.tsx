@@ -41,7 +41,7 @@ import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/questions.responses";
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "Responses · CampTool" }];
+  return [{ title: "Question responses · CampTool" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -95,12 +95,11 @@ export default function Responses({ loaderData }: Route.ComponentProps) {
     <Container size="lg">
       <Stack gap="lg">
         <Stack gap={2}>
-          <Title order={2}>Responses · {year}</Title>
+          <Title order={2}>Question responses · {year}</Title>
           <Text size="sm" c="dimmed">
-            What everyone answered. Lifetime questions show the same answer in
-            every year; the rest are this year's.{" "}
+            Member answers for {year} (plus answers shared across all years).{" "}
             <Anchor component={Link} to="/questions" size="sm">
-              Edit the questions themselves
+              Edit questions
             </Anchor>
           </Text>
         </Stack>
@@ -186,12 +185,12 @@ function ByQuestion({
                 </Badge>
                 {q.scope === "once" ? (
                   <Badge size="sm" variant="light" color="blue">
-                    lifetime
+                    All years
                   </Badge>
                 ) : null}
                 {q.archived ? (
                   <Badge size="sm" variant="light" color="orange">
-                    archived
+                    Archived
                   </Badge>
                 ) : null}
               </Group>
@@ -277,7 +276,7 @@ function ByPerson({
             <Accordion.Panel>
               {asked.length === 0 ? (
                 <Text size="sm" c="dimmed">
-                  No questions are asked of {m.role}s.
+                  No questions apply to this member.
                 </Text>
               ) : (
                 <Table verticalSpacing="xs" withRowBorders={false}>

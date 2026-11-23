@@ -21,6 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   ActionIcon,
+  Anchor,
   Box,
   Button,
   Card,
@@ -37,7 +38,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, asc, eq } from "drizzle-orm";
 import { useEffect, useRef, useState } from "react";
-import { data, useFetcher } from "react-router";
+import { data, Link, useFetcher } from "react-router";
 import { QuestionField } from "~/components/QuestionField";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
@@ -55,7 +56,7 @@ import { onboardingCompletion, onboardingTask } from "../../../db/schema";
 import type { Route } from "./+types/onboarding";
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "Onboarding · CampTool" }];
+  return [{ title: "Checklist · CampTool" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -158,7 +159,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "addTask") {
     if (!canManage) {
-      return data({ error: "You don't have permission." }, { status: 403 });
+      return data({ error: "Officers only." }, { status: 403 });
     }
     const title = String(form.get("title") ?? "").trim();
     const description = String(form.get("description") ?? "").trim() || null;
@@ -181,7 +182,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "editTask") {
     if (!canManage) {
-      return data({ error: "You don't have permission." }, { status: 403 });
+      return data({ error: "Officers only." }, { status: 403 });
     }
     const taskId = String(form.get("taskId"));
     const field = String(form.get("field"));
@@ -207,7 +208,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "reorderTasks") {
     if (!canManage) {
-      return data({ error: "You don't have permission." }, { status: 403 });
+      return data({ error: "Officers only." }, { status: 403 });
     }
     let ids: string[] = [];
     try {
@@ -241,7 +242,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "deleteTask") {
     if (!canManage) {
-      return data({ error: "You don't have permission." }, { status: 403 });
+      return data({ error: "Officers only." }, { status: 403 });
     }
     const taskId = String(form.get("taskId"));
     await db
@@ -394,12 +395,19 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
   return (
     <Container size="md">
       <Stack gap="lg">
-        <Title order={2}>Onboarding</Title>
+        <Stack gap={2}>
+          <Title order={2}>Checklist</Title>
+          <Text c="dimmed" size="sm">
+            {canManage
+              ? "Steps for members to complete. Checkboxes track your own progress; text edits apply to everyone."
+              : "Steps to complete before the event."}
+          </Text>
+        </Stack>
 
         {tasks.length > 0 ? (
           <Card withBorder padding="md" radius="md">
             <Group justify="space-between" mb="xs">
-              <Text fw={600}>Your checklist</Text>
+              <Text fw={600}>Your progress</Text>
               <Text size="sm" c="dimmed">
                 {completed} / {tasks.length} done
               </Text>
@@ -453,7 +461,7 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
           </Card>
         ) : (
           <Text c="dimmed">
-            No onboarding tasks yet.
+            No checklist tasks yet.
             {canManage ? " Add the first one below." : ""}
           </Text>
         )}
@@ -462,11 +470,16 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
           <Card withBorder padding="md" radius="md">
             <Group justify="space-between" mb="xs">
               <Text fw={600}>Camp questions</Text>
-              {locked ? (
-                <Text size="sm" c="dimmed">
-                  Locked — answers are read-only
-                </Text>
-              ) : null}
+              <Group gap="sm">
+                {locked ? (
+                  <Text size="sm" c="dimmed">
+                    This year is locked — read-only.
+                  </Text>
+                ) : null}
+                <Anchor component={Link} to="/questions" size="xs">
+                  Open Questions
+                </Anchor>
+              </Group>
             </Group>
             <Stack gap="lg">
               {questions.map((q) => (
@@ -487,7 +500,7 @@ export default function Onboarding({ loaderData }: Route.ComponentProps) {
         {canManage ? (
           <Card withBorder padding="md" radius="md">
             <Text fw={600} mb="sm">
-              Add an onboarding task
+              Add task
             </Text>
             <manageFetcher.Form method="post" ref={addFormRef}>
               <input type="hidden" name="intent" value="addTask" />

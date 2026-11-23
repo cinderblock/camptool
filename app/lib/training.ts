@@ -23,8 +23,8 @@ export const VALIDITY_OPTIONS: {
   },
   {
     value: "annual",
-    label: "Expires after a year",
-    hint: "Valid for ~12 months from when it was granted (e.g. a certification).",
+    label: "Expires after 12 months",
+    hint: "Valid for 12 months from when it was granted (e.g. a certification).",
   },
 ];
 

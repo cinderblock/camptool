@@ -24,7 +24,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { data, Link, useFetcher } from "react-router";
 import { CampMapView } from "~/components/CampMapView";
 import { StayRangeField } from "~/components/StayRangeField";
-import { AGE_BANDS, ageLabel, bandOf, minorSummary } from "~/lib/age";
+import { AGE_BANDS, ageLabel, bandOf } from "~/lib/age";
 import {
   arrivalDistribution,
   arrivalSortKey,
@@ -70,7 +70,7 @@ import { requireActiveEdition } from "~/lib/session.server";
 import type { Route } from "./+types/roster";
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "Roster · CampTool" }];
+  return [{ title: "Who's coming · CampTool" }];
 }
 
 const STATUS_META: Record<AttendeeStatus, { label: string; color: string }> = {
@@ -243,7 +243,7 @@ export async function action({ request }: Route.ActionArgs) {
       return data(
         {
           error:
-            "That's a guest you're hosting. Use Remove if they're not coming, or Invite to join to give them their own account.",
+            "That's your own guest. Use Remove if they aren't coming, or Get sign-up link to give them an account.",
         },
         { status: 400 },
       );
@@ -359,7 +359,7 @@ export async function action({ request }: Route.ActionArgs) {
     const rawHost = String(form.get("hostMembershipId") ?? "").trim();
     const host = rawHost === "" ? null : rawHost;
     if (!subject) {
-      return data({ error: "Who are we linking?" }, { status: 400 });
+      return data({ error: "Select a member." }, { status: 400 });
     }
     if (subject !== myMid && !isOfficer) {
       // The current host isn't named in the form, so look them up before
@@ -388,7 +388,7 @@ export async function action({ request }: Route.ActionArgs) {
   // grants nothing: the invitation is inert until they answer it.
   if (intent === "invitePartyMember") {
     const subject = String(form.get("membershipId") ?? "");
-    if (!subject) return data({ error: "Who are we asking?" }, { status: 400 });
+    if (!subject) return data({ error: "Select a member." }, { status: 400 });
     const result = await invitePartyMember({
       campId,
       editionId,
@@ -396,13 +396,13 @@ export async function action({ request }: Route.ActionArgs) {
       hostMembershipId: myMid,
     });
     if (!result.ok) return data({ error: result.error }, { status: 400 });
-    return data({ ok: "Asked. They'll see it on their to-do list." });
+    return data({ ok: "Invite sent. They'll see it on Overview." });
   }
 
   // Saying yes — the only place a non-officer's party authority is created.
   if (intent === "acceptPartyInvite") {
     const host = String(form.get("hostMembershipId") ?? "").trim();
-    if (!host) return data({ error: "Whose party?" }, { status: 400 });
+    if (!host) return data({ error: "Select a host." }, { status: 400 });
     const result = await acceptPartyInvite({
       campId,
       editionId,
@@ -417,7 +417,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "clearPartyInvite") {
     const subject = String(form.get("membershipId") ?? "");
     if (!subject) {
-      return data({ error: "Which invitation?" }, { status: 400 });
+      return data({ error: "Select an invitation." }, { status: 400 });
     }
     if (subject !== myMid && !isOfficer) {
       if ((await getPendingPartyHostOf(editionId, subject)) !== myMid) {
@@ -457,8 +457,21 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
     groups,
   } = loaderData;
 
-  // Minors across the whole roster — everyone's guests, not just the viewer's.
-  const minorsNote = minorSummary(members.flatMap((m) => m.guests));
+  const allGuests = members.flatMap((m) => m.guests);
+  const under13Count = allGuests.filter(
+    (g) => bandOf(g.ageBand) === "under_13",
+  ).length;
+  const under18Count = allGuests.filter(
+    (g) => bandOf(g.ageBand) === "under_18",
+  ).length;
+  const minorsParts = [
+    under13Count > 0
+      ? `${under13Count} under 13 (no ticket or ${
+          isBurningMan(event) ? "setup access pass" : "early-arrival pass"
+        } needed)`
+      : null,
+    under18Count > 0 ? `${under18Count} aged 13–17` : null,
+  ].filter(Boolean);
 
   return (
     <Container size="lg">
@@ -466,38 +479,29 @@ export default function Roster({ loaderData }: Route.ComponentProps) {
         <Group justify="space-between" align="flex-end">
           <Stack gap={2}>
             <Title order={2}>Who's coming · {year}</Title>
-            {/* Paired with the same note on /members — the two were confused
-                for each other during a camp meeting. */}
             <Text size="sm" c="dimmed">
-              This year's actual roster: members who RSVP'd, plus the guests
-              they're bringing.{" "}
+              Members coming this year and their guests.{" "}
               <Anchor component={Link} to="/members" size="sm">
-                Looking for the full camp list?
+                View all camp members
               </Anchor>
             </Text>
           </Stack>
           {locked ? (
             <Badge color="gray" variant="light">
-              locked
+              Locked
             </Badge>
           ) : null}
         </Group>
 
         <SimpleGrid cols={{ base: 2, sm: 4 }}>
-          <Stat value={headcount.total} label="coming (heads)" strong />
-          <Stat value={headcount.membersComing} label="members coming" />
-          <Stat value={headcount.guests} label="guests" />
-          <Stat value={headcount.membersMaybe} label="maybe" />
+          <Stat value={headcount.total} label="Coming (total)" strong />
+          <Stat value={headcount.membersComing} label="Members" />
+          <Stat value={headcount.guests} label="Guests" />
+          <Stat value={headcount.membersMaybe} label="Maybe" />
         </SimpleGrid>
-        {minorsNote ? (
-          // Children count toward the headcount like anyone else — they eat,
-          // they sleep somewhere, they're bodies in camp. What they don't need
-          // is a ticket or a pass, and that difference is worth stating next to
-          // the number rather than discovering when the allocation looks short.
+        {minorsParts.length > 0 ? (
           <Text size="xs" c="dimmed">
-            Includes {minorsNote} — no ticket or{" "}
-            {isBurningMan(event) ? "setup access pass" : "early-arrival pass"}{" "}
-            needed for under-13s.
+            Includes {minorsParts.join(" · ")}.
           </Text>
         ) : null}
 
@@ -583,9 +587,9 @@ function Arrivals({
           Arrivals
         </Text>
         <Text size="sm" c="dimmed">
-          Nobody has said when they're arriving yet
-          {dist.undated > 0 ? ` (${dist.undated} still to answer)` : ""}. Once
-          people fill in their dates this shows how many are on site each day.
+          No arrival dates yet
+          {dist.undated > 0 ? ` (${dist.undated} without dates)` : ""}. Daily
+          headcount appears here once people enter their dates.
         </Text>
       </Paper>
     );
@@ -603,9 +607,8 @@ function Arrivals({
             Arrivals
           </Text>
           <Text size="xs" c="dimmed">
-            How many people are here each day. Above each bar is who arrives
-            that day; below it, the number we know and — when dates are missing
-            — the estimated total.
+            Top: arriving that day. Bottom: on site (known, plus estimate when
+            dates are missing).
           </Text>
         </div>
         {dist.fullest ? (
@@ -686,19 +689,13 @@ function Arrivals({
       </Group>
 
       <Text size="xs" c="dimmed" mt="xs">
-        Dashed bars are setup days, before gates open. Solid = counted.
+        Dashed = setup days (before gates open). Solid = confirmed.
         {dist.undated > 0 ? (
           <>
             {" "}
-            Hatched ={" "}
-            <b>
-              estimate for the {dist.undated}{" "}
-              {dist.undated === 1 ? "person" : "people"}
-            </b>{" "}
-            who {dist.undated === 1 ? "hasn't" : "haven't"} given dates, spread
-            the same way as everyone who has. Treat it as a rough ceiling —
-            people who haven't answered are the least likely to be here for
-            setup, so the early days are probably overstated.
+            Hatched = estimate for {dist.undated}{" "}
+            {dist.undated === 1 ? "person" : "people"} without dates (setup days
+            may be overstated).
           </>
         ) : (
           ""
@@ -822,13 +819,12 @@ function CampingWith({
   return (
     <Card withBorder padding="lg" radius="md">
       <Text fw={600} mb={4}>
-        Who you're camping with
+        Camping with (camp members)
       </Text>
       <Text size="sm" c="dimmed" mb="md">
-        For someone in camp who has their own account but is here as part of
-        your household — sharing your tent or RV, arriving together. Whoever
-        anchors the party can sort out tickets and setup passes for everyone in
-        it, and each person can still manage their own.
+        Link camp members who share your tent, RV, or arrival. The party host
+        can manage tickets and passes for the group; everyone can still manage
+        their own.
       </Text>
 
       {/* An invitation outranks the pickers: it's a question addressed to you,
@@ -846,8 +842,8 @@ function CampingWith({
             <b>{invites.received.name}</b> says you're camping with them.
           </Text>
           <Text size="xs" c="dimmed" mb="sm">
-            If you agree, they'll be able to sort out your ticket and setup pass
-            — you keep yours either way. Nothing has changed yet.
+            If you accept, they can manage your ticket and pass alongside you.
+            Nothing has changed yet.
           </Text>
           <Group gap="sm">
             <Button
@@ -857,7 +853,7 @@ function CampingWith({
                 invites.received && accept(invites.received.membershipId)
               }
             >
-              Yes, we're together
+              Accept
             </Button>
             <Button
               size="compact-sm"
@@ -866,7 +862,7 @@ function CampingWith({
               loading={busy}
               onClick={() => clearInvite(myMembershipId)}
             >
-              No
+              Decline
             </Button>
           </Group>
         </Card>
@@ -875,7 +871,7 @@ function CampingWith({
       {partyHost ? (
         <Group gap="sm" wrap="wrap">
           <Text size="sm">
-            You're listed as part of <b>{partyHost.name}</b>'s party.
+            You're in <b>{partyHost.name}</b>'s party.
           </Text>
           <Button
             size="compact-xs"
@@ -884,7 +880,7 @@ function CampingWith({
             loading={busy}
             onClick={() => unlink(myMembershipId)}
           >
-            We're not together
+            Leave party
           </Button>
         </Group>
       ) : (
@@ -901,16 +897,13 @@ function CampingWith({
                     loading={busy}
                     onClick={() => unlink(p.membershipId)}
                   >
-                    Remove from your party
+                    Remove
                   </Button>
                 </Group>
               ))}
             </Stack>
           ) : null}
 
-          {/* Waiting on an answer. Listed next to the confirmed members so
-              "who's in my party" reads as one list with two states, rather than
-              an ask that vanishes until the other person acts. */}
           {invites.sent.length > 0 ? (
             <Stack gap="xs" mb="md">
               {invites.sent.map((p) => (
@@ -919,7 +912,7 @@ function CampingWith({
                     {p.name}
                   </Text>
                   <Badge size="sm" variant="outline" color="gray">
-                    Waiting on them
+                    Pending
                   </Badge>
                   <Button
                     size="compact-xs"
@@ -937,15 +930,15 @@ function CampingWith({
 
           <Group gap="sm" align="flex-end" wrap="wrap">
             <Select
-              label="Ask someone to join your party"
-              description="They confirm, then you can sort out their ticket and setup pass"
-              placeholder="Pick a member"
+              label="Invite a member to your party"
+              description="Once they accept, you can manage their ticket and pass"
+              placeholder="Select member"
               searchable
               clearable
               value={addPick}
               onChange={setAddPick}
               data={options}
-              nothingFoundMessage="Nobody available"
+              nothingFoundMessage="No one available"
               style={{ minWidth: 240 }}
             />
             <Button
@@ -953,7 +946,7 @@ function CampingWith({
               loading={busy}
               onClick={() => addPick && invite(addPick)}
             >
-              Ask them
+              Invite
             </Button>
           </Group>
 
@@ -961,14 +954,14 @@ function CampingWith({
             <Group gap="sm" align="flex-end" wrap="wrap" mt="md">
               <Select
                 label="Or join someone else's party"
-                description="They'll be able to sort out yours — no confirmation needed, it's your call to make"
-                placeholder="Pick a member"
+                description="Lets them manage your ticket and pass immediately"
+                placeholder="Select member"
                 searchable
                 clearable
                 value={joinPick}
                 onChange={setJoinPick}
                 data={options}
-                nothingFoundMessage="Nobody available"
+                nothingFoundMessage="No one available"
                 style={{ minWidth: 240 }}
               />
               <Button
@@ -977,14 +970,13 @@ function CampingWith({
                 loading={busy}
                 onClick={() => joinPick && join(joinPick)}
               >
-                Join their party
+                Join party
               </Button>
             </Group>
           ) : null}
 
           <Text size="xs" c="dimmed" mt="md">
-            Only people who aren't already in someone else's party are listed —
-            a party is one level deep, so it always has a single anchor.
+            Only members not already in another party are listed.
           </Text>
         </>
       )}
@@ -1026,14 +1018,12 @@ function MyParty({
   return (
     <Card withBorder padding="lg" radius="md">
       <Text fw={600} mb={4}>
-        Your party
+        Your guests
       </Text>
       <Text size="sm" c="dimmed" mb="md">
-        Bringing people who don't have their own account (a partner, a friend)?
-        Add them here so they're counted and can be placed on the map. Each one
-        can get their own <b>sign-up link</b> — when they use it, their spot in
-        your party turns into their own account, so the camp doesn't end up
-        counting them twice.
+        Add partners, kids, or friends without an account so they're counted and
+        can be placed on the map. You can send any guest a sign-up link to turn
+        their entry into a member account.
       </Text>
 
       {guests.length > 0 ? (
@@ -1064,11 +1054,11 @@ function MyParty({
                   />
                   {g.inviteRedeemed ? (
                     <Badge size="xs" color="green" variant="light">
-                      has their own account
+                      Has account
                     </Badge>
                   ) : g.inviteLink ? (
                     <Badge size="xs" color="blue" variant="light">
-                      link sent, not used yet
+                      Link sent
                     </Badge>
                   ) : null}
                 </Group>
@@ -1085,7 +1075,7 @@ function MyParty({
                         )
                       }
                     >
-                      Get their sign-up link
+                      Get sign-up link
                     </Button>
                   ) : null}
                   <Button
@@ -1110,10 +1100,6 @@ function MyParty({
                   </Button>
                 </Group>
               </Group>
-              {/* The link persists with the page rather than only living in a
-                  fetcher response that disappears on the next navigation —
-                  that disappearing act is what made this feature "confusing".
-                  Redeemed links are not re-offered: they're one-use. */}
               {g.inviteLink && !g.inviteRedeemed ? (
                 <Group gap="xs" mt={6} wrap="wrap">
                   <Text
@@ -1138,7 +1124,7 @@ function MyParty({
                       `Here's your sign-up link for camp: ${g.inviteLink}`,
                     )}`}
                   >
-                    Text it
+                    Text
                   </Button>
                   <Button
                     size="compact-xs"
@@ -1150,7 +1136,7 @@ function MyParty({
                       `Here's your sign-up link for camp: ${g.inviteLink}`,
                     )}`}
                   >
-                    Email it
+                    Email
                   </Button>
                 </Group>
               ) : null}
@@ -1168,12 +1154,11 @@ function MyParty({
           bg="var(--mantine-color-default-hover)"
         >
           <Text size="sm" fw={600}>
-            Invite link for {promoteFetcher.data?.promoteName ?? "your guest"}
+            Sign-up link for {promoteFetcher.data?.promoteName ?? "your guest"}
           </Text>
           <Text size="xs" c="dimmed" mb={6}>
-            Send them this link — signing up through it turns their guest spot
-            into a real account (their RSVP, tent spot, tickets, and passes come
-            along).
+            Signing up through this link transfers their RSVP, tent spot,
+            tickets, and passes to their new account.
           </Text>
           <Group gap="sm" wrap="wrap">
             <Text size="sm" style={{ wordBreak: "break-all" }}>
@@ -1200,7 +1185,7 @@ function MyParty({
         <Group align="flex-end" gap="sm" wrap="wrap">
           <TextInput
             name="name"
-            label="Add someone to your party"
+            label="Add a guest"
             placeholder="Full name"
             w={{ base: "100%", xs: 220 }}
             maxLength={MAX_NAME}
@@ -1208,7 +1193,7 @@ function MyParty({
           />
           <StayRangeField
             year={year}
-            label="When they're here"
+            label="Dates"
             value={addStay}
             onChange={setAddStay}
             names={{ arrival: "arrivalDate", departure: "departureDate" }}
@@ -1217,7 +1202,7 @@ function MyParty({
           <Select
             name="ageBand"
             label="Age"
-            description="Under 13s need no ticket or pass"
+            description="Under 13: no ticket or pass"
             data={AGE_BANDS}
             defaultValue="adult"
             allowDeselect={false}
@@ -1233,7 +1218,7 @@ function MyParty({
       <Modal
         opened={edit !== null}
         onClose={() => setEdit(null)}
-        title="Edit party member"
+        title="Edit guest"
         centered
       >
         {edit ? (
@@ -1687,7 +1672,7 @@ function RosterTableInner({
                         </Anchor>
                       ) : (
                         <Text size="sm" c="dimmed">
-                          not placed
+                          Not placed
                         </Text>
                       )}
                     </Table.Td>
@@ -1869,10 +1854,9 @@ function RosterTable({
             <Group gap="sm" wrap="nowrap">
               <Text size="xs" c="dimmed">
                 {!activeMember
-                  ? "Pick someone below to light up their spot"
+                  ? "Select a row to highlight them on the map"
                   : activeMember.mapObjectIds.length === 0
-                    ? // The dimmed map is the answer here, so say what it means.
-                      "Nothing of theirs is placed yet"
+                    ? "Nothing placed yet"
                     : `${activeMember.mapObjectIds.length} highlighted`}
               </Text>
               {selected ? (
@@ -1959,13 +1943,12 @@ function RosterTable({
       >
         <Stack gap="md">
           <Text size="sm">
-            You're saying <strong>{claiming?.name}</strong> — currently listed
-            as someone else's guest — is you. That entry will be merged into
-            your account, so you stop being counted twice, and anything attached
-            to it (a tent spot, ticket, or setup pass) comes with you.
+            Merge <strong>{claiming?.name}</strong> (currently listed as a
+            guest) into your account? Any tent spot, ticket, or pass on that
+            entry moves to you, and you won't be counted twice.
           </Text>
           <Text size="xs" c="dimmed">
-            Only do this if it's genuinely you. Officers can see the result.
+            Only confirm if this is you. Officers can see the change.
           </Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setClaiming(null)}>

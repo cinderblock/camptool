@@ -111,7 +111,7 @@ export async function action({ request }: Route.ActionArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
   await requireFeature(active, "training");
   if (!hasAtLeast(active.membership.role, "officer")) {
-    return data({ error: "Officers manage training." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
   const form = await request.formData();
   const intent = String(form.get("intent"));
@@ -246,7 +246,7 @@ export default function Training({ loaderData }: Route.ComponentProps) {
                       color={s.valid ? "green" : "gray"}
                       size="sm"
                     >
-                      {s.valid ? "valid" : "expired"}
+                      {s.valid ? "Valid" : "Expired"}
                     </Badge>
                     <Text size="sm">{t?.name ?? "(retired training)"}</Text>
                     {s.expiresAt ? (
@@ -266,9 +266,11 @@ export default function Training({ loaderData }: Route.ComponentProps) {
         {trainings.map((t) => (
           <TrainingCard key={t.id} t={t} loaderData={loaderData} />
         ))}
-        {trainings.length === 0 && isOfficer ? (
+        {trainings.length === 0 ? (
           <Text size="sm" c="dimmed">
-            No trainings defined yet — add the first one above.
+            {isOfficer
+              ? "No trainings yet — add one above."
+              : "No trainings listed yet."}
           </Text>
         ) : null}
       </Stack>
@@ -307,18 +309,18 @@ function AddTraining() {
               />
               <Select
                 name="validity"
-                label="How long a sign-off lasts"
+                label="Validity"
                 defaultValue="per_edition"
                 data={VALIDITY_OPTIONS.map((v) => ({
                   value: v.value,
-                  label: v.label,
+                  label: `${v.label} — ${v.hint}`,
                 }))}
                 allowDeselect={false}
               />
             </Group>
             <Textarea
               name="description"
-              label="What it covers"
+              label="Description"
               autosize
               minRows={2}
             />
@@ -377,21 +379,31 @@ function TrainingCard({
         {isOfficer ? (
           <Group gap="xs">
             {granting ? (
-              <Select
-                size="xs"
-                placeholder="Sign someone off…"
-                data={members}
-                searchable
-                onChange={(id) => {
-                  if (id) {
-                    fetcher.submit(
-                      { intent: "grant", trainingId: t.id, membershipId: id },
-                      { method: "post" },
-                    );
-                  }
-                  setGranting(false);
-                }}
-              />
+              <>
+                <Select
+                  size="xs"
+                  placeholder="Select member…"
+                  data={members}
+                  searchable
+                  onChange={(id) => {
+                    if (id) {
+                      fetcher.submit(
+                        { intent: "grant", trainingId: t.id, membershipId: id },
+                        { method: "post" },
+                      );
+                    }
+                    setGranting(false);
+                  }}
+                />
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  color="gray"
+                  onClick={() => setGranting(false)}
+                >
+                  Cancel
+                </Button>
+              </>
             ) : (
               <Button
                 size="compact-xs"
@@ -433,7 +445,7 @@ function TrainingCard({
                       variant="light"
                       color={s.valid ? "green" : "gray"}
                     >
-                      {s.valid ? "valid" : "expired"}
+                      {s.valid ? "Valid" : "Expired"}
                     </Badge>
                   </Table.Td>
                   <Table.Td>

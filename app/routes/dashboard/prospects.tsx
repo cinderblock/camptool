@@ -147,7 +147,7 @@ export async function action({ request }: Route.ActionArgs) {
       });
     }
     return data({
-      ok: `Brought ${apps.length} application${apps.length === 1 ? "" : "s"} in.`,
+      ok: `Imported ${apps.length} application${apps.length === 1 ? "" : "s"}.`,
     });
   }
 
@@ -157,7 +157,7 @@ export async function action({ request }: Route.ActionArgs) {
       .update(prospect)
       .set({ ownerMembershipId: myMid, updatedAt: new Date() })
       .where(and(eq(prospect.id, id), eq(prospect.campId, campId)));
-    return data({ ok: "You're looking after them now." });
+    return data({ ok: "Assigned to you." });
   }
 
   return data({ error: "Unknown action." }, { status: 400 });
@@ -217,8 +217,7 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
         <Stack gap={2}>
           <Title order={2}>Prospects</Title>
           <Text size="sm" c="dimmed">
-            Everyone the camp is talking to who hasn't joined yet — and what
-            each of us has said to them. Officers only; members never see this.
+            Recruiting log for prospective campers — officers only.
           </Text>
         </Stack>
 
@@ -228,9 +227,9 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
             <Group align="flex-end" wrap="wrap" gap="sm">
               <TextInput
                 name="name"
-                label="Who are they?"
-                description="Whatever you've got — a partial name is fine"
-                placeholder="Jenny from the art thread"
+                label="Name"
+                description="Partial names are fine"
+                placeholder="e.g. Jenny from the art thread"
                 w={{ base: "100%", sm: 240 }}
                 required
               />
@@ -238,12 +237,12 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
                 name="email"
                 type="email"
                 label="Email"
-                placeholder="optional"
+                placeholder="Optional"
                 w={{ base: "100%", sm: 200 }}
               />
               <Select
                 name="handleKind"
-                label="Found them on"
+                label="Channel"
                 data={CHANNEL_OPTIONS}
                 defaultValue="facebook"
                 w={{ base: "100%", sm: 150 }}
@@ -251,8 +250,8 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
               />
               <TextInput
                 name="handleValue"
-                label="Their handle or profile"
-                placeholder="optional"
+                label="Handle or profile"
+                placeholder="Optional"
                 w={{ base: "100%", sm: 220 }}
               />
               <Select
@@ -274,11 +273,9 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
           <Card withBorder padding="md" radius="md">
             <Group justify="space-between" wrap="wrap">
               <Text size="sm">
-                {unlinkedApplicationCount} application
-                {unlinkedApplicationCount === 1 ? "" : "s"} in the recruits
-                queue {unlinkedApplicationCount === 1 ? "isn't" : "aren't"} here
-                yet. New applications land here automatically — this is for the
-                ones that arrived before you turned this on.
+                {unlinkedApplicationCount} existing application
+                {unlinkedApplicationCount === 1 ? " isn't" : "s aren't"} in
+                Prospects yet. New applications are added automatically.
               </Text>
               <Button
                 variant="light"
@@ -290,7 +287,7 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
                   )
                 }
               >
-                Bring them in
+                Import applications
               </Button>
             </Group>
           </Card>
@@ -307,8 +304,8 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
                 value: "attention",
                 label:
                   attention > 0
-                    ? `Needs a nudge · ${attention}`
-                    : "Needs a nudge",
+                    ? `Needs attention · ${attention}`
+                    : "Needs attention",
               },
               { value: "all", label: "All" },
             ]}
@@ -325,20 +322,20 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
         {shown.length === 0 ? (
           <Text c="dimmed">
             {prospects.length === 0
-              ? "Nobody here yet. Add the first person you're talking to above."
-              : "Nobody matches that."}
+              ? "No prospects yet. Add one above."
+              : "No matching prospects."}
           </Text>
         ) : (
           <Table.ScrollContainer minWidth={860}>
             <Table verticalSpacing="sm" highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>Who</Table.Th>
+                  <Table.Th>Name</Table.Th>
                   <Table.Th>Status</Table.Th>
-                  <Table.Th>Looked after by</Table.Th>
-                  <Table.Th>Reachable at</Table.Th>
+                  <Table.Th>Owner</Table.Th>
+                  <Table.Th>Contact</Table.Th>
                   <Table.Th>Last contact</Table.Th>
-                  <Table.Th>Follow up</Table.Th>
+                  <Table.Th>Follow-up</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -380,7 +377,7 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
                               )
                             }
                           >
-                            Unclaimed — take it
+                            Claim
                           </Button>
                         )}
                       </Table.Td>
@@ -407,7 +404,7 @@ export default function Prospects({ loaderData }: Route.ComponentProps) {
                         <Text size="xs" c="dimmed">
                           {p.lastInteractionAt
                             ? `${p.lastInteractionAt.slice(0, 10)} · ${p.interactionCount}`
-                            : "never"}
+                            : "Never"}
                         </Text>
                       </Table.Td>
                       <Table.Td>

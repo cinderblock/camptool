@@ -27,7 +27,7 @@ import { campInvite, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/invite";
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "Invite friends · CampTool" }];
+  return [{ title: "Invites · CampTool" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -101,7 +101,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   const { active } = await requireActiveCamp(request);
   if (!hasAtLeast(active.membership.role, "member")) {
-    return data({ error: "You don't have permission." }, { status: 403 });
+    return data({ error: "Members only." }, { status: 403 });
   }
 
   const form = await request.formData();
@@ -181,14 +181,14 @@ function inviteStatus(i: {
   maxUses: number | null;
   useCount: number;
 }): { label: string; color: string } {
-  if (i.revoked) return { label: "revoked", color: "red" };
+  if (i.revoked) return { label: "Revoked", color: "red" };
   if (i.expiresAt && i.expiresAt <= Date.now()) {
-    return { label: "expired", color: "gray" };
+    return { label: "Expired", color: "gray" };
   }
   if (i.maxUses != null && i.useCount >= i.maxUses) {
-    return { label: "used up", color: "gray" };
+    return { label: "Used", color: "gray" };
   }
-  return { label: "active", color: "green" };
+  return { label: "Active", color: "green" };
 }
 
 export default function InviteFriends({ loaderData }: Route.ComponentProps) {
@@ -206,31 +206,32 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
   return (
     <Container>
       <Stack gap="lg">
-        <Title order={2}>Invite friends</Title>
-        <Text c="dimmed" size="sm">
-          One-time signup links are how friends join the camp: create a link,
-          send it to one friend, and it stops working once they use it. Whoever
-          joins through your link is recorded as invited by you, and joins as a
-          recruit — promote them later from Members.
-        </Text>
+        <Stack gap={2}>
+          <Title order={2}>Invites</Title>
+          <Text c="dimmed" size="sm">
+            {isOfficer
+              ? "Create invite links to add recruits. Each redemption records who invited them; promote recruits later on Members."
+              : "Create one-time invite links for friends. Anyone who signs up joins as a recruit under your name."}
+          </Text>
+        </Stack>
 
         <Card withBorder padding="md" radius="md">
           <Text fw={600} size="sm">
-            Create a one-time signup link
+            One-time invite link
           </Text>
           <Text c="dimmed" size="xs">
-            Good for exactly one signup — make a fresh link for each friend.
+            Works once — create a separate link for each person.
           </Text>
           <fetcher.Form method="post" key={`one-${resetKey}`}>
             <input type="hidden" name="intent" value="create" />
             <Group gap="xs" mt="xs" align="flex-end" wrap="wrap">
               <TextInput
-                label="For"
+                label="Label"
                 name="note"
                 size="xs"
                 style={{ flex: 1, minWidth: 200 }}
                 maxLength={200}
-                placeholder={'Who’s it for? — e.g. "Alex from work"'}
+                placeholder="e.g. Alex from work"
               />
               <TextInput
                 label="Expires (optional)"
@@ -249,24 +250,22 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
         {isOfficer ? (
           <Card withBorder padding="md" radius="md">
             <Text fw={600} size="sm">
-              Create a reusable link (officers only)
+              Reusable invite link (officers only)
             </Text>
             <Text c="dimmed" size="xs">
-              Admits anyone who has it until you revoke it. Keep it within the
-              officer team — for bringing in friends, use one-time links
-              instead.
+              Admits anyone with the link until revoked or expired.
             </Text>
             <fetcher.Form method="post" key={`multi-${resetKey}`}>
               <input type="hidden" name="intent" value="create" />
               <input type="hidden" name="reusable" value="1" />
               <Group gap="xs" mt="xs" align="flex-end" wrap="wrap">
                 <TextInput
-                  label="For"
+                  label="Label"
                   name="note"
                   size="xs"
                   style={{ flex: 1, minWidth: 200 }}
                   maxLength={200}
-                  placeholder={'What’s it for? — e.g. "2026 build crew"'}
+                  placeholder="e.g. 2026 build crew"
                 />
                 <TextInput
                   label="Expires (optional)"
@@ -291,7 +290,7 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th>Link</Table.Th>
-                  <Table.Th>For</Table.Th>
+                  <Table.Th>Label</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Uses</Table.Th>
                   <Table.Th>Joined</Table.Th>
@@ -306,7 +305,7 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
               <Table.Tbody>
                 {invites.map((i) => {
                   const status = inviteStatus(i);
-                  const active = status.label === "active";
+                  const active = status.label === "Active";
                   return (
                     <Table.Tr key={i.id}>
                       <Table.Td maw={280}>
@@ -332,7 +331,7 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
                           variant="light"
                           color={i.kind === "open" ? "orange" : "blue"}
                         >
-                          {i.kind === "open" ? "reusable" : "one-time"}
+                          {i.kind === "open" ? "Reusable" : "One-time"}
                         </Badge>
                       </Table.Td>
                       <Table.Td>
@@ -390,16 +389,14 @@ export default function InviteFriends({ loaderData }: Route.ComponentProps) {
                         <Group gap="xs" wrap="nowrap">
                           <CopyButton value={i.url}>
                             {({ copied, copy }) => (
-                              <Tooltip label={copied ? "Copied" : "Copy"}>
-                                <Button
-                                  size="xs"
-                                  variant="light"
-                                  color={copied ? "green" : "blue"}
-                                  onClick={copy}
-                                >
-                                  {copied ? "Copied" : "Copy"}
-                                </Button>
-                              </Tooltip>
+                              <Button
+                                size="xs"
+                                variant="light"
+                                color={copied ? "green" : "blue"}
+                                onClick={copy}
+                              >
+                                {copied ? "Copied" : "Copy"}
+                              </Button>
                             )}
                           </CopyButton>
                           {active ? (
