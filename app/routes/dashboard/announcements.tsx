@@ -77,7 +77,7 @@ export async function action({ request }: Route.ActionArgs) {
   } = await requireActiveEdition(request);
   await requireFeature(active, "announcements");
   if (!hasAtLeast(active.membership.role, "officer")) {
-    return data({ error: "Officers post announcements." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
   if (activeEdition.locked) {
     return data({ error: "This year is locked." }, { status: 403 });
@@ -170,10 +170,22 @@ export default function Announcements({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Announcements</Title>
           <Text c="dimmed" size="sm">
-            Camp news for {year}. Everyone in camp can read these; officers post
-            them.
+            Camp news for {year}.
           </Text>
         </div>
+
+        {locked ? (
+          <Paper
+            withBorder
+            p="md"
+            radius="md"
+            bg="var(--mantine-color-default-hover)"
+          >
+            <Text size="sm" c="dimmed">
+              This year is locked — read-only.
+            </Text>
+          </Paper>
+        ) : null}
 
         {isOfficer && !locked ? (
           <Card withBorder padding="md" radius="md">
@@ -228,7 +240,7 @@ export default function Announcements({ loaderData }: Route.ComponentProps) {
                     <Group gap={6} wrap="nowrap">
                       {a.pinned ? (
                         <Badge size="xs" variant="light" color="yellow">
-                          pinned
+                          Pinned
                         </Badge>
                       ) : null}
                       <Text fw={600}>{a.title}</Text>
@@ -254,7 +266,7 @@ export default function Announcements({ loaderData }: Route.ComponentProps) {
                           size="sm"
                           variant="subtle"
                           color={a.pinned ? "yellow" : "gray"}
-                          aria-label="Pin"
+                          aria-label={a.pinned ? "Unpin" : "Pin"}
                           onClick={() =>
                             fetcher.submit(
                               {

@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Anchor,
   Autocomplete,
+  Button,
   Card,
   Container,
   Group,
@@ -66,7 +67,7 @@ export async function action({ request }: Route.ActionArgs) {
   const { user: actor, active } = await requireActiveCamp(request);
   await requireFeature(active, "documents");
   if (!hasAtLeast(active.membership.role, "officer")) {
-    return data({ error: "Officers manage documents." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
   const campId = active.camp.id;
   const form = await request.formData();
@@ -157,8 +158,7 @@ export default function Documents({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Documents</Title>
           <Text c="dimmed" size="sm">
-            Shared links the whole camp can open — packing lists, schedules, the
-            handbook, your Drive folder. {isOfficer ? "Officers add them." : ""}
+            Shared camp links — packing lists, handbooks, and folders.
           </Text>
         </div>
 
@@ -177,7 +177,7 @@ export default function Documents({ loaderData }: Route.ComponentProps) {
                 <Autocomplete
                   size="xs"
                   label="Category"
-                  placeholder="optional"
+                  placeholder="Optional"
                   data={categories}
                   value={category}
                   onChange={setCategory}
@@ -199,15 +199,13 @@ export default function Documents({ loaderData }: Route.ComponentProps) {
                   onChange={(e) => setDescription(e.currentTarget.value)}
                   style={{ flex: "1 1 260px" }}
                 />
-                <ActionIcon
-                  size="lg"
-                  variant="filled"
-                  aria-label="Add document"
+                <Button
+                  size="xs"
                   onClick={add}
                   loading={fetcher.state !== "idle"}
                 >
-                  +
-                </ActionIcon>
+                  Add link
+                </Button>
               </Group>
             </Stack>
           </Card>

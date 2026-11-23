@@ -146,10 +146,7 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   if (intent === "rsvp") {
     if (!hasAtLeast(active.membership.role, "member")) {
-      return data(
-        { error: "Only members can say they're coming." },
-        { status: 403 },
-      );
+      return data({ error: "Members only." }, { status: 403 });
     }
     const status = String(form.get("status") ?? "");
     if (
@@ -224,7 +221,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   if (!isOfficer) {
-    return data({ error: "Officers write the summary." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
 
   if (intent === "saveSummary" || intent === "publishSummary") {
@@ -290,7 +287,7 @@ export default function Meeting({ loaderData }: Route.ComponentProps) {
             <Title order={2}>{meeting.title}</Title>
             {meeting.cancelled ? (
               <Badge color="red" variant="light">
-                cancelled
+                Cancelled
               </Badge>
             ) : null}
           </Group>
@@ -313,8 +310,8 @@ export default function Meeting({ loaderData }: Route.ComponentProps) {
               mt={4}
             >
               {meeting.repeats
-                ? "Manage the whole series on the Schedule →"
-                : "Move, rename or cancel it on the Schedule →"}
+                ? "Manage series on Schedule →"
+                : "Edit or cancel on Schedule →"}
             </Anchor>
           ) : null}
         </div>
@@ -327,7 +324,7 @@ export default function Meeting({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — this meeting is read-only.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -342,8 +339,7 @@ export default function Meeting({ loaderData }: Route.ComponentProps) {
           <Rsvp attendees={attendees} myMembershipId={myMembershipId} />
         ) : attendees.length > 0 ? (
           <Text size="sm" c="dimmed">
-            {past ? "Who came" : "Coming"}:{" "}
-            {attendees.map((a) => a.name).join(", ")}
+            RSVPs: {attendees.map((a) => a.name).join(", ")}
           </Text>
         ) : null}
 
@@ -623,7 +619,7 @@ function AgendaItemCard({
             </div>
           ) : null}
           <Text size="xs" c="dimmed" mt={4}>
-            added by {item.addedBy ?? "someone who has since left"}
+            Added by {item.addedBy ?? "former member"}
           </Text>
         </div>
         {canEdit ? (
@@ -648,7 +644,7 @@ function AgendaItemCard({
                   )
                 }
               >
-                Really remove
+                Confirm remove
               </Button>
             ) : (
               <Button
@@ -785,8 +781,8 @@ function Summary({
         <Title order={4}>Summary</Title>
         <Text size="sm" c="dimmed" mt={4}>
           {past
-            ? "No write-up yet. When an officer publishes one it'll appear here, and on your home page until you've read it."
-            : "After the meeting, an officer writes up what was decided and it shows up here."}
+            ? "No summary yet. Once published, it appears here and on Overview."
+            : "Officers publish a summary here after the meeting."}
         </Text>
       </div>
     );
@@ -925,7 +921,7 @@ function Summary({
           wikiEnabled={wikiEnabled}
         />
         <Text size="xs" c="dimmed" mt="sm">
-          {summary.author ? `Written up by ${summary.author}` : "Written up"}
+          {summary.author ? `Summary by ${summary.author}` : "Summary"}
           {published ? ` · read by ${summary.readCount}` : ""}
         </Text>
       </Paper>
@@ -933,9 +929,7 @@ function Summary({
       {published && !summary.readByMe ? (
         <Alert mt="sm" color="blue" variant="light">
           <Group justify="space-between" wrap="wrap" gap="sm">
-            <Text size="sm">
-              This is on your home page until you've marked it read.
-            </Text>
+            <Text size="sm">Shown on Overview until marked read.</Text>
             <Button
               size="xs"
               loading={busy}

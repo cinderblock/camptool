@@ -84,7 +84,7 @@ export async function action({ request }: Route.ActionArgs) {
   const { user, active, activeEdition } = await requireActiveEdition(request);
   await requireFeature(active, "schedule");
   if (!hasAtLeast(active.membership.role, "officer")) {
-    return data({ error: "Officers manage the schedule." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
   if (activeEdition.locked) {
     return data({ error: "This year is locked." }, { status: 403 });
@@ -182,7 +182,7 @@ export default function Schedule({ loaderData }: Route.ComponentProps) {
             value={view}
             onChange={(v) => setView(v as typeof view)}
             data={[
-              { value: "agenda", label: "Agenda" },
+              { value: "agenda", label: "List" },
               { value: "calendar", label: "Calendar" },
               { value: "mine", label: "Mine" },
             ]}
@@ -197,7 +197,7 @@ export default function Schedule({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — the schedule is read-only.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -212,7 +212,7 @@ export default function Schedule({ loaderData }: Route.ComponentProps) {
           <AgendaList
             rows={agenda.filter((r) => r.mine != null)}
             today={today}
-            emptyText="You're not signed up for anything yet — check the Agenda."
+            emptyText="You aren't signed up for anything yet."
           />
         ) : (
           <AgendaList
@@ -220,7 +220,7 @@ export default function Schedule({ loaderData }: Route.ComponentProps) {
             today={today}
             emptyText={
               gatherings.length === 0
-                ? `Nothing scheduled yet${isOfficer && !locked ? " — create the first gathering above." : "."}`
+                ? `Nothing scheduled yet${isOfficer && !locked ? " — create one above." : "."}`
                 : "No days scheduled."
             }
           />
@@ -268,46 +268,22 @@ function WhatIsThis({
       <Group justify="space-between" wrap="nowrap" gap="xs" align="flex-start">
         <div style={{ minWidth: 0 }}>
           <Text size="sm">
-            Everything the camp does together on a schedule — and where you say
-            you'll be there.
+            Camp events and shift sign-ups.
+            {empty && isOfficer
+              ? " Hidden from members until you add the first gathering."
+              : ""}
           </Text>
-          {empty ? (
-            <Text size="sm" c="dimmed" mt={4}>
-              {isOfficer
-                ? "Nothing is on the calendar yet, so campers can't see this page at all — it stays hidden from them until there's something here. Create the first gathering below."
-                : "Nothing is on the calendar yet. When the camp posts work parties, meetings, or daily shifts, they'll appear here and you'll be able to sign up."}
-            </Text>
-          ) : null}
         </div>
         <Button size="compact-xs" variant="subtle" onClick={toggle}>
-          {open ? "Less" : "What's this?"}
+          {open ? "Less" : "How it works"}
         </Button>
       </Group>
       <Collapse expanded={open}>
         <Stack gap={6} mt="xs">
           <Text size="xs" c="dimmed">
-            A <b>gathering</b> is one thing the camp does — it can happen once,
-            or repeat every day. Kinds:
-          </Text>
-          <Group gap={6} pl="sm" wrap="wrap">
-            {GATHERING_KINDS.map((k) => (
-              <Badge
-                key={k.value}
-                size="xs"
-                variant="light"
-                color={kindColor(k.value)}
-              >
-                {k.label}
-              </Badge>
-            ))}
-          </Group>
-          <Text size="xs" c="dimmed">
-            Each day of a gathering is split into <b>shifts</b>. A shift is{" "}
-            <b>one job, on one day, that needs people</b> — like the prep crew
-            before a service, the people serving during it, and cleanup
-            afterwards. Sign up for a shift and you're on the list for that job
-            on that day. A day with no named roles is just one general sign-up
-            sheet. How many people a shift wants:
+            A <b>gathering</b> runs once or repeats daily. Each day has one or
+            more <b>shifts</b> (jobs/roles) you can sign up for or withdraw from
+            at any time. Full capped shifts automatically waitlist.
           </Text>
           <Stack gap={2} pl="sm">
             {STAFFING_OPTIONS.map((s) => (
@@ -316,10 +292,6 @@ function WhatIsThis({
               </Text>
             ))}
           </Stack>
-          <Text size="xs" c="dimmed">
-            Signing up isn't a contract — you can withdraw any time, and if a
-            shift is already full you'll go on its waitlist instead.
-          </Text>
         </Stack>
       </Collapse>
     </Paper>
@@ -387,7 +359,7 @@ function AgendaCard({ r }: { r: AgendaRow }) {
             </Badge>
             {r.cancelled ? (
               <Badge size="xs" color="red" variant="light">
-                cancelled
+                Cancelled
               </Badge>
             ) : null}
             {r.mine ? (
@@ -402,7 +374,11 @@ function AgendaCard({ r }: { r: AgendaRow }) {
                       : "gray"
                 }
               >
-                {r.mine === "signed_up" ? "you're in" : r.mine}
+                {r.mine === "signed_up"
+                  ? "Going"
+                  : r.mine === "waitlisted"
+                    ? "Waitlisted"
+                    : "Maybe"}
               </Badge>
             ) : null}
           </Group>
@@ -620,14 +596,14 @@ function NewGatheringForm() {
               <TextInput
                 type="date"
                 name="date"
-                label={repeat === "daily" ? "First day" : "Date"}
+                label={repeat === "daily" ? "Start date" : "Date"}
                 required
               />
               {repeat === "daily" ? (
                 <TextInput
                   type="date"
                   name="endDate"
-                  label="Last day"
+                  label="End date"
                   required
                 />
               ) : null}

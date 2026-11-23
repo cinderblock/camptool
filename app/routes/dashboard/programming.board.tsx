@@ -13,7 +13,15 @@
  * Camp-only sessions appear on the handout but are flagged, because they still
  * occupy the hall while not belonging on a public-facing sign.
  */
-import { Badge, Button, Container, Group, Stack, Text } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Container,
+  Group,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
 import { Link, useSearchParams } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { redact } from "~/lib/privacy.server";
@@ -71,12 +79,9 @@ export default function ProgrammingBoard({ loaderData }: Route.ComponentProps) {
       <Stack gap="md" className="board-controls">
         <Group justify="space-between" align="flex-end" wrap="wrap">
           <div>
-            <Text fw={700} size="lg">
-              Day sheet · {year}
-            </Text>
+            <Title order={2}>Day sheet · {year}</Title>
             <Text size="sm" c="dimmed">
-              Print one for the sandwich board out front, or the longer version
-              for inside the hall.
+              Print a large-type sign or a handout with descriptions.
             </Text>
           </div>
           <Button variant="light" onClick={() => window.print()}>
@@ -121,14 +126,14 @@ export default function ProgrammingBoard({ loaderData }: Route.ComponentProps) {
             variant={mode === "sign" ? "filled" : "default"}
             onClick={() => setParam("mode", "sign")}
           >
-            Sign (big type)
+            Sign
           </Button>
           <Button
             size="compact-sm"
             variant={mode === "handout" ? "filled" : "default"}
             onClick={() => setParam("mode", "handout")}
           >
-            Handout (with descriptions)
+            Handout
           </Button>
           <Button
             size="compact-sm"
@@ -178,7 +183,7 @@ export default function ProgrammingBoard({ loaderData }: Route.ComponentProps) {
                     fw={700}
                     style={{ fontSize: mode === "sign" ? 26 : 17 }}
                   >
-                    {timeRangeLabel(s.startTime, s.endTime) || "—"}
+                    {timeRangeLabel(s.startTime, s.endTime, "") || "TBD"}
                   </Text>
                   <Text
                     fw={600}
@@ -189,7 +194,7 @@ export default function ProgrammingBoard({ loaderData }: Route.ComponentProps) {
                   {/* Not for the sign out front, but it's still using the hall. */}
                   {!s.isPublic ? (
                     <Badge size="sm" color="orange" variant="light">
-                      camp only
+                      Camp only
                     </Badge>
                   ) : null}
                 </Group>

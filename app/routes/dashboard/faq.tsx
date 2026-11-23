@@ -180,7 +180,10 @@ export async function action({ request }: Route.ActionArgs) {
     const entry = await getEntryById(campId, str("id"));
     // Only your own, and only while it's still unanswered.
     if (!entry || entry.askedById !== actor.id || entry.status !== "pending") {
-      return data({ error: "That question isn't yours." }, { status: 403 });
+      return data(
+        { error: "You can only withdraw your own unanswered questions." },
+        { status: 403 },
+      );
     }
     await deleteEntry(campId, entry.id);
     return data({ ok: true });
@@ -188,7 +191,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   // ---- officers from here down
   if (!isOfficer) {
-    return data({ error: "Officers manage the FAQ." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
 
   switch (intent) {
@@ -377,16 +380,16 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
                   Categories
                 </Button>
                 <Button size="xs" onClick={() => setDraft(BLANK)}>
-                  New answer
+                  New question
                 </Button>
               </Group>
             ) : null}
           </Group>
           <Text c="dimmed" size="sm">
-            The questions people actually ask, answered once.{" "}
+            Common camp questions.{" "}
             {isOfficer
-              ? "Officers write the answers; anyone can add a question to the queue."
-              : "Can't find yours? Ask it at the bottom — an officer will answer."}
+              ? "Officers manage answers; anyone can submit a question."
+              : "Don't see yours? Ask below and an officer will answer."}
           </Text>
         </div>
 
@@ -577,7 +580,7 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
                             size="xs"
                             c="dimmed"
                           >
-                            Link to this answer →
+                            Open permalink →
                           </Anchor>
                         </div>
                       </Collapse>
@@ -665,7 +668,7 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
         <Modal
           opened={!!draft}
           onClose={() => setDraft(null)}
-          title={draft?.id ? "Edit answer" : "New answer"}
+          title={draft?.id ? "Edit question" : "New question"}
           size="lg"
         >
           {draft ? (
@@ -713,7 +716,7 @@ export default function Faq({ loaderData }: Route.ComponentProps) {
                 targets={linkTargets}
                 minRows={6}
                 maxRows={24}
-                placeholder="Answer it once, properly — and link to the page that has the detail."
+                placeholder="Write a clear answer and link relevant pages if helpful."
               />
               {draft.answer.trim() ? (
                 <div>

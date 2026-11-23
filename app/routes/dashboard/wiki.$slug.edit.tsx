@@ -80,7 +80,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   const { user: actor, active } = await requireActiveCamp(request);
   await requireFeature(active, "wiki");
   if (!hasAtLeast(active.membership.role, "member")) {
-    return data({ error: "Members write the wiki." }, { status: 403 });
+    return data({ error: "Members only." }, { status: 403 });
   }
 
   const campId = active.camp.id;
@@ -129,10 +129,10 @@ export default function WikiPageEdit({ loaderData }: Route.ComponentProps) {
       <Stack gap="lg">
         <div>
           <Anchor component={Link} to={`/wiki/${slug}`} size="sm">
-            ← Back to the page
+            ← Back to page
           </Anchor>
           <Title order={2} mt={4}>
-            Editing
+            Editing {initialTitle}
           </Title>
         </div>
 
@@ -143,8 +143,7 @@ export default function WikiPageEdit({ loaderData }: Route.ComponentProps) {
         />
         {wikiSlug(title) !== slug ? (
           <Text size="xs" c="dimmed">
-            The address stays /wiki/{slug} — renaming the title doesn't break
-            links other pages already made.
+            URL stays /wiki/{slug} so existing links keep working.
           </Text>
         ) : null}
 
@@ -157,8 +156,8 @@ export default function WikiPageEdit({ loaderData }: Route.ComponentProps) {
         />
 
         <TextInput
-          label="What changed? (optional)"
-          placeholder="e.g. added the guy-line spacing"
+          label="Edit summary (optional)"
+          placeholder="e.g. Updated setup steps"
           value={summary}
           onChange={(e) => setSummary(e.currentTarget.value)}
         />

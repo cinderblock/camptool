@@ -68,7 +68,7 @@ export async function action({ request }: Route.ActionArgs) {
   await requireFeature(active, "wiki");
   // The whole point of the feature: any member may write. Recruits read only.
   if (!hasAtLeast(active.membership.role, "member")) {
-    return data({ error: "Members write the wiki." }, { status: 403 });
+    return data({ error: "Members only." }, { status: 403 });
   }
 
   const form = await request.formData();
@@ -149,11 +149,10 @@ export default function WikiIndex({ loaderData }: Route.ComponentProps) {
             ) : null}
           </Group>
           <Text c="dimmed" size="sm">
-            Camp knowledge that outlives any one year — how things work, where
-            things live, what we learned.{" "}
+            Shared camp reference across all years.
             {canEdit
-              ? "Any member can edit any page; every save keeps the previous version."
-              : "Members keep it up to date."}
+              ? " Any member can edit; previous versions are saved."
+              : ""}
           </Text>
         </div>
 
@@ -174,7 +173,7 @@ export default function WikiIndex({ loaderData }: Route.ComponentProps) {
           <Stack gap="sm">
             <TextInput
               label="Page title"
-              placeholder="e.g. Raising the Sierpinski pyramid"
+              placeholder="e.g. Shade structure setup"
               value={title}
               onChange={(e) => setTitle(e.currentTarget.value)}
               data-autofocus

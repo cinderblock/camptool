@@ -88,8 +88,8 @@ export default function FaqEntry({ loaderData }: Route.ComponentProps) {
         {!entry ? (
           <Card withBorder padding="lg" radius="md">
             <Text size="sm" c="dimmed">
-              That answer isn't here. It may have been archived, or the link may
-              be out of date — the full list is one click back.
+              This question isn't available — it may have been archived or the
+              link may be out of date.
             </Text>
           </Card>
         ) : (
@@ -118,7 +118,7 @@ export default function FaqEntry({ loaderData }: Route.ComponentProps) {
                 />
               ) : (
                 <Text size="sm" c="dimmed" fs="italic">
-                  Waiting on an officer to answer this one.
+                  Waiting for an officer to answer.
                 </Text>
               )}
             </Card>

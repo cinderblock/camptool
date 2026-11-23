@@ -188,7 +188,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   const campId = active.camp.id;
   const role = active.membership.role;
   if (!hasAtLeast(role, "member")) {
-    return data({ error: "Members write the wiki." }, { status: 403 });
+    return data({ error: "Members only." }, { status: 403 });
   }
 
   const form = await request.formData();
@@ -232,7 +232,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   if (intent === "restore") {
     if (!hasAtLeast(role, "officer")) {
-      return data({ error: "Officers restore versions." }, { status: 403 });
+      return data({ error: "Officers only." }, { status: 403 });
     }
     const revisions = await pageHistory(campId, page.id);
     const rev = revisions.find((r) => r.id === String(form.get("revisionId")));
@@ -250,7 +250,7 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   if (intent === "delete") {
     if (!hasAtLeast(role, "officer")) {
-      return data({ error: "Officers delete pages." }, { status: 403 });
+      return data({ error: "Officers only." }, { status: 403 });
     }
     await db
       .delete(wikiPage)
@@ -417,16 +417,16 @@ export default function WikiPageView({ loaderData }: Route.ComponentProps) {
         {canEdit && linkOptions.length > 0 ? (
           <Card withBorder padding="md" radius="md">
             <Text size="xs" fw={700} c="dimmed" tt="uppercase" mb={6}>
-              Link this page to something
+              Link this page
             </Text>
             <Text size="xs" c="dimmed" mb="xs">
-              A structure gets its page shown on the map for every camper who
-              places one — this year and every year after.
+              Linking to a structure shows this page on the map for that
+              structure type every year.
             </Text>
             <Group align="flex-end">
               <Select
                 size="xs"
-                placeholder="Pick a structure or a placed object"
+                placeholder="Select a structure or map item"
                 searchable
                 data={linkOptions}
                 value={linkValue}
@@ -547,16 +547,16 @@ export default function WikiPageView({ loaderData }: Route.ComponentProps) {
             >
               <Stack gap="sm">
                 <Text size="sm">
-                  The page and its {history.length} saved{" "}
-                  {history.length === 1 ? "version" : "versions"} go away for
-                  good.
+                  {history.length === 0
+                    ? "Permanently deletes this page."
+                    : `Permanently deletes this page and its ${history.length} saved ${history.length === 1 ? "version" : "versions"}.`}
                 </Text>
                 <Group justify="flex-end">
                   <Button
                     variant="default"
                     onClick={() => setConfirmDelete(false)}
                   >
-                    Keep it
+                    Cancel
                   </Button>
                   <Button
                     color="red"

@@ -27,13 +27,13 @@ export const OFFERING_KINDS: {
     value: "lecture",
     label: "Lecture",
     color: "indigo",
-    hint: "A talk — someone presents, the audience listens.",
+    hint: "A talk or presentation.",
   },
   {
     value: "workshop",
     label: "Workshop",
     color: "orange",
-    hint: "Hands-on — people make or do something.",
+    hint: "Hands-on activity where people make or build something.",
   },
   {
     value: "class",
@@ -45,13 +45,13 @@ export const OFFERING_KINDS: {
     value: "performance",
     label: "Performance",
     color: "grape",
-    hint: "Music, theater, fire, spectacle.",
+    hint: "Music, theater, fire, or spectacle.",
   },
   {
     value: "discussion",
     label: "Discussion",
     color: "cyan",
-    hint: "A conversation with no single presenter.",
+    hint: "Group conversation with no single presenter.",
   },
   { value: "other", label: "Other", color: "gray", hint: "Anything else." },
 ];
@@ -104,13 +104,13 @@ export const AUDIENCE_OPTIONS: {
 }[] = [
   {
     value: "public",
-    label: "Open to the event",
-    hint: "Listed on the camp's public page — anyone can come.",
+    label: "Public",
+    hint: "Listed on the camp's public schedule.",
   },
   {
     value: "camp_only",
     label: "Camp only",
-    hint: "Just for our campers; never listed publicly.",
+    hint: "For camp members only — not listed publicly.",
   },
 ];
 

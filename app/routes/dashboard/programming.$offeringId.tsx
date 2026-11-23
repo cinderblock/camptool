@@ -6,6 +6,7 @@
  * Design: plans/programming-offerings.md.
  */
 import {
+  Anchor,
   Badge,
   Button,
   Card,
@@ -129,13 +130,13 @@ export async function action({ request, params }: Route.ActionArgs) {
     const canEdit = isOfficer || (isMine && row.status === "proposed");
     if (!canEdit) {
       return data(
-        { error: "It's been reviewed — talk to an officer to change it." },
+        { error: "Already reviewed — ask an officer to edit." },
         { status: 403 },
       );
     }
     const title = String(form.get("title") ?? "").trim();
     if (!title || title.length > 200) {
-      return data({ error: "Please give it a title." }, { status: 400 });
+      return data({ error: "Add a title." }, { status: 400 });
     }
     const kind = String(form.get("kind") ?? row.kind);
     if (!isOfferingKind(kind)) {
@@ -169,7 +170,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (intent === "addPresenter" || intent === "removePresenter") {
     const canEdit = isOfficer || (isMine && row.status === "proposed");
     if (!canEdit) {
-      return data({ error: "Officers manage presenters." }, { status: 403 });
+      return data({ error: "Officers only." }, { status: 403 });
     }
     if (intent === "removePresenter") {
       await db
@@ -211,13 +212,13 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   // Everything below is scheduling — officers only.
   if (!isOfficer) {
-    return data({ error: "Officers build the schedule." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
 
   if (intent === "addSession") {
     if (row.status !== "accepted") {
       return data(
-        { error: "Accept it first, then give it a time." },
+        { error: "Accept the proposal before scheduling." },
         { status: 409 },
       );
     }
@@ -289,7 +290,10 @@ export default function OfferingDetail({ loaderData }: Route.ComponentProps) {
     <Container size="md">
       <Stack gap="lg">
         <div>
-          <Group gap="xs" wrap="wrap">
+          <Anchor component={Link} to="/programming" size="sm">
+            ← All programming
+          </Anchor>
+          <Group gap="xs" wrap="wrap" mt={4}>
             <Title order={2}>{o.title}</Title>
             <Badge color={offeringKindColor(o.kind)} variant="light">
               {offeringKindLabel(o.kind)}
@@ -306,9 +310,6 @@ export default function OfferingDetail({ loaderData }: Route.ComponentProps) {
               </Badge>
             ) : null}
           </Group>
-          <Text size="sm" c="dimmed">
-            <Link to="/programming">← All programming</Link>
-          </Text>
         </div>
 
         {o.description ? <Text>{o.description}</Text> : null}
@@ -356,7 +357,8 @@ export default function OfferingDetail({ loaderData }: Route.ComponentProps) {
           fallbackLocation={o.location}
           today={today}
           canEdit={isOfficer && !locked}
-          accepted={o.status === "accepted"}
+          status={status}
+          audience={o.audience}
         />
 
         {canEdit && !locked ? <EditForm o={o} /> : null}
@@ -484,32 +486,40 @@ function SessionSection({
   fallbackLocation,
   today,
   canEdit,
-  accepted,
+  status,
+  audience,
 }: {
   sessions: Route.ComponentProps["loaderData"]["sessions"];
   fallbackLocation: string | null;
   today: string;
   canEdit: boolean;
-  accepted: boolean;
+  status: OfferingStatus;
+  audience: string;
 }) {
   const fetcher = useFetcher<{ error?: string; ok?: string }>();
   useActionToast(fetcher.data);
+  const accepted = status === "accepted";
 
   return (
     <section>
       <Text size="sm" fw={600} mb="xs">
-        When it happens
+        Sessions
       </Text>
       <Stack gap="xs">
         {sessions.length === 0 ? (
           <Text size="sm" c="dimmed">
             {accepted
-              ? "Not scheduled yet — it won't show publicly until it has a time."
-              : "It'll get a time once it's accepted."}
+              ? audience === "public"
+                ? "Not scheduled yet — won't appear on the public schedule until a session is added."
+                : "Not scheduled yet."
+              : status === "proposed"
+                ? "Sessions can be scheduled once accepted."
+                : "No sessions scheduled."}
           </Text>
         ) : (
           sessions.map((s) => {
             const cancelled = s.status === "cancelled";
+            const timeRange = timeRangeLabel(s.startTime, s.endTime, "");
             return (
               <Card key={s.id} withBorder radius="md" p="xs">
                 <Group justify="space-between" wrap="nowrap">
@@ -519,9 +529,7 @@ function SessionSection({
                     td={cancelled ? "line-through" : undefined}
                   >
                     {dateLabel(s.date)}
-                    {timeRangeLabel(s.startTime, s.endTime)
-                      ? ` · ${timeRangeLabel(s.startTime, s.endTime)}`
-                      : ""}
+                    {timeRange ? ` · ${timeRange}` : ""}
                     {(s.location ?? fallbackLocation)
                       ? ` · ${s.location ?? fallbackLocation}`
                       : ""}
@@ -581,12 +589,17 @@ function SessionSection({
                 required
                 size="xs"
               />
-              <TextInput name="startTime" type="time" label="Start" size="xs" />
-              <TextInput name="endTime" type="time" label="End" size="xs" />
+              <TextInput
+                name="startTime"
+                type="time"
+                label="Starts"
+                size="xs"
+              />
+              <TextInput name="endTime" type="time" label="Ends" size="xs" />
               <TextInput
                 name="location"
-                label="Where"
-                placeholder={fallbackLocation ?? "Lecture hall"}
+                label="Location"
+                placeholder={fallbackLocation ?? "e.g. Main shade"}
                 size="xs"
                 style={{ flex: 1, minWidth: 140 }}
               />
@@ -630,7 +643,7 @@ function EditForm({
           />
           <Textarea
             name="description"
-            label="What is it?"
+            label="Description"
             defaultValue={o.description ?? ""}
             autosize
             minRows={2}
@@ -638,7 +651,7 @@ function EditForm({
           <Group grow align="flex-start">
             <Select
               name="kind"
-              label="Kind"
+              label="Type"
               defaultValue={o.kind}
               data={OFFERING_KINDS.map((k) => ({
                 value: k.value,
@@ -648,16 +661,16 @@ function EditForm({
             />
             <Select
               name="durationMin"
-              label="How long?"
+              label="Duration"
               defaultValue={o.durationMin ? String(o.durationMin) : null}
-              placeholder="Pick a length"
+              placeholder="Select duration"
               data={DURATION_OPTIONS}
             />
           </Group>
           <Group grow align="flex-start">
             <Select
               name="audience"
-              label="Who's it for?"
+              label="Audience"
               defaultValue={o.audience}
               data={AUDIENCE_OPTIONS.map((a) => ({
                 value: a.value,
@@ -667,7 +680,7 @@ function EditForm({
             />
             <NumberInput
               name="capacity"
-              label="How many can it fit?"
+              label="Capacity"
               defaultValue={o.capacity ?? undefined}
               placeholder="Optional"
               min={1}
@@ -675,10 +688,10 @@ function EditForm({
           </Group>
           <TextInput
             name="location"
-            label="Where"
+            label="Location"
             defaultValue={o.location ?? ""}
-            placeholder="Lecture hall"
-            description="Sessions can override this."
+            placeholder="e.g. Main shade"
+            description="Individual sessions can override this."
           />
           <Group>
             <Button type="submit" loading={fetcher.state !== "idle"}>

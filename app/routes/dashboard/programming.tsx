@@ -86,14 +86,11 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "propose") {
     if (!hasAtLeast(role, "member")) {
-      return data(
-        { error: "Only camp members can propose something." },
-        { status: 403 },
-      );
+      return data({ error: "Members only." }, { status: 403 });
     }
     const title = String(form.get("title") ?? "").trim();
     if (!title || title.length > 200) {
-      return data({ error: "Please give it a title." }, { status: 400 });
+      return data({ error: "Add a title." }, { status: 400 });
     }
     const kind = String(form.get("kind") ?? "lecture");
     if (!isOfferingKind(kind)) {
@@ -160,7 +157,7 @@ export async function action({ request }: Route.ActionArgs) {
     return data({ error: "Unknown action." }, { status: 400 });
   }
   if (!isOfficer) {
-    return data({ error: "Officers review proposals." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
   await db
     .update(offering)
@@ -173,7 +170,8 @@ export async function action({ request }: Route.ActionArgs) {
     })
     .where(eq(offering.id, offeringId));
   return data({
-    ok: intent === "accept" ? "Accepted — now give it a time." : "Declined.",
+    ok:
+      intent === "accept" ? "Accepted. Add a session time next." : "Declined.",
   });
 }
 
@@ -208,11 +206,11 @@ export default function Programming({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Programming</Title>
           <Text c="dimmed" size="sm">
-            What our camp is offering the event in {year}.
+            Talks, workshops, and performances for {year}.
             {publicLive ? (
               <>
                 {" "}
-                The lineup is public at{" "}
+                Public schedule:{" "}
                 <Anchor component={Link} to={`/c/${campSlug}/schedule`}>
                   /c/{campSlug}/schedule
                 </Anchor>
@@ -222,7 +220,7 @@ export default function Programming({ loaderData }: Route.ComponentProps) {
             <Anchor component={Link} to="/programming/board">
               Print a day sheet
             </Anchor>{" "}
-            for the sandwich board or the lecture hall.
+            for printing or posting.
           </Text>
         </div>
 
@@ -234,7 +232,7 @@ export default function Programming({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — programming is read-only.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -257,7 +255,7 @@ export default function Programming({ loaderData }: Route.ComponentProps) {
         {isOfficer && needTimes.length > 0 ? (
           <section>
             <Text size="sm" fw={600} mb="xs">
-              Accepted, still need a time · {needTimes.length}
+              Accepted, unscheduled · {needTimes.length}
             </Text>
             <Stack gap="xs">
               {needTimes.map((o) => (
@@ -269,14 +267,12 @@ export default function Programming({ loaderData }: Route.ComponentProps) {
 
         <section>
           <Text size="sm" fw={600} mb="xs">
-            The lineup
+            Lineup
           </Text>
           {scheduled.length === 0 ? (
             <Text c="dimmed" size="sm">
               Nothing scheduled yet
-              {canPropose && !locked
-                ? " — propose the first thing above."
-                : "."}
+              {canPropose && !locked ? " — propose one above." : "."}
             </Text>
           ) : (
             <Stack gap="xs">
@@ -365,8 +361,8 @@ function OfferingCard({
                   td={s.status === "cancelled" ? "line-through" : undefined}
                 >
                   {dateLabel(s.date)}
-                  {timeRangeLabel(s.startTime, s.endTime)
-                    ? ` · ${timeRangeLabel(s.startTime, s.endTime)}`
+                  {timeRangeLabel(s.startTime, s.endTime, "")
+                    ? ` · ${timeRangeLabel(s.startTime, s.endTime, "")}`
                     : ""}
                   {(s.location ?? o.location)
                     ? ` · ${s.location ?? o.location}`
@@ -475,10 +471,10 @@ function ProposeForm() {
     <Paper withBorder radius="md" p="md">
       <Group justify="space-between">
         <div>
-          <Text fw={600}>Propose something</Text>
+          <Text fw={600}>Propose an offering</Text>
           <Text size="sm" c="dimmed">
-            Got a talk or a workshop in you? Pitch it — officers build the
-            schedule from what comes in.
+            Pitch a talk, workshop, or activity for officers to review and
+            schedule.
           </Text>
         </div>
         <Button variant="light" size="xs" onClick={toggle}>
@@ -495,21 +491,21 @@ function ProposeForm() {
             <TextInput
               name="title"
               label="Title"
-              placeholder="A Brief History of Infinity"
+              placeholder="e.g. Intro to lockpicking"
               required
               maxLength={200}
             />
             <Textarea
               name="description"
-              label="What is it?"
-              description="This is the blurb people read to decide whether to come."
+              label="Description"
+              description="Shown on the schedule so attendees know what to expect."
               autosize
               minRows={2}
             />
             <Group grow align="flex-start">
               <Select
                 name="kind"
-                label="Kind"
+                label="Type"
                 defaultValue="lecture"
                 data={OFFERING_KINDS.map((k) => ({
                   value: k.value,
@@ -519,28 +515,28 @@ function ProposeForm() {
               />
               <Select
                 name="durationMin"
-                label="How long?"
-                placeholder="Pick a length"
+                label="Duration"
+                placeholder="Select duration"
                 data={DURATION_OPTIONS}
               />
             </Group>
             <Group grow align="flex-start">
               <Select
                 name="audience"
-                label="Who's it for?"
+                label="Audience"
                 defaultValue="public"
                 data={AUDIENCE_OPTIONS.map((a) => ({
                   value: a.value,
                   label: a.label,
                 }))}
                 allowDeselect={false}
-                description="Open to the event means it's listed on our public page."
+                description="Public offerings appear on the camp's public schedule."
               />
               <NumberInput
                 name="capacity"
-                label="How many can it fit?"
+                label="Capacity (optional)"
                 placeholder="Optional"
-                description="A rough number — nobody reserves a spot."
+                description="Approximate limit; no RSVPs required."
                 min={1}
               />
             </Group>

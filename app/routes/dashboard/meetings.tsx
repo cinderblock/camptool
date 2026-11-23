@@ -81,7 +81,7 @@ export async function action({ request }: Route.ActionArgs) {
   const { user, active, activeEdition } = await requireActiveEdition(request);
   await requireFeature(active, "meetings");
   if (!hasAtLeast(active.membership.role, "officer")) {
-    return data({ error: "Officers schedule meetings." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
   if (activeEdition.locked) {
     return data({ error: "This year is locked." }, { status: 403 });
@@ -160,8 +160,7 @@ export default function Meetings({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Meetings</Title>
           <Text c="dimmed" size="sm">
-            When the camp meets in {year}, what's on the agenda, and what got
-            decided.
+            Meeting schedule, agendas, and summaries for {year}.
           </Text>
         </div>
 
@@ -173,7 +172,7 @@ export default function Meetings({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — meetings are read-only.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -189,8 +188,7 @@ export default function Meetings({ loaderData }: Route.ComponentProps) {
           <NextMeeting meeting={next} room={room} />
         ) : meetings.length > 0 ? (
           <Text size="sm" c="dimmed">
-            Nothing on the calendar ahead — every meeting for {year} has been
-            and gone.
+            No upcoming meetings for {year}.
           </Text>
         ) : null}
 
@@ -199,7 +197,7 @@ export default function Meetings({ loaderData }: Route.ComponentProps) {
         {upcoming.length > 1 ? (
           <div>
             <Text size="sm" fw={600} mb="xs">
-              Also coming up
+              Upcoming
             </Text>
             <Stack gap="xs">
               {upcoming
@@ -219,7 +217,8 @@ export default function Meetings({ loaderData }: Route.ComponentProps) {
               </Text>
               {unreadCount > 0 ? (
                 <Badge size="xs" color="blue" variant="filled">
-                  {unreadCount} summary to read
+                  {unreadCount} unread{" "}
+                  {unreadCount === 1 ? "summary" : "summaries"}
                 </Badge>
               ) : null}
             </Group>
@@ -253,52 +252,34 @@ function WhatIsThis({
       <Group justify="space-between" wrap="nowrap" gap="xs" align="flex-start">
         <div style={{ minWidth: 0 }}>
           <Text size="sm">
-            Camp meetings — anyone can put something on the agenda before the
-            day, and whoever misses one can read what happened.
+            Anyone can add agenda items; officers publish summaries afterward.
           </Text>
           {empty ? (
             <Text size="sm" c="dimmed" mt={4}>
-              {isOfficer
-                ? "No meetings scheduled yet. Create the first one below — a repeating one covers the whole run-up in a single go."
-                : "No meetings scheduled yet. When the camp sets one, it'll show up here and you'll be able to add to its agenda."}
+              No meetings scheduled yet.
+              {isOfficer ? " Schedule one below." : ""}
             </Text>
           ) : null}
           {isAdmin && !hasRoom ? (
             <Text size="sm" c="dimmed" mt={4}>
-              No meeting room is set up. Add your camp's voice-channel link
-              under the Meetings feature on{" "}
+              Add a meeting link in{" "}
               <Anchor component={Link} to="/settings" size="sm">
-                camp settings
+                Camp settings
               </Anchor>{" "}
-              and every meeting gets a join button.
+              to show a join button on every meeting.
             </Text>
           ) : null}
         </div>
         <Button size="compact-xs" variant="subtle" onClick={toggle}>
-          {open ? "Less" : "What's this?"}
+          {open ? "Less" : "How it works"}
         </Button>
       </Group>
       <Collapse expanded={open}>
-        <Stack gap={6} mt="xs">
+        <Stack gap={4} mt="xs">
           <Text size="xs" c="dimmed">
-            Every meeting has its own <b>agenda</b>. Add an item any time before
-            the meeting — you don't need to be an officer, and you don't need to
-            be there for it to get discussed. You can edit or take back anything
-            you added.
-          </Text>
-          <Text size="xs" c="dimmed">
-            The <b>join button</b> goes to whatever the camp meets on — a
-            Discord voice channel, a video call, whatever's configured. It's the
-            same room every time, so there's no link to hunt for.
-          </Text>
-          <Text size="xs" c="dimmed">
-            Afterwards an officer writes a <b>summary</b>. Published summaries
-            show up on your home page until you've read them, so missing a
-            meeting doesn't mean missing what happened in it.
-          </Text>
-          <Text size="xs" c="dimmed">
-            Meetings are also on the Schedule calendar alongside work parties —
-            they're the same thing seen two ways, not two lists to keep in sync.
+            Anyone can add, edit, or remove their own agenda items. Published
+            summaries appear on Overview until marked read. Meetings also appear
+            on Schedule.
           </Text>
         </Stack>
       </Collapse>
@@ -326,11 +307,11 @@ function NextMeeting({
               </Badge>
               {meeting.mine === "signed_up" ? (
                 <Badge size="xs" variant="light" color="green">
-                  you're coming
+                  Going
                 </Badge>
               ) : meeting.mine === "maybe" ? (
                 <Badge size="xs" variant="light" color="gray">
-                  maybe
+                  Maybe
                 </Badge>
               ) : null}
             </Group>
@@ -383,7 +364,11 @@ export function JoinButton({
         {joinLabel(room.url, room.label)} ↗
       </Button>
       <Text size="xs" c="dimmed" mt={4}>
-        {room.note ? room.note : `Opens ${provider.label}.`}
+        {room.note
+          ? room.note
+          : provider.key === "link"
+            ? "Opens in a new tab."
+            : `Opens ${provider.label}.`}
       </Text>
     </div>
   );
@@ -411,25 +396,25 @@ function MeetingCard({ m }: { m: MeetingRow }) {
             </Text>
             {m.cancelled ? (
               <Badge size="xs" color="red" variant="light">
-                cancelled
+                Cancelled
               </Badge>
             ) : null}
             {unread ? (
               <Badge size="xs" color="blue" variant="filled">
-                new summary
+                Unread summary
               </Badge>
             ) : m.summary?.published ? (
               <Badge size="xs" color="gray" variant="light">
-                summary
+                Summary
               </Badge>
             ) : m.summary ? (
               <Badge size="xs" color="yellow" variant="light">
-                summary draft
+                Draft
               </Badge>
             ) : null}
             {m.mine === "signed_up" ? (
               <Badge size="xs" color="green" variant="light">
-                you're coming
+                Going
               </Badge>
             ) : null}
           </Group>
@@ -520,8 +505,8 @@ function NewMeetingForm() {
             </Group>
             <Text size="xs" c="dimmed">
               {cadence === "once"
-                ? "One meeting. Each meeting gets its own agenda and its own write-up."
-                : "Every date becomes its own meeting, with its own agenda and write-up. You can cancel or move any single one afterwards on the Schedule page."}
+                ? "Creates one meeting with its own agenda and summary."
+                : "Creates a series of meetings, each with its own agenda and summary. Edit individual dates on Schedule."}
             </Text>
             <Group justify="flex-end">
               <Button type="submit" loading={busy}>

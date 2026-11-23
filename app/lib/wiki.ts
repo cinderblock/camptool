@@ -120,7 +120,7 @@ export function appLinkTargets(
   const visible = new Set(visibleFeatures);
   const core = [
     { path: "/", label: "Overview" },
-    { path: "/guide", label: "How it works" },
+    { path: "/guide", label: "Camp guide" },
     { path: "/members", label: "Members" },
     { path: "/editions", label: "Years" },
   ];

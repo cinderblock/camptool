@@ -207,8 +207,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   const form = await request.formData();
   const intent = String(form.get("intent"));
   const isOfficer = hasAtLeast(active.membership.role, "officer");
-  const officerOnly = () =>
-    data({ error: "Officers manage the schedule." }, { status: 403 });
+  const officerOnly = () => data({ error: "Officers only." }, { status: 403 });
 
   /** Resolve a shift id to its row, verifying it hangs off this gathering. */
   async function shiftInGathering(shiftId: string) {
@@ -288,7 +287,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   // ---- member self-service ----
   if (intent === "signUp" || intent === "maybe") {
     if (!hasAtLeast(active.membership.role, "member")) {
-      return data({ error: "Members can sign up." }, { status: 403 });
+      return data({ error: "Members only." }, { status: 403 });
     }
     const shift = await shiftInGathering(String(form.get("shiftId")));
     if (!shift) return data({ error: "Shift not found." }, { status: 404 });
@@ -747,7 +746,8 @@ export default function GatheringDetail({ loaderData }: Route.ComponentProps) {
                         : "yellow"
                   }
                 >
-                  {r.enforcement === "warn" ? "suggests" : "requires"} {r.name}
+                  {r.enforcement === "warn" ? "Suggested:" : "Requires:"}{" "}
+                  {r.name}
                   {r.iHaveIt ? " ✓" : ""}
                 </Badge>
               ))}
@@ -763,7 +763,7 @@ export default function GatheringDetail({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — the schedule is read-only.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -799,32 +799,20 @@ function WhatIsAShift() {
     <Paper withBorder p="sm" radius="md">
       <Group justify="space-between" wrap="nowrap" gap="xs">
         <Text size="sm" c="dimmed">
-          A <b>shift</b> is one job, on one day, that needs people — sign up and
-          you're on the list for it.
+          Sign up for any shift below; withdraw anytime. Full capped shifts
+          waitlist automatically.
         </Text>
         <Button size="compact-xs" variant="subtle" onClick={toggle}>
-          {open ? "Less" : "More"}
+          {open ? "Less" : "Staffing types"}
         </Button>
       </Group>
       <Collapse expanded={open}>
-        <Stack gap={4} mt="xs">
-          <Text size="xs" c="dimmed">
-            Each day below is broken into shifts. A shift has a <b>role</b>{" "}
-            (what you'd be doing), optionally its own <b>hours</b> inside the
-            day, and how many people it needs:
-          </Text>
-          <Stack gap={2} pl="sm">
-            {STAFFING_OPTIONS.map((s) => (
-              <Text key={s.value} size="xs" c="dimmed">
-                <b>{s.label}</b> — {s.hint}
-              </Text>
-            ))}
-          </Stack>
-          <Text size="xs" c="dimmed">
-            A day with no roles is just one general sign-up sheet. Signing up
-            isn't a contract — you can withdraw, and if a "needs people" shift
-            is already full you'll go on the waitlist instead.
-          </Text>
+        <Stack gap={2} mt="xs" pl="sm">
+          {STAFFING_OPTIONS.map((s) => (
+            <Text key={s.value} size="xs" c="dimmed">
+              <b>{s.label}</b> — {s.hint}
+            </Text>
+          ))}
         </Stack>
       </Collapse>
     </Paper>
@@ -892,7 +880,7 @@ function BulkRoles({
               <TextInput
                 type="date"
                 name="fromDate"
-                label="From day"
+                label="Start date"
                 value={from}
                 min={first}
                 max={last}
@@ -901,7 +889,7 @@ function BulkRoles({
               <TextInput
                 type="date"
                 name="toDate"
-                label="Through day"
+                label="End date"
                 value={to}
                 min={first}
                 max={last}
@@ -909,10 +897,7 @@ function BulkRoles({
               />
             </Group>
             <Text size="xs" c="dimmed">
-              A day that already has a role with the same name is left alone, so
-              you can run this again after adding a day. Existing sign-ups are
-              never touched. Need more people on later days? Add the role
-              everywhere, then edit the count on the individual days.
+              Existing roles with the same name and sign-ups are untouched.
             </Text>
             <Group justify="flex-end">
               <Button
@@ -1072,7 +1057,7 @@ function EditGathering({ g }: { g: LoaderData["gathering"] }) {
         <Group gap="xs">
           <ConfirmButton
             label="Archive"
-            confirmLabel="Really archive?"
+            confirmLabel="Confirm archive"
             onConfirm={() =>
               archiveFetcher.submit(
                 { intent: "archiveGathering" },
@@ -1181,7 +1166,7 @@ function OccurrenceCard({
             <Text fw={600}>{dateLabel(o.date)}</Text>
             {cancelled ? (
               <Badge size="xs" color="red" variant="light">
-                cancelled
+                Cancelled
               </Badge>
             ) : null}
           </Group>
@@ -1210,7 +1195,7 @@ function OccurrenceCard({
             </Button>
             <ConfirmButton
               label="Delete"
-              confirmLabel="Really delete?"
+              confirmLabel="Confirm delete"
               onConfirm={() =>
                 fetcher.submit(
                   { intent: "deleteOccurrence", occurrenceId: o.id },
@@ -1426,10 +1411,10 @@ function ShiftRow({
                   color={mine.status === "waitlisted" ? "yellow" : "green"}
                 >
                   {mine.status === "waitlisted"
-                    ? "waitlisted"
+                    ? "Waitlisted"
                     : mine.status === "maybe"
-                      ? "maybe"
-                      : "you're in"}
+                      ? "Maybe"
+                      : "Going"}
                 </Badge>
                 <Button
                   size="compact-xs"
@@ -1507,7 +1492,7 @@ function ShiftRow({
               </Button>
               <ConfirmButton
                 label="Delete shift"
-                confirmLabel="Really?"
+                confirmLabel="Confirm delete"
                 onConfirm={() =>
                   assignFetcher.submit(
                     { intent: "deleteShift", shiftId: s.id },

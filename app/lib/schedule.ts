@@ -147,12 +147,13 @@ export function timeLabel(hhmm: string): string {
     : `${h12}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
-/** "10:00"–"14:00" → "10 am – 2 pm"; open-ended and all-day handled. */
+/** "10:00"–"14:00" → "10 am – 2 pm"; open-ended and untimed handled. */
 export function timeRangeLabel(
   start: string | null,
   end: string | null,
+  fallback = "All day",
 ): string {
-  if (!start) return "All day";
+  if (!start) return fallback;
   return end ? `${timeLabel(start)} – ${timeLabel(end)}` : timeLabel(start);
 }
 
