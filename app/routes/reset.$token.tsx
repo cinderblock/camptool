@@ -113,24 +113,24 @@ const DEAD_END: Record<
   { title: string; body: string }
 > = {
   unknown: {
-    title: "This link isn't valid",
-    body: "It may have been mistyped, or truncated by the app it was sent through. Ask an officer of your camp to send you a fresh one.",
+    title: "Invalid recovery link",
+    body: "This link may have been mistyped or cut off. Ask an officer for a new one.",
   },
   expired: {
-    title: "This link has expired",
-    body: "Reset links last 7 days. Ask an officer of your camp for a new one — it only takes them a moment.",
+    title: "Recovery link expired",
+    body: "Recovery links expire after 7 days. Ask an officer for a new one.",
   },
   used: {
-    title: "This link has already been used",
-    body: "Someone already used it to get back into this account, so it can't be used again. If that wasn't you, tell an officer of your camp right away.",
+    title: "Link already used",
+    body: "This link has already been used. If that wasn't you, contact an officer.",
   },
   revoked: {
-    title: "This link was replaced",
-    body: "A newer recovery link was issued for this account, which retires this one. Use the most recent link you were sent.",
+    title: "Link replaced",
+    body: "This link was replaced by a newer recovery link. Use the latest link you received.",
   },
   locked: {
-    title: "This link is locked",
-    body: "Too many wrong email addresses were entered. Ask an officer of your camp for a new link.",
+    title: "Link locked",
+    body: "Too many incorrect email attempts. Ask an officer for a new link.",
   },
 };
 
@@ -293,15 +293,10 @@ export default function ResetPassword({
             <Stack>
               <InAppBrowserWarning />
               <Text size="sm">
-                This link was issued by{" "}
+                Recovery link from{" "}
                 <strong>{status.campName ?? "a site admin"}</strong> for{" "}
-                <strong>{status.name}</strong>. To use it, confirm the email
-                address it belongs to — it looks like{" "}
-                <strong>{status.maskedEmail}</strong>.
-              </Text>
-              <Text size="xs" c="dimmed">
-                Valid until {status.expires}. Nothing about your account changes
-                until you finish below.
+                <strong>{status.name}</strong> ({status.maskedEmail}). Valid
+                until {status.expires}.
               </Text>
 
               {error ? <Alert color="red">{error}</Alert> : null}
@@ -309,7 +304,7 @@ export default function ResetPassword({
 
               <TextInput
                 type="email"
-                label="Your email address"
+                label="Confirm your email"
                 placeholder="you@example.com"
                 autoComplete="email"
                 value={email}
@@ -325,9 +320,8 @@ export default function ResetPassword({
                 Set up a passkey
               </Button>
               <Text size="xs" c="dimmed" mt={-8}>
-                Your device asks for your face, fingerprint or PIN, and that
-                becomes how you sign in. Nothing to remember, nothing to type,
-                and nothing that can be leaked in someone else's breach.
+                Sign in with your device's biometrics or PIN — no password
+                needed.
               </Text>
 
               {allowPasswordLogin ? (
@@ -346,14 +340,14 @@ export default function ResetPassword({
                           "password" means one short mangled word. */}
                         <PasswordInput
                           name="password"
-                          label="New password or passphrase"
-                          description="A few unrelated words — “rusty kettle dawn patrol” — beat one short mangled word. Spaces count."
+                          label="New password"
+                          description="Passphrases with spaces are supported."
                           autoComplete="new-password"
                           required
                         />
                         <PasswordInput
                           name="confirm"
-                          label="Type it again"
+                          label="Confirm password"
                           autoComplete="new-password"
                           required
                         />
@@ -363,11 +357,10 @@ export default function ResetPassword({
                           variant="default"
                           fullWidth
                         >
-                          Set my password
+                          Set password
                         </Button>
                         <Text size="xs" c="dimmed">
-                          Signs you out everywhere else. You can still add a
-                          passkey later from your account page.
+                          Signs you out on other devices.
                         </Text>
                       </Stack>
                     </Form>
@@ -377,7 +370,7 @@ export default function ResetPassword({
                       size="compact-sm"
                       onClick={() => setShowPassword(true)}
                     >
-                      My device can't do passkeys — set a password instead
+                      Set a password instead
                     </Button>
                   )}
                 </>

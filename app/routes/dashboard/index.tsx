@@ -482,7 +482,7 @@ function CampOverview({
               </Group>
               {todos.length === 0 ? (
                 <Text size="sm" c="dimmed">
-                  You're all caught up. 🎉
+                  You're all caught up.
                 </Text>
               ) : (
                 <Stack gap="sm">
@@ -584,7 +584,7 @@ function CampOverview({
                 </Group>
                 {overview.schedule.myShifts.length === 0 ? (
                   <Text size="sm" c="dimmed">
-                    Nothing signed up yet — see what's coming on the schedule.
+                    No shifts yet.
                   </Text>
                 ) : (
                   <Stack gap={6}>
@@ -654,18 +654,18 @@ function CampOverview({
                 </Text>
                 <Text size="xs" c="dimmed" mt={6}>
                   {overview.meetings.next.agendaCount === 0
-                    ? "Nothing on the agenda yet — add the first item."
-                    : `${overview.meetings.next.agendaCount} item${
+                    ? "No agenda items yet."
+                    : `${overview.meetings.next.agendaCount} agenda item${
                         overview.meetings.next.agendaCount === 1 ? "" : "s"
-                      } on the agenda.`}
+                      }.`}
                 </Text>
                 {overview.meetings.next.mine === "signed_up" ? (
                   <Badge size="xs" variant="light" color="green" mt="xs">
-                    you're coming
+                    Coming
                   </Badge>
                 ) : (
                   <Text size="xs" c="dimmed" mt={4}>
-                    You haven't said whether you're coming.
+                    No RSVP yet.
                   </Text>
                 )}
               </Card>
@@ -723,8 +723,7 @@ function CampOverview({
             ) : (
               <>
                 <Text size="sm" c="dimmed" mb="sm">
-                  Sign in with your face, fingerprint or device PIN instead of a
-                  password.
+                  Use biometrics or a device PIN to sign in.
                 </Text>
                 <Button
                   component={Link}
@@ -738,35 +737,31 @@ function CampOverview({
             )}
           </Card>
 
-          <Card withBorder padding="lg" radius="md">
-            <Text fw={600}>Discord</Text>
-            {hasDiscord ? (
-              <Text size="sm" c="green">
-                Linked
-              </Text>
-            ) : discordEnabled ? (
-              <>
-                <Text size="sm" c="dimmed" mb="sm">
-                  Link your Discord to verify camp membership.
+          {discordEnabled || hasDiscord ? (
+            <Card withBorder padding="lg" radius="md">
+              <Text fw={600}>Discord</Text>
+              {hasDiscord ? (
+                <Text size="sm" c="green">
+                  Linked
                 </Text>
-                {/* Same shape as the Passkey card above: the account page owns
-                    the credential controls, this is just the status. */}
-                <Button
-                  component={Link}
-                  to="/account"
-                  size="xs"
-                  variant="light"
-                  color="indigo"
-                >
-                  Link Discord
-                </Button>
-              </>
-            ) : (
-              <Text size="sm" c="dimmed">
-                Discord not configured on this deployment.
-              </Text>
-            )}
-          </Card>
+              ) : (
+                <>
+                  <Text size="sm" c="dimmed" mb="sm">
+                    Verify your camp Discord membership.
+                  </Text>
+                  <Button
+                    component={Link}
+                    to="/account"
+                    size="xs"
+                    variant="light"
+                    color="indigo"
+                  >
+                    Link Discord
+                  </Button>
+                </>
+              )}
+            </Card>
+          ) : null}
         </SimpleGrid>
       </Stack>
     </Container>
@@ -799,13 +794,12 @@ function NoCampYet({
             <Card withBorder padding="lg" radius="md" key={a.campName}>
               <Text fw={600}>{a.campName}</Text>
               <Text size="sm" c="dimmed" mt={4}>
-                Your application is in — the camp will reach out at{" "}
-                <b>{userEmail}</b>. There's nothing else you need to do right
-                now.
+                Your application is pending. The camp will reach out at{" "}
+                <b>{userEmail}</b>.
               </Text>
               {a.slug ? (
                 <Anchor component={Link} to={`/c/${a.slug}`} size="sm" mt="sm">
-                  View your application page
+                  View application page
                 </Anchor>
               ) : null}
             </Card>
@@ -824,9 +818,8 @@ function NoCampYet({
             No camp yet
           </Title>
           <Text c="dimmed">
-            New camp creation is currently turned off on this deployment. Ask a
-            site administrator to create your camp or to re-enable camp
-            creation.
+            Camp creation is disabled here. Ask a site admin for a setup link or
+            ask a camp member for an invite.
           </Text>
         </Stack>
       </Container>
@@ -841,8 +834,7 @@ function NoCampYet({
             Create your camp
           </Title>
           <Text c="dimmed">
-            You're not part of a camp yet. Create one to get started — you'll be
-            its first admin.
+            You'll be the camp's first admin and can invite members from there.
           </Text>
         </div>
         <CreateCampForm action="/new-camp" apexHost={apexHost} />
@@ -869,10 +861,9 @@ function ContactFix({
 
   return (
     <Card withBorder padding="lg" radius="md">
-      <Text fw={600}>Your contact details</Text>
+      <Text fw={600}>Contact details</Text>
       <Text size="sm" c="dimmed" mt={4} mb="sm">
-        Typo in your name or email? Fix it here — the camp sees these on your
-        application, and your email is how you sign in.
+        Updates your application and sign-in email.
       </Text>
       {fetcher.data?.error ? (
         <Text size="sm" c="red" mb="xs" role="alert">

@@ -467,33 +467,32 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
     <Container size="sm">
       <Stack gap="lg">
         <div>
-          <Title order={2}>Site administration</Title>
-          <Text c="dimmed">
-            Deployment-wide controls. These apply to the whole CampTool
-            instance, not a single camp.
+          <Title order={2}>Site admin</Title>
+          <Text c="dimmed" size="sm">
+            Site-wide settings across all camps.
           </Text>
         </div>
 
         <Card withBorder radius="md" padding="lg">
           <Stack gap="md">
-            <Title order={4}>Lockdowns</Title>
+            <Title order={4}>Access &amp; sign-in</Title>
             <ToggleRow
               field="allowCampCreation"
               checked={settings.allowCampCreation}
               label="Allow new camp creation"
-              description="When off, only super admins can create new camps."
+              description="When off, only super admins or setup links can create camps."
             />
             <ToggleRow
               field="allowOpenSignups"
               checked={settings.allowOpenSignups}
               label="Allow open sign-ups"
-              description="When off, new accounts are invite-only — only people who follow a camp invite link or a camp's public apply page can register."
+              description="When off, new accounts require an invite link or public application page."
             />
             <ToggleRow
               field="allowPasswordLogin"
               checked={settings.allowPasswordLogin}
               label="Allow password sign-in"
-              description="When off, accounts use passkeys (and Discord, if configured). Existing password-only members can get back in with a recovery link."
+              description="When off, accounts use passkeys (or Discord). Locked-out members use a recovery link."
             />
           </Stack>
         </Card>
@@ -502,10 +501,8 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>Account recovery</Title>
             <Text size="sm" c="dimmed">
-              Generate a one-time recovery link for any member or camp admin who
-              lost their passkey or hasn&rsquo;t set one up yet. Send it to them
-              directly — they&rsquo;ll confirm their email and enrol a passkey
-              in their browser.
+              Create a one-time recovery link for anyone locked out of their
+              account.
             </Text>
             <recoveryFetcher.Form method="post" ref={recoveryEmailRef}>
               <input type="hidden" name="intent" value="issueRecoveryLink" />
@@ -533,8 +530,8 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>Camps</Title>
             <Text size="sm" c="dimmed">
-              Every camp on this deployment. Each camp's admins run their own
-              camp. You can work as any of them without joining it.
+              All camps on this site. You can impersonate a camp admin without
+              joining.
             </Text>
             <CampsTable
               camps={camps}
@@ -553,13 +550,12 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>Camp moves</Title>
             <Text size="sm" c="dimmed">
-              Camps moving between this site and other CampTool sites. A camp
-              admin starts a move under Camp settings; the other site brings it
-              in at{" "}
+              Camp transfers to or from other CampTool sites. Start an outgoing
+              move in Camp settings, or{" "}
               <Anchor href="/import-camp" size="sm">
-                Bring a camp here
+                import a camp here
               </Anchor>
-              . Old links and sign-ins follow a moved camp for a year.
+              .
             </Text>
             {movesOut.length + movesIn.length === 0 ? (
               <Text size="sm" c="dimmed">
@@ -615,9 +611,8 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>Super admins</Title>
             <Text size="sm" c="dimmed">
-              Super admins can change these settings and always bypass the
-              lockdowns. To add one, the person must have signed in here at
-              least once.
+              Can manage site settings and bypass access limits. Users must sign
+              in once before being added.
             </Text>
             <AdminTable admins={admins} currentUserId={currentUserId} />
             <AddAdminForm />
@@ -628,17 +623,9 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>Backup</Title>
             <Text size="sm" c="dimmed">
-              Download a complete backup — the whole database (every camp's
-              data) <em>and</em> every uploaded picture at full resolution — as
-              a <code>.tar.gz</code>. Safe to take while the app is running;
-              keep backups somewhere private.
-            </Text>
-            <Text size="sm" c="dimmed">
-              Restore with{" "}
-              <code>tar -xzf &lt;file&gt; -C /srv/camptool/data</code> — the
-              archive is laid out to land where it came from. A{" "}
-              <code>MANIFEST.txt</code> inside lists what it holds, and flags
-              anything already missing before the backup was taken.
+              Download the full database and uploaded pictures as a{" "}
+              <code>.tar.gz</code> archive (includes a <code>MANIFEST.txt</code>{" "}
+              with restore instructions). Keep backups private.
             </Text>
             <div>
               <Button component="a" href="/export-db" variant="light">
@@ -652,12 +639,11 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>User feedback</Title>
             <Text size="sm" c="dimmed">
-              Bug reports and suggestions sent via the Feedback button. Mark an
-              item <b>Done</b> to clear it from this queue (latest 25 open).
+              Latest 25 open submissions from the Feedback button.
             </Text>
             {recentFeedback.length === 0 ? (
               <Text size="sm" c="dimmed">
-                No open feedback. 🎉
+                No open feedback.
               </Text>
             ) : (
               <Table.ScrollContainer minWidth={620}>
@@ -718,11 +704,11 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           <Stack gap="md">
             <Title order={4}>Recent client errors</Title>
             <Text size="sm" c="dimmed">
-              JavaScript errors forwarded from users' browsers (latest 25).
+              Latest 25 browser errors.
             </Text>
             {recentErrors.length === 0 ? (
               <Text size="sm" c="dimmed">
-                No errors logged. 🎉
+                No errors logged.
               </Text>
             ) : (
               <Table.ScrollContainer minWidth={560}>
@@ -730,7 +716,7 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>When</Table.Th>
-                      <Table.Th>Kind</Table.Th>
+                      <Table.Th>Type</Table.Th>
                       <Table.Th>Message</Table.Th>
                       <Table.Th>Where</Table.Th>
                       <Table.Th>Who</Table.Th>
@@ -783,10 +769,8 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
       >
         <Stack gap="md">
           <Text size="sm">
-            Send this link directly to them (text, Signal, or Discord DM) —
-            CampTool doesn&rsquo;t email it. They&rsquo;ll open it in Safari or
-            Chrome, confirm their email, and set up a passkey. Nothing changes
-            on their account until they finish.
+            Send this link directly — CampTool doesn&rsquo;t email it. They will
+            confirm their email and set up a passkey.
           </Text>
           <TextInput
             readOnly
@@ -796,8 +780,8 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
           />
           <Group justify="space-between">
             <Text size="xs" c="dimmed">
-              Valid until {recoveryLink?.expires}. Safe to preview yourself —
-              finishing recovery also requires their email address.
+              Expires {recoveryLink?.expires}. Safe to preview — only shown
+              once.
             </Text>
             <CopyButton value={recoveryLink?.url ?? ""}>
               {({ copied, copy }) => (
@@ -811,10 +795,6 @@ export default function SiteAdmin({ loaderData }: Route.ComponentProps) {
               )}
             </CopyButton>
           </Group>
-          <Text size="xs" c="dimmed">
-            Copy this now — you won&rsquo;t be able to view it again. Issuing a
-            new link replaces this one.
-          </Text>
         </Stack>
       </Modal>
     </Container>

@@ -20,10 +20,9 @@ export function NoMailRecoveryNote({
   return (
     <Text size="sm" c="dimmed" ta="center">
       {allowPasswordLogin
-        ? "Forgot your password or lost your passkey? "
+        ? "Locked out? "
         : "Lost your passkey or on a new device? "}
-      This site doesn&rsquo;t send email, so ask an officer of your camp for a
-      recovery link — that&rsquo;s how you get back in.
+      Ask a camp officer for a recovery link.
     </Text>
   );
 }

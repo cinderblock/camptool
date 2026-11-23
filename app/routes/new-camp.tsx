@@ -218,7 +218,7 @@ export default function NewCamp({ loaderData, params }: Route.ComponentProps) {
           >
             {!viewer ? (
               <AuthInline
-                intro="First, make your account (or sign in). Then you'll name your camp and pick its address."
+                intro="Create an account or sign in to set up your camp."
                 discordEnabled={loaderData.discordEnabled}
                 mailEnabled={loaderData.mailEnabled}
                 allowPasswordLogin={allowPasswordLogin}
@@ -232,11 +232,7 @@ export default function NewCamp({ loaderData, params }: Route.ComponentProps) {
             ) : (
               <Stack gap="md">
                 <Text size="sm" c="dimmed">
-                  {withLink
-                    ? "You've been invited to start a camp on CampTool. "
-                    : ""}
-                  You'll be its first admin, as <b>{viewer.name}</b>, and can
-                  invite your campers from there.
+                  You'll be the camp's first admin as <b>{viewer.name}</b>.
                 </Text>
                 <CreateCampForm
                   action={action}

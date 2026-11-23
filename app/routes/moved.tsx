@@ -76,15 +76,12 @@ export default function Moved({ loaderData }: Route.ComponentProps) {
       <Paper withBorder shadow="sm" p="lg" radius="md" mt="xl">
         <Stack>
           <Text>
-            CampTool for this camp now lives at{" "}
-            <Anchor href={next}>{newHost}</Anchor>. Your account, and everything
-            in it, came along.
+            This camp moved to <Anchor href={next}>{newHost}</Anchor>. Your
+            account and data came along.
           </Text>
-          <Text>
-            Passkeys belong to the address they were made for, so one made for{" "}
-            <b>{oldHost}</b> won't work at the new address. If that's how you
-            sign in, use it here one last time: you'll be signed in at the new
-            address and asked to make a new passkey there.
+          <Text size="sm" c="dimmed">
+            Passkeys from <b>{oldHost}</b> won't work at the new address. Sign
+            in here once to transfer your session and create a new passkey.
           </Text>
           {error ? <Alert color="red">{error}</Alert> : null}
           <Button onClick={signInWithOldPasskey} loading={busy}>

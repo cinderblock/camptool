@@ -414,7 +414,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           end: true,
           badge: outstandingCount > 0 ? String(outstandingCount) : null,
         },
-        { to: "/guide", label: "How it works", end: false },
+        { to: "/guide", label: "Camp guide", end: false },
         ...gated("announcements", "/announcements", "Announcements"),
       ];
 
@@ -426,7 +426,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         // looking for them anyway.
         {
           id: "setup",
-          label: "Getting set up",
+          label: "Setup",
           items: [
             // The wizard's permanent door. It used to be reachable only by the
             // one-time forced redirect (which officers never get, and which
@@ -438,7 +438,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             ...(activeEditionId
               ? [{ to: "/start", label: "Guided setup", end: false }]
               : []),
-            ...gated("onboarding", "/onboarding", "Onboarding"),
+            ...gated("onboarding", "/onboarding", "Checklist"),
             ...gated("questions", "/questions", "Questions"),
             ...gated("training", "/training", "Training"),
           ],
@@ -447,7 +447,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           id: "people",
           label: "People",
           items: [
-            { to: "/members", label: "Members · all years", end: false },
+            { to: "/members", label: "Members", end: false },
             ...gated(
               "roster",
               "/roster",
@@ -456,11 +456,11 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                 : "Who's coming",
             ),
             ...(activeRole && hasAtLeast(activeRole, "member")
-              ? [{ to: "/invite", label: "Invite friends", end: false }]
+              ? [{ to: "/invite", label: "Invites", end: false }]
               : []),
             ...(officer
               ? [
-                  ...gated("recruiting", "/recruits", "Recruits"),
+                  ...gated("recruiting", "/recruits", "Applications"),
                   ...gated("prospects", "/prospects", "Prospects").map(
                     (item) => ({
                       ...item,
@@ -474,7 +474,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         },
         {
           id: "travel",
-          label: "Getting there",
+          label: "Travel & tickets",
           items: [
             // Ungated: RSVP and stay dates are core, and this is where the
             // to-do list sends people (plans/wizard-step-homes.md).
@@ -495,18 +495,18 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         },
         {
           id: "gear",
-          label: "What we're bringing",
+          label: "Camp & gear",
           items: [
             ...gated("map", "/map", "Map"),
-            ...gated("bringing", "/bringing", "Bringing"),
+            ...gated("bringing", "/bringing", "Your gear"),
+            ...(officer ? gated("bringing", "/inventory", "All gear") : []),
             ...gated("supplies", "/supplies", "Supplies"),
             ...gated("fuel", "/fuel", "Fuel"),
-            ...(officer ? gated("bringing", "/inventory", "Inventory") : []),
           ],
         },
         {
           id: "whats-on",
-          label: "What's on",
+          label: "Events",
           items: [
             // An on-but-empty Schedule stays hidden from members (see loader).
             ...(scheduleEmpty && !officer
@@ -538,7 +538,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         },
         {
           id: "running",
-          label: "Running the camp",
+          label: "Camp admin",
           items: [
             ...(officer
               ? [
@@ -643,15 +643,15 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
     <>
       <Menu.Label>Privacy mode</Menu.Label>
       <Menu.Item onClick={() => setPrivacy({ on: false, keepSelf: false })}>
-        {!privacyMode.on ? "✓ " : ""}Off — show real people
+        {!privacyMode.on ? "✓ " : ""}Off — real names
       </Menu.Item>
       <Menu.Item onClick={() => setPrivacy({ on: true, keepSelf: false })}>
         {privacyMode.on && !privacyMode.keepSelf ? "✓ " : ""}
-        On — fake names for everyone
+        On — fake names
       </Menu.Item>
       <Menu.Item onClick={() => setPrivacy({ on: true, keepSelf: true })}>
         {privacyMode.on && privacyMode.keepSelf ? "✓ " : ""}
-        On — but keep my own name
+        On — fake names (keep mine)
       </Menu.Item>
     </>
   );
@@ -997,8 +997,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               ) : null
             }
           >
-            <b>This camp is moving</b> to another CampTool site. It's read-only
-            until the move is finished.
+            <b>This camp is moving</b> — read-only until the move finishes.
           </ShellBanner>
         ) : null}
         {privacyMode.on ? (
@@ -1016,9 +1015,9 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               </Button>
             }
           >
-            <b>Privacy mode</b> — every name, email and phone number on screen
-            is fake{privacyMode.keepSelf ? " except your own" : ""}. Editing is
-            disabled so a fake name can't be saved over a real one.
+            <b>Privacy mode</b> — names, emails, and phone numbers are masked
+            {privacyMode.keepSelf ? " (except yours)" : ""}. Editing is
+            disabled.
           </ShellBanner>
         ) : null}
         {impersonatedByName ? (
@@ -1034,8 +1033,8 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               </Form>
             }
           >
-            Working as <b>{user.name}</b> — impersonated by {impersonatedByName}
-            .
+            Working as <b>{user.name}</b> (impersonated by {impersonatedByName}
+            ).
           </ShellBanner>
         ) : null}
         {previewDef ? (
@@ -1055,8 +1054,8 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               ) : null
             }
           >
-            <b>Preview</b> — only officers can see {previewDef.label} right now.
-            The rest of the camp won't see it until it's turned on.
+            <b>Preview</b> — only officers can see {previewDef.label} until it's
+            turned on.
           </ShellBanner>
         ) : null}
         {/* The loud half of the passkey reminder: dismissible, but back
@@ -1074,7 +1073,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
                   variant="filled"
                   color="blue"
                 >
-                  Set one up
+                  Set up
                 </Button>
                 <Form method="post" action="/passkey-nag">
                   <input
@@ -1089,8 +1088,8 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
               </Group>
             }
           >
-            <b>Set up a passkey</b> — sign in with your face, fingerprint or
-            device PIN instead of a password. Takes a few seconds.
+            <b>Set up a passkey</b> — sign in with biometrics or a device PIN
+            instead of a password.
           </ShellBanner>
         ) : null}
         {/* Start the new year (app/lib/year-nudge.ts). Officers get it from
@@ -1099,8 +1098,8 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             being viewed. */}
         {yearBanner?.kind === "waiting" ? (
           <ShellBanner color="blue">
-            <b>Your camp hasn't started a year yet.</b> The map, roster, and
-            gear list open up once an officer adds one.
+            <b>No active year yet.</b> Map, roster, and gear open once an
+            officer adds one.
           </ShellBanner>
         ) : yearBanner ? (
           <ShellBanner
@@ -1140,15 +1139,14 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           >
             {yearBanner.kind === "first" ? (
               <>
-                <b>Add your camp's first year.</b> The map, roster, and gear
-                list all belong to a year.
+                <b>Add your camp's first year</b> to unlock the map, roster, and
+                gear list.
               </>
             ) : (
               <>
-                <b>Time to start {yearBanner.year}.</b> It begins with{" "}
-                {yearBanner.from.year}'s lot setup, and everyone sees{" "}
-                {yearBanner.year} from then on. {yearBanner.from.year} stays in
-                the year picker.
+                <b>Start {yearBanner.year}?</b> Copies {yearBanner.from.year}'s
+                lot setup and switches everyone to {yearBanner.year} (
+                {yearBanner.from.year} stays in the year picker).
               </>
             )}
           </ShellBanner>

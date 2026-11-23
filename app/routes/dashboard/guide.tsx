@@ -22,7 +22,7 @@ import { loadWizardState } from "~/lib/wizard.server";
 import type { Route } from "./+types/guide";
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "How camp works · CampTool" }];
+  return [{ title: "Camp guide · CampTool" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -86,12 +86,12 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
       <Stack gap="xl">
         <div>
           <Title order={1} size="h2">
-            How {campName} works
+            {campName} guide
           </Title>
           <Text c="dimmed" size="sm">
-            From joining to {destination} and back again next year
+            Joining, preparing for {destination}, and returning next year
             {burningMan && weeksToEvent > 0
-              ? ` — about ${weeksToEvent} weeks out`
+              ? ` · ~${weeksToEvent} weeks out`
               : ""}
             .
           </Text>
@@ -99,7 +99,7 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
 
         <Card withBorder padding="lg" radius="md">
           <Group justify="space-between" mb="md">
-            <Text fw={600}>Where you are — {year}</Text>
+            <Text fw={600}>Your progress · {year}</Text>
             <Badge
               variant="light"
               color={pendingCount === 0 ? "green" : "blue"}
@@ -109,7 +109,7 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
           </Group>
           {scheduled.length === 0 ? (
             <Text size="sm" c="dimmed">
-              Nothing to do right now — you're all set for {year}.
+              All set for {year}.
             </Text>
           ) : (
             <Timeline active={doneCount} bulletSize={20} lineWidth={2}>
@@ -147,44 +147,43 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
             variant="light"
             w="fit-content"
           >
-            {pendingCount > 0 ? "Continue setup" : "Walk through setup again"}
+            {pendingCount > 0 ? "Continue setup" : "Review setup"}
           </Button>
         </Card>
 
         <div>
           <Title order={2} size="h4" mb="sm">
-            Joining {campName} — the big picture
+            How it works
           </Title>
           <JoinFlowchart year={year} event={event} />
         </div>
 
         <div>
           <Title order={2} size="h4" mb="sm">
-            The details
+            Details
           </Title>
           <Stack gap="md">
             <PhaseCard
               title="1 · Joining"
               items={[
-                "Redeem a friend's one-time invite link (the usual way in), apply on the public page, or get added by an officer.",
-                "Officers review applications — accept, waitlist, or pass.",
-                "Recruits become full members as they get involved.",
+                "Join via an invite link, apply on the public page, or get added by an officer.",
+                "Officers review applications and update member roles as people get involved.",
               ]}
             />
             <PhaseCard
               title="2 · Getting ready"
               items={[
-                "Guided setup asks for what's relevant as the event nears — your RSVP and whatever else the camp collects.",
+                "Guided setup walks through your RSVP and camp questions as the event approaches.",
                 ...(features.map
                   ? [
-                      "List your tents and vehicles on Your gear; officers place them on the camp map (you can suggest moves on your own spot).",
+                      "List your tents and vehicles on Your gear so officers can place them on the camp map.",
                     ]
                   : []),
                 ...(features.tickets
                   ? [
                       burningMan
-                        ? "Request a Directed Group Sale ticket and any Setup Access Passes."
-                        : "Request a camp ticket and any early-arrival passes.",
+                        ? "Request Directed Group Sale tickets and Setup Access Passes as needed."
+                        : "Request camp tickets and early-arrival passes as needed.",
                     ]
                   : []),
               ]}
@@ -192,9 +191,9 @@ export default function Guide({ loaderData }: Route.ComponentProps) {
             <PhaseCard
               title="3 · Next year"
               items={[
-                "Officers start a new year — your account and camp role carry over.",
-                "Per-year things reset: RSVP, answers, what you're bringing, tickets.",
-                "Officers can copy last year's lot dimensions as a starting point, and returning campers can re-add their gear in one click on Your gear.",
+                "Your account and camp role carry over when officers start a new year.",
+                "RSVPs, yearly questions, gear lists, and tickets start fresh.",
+                "Returning campers can copy last year's gear in one click on Your gear.",
               ]}
             />
           </Stack>

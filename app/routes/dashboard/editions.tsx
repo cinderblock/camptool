@@ -287,10 +287,104 @@ export default function Editions({
         <div>
           <Title order={2}>Years</Title>
           <Text c="dimmed" size="sm">
-            Each year has its own map, roster, and gear list. Editing a year
-            never changes past years, and locking a year makes it read-only.
+            Each year has its own map, roster, and gear list. Lock a year to
+            make it read-only.
           </Text>
         </div>
+
+        <Table.ScrollContainer minWidth={640}>
+          <Table verticalSpacing="sm">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Year</Table.Th>
+                <Table.Th>Event</Table.Th>
+                <Table.Th>Status</Table.Th>
+                <Table.Th>Actions</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {editions.map((e) => {
+                const isActive = e.id === activeEditionId;
+                return (
+                  <Table.Tr key={e.id}>
+                    <Table.Td>
+                      {e.label ? `${e.year} · ${e.label}` : e.year}
+                      {isActive ? (
+                        <Badge ml={8} size="xs" variant="light">
+                          Viewing
+                        </Badge>
+                      ) : null}
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c="dimmed">
+                        {eventLabel(e.event)}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      {e.locked ? (
+                        <Badge size="sm" color="gray" variant="light">
+                          Locked
+                        </Badge>
+                      ) : (
+                        <Badge size="sm" color="green" variant="light">
+                          Open
+                        </Badge>
+                      )}
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap="xs">
+                        {!isActive ? (
+                          <Form method="post">
+                            <input
+                              type="hidden"
+                              name="intent"
+                              value="setActive"
+                            />
+                            <input
+                              type="hidden"
+                              name="editionId"
+                              value={e.id}
+                            />
+                            <Button type="submit" size="xs" variant="light">
+                              View
+                            </Button>
+                          </Form>
+                        ) : null}
+                        {canManage ? (
+                          <Form method="post">
+                            <input
+                              type="hidden"
+                              name="intent"
+                              value="setLock"
+                            />
+                            <input
+                              type="hidden"
+                              name="editionId"
+                              value={e.id}
+                            />
+                            <input
+                              type="hidden"
+                              name="locked"
+                              value={e.locked ? "false" : "true"}
+                            />
+                            <Button
+                              type="submit"
+                              size="xs"
+                              variant="subtle"
+                              color={e.locked ? "blue" : "gray"}
+                            >
+                              {e.locked ? "Unlock" : "Lock"}
+                            </Button>
+                          </Form>
+                        ) : null}
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
 
         {canManage ? (
           <Card withBorder padding="md" radius="md">
@@ -303,7 +397,7 @@ export default function Editions({
                 <Group align="flex-end" wrap="wrap">
                   <NumberInput
                     size="xs"
-                    label="New year"
+                    label="Year"
                     name="year"
                     value={newYear}
                     onChange={(v) => {
@@ -318,7 +412,7 @@ export default function Editions({
                     size="xs"
                     label="Event"
                     name="event"
-                    placeholder="Choose an event"
+                    placeholder="Choose event"
                     required
                     value={selectedEvent}
                     onChange={setEventChoice}
@@ -351,20 +445,16 @@ export default function Editions({
                     Add year
                   </Button>
                 </Group>
-                <Stack gap={4}>
-                  <Text size="xs" c="dimmed">
-                    {copySourceLabel
-                      ? `Copies only ${copySourceLabel}'s lot dimensions and location as a starting point — update them on the Camp map once final placement arrives. Placed gear and RSVPs don't carry over; campers confirm they're coming on Your trip and can re-add their gear in one click on Your gear.`
-                      : "Starts with a blank map, roster, and gear list. Set your lot dimensions on the Camp map whenever you're ready; returning campers can still re-add their gear in one click on Your gear."}
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    {selectedEvent === BURNING_MAN
-                      ? "Burning Man sets up the Black Rock City street grid and starts with pop-up canopies disallowed (adjustable below)."
-                      : selectedEvent
-                        ? "Uses a generic lot and terminology with no structures disallowed by default (adjustable below)."
-                        : "Pick an event to choose map layout, terminology, and default disallowed structures."}
-                  </Text>
-                </Stack>
+                <Text size="xs" c="dimmed">
+                  {copySourceLabel
+                    ? `Copies ${copySourceLabel}'s lot size and location only; RSVPs and gear start fresh.`
+                    : "Starts with a blank map, roster, and gear list."}{" "}
+                  {selectedEvent === BURNING_MAN
+                    ? "Burning Man uses the Black Rock City street grid and disallows pop-up canopies by default."
+                    : selectedEvent
+                      ? "Uses a generic lot with all structure types allowed by default."
+                      : ""}
+                </Text>
                 {actionError ? (
                   <Text size="xs" c="red">
                     {actionError}
@@ -381,15 +471,13 @@ export default function Editions({
               <div>
                 <Title order={4}>Disallowed structures · {activeLabel}</Title>
                 <Text c="dimmed" size="sm">
-                  Checked items are hidden when campers add gear on Your gear or
-                  the Camp map for this year. Items already on the map stay
-                  visible and are flagged for an officer to review.
+                  Checked types can't be added this year. Items already placed
+                  are flagged for review.
                 </Text>
               </div>
               {activeEdition.locked ? (
                 <Text size="sm" c="dimmed">
-                  This year is locked — unlock it below to change the disallowed
-                  list.
+                  This year is locked — unlock it above to edit.
                 </Text>
               ) : (
                 <Form method="post">
@@ -431,7 +519,7 @@ export default function Editions({
                     })}
                     <Group>
                       <Button type="submit" size="xs">
-                        Save disallowed list
+                        Save
                       </Button>
                     </Group>
                   </Stack>
@@ -440,100 +528,6 @@ export default function Editions({
             </Stack>
           </Card>
         ) : null}
-
-        <Table.ScrollContainer minWidth={640}>
-          <Table verticalSpacing="sm">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Year</Table.Th>
-                <Table.Th>Event</Table.Th>
-                <Table.Th>Status</Table.Th>
-                {canManage ? <Table.Th>Actions</Table.Th> : null}
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {editions.map((e) => {
-                const isActive = e.id === activeEditionId;
-                return (
-                  <Table.Tr key={e.id}>
-                    <Table.Td>
-                      {e.label ? `${e.year} · ${e.label}` : e.year}
-                      {isActive ? (
-                        <Badge ml={8} size="xs" variant="light">
-                          viewing
-                        </Badge>
-                      ) : null}
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm" c="dimmed">
-                        {eventLabel(e.event)}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      {e.locked ? (
-                        <Badge size="sm" color="gray" variant="light">
-                          locked
-                        </Badge>
-                      ) : (
-                        <Badge size="sm" color="green" variant="light">
-                          open
-                        </Badge>
-                      )}
-                    </Table.Td>
-                    {canManage ? (
-                      <Table.Td>
-                        <Group gap="xs">
-                          {!isActive ? (
-                            <Form method="post">
-                              <input
-                                type="hidden"
-                                name="intent"
-                                value="setActive"
-                              />
-                              <input
-                                type="hidden"
-                                name="editionId"
-                                value={e.id}
-                              />
-                              <Button type="submit" size="xs" variant="light">
-                                View
-                              </Button>
-                            </Form>
-                          ) : null}
-                          <Form method="post">
-                            <input
-                              type="hidden"
-                              name="intent"
-                              value="setLock"
-                            />
-                            <input
-                              type="hidden"
-                              name="editionId"
-                              value={e.id}
-                            />
-                            <input
-                              type="hidden"
-                              name="locked"
-                              value={e.locked ? "false" : "true"}
-                            />
-                            <Button
-                              type="submit"
-                              size="xs"
-                              variant="subtle"
-                              color={e.locked ? "blue" : "gray"}
-                            >
-                              {e.locked ? "Unlock" : "Lock"}
-                            </Button>
-                          </Form>
-                        </Group>
-                      </Table.Td>
-                    ) : null}
-                  </Table.Tr>
-                );
-              })}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
       </Stack>
     </Container>
   );

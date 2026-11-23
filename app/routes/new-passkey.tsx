@@ -92,16 +92,12 @@ export default function NewPasskey({ loaderData }: Route.ComponentProps) {
             ) : null}
             .{" "}
             {oldHost
-              ? "Passkeys only work at the address they were made for, so your old one can't sign you in here."
-              : "Passwords from your camp's old site don't come along."}
-          </Text>
-          <Text>
-            Make a new one now; it takes a few seconds. It's how you'll sign in
-            from now on.
+              ? "Passkeys are tied to the domain they were created on, so you need a new one here."
+              : "Passwords don't transfer between sites — set up a passkey to sign in here."}
           </Text>
           {error ? <Alert color="red">{error}</Alert> : null}
           <Button onClick={add} loading={busy}>
-            Make a passkey
+            Set up a passkey
           </Button>
           <Text size="sm" c="dimmed">
             Not your device?{" "}

@@ -78,12 +78,12 @@ export function StayRangeField({
       <Modal
         opened={open}
         onClose={() => setOpen(false)}
-        title="When are they here?"
+        title="Stay dates"
         size="auto"
       >
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
-            Tap the day they arrive, then the day they head home.
+            Select arrival day, then departure day.
           </Text>
           <EventCalendar
             year={year}
@@ -113,8 +113,8 @@ export function StayRangeField({
 export function describe(range: EventRange): string {
   const { arrival, departure } = range;
   if (!arrival && !departure) return "Pick dates";
-  if (arrival && !departure) return `${day(arrival)} → pick a last day`;
-  if (!arrival && departure) return `pick an arrival → ${day(departure)}`;
+  if (arrival && !departure) return `${day(arrival)} → departure`;
+  if (!arrival && departure) return `arrival → ${day(departure)}`;
   return `${day(arrival as string)} → ${day(departure as string)}`;
 }
 

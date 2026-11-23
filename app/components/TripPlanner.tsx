@@ -80,7 +80,7 @@ export function RsvpButtons({ trip }: { trip: TripData }) {
         Are you camping with us for {trip.year}?
       </Text>
       <Text size="sm" c="dimmed">
-        This helps us plan tickets and space — you can change it anytime.
+        Helps us plan space and logistics. You can change this anytime.
       </Text>
       <Group gap="xs">
         {choices.map((c) => (
@@ -130,7 +130,7 @@ export function StayPicker({ trip }: { trip: TripData }) {
           When will you be there?
         </Text>
         <Text size="xs" c="dimmed">
-          Tap the day you'll arrive, then the day you'll head home.
+          Select your arrival day, then your departure day.
           {isBurningMan(trip.event) ? ` Gates open ${longDay(gateOpen)}.` : ""}
         </Text>
       </div>
@@ -145,8 +145,8 @@ export function StayPicker({ trip }: { trip: TripData }) {
         {arrival && departure
           ? `${fmt(arrival)} → ${fmt(departure)} · ${nights} ${nights === 1 ? "night" : "nights"}`
           : arrival
-            ? `Arriving ${fmt(arrival)} — now tap your last day.`
-            : "No stay picked yet."}
+            ? `Arriving ${fmt(arrival)} — now select your departure day.`
+            : "No dates selected."}
       </Text>
       <SetupPassSwitch trip={trip} />
     </Stack>
@@ -231,20 +231,19 @@ function SetupPassSwitch({ trip }: { trip: TripData }) {
         ) : null}
         {sap.onOrAfterDate && arrival && sap.onOrAfterDate > arrival ? (
           <Text size="sm" c="orange">
-            Heads up: that's after your planned arrival — talk to an officer
-            about an earlier pass.
+            This pass starts after your planned arrival. Contact an officer for
+            an earlier pass.
           </Text>
         ) : null}
         {!checked && arrivingEarly && burningMan && !sap.fixedReason ? (
           <Text size="sm" c="orange">
-            Without one you won't be let in until gates open on{" "}
-            {longDay(gateOpen)}.
+            Without a pass, entry starts when gates open ({fmt(gateOpen)}).
           </Text>
         ) : null}
         {checked && !arrivingEarly && burningMan && !sap.fixedReason ? (
           <Text size="sm" c="dimmed">
-            Your arrival is after gates open, so you probably don't need one —
-            passes are scarce, so switch this off if you don't.
+            Your arrival is after gates open. Turn this off if you don't need an
+            early-arrival pass.
           </Text>
         ) : null}
         {sap.denied ? (
@@ -279,8 +278,8 @@ export function TripNote({
   return (
     <Stack gap="xs" maw={520}>
       <Textarea
-        label="Anything to add?"
-        description="Anything else we should know — arriving late, bringing a friend, a question for us…"
+        label="Notes for the camp"
+        placeholder="Arriving late, bringing a friend, questions…"
         autosize
         minRows={2}
         disabled={trip.locked}

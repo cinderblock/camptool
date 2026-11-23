@@ -77,9 +77,8 @@ export default function MoveClaim({
         ) : (
           <Stack gap="md">
             <Text size="sm">
-              Your camp moved here. There&apos;s already an account here using{" "}
-              <b>{email}</b>, so your place in the camp is waiting to be
-              claimed. Sign in to your account here (or make one) and claim it.
+              Your camp moved here, and an account with <b>{email}</b> already
+              exists. Sign in to claim your membership.
             </Text>
             {error && <Alert color="red">{error}</Alert>}
             {viewer ? (

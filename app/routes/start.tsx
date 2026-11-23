@@ -472,14 +472,12 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
                 : "Your setup, step by step"}
             </Title>
             <Text c="dimmed" size="sm">
-              We only ask for what's relevant right now
-              {isBurningMan(loaderData.event) && weeksToEvent > 0
-                ? ` (~${weeksToEvent} weeks to the event)`
-                : ""}
-              .
               {firstVisit
-                ? " Stop anytime and pick up where you left off."
-                : " Everything here also has its own page — this is just the guided pass."}
+                ? "You can stop anytime and pick up where you left off."
+                : "Everything here can also be updated on its own page."}
+              {isBurningMan(loaderData.event) && weeksToEvent > 0
+                ? ` (~${weeksToEvent} weeks out)`
+                : ""}
             </Text>
           </div>
           <Button variant="subtle" size="xs" onClick={() => navigate("/")}>
@@ -523,9 +521,8 @@ export default function StartWizard({ loaderData }: Route.ComponentProps) {
                 You're all set!
               </Title>
               <Text size="sm" c="dimmed">
-                Your answers are saved — it's safe to close this tab now. You
-                can refine any of this anytime from the dashboard — Bringing,
-                the map, tickets, and the checklist.
+                Your answers are saved. You can update anything later from the
+                sidebar.
               </Text>
             </Paper>
           </Stepper.Completed>

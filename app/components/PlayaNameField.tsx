@@ -22,7 +22,6 @@ export function PlayaNameField({
     return (
       <TextInput
         label="Camp nickname"
-        description="Optional — a nickname you go by with the camp."
         placeholder="Optional"
         defaultValue={defaultValue}
         {...inputProps}
@@ -33,7 +32,6 @@ export function PlayaNameField({
     <>
       <Checkbox
         label="I've been to Burning Man before"
-        description="No worries if not — first-timers are welcome."
         checked={beenBefore}
         onChange={(e) => {
           const checked = e.currentTarget.checked;
@@ -45,8 +43,7 @@ export function PlayaNameField({
       {beenBefore ? (
         <TextInput
           label="Playa name"
-          description="Optional — the nickname you go by at the event."
-          placeholder="Dusty"
+          placeholder="Optional"
           defaultValue={defaultValue}
           {...inputProps}
         />

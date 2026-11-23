@@ -218,17 +218,10 @@ export function MarkupTextarea({
         }}
       />
       <Text size="xs" c="dimmed" mt={4}>
-        <strong>#</strong> heading · <strong>-</strong> bullet ·{" "}
+        <strong>#</strong> heading · <strong>-</strong> list ·{" "}
         <strong>**bold**</strong> · <strong>`code`</strong> ·{" "}
-        <strong>[[Another page]]</strong> to link a wiki page ·{" "}
-        <strong>[[/map|the map]]</strong> to link anywhere in CampTool
-        {allowPictures ? (
-          <>
-            {" "}
-            · <strong>drop, paste or pick a picture</strong> to add one
-          </>
-        ) : null}
-        .
+        <strong>[[Page]]</strong> or <strong>[[/path|label]]</strong> links
+        {allowPictures ? " · drop or paste images" : ""}.
       </Text>
     </div>
   );

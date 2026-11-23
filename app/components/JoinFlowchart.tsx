@@ -19,7 +19,7 @@ export function JoinFlowchart({
   const border = "2px solid var(--mantine-color-default-border)";
   const dashed = "2px dashed var(--mantine-color-dimmed)";
   const goToTitle = isBurningMan(event)
-    ? "Go to Burning Man 🔥"
+    ? "Go to Burning Man"
     : event && event !== "other"
       ? `Go to ${eventLabel(event)}`
       : "Go to the event";
@@ -36,23 +36,17 @@ export function JoinFlowchart({
       <VisuallyHidden>
         <ol>
           <li>
-            There are two ways in: a friend in the camp sends you their one-time
-            invite link (create an account, tap Join, you're in right away), or
-            you find us online and apply on the public page — the camp reviews
-            applications and reaches out.
+            Two ways in: redeem an invite link (create an account and join right
+            away), or apply on the camp's public page for officers to review.
+          </li>
+          <li>Complete Guided setup: your details, dates, and gear.</li>
+          <li>
+            Prepare{year ? ` for ${year}` : ""} (tickets, passes, dues, and camp
+            map), then {goToProse}.
           </li>
           <li>
-            Both paths meet at onboarding: quick setup covering who you are,
-            when you'll be there, and what you're bringing.
-          </li>
-          <li>
-            Then you get ready{year ? ` for ${year}` : ""} — tickets and passes,
-            dues, your spot on the camp map — and {goToProse} (come early for
-            setup or stay for strike if you can).
-          </li>
-          <li>
-            After that you're in the camp, and each following year loops back to
-            "get ready" — the easy path.
+            Each following year, your membership carries over and loops back to
+            preparing for the new year.
           </li>
         </ol>
       </VisuallyHidden>
@@ -63,24 +57,21 @@ export function JoinFlowchart({
         >
           <Stack gap={0}>
             <FlowNode
-              title="A friend invites you"
-              hint="Someone in the camp makes you a one-time invite link."
+              title="Invited by camp"
+              hint="Receive an invite link from a member or officer."
             />
             <FlowArrow />
-            <FlowNode
-              title="Create an account & tap Join"
-              hint="You're in right away."
-            />
+            <FlowNode title="Create account & join" hint="Immediate access." />
           </Stack>
           <Stack gap={0}>
             <FlowNode
-              title="You find us online"
-              hint="Apply on the public page — tell us a bit about yourself."
+              title="Apply online"
+              hint="Submit the camp's application form."
             />
             <FlowArrow />
             <FlowNode
-              title="The camp reviews & reaches out"
-              hint="Accepted folks get invited in."
+              title="Officer review"
+              hint="Accepted applicants join the camp."
             />
           </Stack>
         </Box>
@@ -100,29 +91,29 @@ export function JoinFlowchart({
         />
         <FlowArrow />
         <FlowNode
-          title="Onboarding"
-          hint="Quick setup: who you are, when you'll be there, what you're bringing."
+          title="Guided setup"
+          hint="Your info, dates, and gear."
           accent
         />
         <FlowArrow />
 
-        {/* The yearly loop: get ready → burn → you're in → (next year) back up */}
+        {/* The yearly loop: get ready → burn → return → (next year) back up */}
         <Box style={{ display: "grid", gridTemplateColumns: "1fr 26px" }}>
           <Stack gap={0}>
             <FlowNode
               title={`Get ready${year ? ` for ${year}` : ""}`}
-              hint="Tickets & passes, dues, your spot on the camp map."
+              hint="Tickets, passes, dues, and map placement."
             />
             <FlowArrow />
             <FlowNode
               title={goToTitle}
-              hint="Come early for setup or stay for strike if you can."
+              hint="Build, enjoy the event, and pack out."
               accent
             />
             <FlowArrow />
             <FlowNode
-              title="You're in the camp"
-              hint="From here on it's the easy path."
+              title="Return next year"
+              hint="Your account and role carry over."
             />
           </Stack>
           <Box style={{ position: "relative", margin: "24px 0" }}>

@@ -321,8 +321,8 @@ function BinsConfig({
         label="Access code"
         description={
           bins.hasCode
-            ? "Saved. Type a new one to replace it, or leave blank to keep it."
-            : "From your bins site's Settings page — the code its invite link carries. Members get signed straight in; it's never printed on the page."
+            ? "Saved. Leave blank to keep."
+            : "Invite access code from your bins site's Settings page."
         }
         placeholder={bins.hasCode ? "••••••••" : "Optional"}
         value={accessCode}
@@ -333,8 +333,8 @@ function BinsConfig({
         label="Read token"
         description={
           bins.hasToken
-            ? "Saved. Type a new one to replace it, or leave blank to keep it."
-            : "Optional. A read-scoped integration token from your bins admin page — with one, Supplies can look up which box something is in. Stays on the server."
+            ? "Saved. Leave blank to keep."
+            : "Optional read-only API token so Supplies can show storage locations."
         }
         placeholder={bins.hasToken ? "••••••••" : "bins_…"}
         value={apiToken}
@@ -405,7 +405,7 @@ function MeetingRoomConfig({
       <TextInput
         size="xs"
         label="Meeting room link"
-        description="In Discord, right-click your voice channel → Copy Link. A Zoom, Meet, Teams or Jitsi link works the same way."
+        description="Discord voice channel, Zoom, Google Meet, Teams, or Jitsi link."
         placeholder="https://discord.com/channels/…"
         value={url}
         onChange={(e) => setUrl(e.currentTarget.value)}
@@ -413,24 +413,24 @@ function MeetingRoomConfig({
       {url.trim() ? (
         <Text size="xs" c="dimmed">
           {provider.key === "link"
-            ? "Not a service we recognize — the button will just say “Join the meeting”, which is fine."
-            : `Recognized as ${provider.label}; the button will offer to join the ${provider.place}.`}
+            ? 'Button will read "Join the meeting".'
+            : `Detected ${provider.label}.`}
         </Text>
       ) : null}
       <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm" verticalSpacing="sm">
         <TextInput
           size="xs"
-          label="Call it"
-          description="Optional — defaults to naming the service."
-          placeholder="the Math Cave"
+          label="Button label (optional)"
+          description="Overrides the detected service name."
+          placeholder="e.g. Camp voice channel"
           value={label}
           onChange={(e) => setLabel(e.currentTarget.value)}
         />
         <TextInput
           size="xs"
-          label="Note under the button"
-          description="Optional — a dial-in, or how the camp does it."
-          placeholder="We start with a mic check."
+          label="Note (optional)"
+          description="Shown under the join button."
+          placeholder="e.g. Dial-in or passcode"
           value={note}
           onChange={(e) => setNote(e.currentTarget.value)}
         />
@@ -568,9 +568,8 @@ export default function CampSettings({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Camp settings</Title>
           <Text c="dimmed" size="sm">
-            Choose which features {campName} uses. <b>Preview</b> lets officers
-            explore a feature before the whole camp sees it; turning a feature
-            off hides it but never deletes its data.
+            Enable features for {campName}. <b>Preview</b> is officer-only;
+            turning a feature off hides it without deleting data.
           </Text>
         </div>
         {features.map((f) => (
@@ -584,14 +583,13 @@ export default function CampSettings({ loaderData }: Route.ComponentProps) {
         <DiscordConfig discord={discord} />
         <Card withBorder radius="md" padding="lg">
           <Stack gap="xs">
-            <Title order={4}>Move this camp</Title>
+            <Title order={4}>Move camp</Title>
             <Text size="sm" c="dimmed">
-              Take {campName} to another CampTool site, with everything and
-              everyone in it.
+              Transfer {campName} and all its data to another CampTool site.
             </Text>
             <Group justify="flex-end">
               <Button component={Link} to="/move" size="xs" variant="light">
-                Move this camp…
+                Move camp…
               </Button>
             </Group>
           </Stack>

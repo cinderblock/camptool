@@ -168,13 +168,16 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   let title = "Something went wrong";
   let detail = "An unexpected error occurred.";
   if (isRouteErrorResponse(error)) {
-    title = `${error.status} ${error.statusText}`;
+    title = error.statusText
+      ? `${error.status} ${error.statusText}`
+      : `Error ${error.status}`;
     detail = error.data?.toString() ?? "";
-  } else if (error instanceof Error) {
+  } else if (error instanceof Error && import.meta.env.DEV) {
     detail = error.message;
   }
   return (
     <main
+      id="main-content"
       style={{
         padding: "2rem",
         fontFamily: "system-ui",
@@ -184,7 +187,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
       }}
     >
       <h1>{title}</h1>
-      <p>{detail}</p>
+      {detail ? <p>{detail}</p> : null}
+      <p>
+        <a href="/">Go home</a>
+      </p>
     </main>
   );
 }

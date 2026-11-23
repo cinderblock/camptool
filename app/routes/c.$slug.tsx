@@ -161,7 +161,7 @@ export async function action({ request, params }: Route.ActionArgs) {
     .limit(1);
   if (pending) {
     return data({
-      ok: "You've already applied — the camp will be in touch. Hang tight!",
+      ok: "Your application is already on file.",
     });
   }
 
@@ -244,7 +244,7 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
           name={campName}
           logo={logo}
           description={description}
-          tagline="Interested in joining? Tell us a bit about yourself and the camp will reach out."
+          tagline="Interested in joining? Apply below."
         />
 
         <Paper withBorder radius="md" p="lg">
@@ -257,7 +257,7 @@ export default function PublicCamp({ loaderData }: Route.ComponentProps) {
               pageUrl={loaderData.pageUrl}
             >
               <AuthInline
-                intro="Create an account to apply — so you can sign back in later and check on your application."
+                intro="Create an account or sign in to apply."
                 discordEnabled={loaderData.discordEnabled}
                 mailEnabled={loaderData.mailEnabled}
                 allowPasswordLogin={loaderData.allowPasswordLogin}
@@ -294,8 +294,8 @@ function ApplySection({
 
   if (alreadyMember) {
     return (
-      <Alert color="green" title="You're in">
-        You're already a member of {campName}.
+      <Alert color="green" title="You're already a member">
+        You're already in {campName}. <a href="/">Go to Overview</a>.
       </Alert>
     );
   }
@@ -303,12 +303,9 @@ function ApplySection({
     return (
       <Alert color="green" title="Application received">
         <Stack gap={6}>
+          <Text size="sm">{result?.ok ?? "Your application is on file."}</Text>
           <Text size="sm">
-            {result?.ok ?? "You've already applied — hang tight!"}
-          </Text>
-          <Text size="sm">
-            The camp will reach out at <b>{viewer.email}</b>. You can revisit
-            this page any time to check where things stand.
+            The camp will reach out at <b>{viewer.email}</b>.
           </Text>
         </Stack>
       </Alert>

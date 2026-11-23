@@ -225,7 +225,7 @@ export default function RedeemInvite({
     actionData && "error" in actionData ? actionData.error : null;
 
   return (
-    <Container size="sm" py="xl">
+    <Container component="main" id="main-content" size="sm" py="xl">
       <Stack gap="lg">
         <CampHero
           name={campName}
@@ -234,10 +234,10 @@ export default function RedeemInvite({
           tagline={
             inviterName ? (
               <>
-                <b>{inviterName}</b> invited you to join {campName}.
+                Invited by <b>{inviterName}</b>.
               </>
             ) : (
-              <>You're invited to join {campName}.</>
+              <>You're invited to join.</>
             )
           }
         />
@@ -297,9 +297,8 @@ function InviteBody({
 
   if (alreadyMember) {
     return (
-      <Alert color="green" title="You're in">
-        You're already a member of {campName}.{" "}
-        <Anchor href="/">Go to your dashboard.</Anchor>
+      <Alert color="green" title="You're already a member">
+        You're already in {campName}. <Anchor href="/">Go to Overview.</Anchor>
       </Alert>
     );
   }
@@ -309,11 +308,11 @@ function InviteBody({
       enabled={!allowPasswordLogin && (!viewer || !hasPasskey)}
       serverInApp={inAppBrowser}
       pageUrl={url}
-      reassurance="Your invite link hasn't been used yet — it's still good."
+      reassurance="Your invite link hasn't been used yet."
     >
       {!viewer ? (
         <AuthInline
-          intro={`Create an account to accept your invite to ${campName} — so you can sign back in later.`}
+          intro="Create an account or sign in to accept your invite."
           discordEnabled={discordEnabled}
           mailEnabled={mailEnabled}
           allowPasswordLogin={allowPasswordLogin}

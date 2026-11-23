@@ -66,14 +66,12 @@ export default function CampMoved({ loaderData }: Route.ComponentProps) {
       <Paper withBorder shadow="sm" p="lg" radius="md" mt="xl">
         <Stack>
           <Text>
-            {campName} now lives at <Anchor href={next}>{newHost}</Anchor>.
-            Everything came along.
+            {campName} moved to <Anchor href={next}>{newHost}</Anchor>.
           </Text>
           {!signedInElsewhere && (
             <Text size="sm" c="dimmed">
-              Had an account here? Sign in here once, the way you always did,
-              and you&apos;ll arrive there signed in. You&apos;ll be asked to
-              make a passkey for the new site.
+              Sign in here once to transfer your session and set up a passkey at
+              the new address.
             </Text>
           )}
           <Group justify="flex-end">

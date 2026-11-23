@@ -33,7 +33,7 @@ import type { Route } from "./+types/c.$slug.schedule";
 
 export function meta({ loaderData: d }: Route.MetaArgs) {
   const name = d?.campName ?? "Camp";
-  return [{ title: `${name} — what's on · CampTool` }];
+  return [{ title: `${name} · Schedule · CampTool` }];
 }
 
 export async function loader({ params }: Route.LoaderArgs) {
@@ -82,25 +82,18 @@ export default function PublicSchedule({ loaderData }: Route.ComponentProps) {
   }
 
   return (
-    <Container size="sm" py="xl" id="main-content">
+    <Container component="main" size="sm" py="xl" id="main-content">
       <Stack gap="lg">
         <CampHero
           name={campName}
           logo={campLogo}
           description={campDescription}
-          tagline="Here's what we're offering this year — everyone's welcome."
+          tagline="Open to everyone — just show up."
         />
-        <div>
-          <Title order={2}>What&rsquo;s on{year ? ` in ${year}` : ""}</Title>
-          <Text c="dimmed" size="sm">
-            Everything here is open to everyone — just show up.
-          </Text>
-        </div>
+        <Title order={2}>Schedule{year ? ` · ${year}` : ""}</Title>
 
         {days.length === 0 ? (
-          <Text c="dimmed">
-            Nothing scheduled yet — check back closer to the event.
-          </Text>
+          <Text c="dimmed">Nothing scheduled yet.</Text>
         ) : (
           days.map((day) => (
             <section key={day.date}>

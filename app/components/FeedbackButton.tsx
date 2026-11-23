@@ -14,11 +14,8 @@ import { getBreadcrumbs } from "~/lib/telemetry.client";
 
 const KINDS = [
   { value: "bug", label: "Bug" },
-  { value: "question", label: "Question" },
-  { value: "issue", label: "Issue" },
-  { value: "improvement", label: "Improvement" },
   { value: "suggestion", label: "Suggestion" },
-  { value: "compliment", label: "Compliment" },
+  { value: "question", label: "Question" },
   { value: "other", label: "Other" },
 ];
 
@@ -50,7 +47,6 @@ export function FeedbackModal({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [doing, setDoing] = useState("");
-  const [trying, setTrying] = useState("");
   const [expected, setExpected] = useState("");
   const [actual, setActual] = useState("");
   const [busy, setBusy] = useState(false);
@@ -61,15 +57,14 @@ export function FeedbackModal({
     setTitle("");
     setBody("");
     setDoing("");
-    setTrying("");
     setExpected("");
     setActual("");
   }
 
   async function submit() {
-    const details = isBug ? { doing, trying, expected, actual } : null;
+    const details = isBug ? { doing, expected, actual } : null;
     const hasContent = isBug
-      ? `${doing}${trying}${expected}${actual}`.trim() !== ""
+      ? `${doing}${expected}${actual}`.trim() !== ""
       : body.trim() !== "";
     if (!hasContent) {
       notifications.show({
@@ -124,7 +119,7 @@ export function FeedbackModal({
         />
         <TextInput
           label="Summary (optional)"
-          placeholder="One line"
+          placeholder="Short summary"
           value={title}
           onChange={(e) => setTitle(e.currentTarget.value)}
         />
@@ -138,21 +133,14 @@ export function FeedbackModal({
               onChange={(e) => setDoing(e.currentTarget.value)}
             />
             <Textarea
-              label="What did you try?"
-              autosize
-              minRows={2}
-              value={trying}
-              onChange={(e) => setTrying(e.currentTarget.value)}
-            />
-            <Textarea
-              label="What did you expect to happen?"
+              label="Expected"
               autosize
               minRows={2}
               value={expected}
               onChange={(e) => setExpected(e.currentTarget.value)}
             />
             <Textarea
-              label="What actually happened?"
+              label="Actual"
               autosize
               minRows={2}
               value={actual}

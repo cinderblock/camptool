@@ -131,11 +131,9 @@ export default function MoveCamp({
     <Container size="sm">
       <Stack gap="md">
         <div>
-          <Title order={2}>Move this camp</Title>
+          <Title order={2}>Move camp</Title>
           <Text c="dimmed" size="sm">
-            Take {campName} to another CampTool site: a site you run yourself,
-            or a shared one. Everything comes along: members, maps, pictures,
-            the lot.
+            Transfer {campName} and all its data to another CampTool site.
           </Text>
         </div>
         {error && <Alert color="red">{error}</Alert>}
@@ -145,33 +143,31 @@ export default function MoveCamp({
             <Form method="post">
               <input type="hidden" name="intent" value="start" />
               <Stack gap="sm">
-                <Text size="sm">What happens:</Text>
+                <Text size="sm" fw={500}>
+                  Before you start:
+                </Text>
                 <List size="sm" spacing={4}>
                   <List.Item>
-                    The camp becomes <b>read-only</b> here, so nothing written
-                    during the move is lost. You can call it off any time before
-                    it's done.
+                    This camp becomes <b>read-only</b> until the move finishes
+                    (you can cancel anytime before completion).
                   </List.Item>
                   <List.Item>
-                    You get a <b>move code</b>. Paste it into the new site's
-                    "Bring a camp here" page (signed in there as yourself). It
-                    works once, for {codeDays} days.
+                    Paste the one-time <b>move code</b> (valid {codeDays} days)
+                    on the destination site's Import a camp page.
                   </List.Item>
                   <List.Item>
-                    When the new site has the camp, the camp is{" "}
-                    <b>deleted here</b>. Old links forward to the new site for a
-                    year, and everyone's sign-ins from here keep working there:
-                    they'll be asked to make a passkey for the new site.
+                    Once imported, this copy is <b>deleted</b>, old links
+                    forward for a year, and members sign in to create a passkey
+                    on the new site. Passwords are not transferred.
                   </List.Item>
-                  <List.Item>Passwords never leave this site.</List.Item>
                 </List>
                 <Checkbox
                   name="understood"
-                  label="I understand the camp will be read-only now and deleted here once it has moved."
+                  label="I understand this camp will become read-only now and be deleted here once moved."
                 />
                 <Group justify="flex-end">
                   <Button type="submit" color="orange" loading={busy}>
-                    Start the move
+                    Start move
                   </Button>
                 </Group>
               </Stack>
@@ -182,14 +178,13 @@ export default function MoveCamp({
             <Paper withBorder p="lg" radius="md">
               <Stack gap="sm">
                 <Text size="sm">
-                  The camp is read-only while it moves. Paste this code into the
-                  new site's <b>Bring a camp here</b> page (
-                  <Code>/import-camp</Code>). It works until{" "}
+                  This camp is read-only. Paste this code at{" "}
+                  <Code>/import-camp</Code> on the destination site (valid until{" "}
                   <LocalTime
                     iso={new Date(move.expiresAt).toISOString()}
                     format="YYYY-MM-DD h:mm A"
                   />
-                  .
+                  ).
                 </Text>
                 <Code block style={{ wordBreak: "break-all" }}>
                   {move.code}
@@ -198,18 +193,17 @@ export default function MoveCamp({
                   <CopyButton value={move.code}>
                     {({ copied, copy }) => (
                       <Button size="xs" variant="light" onClick={copy}>
-                        {copied ? "Copied" : "Copy the code"}
+                        {copied ? "Copied" : "Copy code"}
                       </Button>
                     )}
                   </CopyButton>
                   <Anchor href="/move/bundle" size="sm" download>
-                    Download the camp as a file
+                    Download bundle file
                   </Anchor>
                 </Group>
                 <Text size="xs" c="dimmed">
-                  Keep the code private: it unlocks the camp's data. The file is
-                  only needed when the new site can't reach this one; it's
-                  encrypted with the code.
+                  Keep this code private. Only download the encrypted bundle
+                  file if the destination site can't reach this one.
                 </Text>
               </Stack>
             </Paper>
@@ -217,11 +211,10 @@ export default function MoveCamp({
               <Form method="post">
                 <input type="hidden" name="intent" value="done" />
                 <Stack gap="sm">
-                  <Title order={4}>Moved by file?</Title>
+                  <Title order={4}>Finish manual file move</Title>
                   <Text size="sm" c="dimmed">
-                    When the new site couldn't reach this one, finish the move
-                    here: give the camp's new address. This deletes the camp
-                    here and starts forwarding.
+                    If you imported via file, enter the camp's new URL to delete
+                    this copy and enable forwarding.
                   </Text>
                   <TextInput
                     name="targetCampUrl"
@@ -231,7 +224,7 @@ export default function MoveCamp({
                   />
                   <Checkbox
                     name="confirmDelete"
-                    label="The camp is on the new site and looks right. Delete it here."
+                    label="I've verified the camp on the new site. Delete it here."
                   />
                   <Group justify="flex-end">
                     <Button
@@ -241,7 +234,7 @@ export default function MoveCamp({
                       disabled={!newUrl}
                       loading={busy}
                     >
-                      Finish the move
+                      Finish move
                     </Button>
                   </Group>
                 </Stack>
@@ -251,7 +244,7 @@ export default function MoveCamp({
               <input type="hidden" name="intent" value="cancel" />
               <Group justify="flex-end">
                 <Button type="submit" variant="subtle" loading={busy}>
-                  Call off the move
+                  Cancel move
                 </Button>
               </Group>
             </Form>

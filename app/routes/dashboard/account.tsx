@@ -445,82 +445,96 @@ export default function Account({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Your account</Title>
           <Text size="sm" c="dimmed">
-            Your details, who you're grouped with, and how you sign in.
+            Profile, groups, and sign-in settings.
           </Text>
         </div>
 
-        {identity ? <IdentityCard identity={identity} /> : null}
-        {identity ? <GroupsCard groups={groups} /> : null}
-
-        <Card withBorder>
+        {identity ? (
           <Stack gap="md">
-            <Group justify="space-between" align="center">
-              <Text fw={600}>Your passkeys</Text>
-              <Badge variant="light" color={passkeys.length ? "green" : "red"}>
-                {passkeys.length
-                  ? `${passkeys.length} set up`
-                  : "None set up yet"}
-              </Badge>
-            </Group>
-
-            <InAppBrowserWarning />
-
-            {passkeys.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                You don't have a passkey yet. Add one below — it takes a few
-                seconds and works on this device straight away.
-              </Text>
-            ) : (
-              <Stack gap="xs">
-                {passkeys.map((k) => (
-                  <PasskeyRow
-                    key={k.id}
-                    pk={k}
-                    canDelete={passkeys.length > 1}
-                  />
-                ))}
-              </Stack>
-            )}
-
-            {err ? (
-              <Text size="sm" c="red">
-                {err}
-              </Text>
-            ) : null}
-
-            <Group align="end" gap="sm">
-              <TextInput
-                label="Name this device"
-                description="So you can tell your passkeys apart later"
-                placeholder={defaultDeviceName()}
-                value={label}
-                onChange={(e) => setLabel(e.currentTarget.value)}
-                style={{ flex: 1 }}
-              />
-              <Button onClick={addPasskey} loading={busy}>
-                Add a passkey
-              </Button>
-            </Group>
+            <Text size="xs" fw={700} tt="uppercase" c="dimmed">
+              Profile
+            </Text>
+            <IdentityCard identity={identity} />
+            <GroupsCard groups={groups} />
           </Stack>
-        </Card>
-
-        {/* Only where the deployment actually has Discord OAuth configured —
-            otherwise there is nothing to link to, and the ask that points here
-            isn't shown either (see the "discord" capability in asks.ts). */}
-        {discordEnabled ? (
-          <DiscordCard linked={discordLinked} impersonating={impersonating} />
         ) : null}
 
-        {/* No "add a password" counterpart on purpose: passwords are a legacy
-            credential here, so this card can only ever appear for accounts that
-            already have one (plans/password-recovery.md decision 1). */}
-        {hasPassword ? (
-          <PasswordCard
-            canRemove={passkeys.length > 0}
-            allowPasswordLogin={allowPasswordLogin}
-            impersonating={impersonating}
-          />
-        ) : null}
+        <Stack gap="md">
+          <Text size="xs" fw={700} tt="uppercase" c="dimmed">
+            Sign-in &amp; security
+          </Text>
+          <Card withBorder>
+            <Stack gap="md">
+              <Group justify="space-between" align="center">
+                <Text fw={600}>Your passkeys</Text>
+                <Badge
+                  variant="light"
+                  color={passkeys.length ? "green" : "red"}
+                >
+                  {passkeys.length
+                    ? `${passkeys.length} set up`
+                    : "None set up"}
+                </Badge>
+              </Group>
+
+              <InAppBrowserWarning />
+
+              {passkeys.length === 0 ? (
+                <Text size="sm" c="dimmed">
+                  Add a passkey below to sign in with biometrics or a device
+                  PIN.
+                </Text>
+              ) : (
+                <Stack gap="xs">
+                  {passkeys.map((k) => (
+                    <PasskeyRow
+                      key={k.id}
+                      pk={k}
+                      canDelete={passkeys.length > 1}
+                    />
+                  ))}
+                </Stack>
+              )}
+
+              {err ? (
+                <Text size="sm" c="red">
+                  {err}
+                </Text>
+              ) : null}
+
+              <Group align="end" gap="sm">
+                <TextInput
+                  label="Device name"
+                  placeholder={defaultDeviceName()}
+                  value={label}
+                  onChange={(e) => setLabel(e.currentTarget.value)}
+                  style={{ flex: 1 }}
+                />
+                <Button onClick={addPasskey} loading={busy}>
+                  Add a passkey
+                </Button>
+              </Group>
+            </Stack>
+          </Card>
+
+          {/* Only where the deployment actually has Discord OAuth configured —
+              otherwise there is nothing to link to, and the ask that points here
+              isn't shown either (see the "discord" capability in asks.ts). */}
+          {discordEnabled ? (
+            <DiscordCard linked={discordLinked} impersonating={impersonating} />
+          ) : null}
+
+          {/* No "add a password" counterpart on purpose: passwords are a legacy
+              credential here, so this card can only ever appear for accounts that
+              already have one (plans/password-recovery.md decision 1). */}
+          {hasPassword ? (
+            <PasswordCard
+              canRemove={passkeys.length > 0}
+              allowPasswordLogin={allowPasswordLogin}
+              impersonating={impersonating}
+            />
+          ) : null}
+        </Stack>
       </Stack>
     </Container>
   );
@@ -547,20 +561,17 @@ function DiscordCard({
         </Group>
         {linked ? (
           <Text size="sm" c="dimmed">
-            Your Discord account is linked. You can sign in with it, and the
-            camp can match you to the person in its server.
+            Linked for sign-in and camp server verification.
           </Text>
         ) : impersonating ? (
           <Alert color="yellow">
-            You're working as someone else. Linking Discord always applies to
-            your own account, so it's unavailable here.
+            Unavailable while impersonating another member.
           </Alert>
         ) : (
           <>
             <Text size="sm" c="dimmed">
-              Discord is where the camp actually talks. Linking it lets the camp
-              match your account to the person in its server — and gives you
-              another way to sign in.
+              Link Discord to verify your server membership and sign in with
+              Discord.
             </Text>
             <Group>
               <Button
@@ -626,15 +637,13 @@ function PasswordCard({
 
         <Text size="sm" c="dimmed">
           {allowPasswordLogin
-            ? "A password is the part of your account somebody else can guess, phish, or find in an unrelated site's breach. A passkey can't be any of those things — once you have one, you don't need this."
-            : "Password sign-in is turned off on this site. Once you've added a passkey, you can remove your old password here."}
+            ? "Once you have a passkey, you can remove your password."
+            : "Password sign-in is disabled here. Once you have a passkey, you can remove your old password."}
         </Text>
 
         {impersonating ? (
           <Alert color="yellow">
-            You're working as someone else. Password settings always apply to
-            your own account, so they're unavailable here — stop working as them
-            first.
+            Unavailable while impersonating another member.
           </Alert>
         ) : (
           <>
@@ -659,23 +668,23 @@ function PasswordCard({
                       nobody tries one unless told. Same copy as /reset. */}
                   <PasswordInput
                     name="newPassword"
-                    label="New password or passphrase"
-                    description="A few unrelated words — “rusty kettle dawn patrol” — beat one short mangled word. Spaces count."
+                    label="New password"
+                    description="Passphrases with spaces are supported."
                     autoComplete="new-password"
                     required
                   />
                   <PasswordInput
                     name="confirmPassword"
-                    label="Type it again"
+                    label="Confirm new password"
                     autoComplete="new-password"
                     required
                   />
                   <Text size="xs" c="dimmed">
-                    Changing it signs you out on your other devices.
+                    Signs you out on other devices.
                   </Text>
                   <Group gap="sm">
                     <Button type="submit" loading={busy}>
-                      Save new password
+                      Save password
                     </Button>
                     <Button
                       variant="subtle"
@@ -690,9 +699,9 @@ function PasswordCard({
             ) : confirmingRemove ? (
               <Stack gap="sm">
                 <Text size="sm">
-                  Remove your password? You'll sign in with your passkey from
-                  then on. An officer can issue you a reset link if you ever
-                  need a password back.
+                  Remove your password? You'll sign in with a passkey instead.
+                  An officer can issue a recovery link if you ever get locked
+                  out.
                 </Text>
                 <Group gap="sm">
                   <Button
@@ -706,13 +715,13 @@ function PasswordCard({
                       setConfirmingRemove(false);
                     }}
                   >
-                    Yes, remove it
+                    Remove password
                   </Button>
                   <Button
                     variant="subtle"
                     onClick={() => setConfirmingRemove(false)}
                   >
-                    Keep it
+                    Cancel
                   </Button>
                 </Group>
               </Stack>
@@ -747,8 +756,7 @@ function PasswordCard({
                 phone, same as the last-passkey note above. */}
             {!canRemove ? (
               <Text size="xs" c="dimmed">
-                Set up a passkey before removing your password — otherwise you'd
-                have no way to sign in.
+                Add a passkey before removing your password.
               </Text>
             ) : null}
           </>
@@ -789,22 +797,19 @@ function IdentityCard({
         <div>
           <Text fw={600}>Your details</Text>
           <Text size="xs" c="dimmed">
-            How you appear to {identity.campName}. Change these any time — they
-            were asked once during sign-up and this is where they live now.
+            How you appear to {identity.campName}.
           </Text>
         </div>
 
         <TextInput
           label="Name"
-          description="Your real name, as the camp knows you"
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
           maxLength={120}
         />
         <TextInput
           label={isBurningMan(identity.event) ? "Playa name" : "Camp nickname"}
-          description="Optional. Leave blank if you don't have one."
-          placeholder={isBurningMan(identity.event) ? "e.g. Bug" : "Optional"}
+          placeholder="Optional"
           value={playaName}
           onChange={(e) => setPlayaName(e.currentTarget.value)}
           maxLength={60}
@@ -813,7 +818,7 @@ function IdentityCard({
           label="Email"
           value={identity.email}
           readOnly
-          description="Ask an officer if this needs to change"
+          description="Ask an officer to change your email."
         />
 
         <Group justify="space-between" align="center" wrap="wrap">
@@ -873,9 +878,8 @@ function GroupsCard({
         <div>
           <Text fw={600}>Your groups</Text>
           <Text size="xs" c="dimmed">
-            Families, couples, housemates, the people you've camped with for
-            years. They shape how the roster reads — they grant nobody any
-            authority over anybody.
+            Social groups (families, couples, friends) used to organize the
+            directory and roster.
           </Text>
         </div>
 
@@ -939,10 +943,9 @@ function GroupsCard({
         ) : null}
 
         <Text size="xs" c="dimmed">
-          Need a group that doesn't exist yet, or want to add someone else?
-          That's on the{" "}
+          Create new groups or add others on{" "}
           <Anchor href="/members" size="xs">
-            members page
+            Members
           </Anchor>
           .
         </Text>

@@ -136,7 +136,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "rsvp") {
     const status = String(form.get("status")) as ParticipationStatus;
     if (!["unknown", "coming", "maybe", "not_coming"].includes(status)) {
-      return data({ error: "Bad status." }, { status: 400 });
+      return data({ error: "Invalid status." }, { status: 400 });
     }
     const noteRaw = form.get("note");
     // Absent field = leave unchanged; empty string = clear; else YYYY-MM-DD.
@@ -149,7 +149,7 @@ export async function action({ request }: Route.ActionArgs) {
     const departureDate = readDay("departureDate");
     for (const day of [arrivalDate, departureDate]) {
       if (day && !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-        return data({ error: "Bad date." }, { status: 400 });
+        return data({ error: "Invalid date." }, { status: 400 });
       }
     }
     if (arrivalDate && departureDate && departureDate < arrivalDate) {
@@ -306,16 +306,14 @@ export default function Trip({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Your trip · {trip.year}</Title>
           <Text c="dimmed" size="sm">
-            Whether you're coming to {campName} this year, when you'll be there,
-            and anything else we should know. Change it whenever your plans do.
+            Your RSVP, dates, and notes for {campName}. Update anytime.
           </Text>
         </div>
 
         {trip.locked ? (
           <Card withBorder padding="md" bg="var(--mantine-color-default-hover)">
             <Text size="sm" c="dimmed">
-              This year is locked — your trip is read-only. Switch to an open
-              year to make changes.
+              This year is locked — read-only.
             </Text>
           </Card>
         ) : null}
@@ -336,13 +334,13 @@ export default function Trip({ loaderData }: Route.ComponentProps) {
 
         <Group gap="lg">
           <Anchor component={Link} to="/bringing" size="sm">
-            What you're bringing
+            Your gear
           </Anchor>
           <Anchor component={Link} to="/questions" size="sm">
-            The camp's questions
+            Questions
           </Anchor>
           <Anchor component={Link} to="/account" size="sm">
-            Your name and account
+            Your account
           </Anchor>
         </Group>
       </Stack>

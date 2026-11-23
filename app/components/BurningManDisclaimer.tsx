@@ -13,7 +13,8 @@ export function BurningManDisclaimer({
 }) {
   return (
     <Text size="xs" c="dimmed" ta="center" mt={mt}>
-      This app is not affiliated, endorsed, or verified by Burning Man Project.
+      This app is not affiliated with, endorsed by, or verified by Burning Man
+      Project.
     </Text>
   );
 }

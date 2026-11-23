@@ -429,9 +429,8 @@ export default function ImportCamp({
   return (
     <Shell>
       <Text size="sm" c="dimmed">
-        Moving a camp here from another CampTool site? Its admin starts the move
-        there (Camp settings → Move this camp) and gets a move code. Paste it
-        here. Nothing is imported until you've checked what will happen.
+        Paste the move code from the source camp (Camp settings → Move camp).
+        Nothing is imported until you review and confirm.
       </Text>
       {result?.stage === "error" && (
         <Alert color="red" title="That didn't work">
@@ -472,7 +471,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <Container component="main" id="main-content" size={640} py="xl">
       <Title order={1} size="h2" ta="center">
-        Bring a camp here
+        Import a camp
       </Title>
       <Paper withBorder shadow="sm" p="lg" radius="md" mt="xl">
         <Stack gap="md">{children}</Stack>

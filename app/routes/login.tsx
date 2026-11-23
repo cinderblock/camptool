@@ -99,7 +99,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
   });
 
   function fail(message: string) {
-    notifications.show({ color: "red", title: "Auth error", message });
+    notifications.show({ color: "red", title: "Sign-in error", message });
   }
 
   async function handlePasswordSignIn(values: typeof signInForm.values) {
@@ -135,8 +135,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
     if (error) return fail(error.message ?? "Could not send link");
     notifications.show({
       title: "Magic link sent",
-      message:
-        "Check your email. In local dev the link is printed to the server console.",
+      message: "Check your email for the sign-in link.",
     });
   }
 
@@ -248,7 +247,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
             size="compact-sm"
             onClick={() => setShowPassword(true)}
           >
-            Sign in with a legacy password instead
+            Sign in with a password instead
           </Button>
         )
       ) : null}
@@ -271,8 +270,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
 
         {loaderData.justReset && allowPasswordLogin ? (
           <Alert color="green">
-            Your password is set. Sign in with it below — and once you're in,
-            consider adding a passkey so you never need a password again.
+            Password updated. Sign in below, then add a passkey in Your account.
           </Alert>
         ) : null}
 
@@ -344,8 +342,7 @@ export default function Login({ loaderData }: Route.ComponentProps) {
                     Create account with a passkey
                   </Button>
                   <Text size="xs" c="dimmed" ta="center">
-                    Your device asks for your face, fingerprint, or PIN. Nothing
-                    to remember, no password to type later.
+                    Uses your device's biometrics or PIN — no password needed.
                   </Text>
                   {loaderData.discordEnabled ? (
                     <>

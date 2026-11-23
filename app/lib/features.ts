@@ -53,110 +53,102 @@ export const FEATURES: CampFeatureDef[] = [
   {
     key: "announcements",
     label: "Announcements",
-    description: "Officer-posted camp news everyone reads, pinned to the top.",
+    description: "Camp news posted by officers, with optional pinning.",
     starter: true,
   },
   {
     key: "documents",
     label: "Documents",
-    description:
-      "A shared library of links — Google Docs, schedules, packing lists.",
+    description: "Shared links to external docs, spreadsheets, and folders.",
     starter: true,
   },
   {
     key: "wiki",
     label: "Wiki",
-    description:
-      "A camp-wide knowledge base — any member can create and edit pages.",
+    description: "Camp knowledge base that any member can edit.",
   },
   {
     key: "faq",
     label: "FAQ",
     description:
-      "A searchable Q&A list officers keep — with a queue where anyone can ask a question that isn't answered yet.",
+      "Searchable Q&A maintained by officers, with a question queue.",
   },
   {
     key: "bins",
     label: "Bins",
-    description:
-      "A top-bar shortcut into the camp's bins inventory tracker — the QR-sticker app for what's in which box — opened already signed in. Set the address and access code below once it's on.",
+    description: "Top-bar shortcut and storage lookup for your bins tracker.",
   },
   {
     key: "questions",
     label: "Questions",
-    description:
-      "A camp questionnaire: officers author questions, campers answer each year.",
+    description: "Custom camp questions for campers to answer each year.",
     starter: true,
   },
   {
     key: "onboarding",
-    label: "Onboarding checklist",
-    description: "A camp-defined checklist new campers tick off.",
+    label: "Checklist",
+    description: "Camp-defined tasks for campers to check off.",
   },
   {
     key: "map",
     label: "Camp map",
     description:
-      "The visual lot editor — place tents, vehicles, and structures on your plot.",
+      "Visual lot editor for tents, vehicles, and shared structures.",
   },
   {
     key: "bringing",
-    label: "Bringing & inventory",
+    label: "Gear & structures",
     description:
-      "Campers declare the gear they're bringing; officers account for every item.",
+      "Campers list tents and vehicles; officers view the full roll-up.",
   },
   {
     key: "supplies",
     label: "Supplies",
     description:
-      "Shared camp supplies organized into groups, with campers claiming items.",
+      "Shared camp supplies grouped by category for members to claim.",
   },
   {
     key: "tickets",
     label: "Tickets",
-    description:
-      "Distribute the camp's ticket allocation — requests, assignments, purchases.",
+    description: "Track camp ticket allocations, requests, and purchases.",
   },
   {
     key: "passes",
     label: "Setup passes",
-    description:
-      "Early-arrival passes — per-date quotas, member requests, officer grants.",
+    description: "Manage early-arrival pass requests, stock, and distribution.",
   },
   {
     key: "swaps",
     label: "Spares board",
-    description:
-      "Campers post spare tickets and vehicle passes, or ask for one — with an asking price and a way to mark it taken. The camp isn't a party to the arrangement.",
+    description: "Peer-to-peer board for spare tickets and vehicle passes.",
   },
   {
     key: "fuel",
     label: "Fuel",
     description:
-      "Who's bringing fuel, how much, and in what — with totals and container counts for the fire-safety review and the map's fuel-storage area.",
+      "Track fuel types, quantities, and containers for safety review.",
   },
   {
     key: "finances",
     label: "Finances",
-    description: "An officer-only ledger of camp donations and spending.",
+    description: "Officer-only ledger of camp donations and expenses.",
   },
   {
     key: "dues",
     label: "Dues",
-    description: "Track member dues and contribution tiers.",
+    description: "Contribution tiers and per-member dues tracking.",
     requires: ["finances"],
   },
   {
     key: "recruiting",
-    label: "Recruiting",
-    description:
-      "The public application page and the officer review queue for applicants.",
+    label: "Applications",
+    description: "Public application page and officer review queue.",
   },
   {
     key: "prospects",
     label: "Prospects",
     description:
-      "An officer-only record of everyone the camp is talking to but who hasn't joined — every message, on whichever platform it arrived, in one shared thread per person. Not visible to members.",
+      "Officer-only tracker for conversations with prospective campers.",
     // Deliberately no `requires`: a camp can track the people it's courting
     // without ever opening a public application page. When Recruiting is also
     // on, incoming applications match onto their prospect automatically.
@@ -164,27 +156,25 @@ export const FEATURES: CampFeatureDef[] = [
   {
     key: "roster",
     label: "Who's coming",
-    description:
-      "The per-year attendee roster and headcount — members and their guests.",
+    description: "Per-year attendee roster, headcount, and guest list.",
   },
   {
     key: "groups",
     label: "Social groups",
     description:
-      "Who belongs with who — families, couples, housemates, the friends somebody brought along. Members and the roster can be grouped into named groups anyone can create, nested as deeply as the relationships go, with the who-invited-whom tree alongside. Descriptive only: being in a group grants nobody anything, and it is separate from who you are actually camping with.",
+      "Optional groups (families, couples, friends) for organizing the directory and roster.",
     starter: true,
   },
   {
     key: "schedule",
     label: "Schedule",
-    description:
-      "Work parties, camp meetings, and shifts — with sign-ups and a calendar.",
+    description: "Work parties and shifts with sign-ups and a calendar.",
   },
   {
     key: "meetings",
     label: "Meetings",
     description:
-      "Camp meetings on a repeating date, an agenda anyone can add to before the day, a one-click link into the camp's voice channel, and the write-up afterwards for everyone who missed it. Set the meeting-room link below once it's on.",
+      "Camp meetings with shared agendas, a join link, and summaries.",
     // A meeting IS a scheduled gathering — this feature is a purpose-built view
     // over the same rows, so Schedule has to be on for it to work.
     requires: ["schedule"],
@@ -192,14 +182,12 @@ export const FEATURES: CampFeatureDef[] = [
   {
     key: "training",
     label: "Training",
-    description:
-      "Qualifications officers sign members off on — one-time, yearly, or per event.",
+    description: "Track officer sign-offs on camp qualifications.",
   },
   {
     key: "programming",
     label: "Programming",
-    description:
-      "What your camp offers the event — talks, workshops, classes. Campers propose, officers schedule, everyone can see the lineup.",
+    description: "Proposals, scheduling, and public lineup for camp offerings.",
   },
 ];
 

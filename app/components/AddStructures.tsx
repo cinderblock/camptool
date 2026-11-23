@@ -120,7 +120,7 @@ function AddButton({
       <Popover.Dropdown>
         <Stack gap="xs">
           <Text size="xs" fw={600}>
-            How big is your {kind.label.toLowerCase()}? (feet)
+            {kind.label} size (feet)
           </Text>
           <Group gap="xs" align="flex-end">
             {kind.vehicle ? null : (

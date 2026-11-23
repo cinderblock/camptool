@@ -185,8 +185,8 @@ const attending = (s: AskSnapshot) => s.rsvp !== "not_coming";
 export const ASKS: AskDef[] = [
   {
     key: "profile",
-    label: "Tell us your name",
-    hint: "Your name and playa name",
+    label: "Add your name",
+    hint: "Name and camp nickname",
     route: "/account",
     audience: "all",
     importance: "recommended",
@@ -196,8 +196,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "questionnaire",
-    label: "Answer the camp's questions",
-    hint: "A few things the camp needs to know",
+    label: "Answer camp questions",
+    hint: "Required camp questions",
     route: "/questions",
     audience: "all",
     importance: "required",
@@ -210,8 +210,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "rsvp",
-    label: "Say whether you're coming",
-    hint: "Yes, no, or maybe",
+    label: "Confirm your RSVP",
+    hint: "Coming, maybe, or not this year",
     route: "/trip",
     audience: "all",
     importance: "required",
@@ -221,8 +221,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "stay_dates",
-    label: "Give your arrival and departure dates",
-    hint: "So the camp can plan headcount and setup",
+    label: "Set arrival and departure dates",
+    hint: "Helps plan headcount and setup",
     route: "/trip",
     audience: "all",
     importance: "recommended",
@@ -232,8 +232,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "bringing",
-    label: "Tell us what you're bringing",
-    hint: "Tents, vehicles, shade",
+    label: "List your gear",
+    hint: "Tents, vehicles, and shade",
     route: "/bringing",
     audience: "all",
     importance: "recommended",
@@ -244,8 +244,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "place_on_map",
-    label: "Put your stuff on the camp map",
-    hint: "Everything you're bringing needs a spot",
+    label: "Place your gear on the map",
+    hint: "Every item needs a spot",
     route: "/map",
     audience: "all",
     importance: "recommended",
@@ -255,8 +255,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "sharing",
-    label: "Say where the people with you are sleeping",
-    hint: "Your guests, and anyone attending under you",
+    label: "Assign sleeping spots",
+    hint: "For your guests and party",
     route: "/bringing",
     audience: "all",
     importance: "optional",
@@ -267,8 +267,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "party_invite",
-    label: "Someone says you're camping with them",
-    hint: "Confirm it, or say you're not — takes one tap",
+    label: "Respond to party invite",
+    hint: "Confirm or decline who you're camping with",
     route: "/roster",
     audience: "all",
     // `required`, so it can't be waved off while the question stays open. That
@@ -284,7 +284,7 @@ export const ASKS: AskDef[] = [
   {
     key: "ticket",
     label: "Sort out your ticket",
-    hint: "Request one, or say you already have one",
+    hint: "Request one or mark yours handled",
     route: "/tickets",
     audience: "all",
     importance: "required",
@@ -294,8 +294,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "ticket_purchased",
-    label: "Confirm you bought your ticket",
-    hint: "The camp can't tell until you say so",
+    label: "Confirm ticket purchase",
+    hint: "Mark your ticket purchased once bought",
     route: "/tickets",
     audience: "all",
     importance: "required",
@@ -306,7 +306,7 @@ export const ASKS: AskDef[] = [
   {
     key: "setup_pass",
     label: "Request a Setup Access Pass",
-    hint: "You're arriving before gates open",
+    hint: "Needed for arrival before gates open",
     route: "/passes",
     audience: "all",
     importance: "required",
@@ -318,8 +318,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "fuel",
-    label: "Declare the fuel you're bringing",
-    hint: "Gas, propane — the camp has to account for it",
+    label: "Declare fuel",
+    hint: "Gas, propane, or confirm none",
     route: "/fuel",
     audience: "all",
     importance: "recommended",
@@ -329,8 +329,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "checklist",
-    label: "Work through the camp checklist",
-    hint: "The things everyone has to do",
+    label: "Complete camp checklist",
+    hint: "Remaining camp tasks",
     route: "/onboarding",
     audience: "all",
     importance: "recommended",
@@ -341,8 +341,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "dues",
-    label: "Pay your camp dues",
-    hint: "What's still outstanding",
+    label: "Pay camp dues",
+    hint: "Balance remaining",
     route: "/dues",
     audience: "all",
     importance: "required",
@@ -353,7 +353,7 @@ export const ASKS: AskDef[] = [
   {
     key: "passkey",
     label: "Set up a passkey",
-    hint: "Sign in with your face, fingerprint or PIN — no password",
+    hint: "Passwordless sign-in with biometrics or PIN",
     route: "/account",
     audience: "all",
     // `required` so it cannot be waved off: this stays on the to-do list until
@@ -369,8 +369,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "discord",
-    label: "Link your Discord account",
-    hint: "Where the camp actually talks",
+    label: "Link Discord",
+    hint: "Connect your Discord account",
     // Your account, next to the passkeys — NOT /settings, which is the
     // admin-only camp feature switchboard and has never had a Discord control.
     route: "/account",
@@ -383,8 +383,8 @@ export const ASKS: AskDef[] = [
   },
   {
     key: "extras",
-    label: "Anything else we should know?",
-    hint: "Free-text, entirely optional",
+    label: "Add trip notes",
+    hint: "Optional note for camp organizers",
     route: "/trip",
     audience: "all",
     importance: "optional",
