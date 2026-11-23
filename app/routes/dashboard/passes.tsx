@@ -627,7 +627,7 @@ export async function action({ request }: Route.ActionArgs) {
       // A departure before the arrival is a mis-tap, not a stay.
       if (arrivalDate && departureDate && departureDate < arrivalDate) {
         return data(
-          { error: "That leaves before it arrives." },
+          { error: "Departure date must be on or after arrival date." },
           { status: 400 },
         );
       }
@@ -816,13 +816,12 @@ export async function action({ request }: Route.ActionArgs) {
       throw e;
     }
     const done: Record<string, string> = {
-      assignStock:
-        "Pass set aside. The codes stay hidden until you release it.",
+      assignStock: "Pass set aside. Codes stay hidden until released.",
       allocateExternal:
-        "Allocated outside the camp. Release it to get the PDF you can send them.",
-      unassignStock: "Pass returned to the pool.",
-      releaseStock: "Released — the codes are now visible to them.",
-      voidStock: "Pass voided. It has NOT gone back into the pool.",
+        "Allocated outside the camp. Release it to download the PDF.",
+      unassignStock: "Pass returned to pool.",
+      releaseStock: "Pass released.",
+      voidStock: "Pass voided (not returned to pool).",
     };
     return data({ ok: done[intent] ?? "Done." });
   }
@@ -929,12 +928,12 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>
             {isBurningMan(event)
-              ? "Setup access passes"
+              ? "Setup Access Passes"
               : "Early-arrival passes"}
           </Title>
           <Text c="dimmed" size="sm">
-            Early-arrival passes the camp allocates. Each pass admits you on or
-            after its date — an earlier-dated pass covers a later arrival.
+            Each pass admits entry on or after its date — an earlier pass covers
+            a later arrival.
           </Text>
         </div>
 
@@ -946,8 +945,7 @@ export default function Passes({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — passes are read-only. Switch to an open year
-              to make changes.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -1295,7 +1293,7 @@ function StayModal({
     >
       <Stack gap="sm">
         <Text size="sm" c="dimmed">
-          Tap the day they arrive, then the day they head home.
+          Tap the day they arrive, then the day they depart.
         </Text>
         <EventCalendar
           year={year}
@@ -1508,7 +1506,7 @@ function ImportCard({
                 ? `Setup Access Pass PDF for ${year}`
                 : `Early-arrival pass PDF for ${year}`
             }
-            placeholder="choose a PDF"
+            placeholder="Choose a PDF"
             accept="application/pdf"
             value={file}
             onChange={setFile}
@@ -1534,8 +1532,8 @@ function ImportCard({
           </Button>
         </Group>
         <Text size="xs" c="dimmed">
-          Importing stores the order so a single page can be cut from it on
-          demand. CampTool never sends a page that carries anyone else's codes.
+          Single-pass PDFs are sliced on demand so no one sees anyone else's
+          codes.
         </Text>
       </Stack>
     </Card>
@@ -1637,9 +1635,8 @@ function CoverageCard({
 
         {coverage.unknownArrival > 0 ? (
           <Text size="xs" c="dimmed">
-            The unknowns aren't counted as needing a pass — we genuinely don't
-            know. They're who to chase, though: an early arrival nobody wrote
-            down is the one way to come up short on the day.
+            Members without arrival dates aren't counted above — confirm their
+            dates so you aren't caught short.
           </Text>
         ) : null}
 
@@ -1684,9 +1681,8 @@ function NeedsPassCard({
         <div>
           <Text fw={600}>Needs a pass · {people.length}</Text>
           <Text size="xs" c="dimmed">
-            Arriving before gates open, or asked for a pass, and nothing set
-            aside yet. Nobody has to ask to appear here — an early arrival date
-            is enough.
+            Anyone arriving before gates open or requesting a pass without one
+            assigned yet.
           </Text>
         </div>
         {people.map((p) => {
@@ -1710,10 +1706,10 @@ function NeedsPassCard({
                   ) : null}
                   <Text span size="xs" c="dimmed">
                     {" "}
-                    — arriving{" "}
+                    —{" "}
                     {p.arrivalDate
-                      ? dayjs(p.arrivalDate).format("ddd, MMM D")
-                      : "date not given"}
+                      ? `arriving ${dayjs(p.arrivalDate).format("ddd, MMM D")}`
+                      : "arrival date not set"}
                   </Text>
                   {p.asked ? (
                     <Badge size="xs" variant="light" ml={6}>
@@ -1825,10 +1821,9 @@ function StockCard({
             <div>
               <Text fw={600}>Pass stock · {stock.length}</Text>
               <Text size="xs" c="dimmed">
-                Setting a pass aside reveals nothing. Releasing it hands the
-                codes over and can't be undone. Guests are listed under whoever
-                brought them; under-13s aren't listed at all, because they need
-                no pass.
+                Setting a pass aside hides codes until release. Releasing can't
+                be undone. Under-13s aren't listed because they don't need a
+                pass.
               </Text>
             </div>
             {!locked && assigned.length > 0 ? (
@@ -2099,12 +2094,17 @@ function ReleaseModal({
   fetcher: ReturnType<typeof useFetcher>;
 }) {
   const open = rows !== null && rows.length > 0;
+  const count = rows?.length ?? 0;
   return (
-    <Modal opened={open} onClose={onClose} title="Release these passes?">
+    <Modal
+      opened={open}
+      onClose={onClose}
+      title={count === 1 ? "Release pass?" : `Release ${count} passes?`}
+    >
       <Stack gap="sm">
         <Alert color="orange" variant="light">
-          This hands over the codes. They can't be un-sent — if a released pass
-          has to be pulled, it gets voided and needs replacing by the vendor.
+          Releasing reveals the codes and can't be undone. A released pass can
+          only be voided and replaced by the vendor.
         </Alert>
         <List size="sm">
           {(rows ?? []).map((r) => (
@@ -2227,21 +2227,20 @@ function ExternalModal({
     >
       <Stack gap="sm">
         <Alert color="grape" variant="light">
-          For somebody with no CampTool account — a neighbour, a helper, a
-          friend of the camp. It leaves the pool immediately, so it stops
-          counting towards covering your own early arrivals. Release it
-          afterwards to get the PDF you can send them.
+          For someone without a CampTool account (e.g. a neighbor or helper).
+          Removes this pass from the pool immediately; release it afterward to
+          download the PDF.
         </Alert>
         <TextInput
-          label="Who's getting it?"
-          description="The only record of where this pass went — a name someone will recognise in November."
-          placeholder="e.g. Jamie Reyes (Ranger HQ)"
+          label="Recipient"
+          description="Use a recognizable name — this is the only record of who received it."
+          placeholder="e.g. Jamie Reyes (neighboring camp)"
           value={holder}
           onChange={(e) => setHolder(e.currentTarget.value)}
         />
         <Textarea
-          label="Why? (optional)"
-          placeholder="e.g. helping us build the shade structure Tuesday; agreed with the leads"
+          label="Reason (optional)"
+          placeholder="e.g. helping build shade structure Tuesday"
           value={note}
           onChange={(e) => setNote(e.currentTarget.value)}
           minRows={2}

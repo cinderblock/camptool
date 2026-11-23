@@ -38,12 +38,26 @@ export const SWAP_KINDS: {
 export const SWAP_DIRECTIONS: {
   value: SwapDirection;
   label: string;
+  /** Third-person badge shown on listing cards. */
+  badge: string;
   /** How the listing reads in a sentence. */
   verb: string;
   color: string;
 }[] = [
-  { value: "have", label: "I have a spare", verb: "has", color: "green" },
-  { value: "need", label: "I need one", verb: "needs", color: "orange" },
+  {
+    value: "have",
+    label: "I have a spare",
+    badge: "Offering",
+    verb: "has",
+    color: "green",
+  },
+  {
+    value: "need",
+    label: "I need one",
+    badge: "Looking for",
+    verb: "needs",
+    color: "orange",
+  },
 ];
 
 export function isSwapKind(value: string): value is SwapKind {

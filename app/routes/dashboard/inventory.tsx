@@ -20,7 +20,7 @@ import { mapObject, membership, user } from "../../../db/schema";
 import type { Route } from "./+types/inventory";
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "Inventory · CampTool" }];
+  return [{ title: "All gear · CampTool" }];
 }
 
 type Row = {
@@ -91,10 +91,10 @@ export default function Inventory({ loaderData }: Route.ComponentProps) {
     <Container size="lg">
       <Stack gap="lg">
         <div>
-          <Title order={2}>Inventory</Title>
+          <Title order={2}>All gear</Title>
           <Text c="dimmed" size="sm">
-            Everything campers are bringing plus shared camp items — so nothing
-            gets missed. {items.length} items · {placed} placed ·{" "}
+            Member and shared camp items. {items.length} total · {placed} placed
+            ·{" "}
             <Text
               span
               c={unplaced ? "orange" : "dimmed"}
@@ -108,8 +108,8 @@ export default function Inventory({ loaderData }: Route.ComponentProps) {
 
         {items.length === 0 ? (
           <Text c="dimmed">
-            Nothing declared yet. Campers add items on their “Bringing” page;
-            officers add shared items from the map legend.
+            No gear declared yet. Members add items on Your gear; officers add
+            shared items on the Map.
           </Text>
         ) : (
           <Table.ScrollContainer minWidth={620}>
@@ -134,18 +134,14 @@ export default function Inventory({ loaderData }: Route.ComponentProps) {
                       <Table.Td>
                         <Group gap={6} wrap="wrap">
                           {def.label}
-                          {/* The camper's placement preference — advisory, so
-                              whoever arranges the map can honour it. */}
                           {item.placeNearVehicle ? (
                             <Badge size="xs" color="blue" variant="light">
-                              near their vehicle
+                              Near vehicle
                             </Badge>
                           ) : null}
-                          {/* Not a preference: a pump-out truck has to reach
-                              it, so this constrains where it can go at all. */}
                           {item.needsPumpout ? (
                             <Badge size="xs" color="orange" variant="light">
-                              needs pump-out access
+                              Pump-out access
                             </Badge>
                           ) : null}
                         </Group>
@@ -156,18 +152,18 @@ export default function Inventory({ loaderData }: Route.ComponentProps) {
                       <Table.Td>
                         {item.ownerName ?? (
                           <Text span c="dimmed">
-                            camp / shared
+                            Shared camp
                           </Text>
                         )}
                       </Table.Td>
                       <Table.Td>
                         {item.placed ? (
                           <Badge size="sm" color="green" variant="light">
-                            placed
+                            Placed
                           </Badge>
                         ) : (
                           <Badge size="sm" color="orange" variant="light">
-                            unplaced
+                            Unplaced
                           </Badge>
                         )}
                       </Table.Td>

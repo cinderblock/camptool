@@ -315,19 +315,17 @@ export default function Fuel({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Fuel · {year}</Title>
           <Text c="dimmed" size="sm">
-            What fuel the camp is bringing, how much of it, and what it arrives
-            in. This feeds the fuel-storage area on the{" "}
+            Fuel totals and container counts for the{" "}
             <Text span component={Link} to="/map" c="blue" inherit>
-              map
+              camp map
             </Text>{" "}
-            and the camp's fire-safety review, so the totals and the container
-            counts are the part that matters.
+            and fire-safety review.
           </Text>
         </div>
 
         {locked ? (
           <Text size="sm" c="dimmed">
-            This year is locked — fuel declarations are read-only.
+            This year is locked — read-only.
           </Text>
         ) : null}
 
@@ -339,15 +337,12 @@ export default function Fuel({ loaderData }: Route.ComponentProps) {
 
         <div>
           <Text fw={600} mb="xs">
-            What you're bringing
+            Your fuel
           </Text>
           {mine.length === 0 ? (
             <Text size="sm" c="dimmed" mb="xs">
-              Nothing declared. If you're bringing fuel of any kind — generator
-              gas, propane for a stove, diesel — add it here so it can be stored
-              safely and separated properly. If you're bringing none, say that
-              too: it's a real answer, and it's how you stop being counted as
-              someone nobody has heard from.
+              Declare any gas, diesel, or propane you're bringing — or confirm
+              none so officers know you've answered.
             </Text>
           ) : (
             <Stack gap="xs" mb="xs">
@@ -396,8 +391,8 @@ function Totals({
     return (
       <Paper withBorder p="md" radius="md">
         <Text size="sm" c="dimmed">
-          Nobody has declared any fuel yet.
-          {noFuelLine ? ` ${noFuelLine} — that part is answered.` : ""}
+          No fuel declared yet.
+          {noFuelLine ? ` ${noFuelLine}.` : ""}
         </Text>
       </Paper>
     );
@@ -418,7 +413,7 @@ function Totals({
             </Text>
             <Text size="xs" c="dimmed">
               {t.containers} container{t.containers === 1 ? "" : "s"} ·{" "}
-              {t.lines} {t.lines === 1 ? "person" : "declarations"}
+              {t.lines} declaration{t.lines === 1 ? "" : "s"}
             </Text>
             {t.containmentMissing > 0 ? (
               <Text size="xs" c="orange">
@@ -427,7 +422,7 @@ function Totals({
             ) : null}
             {t.containmentUnknown > 0 ? (
               <Text size="xs" c="dimmed">
-                {t.containmentUnknown} haven't said
+                {t.containmentUnknown} unanswered
               </Text>
             ) : null}
           </div>
@@ -435,9 +430,7 @@ function Totals({
       </SimpleGrid>
       {mixedPhases ? (
         <Text size="xs" c="dimmed" mt="sm">
-          The camp is bringing both liquid fuel and propane, so they need 20′
-          between them — one storage area won't do. The map draws the rings once
-          you place fuel-storage objects.
+          Liquid fuel and propane must be stored at least 20′ apart.
         </Text>
       ) : null}
       {noFuelLine ? (
@@ -445,10 +438,6 @@ function Totals({
           {noFuelLine}.
         </Text>
       ) : null}
-      <Text size="xs" c="dimmed" mt="xs">
-        Gallons and pounds are kept apart on purpose; converting between them
-        would invent precision nobody gave us.
-      </Text>
     </Paper>
   );
 }
@@ -541,19 +530,22 @@ function Row({
               {d.amount} {d.unit}
             </Text>
             <Text size="sm" c="dimmed">
-              in {d.containerCount} × {d.containerType || "container"}
+              in {d.containerCount}{" "}
+              {d.containerType
+                ? `× ${d.containerType}`
+                : `container${d.containerCount === 1 ? "" : "s"}`}
             </Text>
             {d.secondaryContainment === true ? (
               <Badge size="xs" variant="light" color="green">
-                contained
+                Contained
               </Badge>
             ) : d.secondaryContainment === false ? (
               <Badge size="xs" variant="light" color="orange">
-                no containment
+                No containment
               </Badge>
             ) : (
               <Badge size="xs" variant="outline" color="gray">
-                containment unanswered
+                Containment unanswered
               </Badge>
             )}
           </Group>
@@ -654,17 +646,17 @@ function Fields({ d }: { d?: Declaration }) {
       <Switch
         checked={contained === "yes"}
         onChange={(e) => setContained(e.currentTarget.checked ? "yes" : "no")}
-        label="Sitting in secondary containment (a tray or tub that catches a leak)"
+        label="Has secondary containment (tray or tub to catch leaks)"
       />
       {contained === "" ? (
         <Text size="xs" c="dimmed">
-          Not answered yet — the safety review counts that separately from a no.
+          Toggle if you have containment; leave off if not yet known.
         </Text>
       ) : null}
       <TextInput
         name="notes"
-        label="Anything else"
-        placeholder="e.g. for the generator, arriving Wednesday"
+        label="Notes (optional)"
+        placeholder="e.g. for generator, arriving Wednesday"
         defaultValue={d?.notes ?? ""}
         maxLength={500}
       />

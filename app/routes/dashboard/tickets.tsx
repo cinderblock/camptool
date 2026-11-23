@@ -541,11 +541,13 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
   const saleStart = saleStartsAt ? new Date(saleStartsAt) : null;
   const saleEnd = saleEndsAt ? new Date(saleEndsAt) : null;
   const saleNote =
-    saleStart || saleEnd
-      ? `Sale window: ${saleStart ? fmtDateTime(saleStart) : "open"} – ${
-          saleEnd ? fmtDateTime(saleEnd) : "open"
-        }.`
-      : null;
+    saleStart && saleEnd
+      ? `Sale window: ${fmtDateTime(saleStart)} – ${fmtDateTime(saleEnd)}.`
+      : saleStart
+        ? `Sale opens ${fmtDateTime(saleStart)}.`
+        : saleEnd
+          ? `Sale closes ${fmtDateTime(saleEnd)}.`
+          : null;
 
   const myTickets = tickets.filter((t) => t.mine);
   const myRequest = requests.find(
@@ -555,19 +557,19 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
 
   const available = tickets.filter((t) => t.status === "available").length;
   const assigned = tickets.filter((t) => t.status === "assigned").length;
-  // What's still outstanding — anything not yet member-confirmed as purchased.
-  const unpurchased = tickets.filter((t) => t.status !== "purchased").length;
+  const purchased = tickets.filter((t) => t.status === "purchased").length;
 
   return (
     <Container size="lg">
       <Stack gap="lg">
         <div>
-          <Title order={2}>Direct Group Sale tickets</Title>
+          <Title order={2}>
+            {isBurningMan(event) ? "Directed Group Sale tickets" : "Tickets"}
+          </Title>
           <Text c="dimmed" size="sm">
-            The camp's guaranteed ticket allocation for this year. The camp
-            decides who gets each slot; once assignments are published, Burning
-            Man emails you a link to buy your ticket directly. Mark it purchased
-            here after you do.
+            {isBurningMan(event)
+              ? "The camp's DGS ticket allocation. Once published, Burning Man emails your purchase link — mark your ticket purchased here after buying."
+              : "The camp's ticket allocation for this year. Mark your ticket purchased here once you've bought it."}
           </Text>
         </div>
 
@@ -579,8 +581,7 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — tickets are read-only. Switch to an open
-              year to make changes.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -591,30 +592,29 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
             <Text fw={600}>Your tickets</Text>
             {!isOfficer && !published ? (
               <Text size="sm" c="dimmed">
-                Ticket assignments haven't been announced yet — check back once
-                they're published.
+                Assignments aren't published yet.
               </Text>
             ) : myTickets.length === 0 ? (
               <Text size="sm" c="dimmed">
-                None assigned to you or your party yet.
+                None assigned to you or your group yet.
               </Text>
             ) : (
               <Stack gap="sm">
                 {myTickets.map((t) => (
                   <MyTicket key={t.id} t={t} fetcher={fetcher} />
                 ))}
-                <Text size="xs" c="dimmed">
-                  Burning Man emails your purchase link once assignments are
-                  published. Mark a ticket purchased here after you buy it.
-                  {saleNote ? ` ${saleNote}` : ""}
-                </Text>
+                {saleNote ? (
+                  <Text size="xs" c="dimmed">
+                    {saleNote}
+                  </Text>
+                ) : null}
               </Stack>
             )}
 
             {locked ? null : myRequest ? (
               <Group gap="xs">
                 <Badge color="yellow" variant="light">
-                  request pending
+                  Request pending
                 </Badge>
                 {myRequest.note ? (
                   <Text size="sm" c="dimmed">
@@ -655,16 +655,16 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
                   <Text fw={600} size="sm">
                     {published
                       ? "Assignments published"
-                      : "Draft — assignments hidden from members"}
+                      : "Draft — hidden from members"}
                   </Text>
                   <Text size="xs" c="dimmed">
                     {published
-                      ? `Members can see their own assigned tickets${
+                      ? `Members can see their assigned tickets${
                           publishedAt
                             ? ` (published ${fmtDateTime(new Date(publishedAt))})`
                             : ""
                         }.`
-                      : "Only officers can see assignments. Publish when you're ready to announce them to members."}
+                      : "Visible to officers only until published."}
                   </Text>
                 </div>
                 {locked ? null : (
@@ -694,9 +694,9 @@ export default function Tickets({ loaderData }: Route.ComponentProps) {
                 Allocation · {tickets.length} total
               </Text>
               <SimpleGrid cols={{ base: 3, xs: 3 }} spacing="lg" mb="md">
-                <Stat label="available" value={available} color="gray" />
-                <Stat label="assigned" value={assigned} color="blue" />
-                <Stat label="unpurchased" value={unpurchased} color="orange" />
+                <Stat label="Available" value={available} color="gray" />
+                <Stat label="Assigned" value={assigned} color="blue" />
+                <Stat label="Purchased" value={purchased} color="green" />
               </SimpleGrid>
               {locked ? null : (
                 <Stack gap="md">
@@ -823,7 +823,7 @@ function RequestForm({ fetcher }: { fetcher: ReturnType<typeof useFetcher> }) {
         <TextInput
           name="note"
           label="Request a ticket"
-          placeholder="optional note — e.g. low-income"
+          placeholder="Optional note (e.g. low-income)"
           w={{ base: "100%", xs: 320 }}
         />
         <Button type="submit" loading={fetcher.state !== "idle"}>
@@ -951,7 +951,7 @@ function SaleWindowForm({
     <Group align="flex-end">
       <DateTimePicker
         label="Sale opens"
-        placeholder="not set"
+        placeholder="Not set"
         value={start}
         onChange={(v) => setStart(pickerValueToDate(v))}
         clearable
@@ -960,7 +960,7 @@ function SaleWindowForm({
       />
       <DateTimePicker
         label="Sale closes"
-        placeholder="not set"
+        placeholder="Not set"
         value={end}
         onChange={(v) => setEnd(pickerValueToDate(v))}
         clearable
@@ -1008,7 +1008,7 @@ function TicketRowView({
             size="xs"
             w={150}
             defaultValue={t.tier ?? ""}
-            placeholder="tier"
+            placeholder="Tier"
             onBlur={(e) => {
               if ((e.currentTarget.value || null) !== (t.tier ?? null))
                 fetcher.submit(
@@ -1027,7 +1027,7 @@ function TicketRowView({
       <Table.Td>{usd(t.priceCents)}</Table.Td>
       <Table.Td>
         <Badge color={STATUS_COLOR[t.status] ?? "gray"} variant="light">
-          {t.status}
+          {t.status.charAt(0).toUpperCase() + t.status.slice(1)}
         </Badge>
       </Table.Td>
       <Table.Td>
@@ -1037,7 +1037,7 @@ function TicketRowView({
           <Select
             size="xs"
             w={190}
-            placeholder="— pool —"
+            placeholder="Unassigned"
             data={assignGroups}
             value={t.assigneeRef}
             searchable

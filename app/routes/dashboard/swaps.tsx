@@ -169,12 +169,15 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "post") {
     if (!hasAtLeast(active.membership.role, "member")) {
-      return data({ error: "Members can post." }, { status: 403 });
+      return data({ error: "Members only." }, { status: 403 });
     }
     const kind = String(form.get("kind") ?? "");
     const direction = String(form.get("direction") ?? "");
     if (!isSwapKind(kind) || !isSwapDirection(direction)) {
-      return data({ error: "Pick what and which way." }, { status: 400 });
+      return data(
+        { error: "Select an item and listing type." },
+        { status: 400 },
+      );
     }
     const qtyRaw = Number(form.get("quantity"));
     const quantity =
@@ -291,20 +294,14 @@ export default function Swaps({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Spares board · {year}</Title>
           <Text c="dimmed" size="sm">
-            Spare tickets and vehicle passes, and people looking for one. Post
-            what you have or what you need instead of hoping the right person
-            reads the right Discord thread.
-          </Text>
-          <Text c="dimmed" size="xs" mt={4}>
-            The camp isn't part of these arrangements — no money passes through
-            here and nothing is guaranteed. Sort out payment and handover
-            directly with the other person.
+            Offer or request spare tickets and vehicle passes. Arrange payment
+            and transfer directly — the camp isn't a party to swaps.
           </Text>
         </div>
 
         {locked ? (
           <Text size="sm" c="dimmed">
-            This year is locked — the board is read-only.
+            This year is locked — read-only.
           </Text>
         ) : null}
 
@@ -313,15 +310,15 @@ export default function Swaps({ loaderData }: Route.ComponentProps) {
             value={filter}
             onChange={(v) => setFilter(v as typeof filter)}
             data={[
-              { value: "all", label: "Everything" },
+              { value: "all", label: "All" },
               ...SWAP_KINDS.map((k) => ({
                 value: k.value,
-                label: `${k.label}s`,
+                label: k.many.charAt(0).toUpperCase() + k.many.slice(1),
               })),
             ]}
           />
           <Text size="xs" c="dimmed">
-            {open.length} open · {settled.length} settled
+            {open.length} open · {settled.length} closed
           </Text>
         </Group>
 
@@ -350,7 +347,7 @@ export default function Swaps({ loaderData }: Route.ComponentProps) {
         {settled.length > 0 ? (
           <div>
             <Text size="sm" fw={600} c="dimmed" mb={4}>
-              Settled
+              Closed
             </Text>
             <Stack gap="xs">
               {settled.map((l) => (
@@ -395,19 +392,19 @@ function ListingCard({
               variant="light"
               color={directionColor(l.direction)}
             >
-              {dir?.label ?? l.direction}
+              {dir?.badge ?? l.direction}
             </Badge>
             <Badge size="sm" variant="outline" color={kindColor(l.kind)}>
               {listingSummary(l)}
             </Badge>
             {l.status === "claimed" ? (
               <Badge size="sm" variant="light" color="gray">
-                {l.claimedByName ? `taken by ${l.claimedByName}` : "settled"}
+                {l.claimedByName ? `Claimed by ${l.claimedByName}` : "Settled"}
               </Badge>
             ) : null}
             {l.status === "withdrawn" ? (
               <Badge size="sm" variant="light" color="gray">
-                withdrawn
+                Withdrawn
               </Badge>
             ) : null}
           </Group>
@@ -538,13 +535,14 @@ function PostForm() {
             />
           </Group>
           <Text size="xs" c="dimmed">
-            Leave the price blank if you'd rather talk about it; enter 0 if
-            you're giving it away.
+            {direction === "have"
+              ? "Leave blank to discuss price, or enter 0 to give it away."
+              : "Leave blank if you're flexible on price."}
           </Text>
           <Textarea
             name="note"
-            label="Anything else"
-            placeholder="e.g. tier 2, can meet in Reno on the way out"
+            label="Details (optional)"
+            placeholder="e.g. tier, transfer timing, or pickup details"
             autosize
             minRows={2}
             maxLength={MAX_NOTE}

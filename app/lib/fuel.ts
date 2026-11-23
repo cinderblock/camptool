@@ -76,8 +76,8 @@ export const FUEL_TYPES: {
 ];
 
 export const FUEL_UNITS: { value: FuelUnit; label: string }[] = [
-  { value: "gal", label: "gallons" },
-  { value: "lb", label: "pounds" },
+  { value: "gal", label: "Gallons" },
+  { value: "lb", label: "Pounds" },
 ];
 
 export function isFuelType(value: string): value is FuelType {

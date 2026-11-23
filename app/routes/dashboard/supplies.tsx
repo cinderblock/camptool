@@ -304,7 +304,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   // --- Everything below is officer-only management. ---
   if (!canManage) {
-    return data({ error: "You don't have permission." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
 
   switch (intent) {
@@ -317,7 +317,7 @@ export async function action({ request }: Route.ActionArgs) {
       await db.insert(inventoryCategory).values({
         id: crypto.randomUUID(),
         campId,
-        name: "New category",
+        name: "New supply group",
         sortOrder: (last?.sortOrder ?? 0) + 1,
       });
       return data({ ok: true });
@@ -361,7 +361,8 @@ export async function action({ request }: Route.ActionArgs) {
           ),
         )
         .limit(1);
-      if (!cat) return data({ error: "Category not found." }, { status: 404 });
+      if (!cat)
+        return data({ error: "Supply group not found." }, { status: 404 });
       await db.insert(inventoryItem).values({
         id: crypto.randomUUID(),
         campId,
@@ -534,11 +535,8 @@ export default function Supplies({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Camp supplies</Title>
           <Text c="dimmed" size="sm">
-            Shared camp gear for {year}, by group — what we need and who's
-            bringing it. Claim anything unclaimed, or add what you're bringing
-            that isn't listed; you'll see what's already covered as you type, so
-            we don't end up with six of one thing and none of another. (Your own
-            tents and vehicles live under Bringing.)
+            Shared camp supplies for {year}. Claim an item or add what you're
+            bringing.
           </Text>
         </div>
 
@@ -546,7 +544,7 @@ export default function Supplies({ loaderData }: Route.ComponentProps) {
 
         {locked ? (
           <Text size="sm" c="dimmed">
-            This year is locked — supplies are read-only.
+            This year is locked — read-only.
           </Text>
         ) : null}
 
@@ -678,10 +676,9 @@ function CategoryCard({
 
       {dupes.length > 0 ? (
         <Text size="xs" c="orange" mt="xs">
-          Possible duplicates in this group:{" "}
-          {dupes.map((g) => g.map((i) => i.name).join(" / ")).join("; ")}. Two
-          people bringing the same thing is fine — merge only if it's one thing
-          listed twice.
+          Possible duplicates:{" "}
+          {dupes.map((g) => g.map((i) => i.name).join(" / ")).join("; ")}.
+          Remove one if it's listed twice.
         </Text>
       ) : null}
 
@@ -707,7 +704,7 @@ function CategoryCard({
             )
           }
         >
-          + Add a blank line for someone else to claim
+          + Add unclaimed item
         </Button>
       ) : null}
     </Card>
@@ -780,7 +777,7 @@ function AddMine({
         w="fit-content"
         onClick={() => setOpen(true)}
       >
-        + I'm bringing something for {category.name}
+        + Add item I'm bringing
       </Button>
     );
   }
@@ -792,15 +789,15 @@ function AddMine({
           size="xs"
           w={72}
           min={1}
-          label="How many"
+          label="Qty"
           value={quantity}
           onChange={setQuantity}
         />
         <TextInput
           size="xs"
           style={{ flex: 1, minWidth: 160 }}
-          label="What are you bringing?"
-          placeholder="e.g. whiskey — you can get specific later"
+          label="Item"
+          placeholder="e.g. whiskey, extension cords"
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
           maxLength={120}
@@ -869,8 +866,7 @@ function AddMine({
         </Stack>
       ) : null}
       <Text size="xs" c="dimmed" mt="xs">
-        Rough is fine — "whiskey" now, "2 handles of rye" once you've bought it.
-        You can edit your own lines any time.
+        You can edit your own items later with brand or exact quantities.
       </Text>
     </Card>
   );

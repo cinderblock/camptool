@@ -3,6 +3,7 @@ import {
   Anchor,
   Autocomplete,
   Badge,
+  Button,
   Container,
   Group,
   NumberInput,
@@ -138,7 +139,7 @@ export async function action({ request }: Route.ActionArgs) {
   } = await requireActiveEdition(request);
   await requireFeature(active, "finances");
   if (!hasAtLeast(active.membership.role, "officer")) {
-    return data({ error: "Officers manage finances." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
   const campId = active.camp.id;
   const editionId = activeEdition.id;
@@ -253,8 +254,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
         <div>
           <Title order={2}>Finances</Title>
           <Text c="dimmed" size="sm">
-            Donations to the camp and camp spends for {year}. Officers only —
-            not shared with all campers.
+            Donations and expenses for {year} — officers only.
           </Text>
         </div>
 
@@ -266,8 +266,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — finances are read-only. Switch to an open
-              year to make changes.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -275,7 +274,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
         <SimpleGrid cols={{ base: 1, sm: 3 }}>
           <Paper withBorder p="md" radius="md">
             <Text size="xs" c="dimmed">
-              Donations in
+              Donations
             </Text>
             <Text fw={700} size="xl" c="teal">
               {usd(totals.donations)}
@@ -283,7 +282,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
           </Paper>
           <Paper withBorder p="md" radius="md">
             <Text size="xs" c="dimmed">
-              Spends out
+              Expenses
             </Text>
             <Text fw={700} size="xl" c="red">
               {usd(totals.expenses)}
@@ -303,7 +302,8 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
           {duesEnabled ? (
             <Group justify="space-between" wrap="wrap">
               <Text size="xs" c="dimmed">
-                This camp tracks member dues & contribution tiers.
+                Donations attributed to a member automatically credit their dues
+                balance.
               </Text>
               <Anchor component={Link} to="/dues" size="xs">
                 Open Dues →
@@ -312,8 +312,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
           ) : (
             <Group justify="space-between" wrap="wrap">
               <Text size="xs" c="dimmed">
-                Dues tracking is off. If your camp has dues, the camp admin can
-                turn on the Dues feature.
+                Dues tracking is off. An admin can enable it in Camp settings.
               </Text>
               {isAdmin ? (
                 <Anchor component={Link} to="/settings" size="xs">
@@ -327,7 +326,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
         {locked ? null : (
           <Paper withBorder p="md" radius="md">
             <Text fw={600} size="sm" mb="sm">
-              Record a {kind === "donation" ? "donation" : "spend"}
+              Add {kind === "donation" ? "donation" : "expense"}
             </Text>
             <Stack gap="sm">
               <Group align="flex-end" wrap="wrap">
@@ -336,8 +335,8 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
                   value={kind}
                   onChange={setKind}
                   data={[
-                    { label: "Donation in", value: "donation" },
-                    { label: "Spend out", value: "expense" },
+                    { label: "Donation", value: "donation" },
+                    { label: "Expense", value: "expense" },
                   ]}
                 />
                 <NumberInput
@@ -377,7 +376,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
                 <Autocomplete
                   size="xs"
                   label="Category"
-                  placeholder="optional"
+                  placeholder="Optional"
                   data={categories}
                   value={category}
                   onChange={setCategory}
@@ -397,17 +396,13 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
                   comboboxProps={{ withinPortal: true }}
                   w={180}
                 />
-                <Tooltip label="Add entry">
-                  <ActionIcon
-                    size="lg"
-                    variant="filled"
-                    aria-label="Add entry"
-                    onClick={submitAdd}
-                    loading={fetcher.state !== "idle"}
-                  >
-                    +
-                  </ActionIcon>
-                </Tooltip>
+                <Button
+                  size="xs"
+                  onClick={submitAdd}
+                  loading={fetcher.state !== "idle"}
+                >
+                  Add
+                </Button>
               </Group>
             </Stack>
           </Paper>
@@ -453,7 +448,7 @@ export default function Finances({ loaderData }: Route.ComponentProps) {
                             variant="light"
                             color={donation ? "teal" : "red"}
                           >
-                            {donation ? "donation" : "spend"}
+                            {donation ? "Donation" : "Expense"}
                           </Badge>
                         </Table.Td>
                         <Table.Td>

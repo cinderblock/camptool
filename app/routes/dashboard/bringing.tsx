@@ -14,7 +14,9 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { and, eq, isNotNull } from "drizzle-orm";
+import { useEffect, useRef } from "react";
 import { data, useFetcher } from "react-router";
 import { type AddSize, AddStructures } from "~/components/AddStructures";
 import { ensureMemberAttendee } from "~/lib/attendee.server";
@@ -37,7 +39,7 @@ import {
 import type { Route } from "./+types/bringing";
 
 export function meta(_: Route.MetaArgs) {
-  return [{ title: "Bringing · CampTool" }];
+  return [{ title: "Your gear · CampTool" }];
 }
 
 type Item = {
@@ -536,7 +538,22 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
     withoutBed,
   } = loaderData;
   const kinds = useKinds();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
+  const seenError = useRef<unknown>(undefined);
+  useEffect(() => {
+    if (
+      fetcher.state === "idle" &&
+      fetcher.data?.error &&
+      fetcher.data !== seenError.current
+    ) {
+      seenError.current = fetcher.data;
+      notifications.show({
+        color: "red",
+        title: "Error",
+        message: fetcher.data.error,
+      });
+    }
+  }, [fetcher.data, fetcher.state]);
 
   function add(kind: string, size?: AddSize) {
     const fields: Record<string, string> = { intent: "addItem", kind };
@@ -549,11 +566,10 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
     <Container size="md">
       <Stack gap="lg">
         <div>
-          <Title order={2}>What you're bringing</Title>
+          <Title order={2}>Your gear</Title>
           <Text c="dimmed" size="sm">
-            List your structures and vehicles so officers can place them on the
-            camp map, and say who's sleeping in each one. Sizes are in feet —
-            set them as accurately as you can.
+            List your structures and vehicles (in feet) so officers can place
+            them on the camp map, and note who's sleeping in each.
           </Text>
         </div>
 
@@ -564,13 +580,12 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
           <Paper withBorder p="md" radius="md">
             <Text fw={600} size="sm">
               {withoutBed.length === 1
-                ? "One person with you has no bed yet"
-                : `${withoutBed.length} people with you have no bed yet`}
+                ? "1 person in your group has no bed yet"
+                : `${withoutBed.length} people in your group have no bed yet`}
             </Text>
             <Text size="xs" c="dimmed" mt={2}>
-              {withoutBed.join(", ")} — add them to whatever they're sleeping in
-              below. If they're in someone else's tent, that person adds them
-              from their own Bringing page.
+              {withoutBed.join(", ")} — add them to a structure below (or have
+              their tent host add them on their own Your gear page).
             </Text>
           </Paper>
         ) : null}
@@ -590,15 +605,15 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
                   Bringing the same as {lastYear.year}?
                 </Text>
                 <Text size="xs" c="dimmed" mt={2}>
-                  Last year you brought:{" "}
+                  In {lastYear.year} you brought:{" "}
                   {lastYear.items
                     .map(
                       (it) =>
                         `${it.name ? `${it.name} ` : ""}${kinds.def(it.kind).label} (${Math.round(it.width)}×${Math.round(it.height)}′)`,
                     )
                     .join(", ")}
-                  . Add them again to re-declare for this year (officers
-                  re-place them on the new map).
+                  . Re-add them for this year so officers can place them on the
+                  map.
                 </Text>
               </div>
               <Button
@@ -626,8 +641,7 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — your inventory is read-only. Switch to an
-              open year to make changes.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : (
@@ -642,8 +656,8 @@ export default function Bringing({ loaderData }: Route.ComponentProps) {
         {items.length === 0 ? (
           <Text c="dimmed">
             {locked
-              ? "Nothing was declared for this year."
-              : "Nothing yet. Add what you're bringing using the buttons above."}
+              ? "Nothing declared for this year."
+              : "Nothing yet — add your structures or vehicles above."}
           </Text>
         ) : (
           <Stack gap="sm">
@@ -706,11 +720,11 @@ function ItemRow({
               </Text>
               {item.placed ? (
                 <Badge size="xs" color="green" variant="light">
-                  placed
+                  Placed
                 </Badge>
               ) : (
                 <Badge size="xs" color="gray" variant="light">
-                  not placed
+                  Unplaced
                 </Badge>
               )}
             </Group>
@@ -738,21 +752,14 @@ function ItemRow({
                       needsEgress: e.currentTarget.checked ? "true" : "false",
                     })
                   }
-                  label={
-                    <Text size="xs">
-                      Must be able to drive out{" "}
-                      <Text span c="dimmed">
-                        — leaving and coming back during the event
-                      </Text>
-                    </Text>
-                  }
+                  label="Needs drive-out access during the event"
                 />
                 {item.needsEgress ? (
                   <TextInput
                     size="xs"
                     disabled={locked}
-                    placeholder="e.g. out Wednesday morning, back Thursday"
-                    aria-label="When it needs to leave"
+                    placeholder="e.g. out Wed morning, back Thu"
+                    aria-label="Drive-out timing"
                     defaultValue={item.egressNote ?? ""}
                     onBlur={(e) =>
                       commit({ egressNote: e.currentTarget.value })
@@ -762,10 +769,6 @@ function ItemRow({
               </Stack>
             ) : null}
 
-            {/* Only meaningful for something you sleep in — asking whether a
-                car should be parked next to a car isn't a question. Off means
-                "don't care", which is the common case: plenty of campers
-                cluster vehicles and pitch tents elsewhere. */}
             {def.group === "Domiciles" ? (
               <Checkbox
                 mt={6}
@@ -779,21 +782,9 @@ function ItemRow({
                       : "false",
                   })
                 }
-                label={
-                  <Text size="xs">
-                    Place next to my vehicle{" "}
-                    <Text span c="dimmed">
-                      — otherwise it goes wherever fits
-                    </Text>
-                  </Text>
-                }
+                label="Place next to my vehicle"
               />
             ) : null}
-            {/* The wish the app can't infer. "Near my car" is derivable from
-                what you brought; "near Sam" is only knowable if you say so.
-                Same standing as the checkbox above — advisory, drawn as a faint
-                line on the map for whoever is arranging it. Domiciles only, for
-                the same reason: where your generator sleeps isn't a friendship. */}
             {def.group === "Domiciles" && neighbours.length > 0 ? (
               <Select
                 mt={6}
@@ -802,27 +793,13 @@ function ItemRow({
                 clearable
                 searchable
                 disabled={locked}
-                label={
-                  <Text size="xs">
-                    …and near this person{" "}
-                    <Text span c="dimmed">
-                      — optional
-                    </Text>
-                  </Text>
-                }
-                placeholder="Nobody in particular"
+                label="Place near (optional)"
+                placeholder="No preference"
                 value={item.nearMembershipId}
                 data={neighbours.map((n) => ({ value: n.id, label: n.name }))}
                 onChange={(v) => commit({ nearMembershipId: v ?? "" })}
               />
             ) : null}
-            {/* A pump-out truck has to physically reach the RV, so this is a
-                placement REQUIREMENT rather than a preference — it decides
-                whether the RV can go mid-block at all.
-                Asked of anything whose kind declares a `cleanout` marker,
-                which is exactly "this thing has a sewer fitting". That keeps
-                the question general: a camp-theme adding its own trailer with
-                a cleanout gets asked too, with no core change. */}
             {def.controls?.some((c) => c.key === "cleanout") ? (
               <Checkbox
                 mt={6}
@@ -834,14 +811,7 @@ function ItemRow({
                     needsPumpout: e.currentTarget.checked ? "true" : "false",
                   })
                 }
-                label={
-                  <Text size="xs">
-                    Needs pump-out / cleanout access{" "}
-                    <Text span c="dimmed">
-                      — a truck has to be able to reach it
-                    </Text>
-                  </Text>
-                }
+                label="Needs pump-out truck access"
               />
             ) : null}
 

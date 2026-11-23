@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Anchor,
   Badge,
   Button,
   Card,
@@ -19,7 +20,7 @@ import {
 import { notifications } from "@mantine/notifications";
 import { and, eq, sql } from "drizzle-orm";
 import { useEffect, useState } from "react";
-import { data, Form, useFetcher } from "react-router";
+import { data, Form, Link, useFetcher } from "react-router";
 import { requireFeature } from "~/lib/features.server";
 import { hasAtLeast } from "~/lib/permissions";
 import { redact } from "~/lib/privacy.server";
@@ -159,7 +160,7 @@ export async function action({ request }: Route.ActionArgs) {
   const { active, activeEdition } = await requireActiveEdition(request);
   await requireFeature(active, "dues");
   if (!hasAtLeast(active.membership.role, "officer")) {
-    return data({ error: "Officers manage dues." }, { status: 403 });
+    return data({ error: "Officers only." }, { status: 403 });
   }
   if (activeEdition.locked) {
     return data({ error: "This year is locked." }, { status: 403 });
@@ -321,11 +322,14 @@ export default function Dues({ loaderData }: Route.ComponentProps) {
     <Container size="md">
       <Stack gap="lg">
         <div>
-          <Title order={2}>Dues &amp; contributions</Title>
+          <Title order={2}>Dues</Title>
           <Text c="dimmed" size="sm">
-            Your camp's contribution tiers for {year}. Each year is its own set
-            — edit this year freely without changing past years, or copy last
-            year's to start. Some camps have none; that's fine.
+            Contribution tiers and member balances for {year}. Record payments
+            as member donations in{" "}
+            <Anchor component={Link} to="/finances" size="sm">
+              Finances
+            </Anchor>
+            .
           </Text>
         </div>
 
@@ -337,8 +341,7 @@ export default function Dues({ loaderData }: Route.ComponentProps) {
             bg="var(--mantine-color-default-hover)"
           >
             <Text size="sm" c="dimmed">
-              This year is locked — tiers are read-only. Switch to an open year
-              to make changes.
+              This year is locked — read-only.
             </Text>
           </Paper>
         ) : null}
@@ -381,7 +384,8 @@ export default function Dues({ loaderData }: Route.ComponentProps) {
                           variant="light"
                           color={reqColor(t.requirement)}
                         >
-                          {t.requirement}
+                          {t.requirement.charAt(0).toUpperCase() +
+                            t.requirement.slice(1)}
                         </Badge>
                       </Table.Td>
                       {locked ? null : (
@@ -582,7 +586,7 @@ export default function Dues({ loaderData }: Route.ComponentProps) {
                           <Table.Td>
                             {r.waived ? (
                               <Badge size="sm" variant="light" color="gray">
-                                waived
+                                Waived
                               </Badge>
                             ) : r.expectedCents == null ? (
                               <Text size="xs" c="dimmed">
@@ -590,11 +594,11 @@ export default function Dues({ loaderData }: Route.ComponentProps) {
                               </Text>
                             ) : owes != null && owes <= 0 ? (
                               <Badge size="sm" variant="light" color="teal">
-                                paid
+                                Paid
                               </Badge>
                             ) : (
                               <Badge size="sm" variant="light" color="orange">
-                                owes {usd(owes)}
+                                Owes {usd(owes)}
                               </Badge>
                             )}
                           </Table.Td>
