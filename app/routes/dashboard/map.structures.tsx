@@ -108,7 +108,7 @@ function readKindForm(form: FormData) {
   }
   const color = str("color").toLowerCase();
   if (!/^#[0-9a-f]{6}$/.test(color)) {
-    return { error: "Pick a colour like #4dabf7." };
+    return { error: "Enter a hex color like #4dabf7." };
   }
   const shape = str("shape") as CustomShape;
   if (!CUSTOM_SHAPES.includes(shape)) return { error: "Pick a shape." };
@@ -210,7 +210,7 @@ export async function action({ request }: Route.ActionArgs) {
       .where(and(eq(mapObject.campId, campId), eq(mapObject.kind, row.value)));
     if ((used?.n ?? 0) > 0) {
       return data(
-        { error: "It's on the map — archive it instead." },
+        { error: "Currently used on the map — archive it instead." },
         { status: 409 },
       );
     }
@@ -332,18 +332,17 @@ export default function CampStructures({ loaderData }: Route.ComponentProps) {
             </Button>
           </Group>
           <Text c="dimmed" size="sm" mt={6}>
-            Your camp's own kinds of thing for the map, beside the built-in
-            ones. Only this camp sees them. Officers drag them from the legend;
-            ones campers can bring show up on their Bringing page.
+            Custom map structures for this camp. Officers place them from the
+            map legend; items marked for campers also appear on the Bringing
+            page.
           </Text>
         </div>
 
         {live.length === 0 ? (
           <Card withBorder>
             <Text c="dimmed" size="sm">
-              No camp structures yet. Make one for anything the built-in kinds
-              don't cover: an L-shaped kitchen, a triangle shade, your camp's
-              art.
+              No custom structures yet. Create one for anything the built-in
+              types don't cover.
             </Text>
           </Card>
         ) : (
@@ -367,7 +366,7 @@ export default function CampStructures({ loaderData }: Route.ComponentProps) {
         {archived.length > 0 ? (
           <Stack gap={6}>
             <Text size="xs" c="dimmed" fw={600} tt="uppercase">
-              Archived — off the palettes, still drawn where placed
+              Archived (hidden from palettes, still shown where placed)
             </Text>
             {archived.map((k) => (
               <KindRow
@@ -480,7 +479,7 @@ function KindRow({
               </Popover.Target>
               <Popover.Dropdown>
                 <Stack gap="xs">
-                  <Text size="sm">Delete {kind.label} for good?</Text>
+                  <Text size="sm">Delete {kind.label} permanently?</Text>
                   <Button
                     size="xs"
                     color="red"
@@ -520,7 +519,7 @@ function KindEditor({
   }, [fetcher.state, fetcher.data, onClose]);
 
   const outline =
-    d.shape === "outline" ? (d.outline ?? PRESETS.triangle) : null;
+    d.shape === "outline" ? (d.outline ?? PRESETS.Triangle) : null;
   const problem = outline ? outlineProblem(outline) : null;
 
   const save = () => {
@@ -593,7 +592,7 @@ function KindEditor({
                 shape,
                 outline:
                   shape === "outline"
-                    ? (prev.outline ?? PRESETS.triangle)
+                    ? (prev.outline ?? PRESETS.Triangle)
                     : prev.outline,
               }));
             }}
@@ -642,7 +641,7 @@ function KindEditor({
         </Group>
 
         <ColorInput
-          label="Colour"
+          label="Color"
           format="hex"
           swatches={SWATCHES}
           value={d.color}
@@ -667,8 +666,8 @@ function KindEditor({
             </Group>
           </Chip.Group>
           <Text size="xs" c="dimmed" mt={4}>
-            Used by the map's highlight filter. Sleeping places show their
-            owner's name and take occupants.
+            Used by map filters. Sleeping structures show their owner's name and
+            hold occupants.
           </Text>
         </div>
 
@@ -711,8 +710,8 @@ function KindEditor({
         ) : null}
         {d.id ? (
           <Text size="xs" c="dimmed">
-            Changing the size or colour here changes new ones; anything already
-            on the map keeps its own.
+            Changes to size or color apply to newly placed items; existing items
+            keep their current values.
           </Text>
         ) : null}
         <Group justify="flex-end">
@@ -734,7 +733,7 @@ function KindEditor({
 
 /** Starting outlines, 0..1 of the box. */
 const PRESETS = {
-  triangle: [
+  Triangle: [
     { x: 0.5, y: 0 },
     { x: 1, y: 1 },
     { x: 0, y: 1 },
@@ -747,13 +746,13 @@ const PRESETS = {
     { x: 1, y: 1 },
     { x: 0, y: 1 },
   ],
-  trapezoid: [
+  Trapezoid: [
     { x: 0.25, y: 0 },
     { x: 0.75, y: 0 },
     { x: 1, y: 1 },
     { x: 0, y: 1 },
   ],
-  box: [
+  Box: [
     { x: 0, y: 0 },
     { x: 1, y: 0 },
     { x: 1, y: 1 },
@@ -946,7 +945,7 @@ function ShapePreview({
           textAnchor="middle"
           fill="var(--mantine-color-dimmed)"
         >
-          street side
+          Street side
         </text>
       </svg>
       {editable ? (

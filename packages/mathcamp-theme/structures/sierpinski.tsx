@@ -233,7 +233,7 @@ function renderFootprint({
   const bcMid: Pt = [(B[0] + C[0]) / 2, (B[1] + C[1]) / 2];
   const labels: { at: Pt; lines: string[] }[] = [
     { at: lerp(A, G, 0.42), lines: ["Group W", "Bar"] },
-    { at: lerp(bcMid, G, 0.42), lines: ["lecture", "hall"] },
+    { at: lerp(bcMid, G, 0.42), lines: ["Lecture", "Hall"] },
   ];
 
   const bt = flyingButtress(w, h, buttressExt(config));
@@ -632,7 +632,7 @@ const TETRA_TALL_FT = Math.round(EDGE_FT * Math.sqrt(2 / 3) * 10) / 10; // ≈ 3
 
 export const sierpinskiPyramid: CampStructure = {
   value: "sierpinski-pyramid",
-  label: "Sierpinski Pyramid",
+  label: "Sierpinski pyramid",
   color: "#6741d9",
   w: EDGE_FT,
   h: Math.round(EDGE_FT * SQRT3_2 * 100) / 100, // ≈ 34.64′

@@ -416,7 +416,7 @@ export function AerialPanel({
         error?: string;
       };
       if (!res.ok || !json.id) {
-        throw new Error(json.error ?? `Upload failed (${res.status}).`);
+        throw new Error(json.error ?? "Upload failed. Please try again.");
       }
       const t = initialTransform({
         pxWidth: prepared.width,
@@ -475,10 +475,10 @@ export function AerialPanel({
   const step = pick ? pick.img.length + pick.plot.length + 1 : 0;
   const stepText = [
     "",
-    "Click a feature on the photo — a corner of a big shade, the tip of a structure. Zoom in for precision.",
-    "Now click where that same thing is on the map.",
-    "Click a second feature on the photo, well away from the first.",
-    "And where that one is on the map.",
+    "Click a clear landmark on the photo (zoom in for accuracy).",
+    "Click the matching spot on the map.",
+    "Click a second landmark on the photo, far from the first.",
+    "Click the matching spot on the map.",
   ][step];
 
   return (
@@ -489,9 +489,8 @@ export function AerialPanel({
       <Stack gap="xs">
         {aerials.length === 0 ? (
           <Text size="xs" c="dimmed">
-            Lay a drone shot, gigapan or satellite picture of the camp under the
-            map, to compare the plan with what actually got built. Only the camp
-            sees it.
+            Overlay a drone or satellite photo under the map to compare the plan
+            with what was built. Visible only to your camp.
           </Text>
         ) : null}
         {aerials.map((a) => {
@@ -569,12 +568,12 @@ export function AerialPanel({
                         onDraft(a.id, { rotation });
                         save(a.id, { rotation });
                       }}
-                      orientationLabel={
+                      resetLabel={
                         orientation === "twelve"
-                          ? "12:00 up"
+                          ? "Reset rotation to 12:00 up"
                           : orientation === "north"
-                            ? "north up"
-                            : "as the map"
+                            ? "Reset rotation to north up"
+                            : "Match map rotation"
                       }
                     />
                   ) : null}
@@ -612,7 +611,7 @@ export function AerialPanel({
                             );
                           }}
                         >
-                          Really remove?
+                          Remove photo?
                         </Button>
                       ) : (
                         <Button
@@ -659,10 +658,10 @@ export function AerialPanel({
               allowDeselect={false}
               data={[
                 ...(burningMan
-                  ? [{ value: "twelve", label: "12:00 up (gigapan style)" }]
+                  ? [{ value: "twelve", label: "12:00 up (clock-aligned)" }]
                   : []),
-                { value: "north", label: "North up (satellite style)" },
-                { value: "map", label: "Already turned to match the map" },
+                { value: "north", label: "North up (satellite)" },
+                { value: "map", label: "Matches map orientation" },
               ]}
             />
             <FileButton
@@ -698,14 +697,14 @@ function AdjustControls({
   save,
   onDraft,
   reseed,
-  orientationLabel,
+  resetLabel,
 }: {
   a: AerialRow;
   change: (id: string, patch: Partial<AerialRow>) => void;
   save: (id: string, fields: Record<string, string | number | boolean>) => void;
   onDraft: (id: string, patch: Partial<AerialRow>) => void;
   reseed: () => void;
-  orientationLabel: string;
+  resetLabel: string;
 }) {
   // Scale reads better as px/ft (a photo is "10 pixels to the foot") than as
   // the stored ft/px.
@@ -737,7 +736,7 @@ function AdjustControls({
     <Stack gap={6}>
       <Group grow gap={6}>
         {num(
-          "Turn",
+          "Rotation",
           a.rotation,
           0.5,
           1,
@@ -754,14 +753,17 @@ function AdjustControls({
         )}
       </Group>
       <Group grow gap={6}>
-        {num("Across", a.cx, 0.5, 1, (v) => change(a.id, { cx: v }), "′")}
-        {num("Back", a.cy, 0.5, 1, (v) => change(a.id, { cy: v }), "′")}
+        {num("X offset", a.cx, 0.5, 1, (v) => change(a.id, { cx: v }), "′")}
+        {num("Y offset", a.cy, 0.5, 1, (v) => change(a.id, { cy: v }), "′")}
       </Group>
       <Button size="compact-xs" variant="default" onClick={reseed}>
-        Reset turn to {orientationLabel}
+        {resetLabel}
       </Button>
       <Text size="xs" c="dimmed">
-        Crop (the photo's own edges, before it's turned)
+        Crop (unrotated photo edges)
+      </Text>
+      <Text size="xs" c="dimmed" mb={-4}>
+        Left ↔ right
       </Text>
       <RangeSlider
         size="xs"
@@ -774,8 +776,8 @@ function AdjustControls({
         onChange={([x0, x1]) => onDraft(a.id, { cropX0: x0, cropX1: x1 })}
         onChangeEnd={([x0, x1]) => save(a.id, { cropX0: x0, cropX1: x1 })}
       />
-      <Text size="xs" c="dimmed" mt={-4}>
-        Left ↔ right
+      <Text size="xs" c="dimmed" mb={-4}>
+        Top ↕ bottom
       </Text>
       <RangeSlider
         size="xs"
@@ -788,9 +790,6 @@ function AdjustControls({
         onChange={([y0, y1]) => onDraft(a.id, { cropY0: y0, cropY1: y1 })}
         onChangeEnd={([y0, y1]) => save(a.id, { cropY0: y0, cropY1: y1 })}
       />
-      <Text size="xs" c="dimmed" mt={-4}>
-        Top ↕ bottom
-      </Text>
       <LabelField a={a} save={(label) => save(a.id, { label })} />
     </Stack>
   );

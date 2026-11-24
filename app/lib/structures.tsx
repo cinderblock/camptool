@@ -506,7 +506,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: false,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
   },
@@ -522,7 +522,7 @@ const CORE_KINDS = [
     vehicle: false,
     rigid: true,
     fixedTall: true,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
     // Slide the door along the front edge (fraction of the wall, 0 = centered).
@@ -547,7 +547,7 @@ const CORE_KINDS = [
     shape: "hypar",
     vehicle: false,
     rigid: true,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
   },
@@ -561,7 +561,7 @@ const CORE_KINDS = [
     shape: "dome",
     vehicle: false,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
   },
@@ -570,7 +570,7 @@ const CORE_KINDS = [
   // ~106-144 sq ft) — with a ~6'6" peak (III: 6'11").
   {
     value: "shiftpod",
-    label: "Shift Pod",
+    label: "ShiftPod",
     color: "#9775fa",
     w: 12,
     h: 12,
@@ -578,7 +578,7 @@ const CORE_KINDS = [
     vehicle: false,
     rigid: true,
     fixedTall: true,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
   },
@@ -586,7 +586,7 @@ const CORE_KINDS = [
   // a 6×6 ft square footprint with a ~4.7 ft peak.
   {
     value: "shiftpod-mini",
-    label: "Shift Pod Mini",
+    label: "ShiftPod Mini",
     color: "#a78bfa",
     w: 6,
     h: 6,
@@ -594,7 +594,7 @@ const CORE_KINDS = [
     vehicle: false,
     rigid: true,
     fixedTall: true,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
   },
@@ -609,7 +609,7 @@ const CORE_KINDS = [
     shape: "dome",
     vehicle: false,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
   },
@@ -626,7 +626,7 @@ const CORE_KINDS = [
     vehicle: false,
     rigid: true,
     fixedTall: true,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
     footprint: stretchHexOutline,
@@ -654,7 +654,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: false,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
   },
@@ -669,7 +669,7 @@ const CORE_KINDS = [
     shape: "dome",
     vehicle: false,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile"],
     personal: true,
   },
@@ -682,7 +682,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: true,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile", "vehicle"],
     personal: true,
     footprint: rvFootprint,
@@ -699,7 +699,7 @@ const CORE_KINDS = [
       // Slide-out depth (ft) on each side; 0 = retracted.
       {
         key: "popoutL",
-        label: "Pop-out (left)",
+        label: "Pop-out left (ft)",
         min: 0,
         max: 4,
         step: 0.5,
@@ -707,7 +707,7 @@ const CORE_KINDS = [
       },
       {
         key: "popoutR",
-        label: "Pop-out (right)",
+        label: "Pop-out right (ft)",
         min: 0,
         max: 4,
         step: 0.5,
@@ -725,7 +725,7 @@ const CORE_KINDS = [
       },
       {
         key: "cleanout",
-        label: "Cleanout",
+        label: "Sewer cleanout",
         min: 0,
         max: 1,
         default: 0,
@@ -744,7 +744,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: true,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile", "vehicle"],
     personal: true,
   },
@@ -759,7 +759,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: true,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile", "vehicle"],
     personal: true,
   },
@@ -773,7 +773,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: true,
     rigid: true,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile", "vehicle"],
     personal: true,
   },
@@ -789,7 +789,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: true,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile", "vehicle"],
     personal: true,
     footprint: popupCamperFootprint,
@@ -1077,7 +1077,7 @@ const CORE_KINDS = [
   // A black-lined greywater evaporation pond (shallow ground feature).
   {
     value: "evap-pond",
-    label: "Evap pond",
+    label: "Evaporation pond",
     color: "#212529",
     w: 8,
     h: 8,
@@ -1231,7 +1231,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: true,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile", "vehicle"],
     personal: true,
     footprint: toyHaulerFootprint,
@@ -1257,7 +1257,7 @@ const CORE_KINDS = [
     shape: "rect",
     vehicle: true,
     rigid: false,
-    group: "Domiciles",
+    group: "Shelters",
     tags: ["domicile", "vehicle"],
     personal: true,
   },
@@ -1335,14 +1335,14 @@ const KIND_HEIGHTS: Record<string, number> = {
 export const AMP_OPTIONS = ["15", "20", "30", "50", "100"] as const;
 /** Copper wire gauge (AWG) with its NEC ampacity, biggest wire = highest amps. */
 export const GAUGE_OPTIONS = [
-  { value: "14 AWG", label: "14 AWG (15A)" },
-  { value: "12 AWG", label: "12 AWG (20A)" },
-  { value: "10 AWG", label: "10 AWG (30A)" },
-  { value: "8 AWG", label: "8 AWG (40A)" },
-  { value: "6 AWG", label: "6 AWG (55A)" },
-  { value: "4 AWG", label: "4 AWG (70A)" },
-  { value: "2 AWG", label: "2 AWG (95A)" },
-  { value: "1/0 AWG", label: "1/0 AWG (125A)" },
+  { value: "14 AWG", label: "14 AWG (15 A)" },
+  { value: "12 AWG", label: "12 AWG (20 A)" },
+  { value: "10 AWG", label: "10 AWG (30 A)" },
+  { value: "8 AWG", label: "8 AWG (40 A)" },
+  { value: "6 AWG", label: "6 AWG (55 A)" },
+  { value: "4 AWG", label: "4 AWG (70 A)" },
+  { value: "2 AWG", label: "2 AWG (95 A)" },
+  { value: "1/0 AWG", label: "1/0 AWG (125 A)" },
 ] as const;
 
 /** Shipping containers: fixed 8ft width; length is full (40ft) or half (20ft). */
@@ -1353,7 +1353,7 @@ export const CONTAINER_HALF = 20;
 /** Legend group order; groups not listed here (a pack's or a camp's own) follow
  * in first-seen order. */
 const LEGEND_ORDER = [
-  "Domiciles",
+  "Shelters",
   "Vehicles",
   "Shade",
   "Structures",
@@ -1465,7 +1465,7 @@ export function makeKindRegistry(
     groups: groupKinds(palette, LEGEND_ORDER, (k) => k.group),
     camperKinds,
     camperGroups: groupKinds(camperKinds, CAMPER_ORDER, (k) => {
-      if (k.group !== "Domiciles") return k.group;
+      if (k.group !== "Shelters" && k.group !== "Domiciles") return k.group;
       const towed = (k.tags as readonly string[]).includes("vehicle");
       return towed ? "Campers & RVs" : "Tents & shelters";
     }),

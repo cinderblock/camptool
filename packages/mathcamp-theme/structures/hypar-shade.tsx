@@ -320,7 +320,7 @@ function shadedFaces(
 
 export const hyparShade: CampStructure = {
   value: "hypar-shade",
-  label: "Hypar Shade",
+  label: "Hypar shade",
   color: "#b08968",
   w: SIZE_FT,
   h: SIZE_FT,

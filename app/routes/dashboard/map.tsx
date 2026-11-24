@@ -1148,7 +1148,12 @@ export async function action({ request }: Route.ActionArgs) {
         .limit(1);
       const cursor = ed?.cursor ?? null;
       if (cursor == null)
-        return data({ error: "Nothing to undo yet." }, { status: 400 });
+        return data(
+          {
+            error: intent === "undo" ? "Nothing to undo." : "Nothing to redo.",
+          },
+          { status: 400 },
+        );
       const [target] = await db
         .select({ seq: mapSnapshot.seq, data: mapSnapshot.data })
         .from(mapSnapshot)
@@ -1182,7 +1187,7 @@ export async function action({ request }: Route.ActionArgs) {
     }
 
     if (intent === "saveSnapshot") {
-      const label = (str("label") ?? "Snapshot").slice(0, 80);
+      const label = (str("label") ?? "Version").slice(0, 80);
       await insertSnap(
         campId,
         editionId,
@@ -1204,7 +1209,7 @@ export async function action({ request }: Route.ActionArgs) {
           and(eq(mapSnapshot.id, id), eq(mapSnapshot.editionId, editionId)),
         )
         .limit(1);
-      if (!snap) return data({ error: "Snapshot not found." }, { status: 404 });
+      if (!snap) return data({ error: "Version not found." }, { status: 404 });
       // The restore is itself an undoable official edit.
       const pre = await serializeMap(editionId);
       await restoreMap(editionId, snap.data);
@@ -1233,7 +1238,7 @@ export async function action({ request }: Route.ActionArgs) {
       if (!view)
         return data({ error: "That version can't be read." }, { status: 422 });
       return data({
-        view: { id, label: snap.label ?? "Snapshot", map: view },
+        view: { id, label: snap.label ?? "Version", map: view },
       });
     }
 
@@ -2881,11 +2886,10 @@ function GridScaleNote({ lot }: { lot: Lot }) {
         <>
           10′ grid · {delta > 0 ? "widens" : "narrows"} {feetInches(front)}→
           {feetInches(rear)} ({delta > 0 ? "+" : "−"}
-          {feetInches(Math.abs(delta))}) · cols 10′0″→{feetInches(cellRear)} ·
-          rows 10′0″
+          {feetInches(Math.abs(delta))}) · columns 10′0″→{feetInches(cellRear)}
         </>
       ) : (
-        <>10′ grid · square cells, no skew</>
+        <>10′ grid · square 10′ cells</>
       )}
     </Text>
   );
@@ -2941,7 +2945,7 @@ async function exportMapJpeg(opts: {
   dateVersion: string;
 }) {
   const live = document.getElementById("camp-map-svg") as SVGSVGElement | null;
-  if (!live) throw new Error("Map SVG not found on the page.");
+  if (!live) throw new Error("Map not found on the page.");
   const vb = live.viewBox.baseVal;
   const mw = vb.width || live.clientWidth || 1000;
   const mh = vb.height || live.clientHeight || 1000;
@@ -2996,7 +3000,7 @@ async function exportMapJpeg(opts: {
   const img = new Image();
   await new Promise<void>((res, rej) => {
     img.onload = () => res();
-    img.onerror = () => rej(new Error("Could not rasterize the map."));
+    img.onerror = () => rej(new Error("Couldn't render the map image."));
     img.src = url;
   });
 
@@ -3008,7 +3012,7 @@ async function exportMapJpeg(opts: {
   canvas.width = CW;
   canvas.height = CH;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas is not supported in this browser.");
+  if (!ctx) throw new Error("Your browser doesn't support image export.");
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, CW, CH);
   ctx.fillStyle = "#000000";
@@ -3043,7 +3047,7 @@ async function exportMapJpeg(opts: {
   const blob = await new Promise<Blob | null>((res) =>
     canvas.toBlob((b) => res(b), "image/jpeg", 0.92),
   );
-  if (!blob) throw new Error("Failed to encode the image.");
+  if (!blob) throw new Error("Couldn't create the JPEG file.");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = opts.filename;
@@ -3154,15 +3158,13 @@ function BurningManExport({
       >
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
-            Renders the current map to a single-page portrait JPEG with your
-            camp name, dimensions, and contact info — following BMorg's
-            layout-file rules. Set a clear day (drag the sun) and a Map
-            status/version first. Fuel and battery safety zones export
-            automatically if placed.
+            Downloads a single-page portrait JPEG with your camp name,
+            dimensions, and contact info, formatted for Burning Man placement.
+            Fuel and battery safety zones are included automatically.
           </Text>
           <Group grow>
             <TextInput
-              label="First + last name"
+              label="Full name"
               value={name}
               onChange={(e) => setName(e.currentTarget.value)}
             />
@@ -3413,7 +3415,7 @@ function VersionsPanel({
   const [label, setLabel] = useState("");
   const save = () => {
     fetcher.submit(
-      { intent: "saveSnapshot", label: label.trim() || "Snapshot" },
+      { intent: "saveSnapshot", label: label.trim() || "Version" },
       { method: "post" },
     );
     setLabel("");
@@ -3456,7 +3458,7 @@ function VersionsPanel({
         {row(
           "official",
           "Official map",
-          canManage ? "The live layout — the one you edit" : "The live layout",
+          canManage ? "Live layout (editable)" : "Live layout",
         )}
         {snapshots.map((s) =>
           row(
@@ -3562,7 +3564,7 @@ function VersionsPanel({
                   {diff.cables > 0
                     ? `${diff.cables} more`
                     : `${-diff.cables} fewer`}{" "}
-                  {Math.abs(diff.cables) === 1 ? "run" : "runs"} (power/water)
+                  {Math.abs(diff.cables) === 1 ? "line/pipe" : "lines/pipes"}
                 </Text>
               ) : null}
               {diff.roads !== 0 ? (
@@ -3570,12 +3572,12 @@ function VersionsPanel({
                   {diff.roads > 0
                     ? `${diff.roads} more`
                     : `${-diff.roads} fewer`}{" "}
-                  {Math.abs(diff.roads) === 1 ? "lane" : "lanes"}
+                  {Math.abs(diff.roads) === 1 ? "road" : "roads"}
                 </Text>
               ) : null}
               {diff.lotChanged ? (
                 <Text size="xs" c="dimmed">
-                  The lot itself is a different size in this version.
+                  Lot dimensions differ in this version.
                 </Text>
               ) : null}
             </Stack>
@@ -3609,8 +3611,8 @@ function VersionsPanel({
       {snapshots.length === 0 && members.length === 0 ? (
         <Text size="xs" c="dimmed" mt={6}>
           {canManage
-            ? "Save the layout under a name and it becomes a version everyone can look at."
-            : "Only the official map so far. Drag your own things to propose a version of your own."}
+            ? "Save a named copy of the official map so everyone can compare layouts."
+            : "Only the official map so far. Drag any item on the map to suggest a move."}
         </Text>
       ) : null}
     </Paper>
@@ -4251,7 +4253,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
           <Group gap="sm" wrap="wrap">
             <Text size="sm">
               {diffIsEmpty(diff)
-                ? "Identical to the official map."
+                ? "Identical to the official map"
                 : [
                     diff.changed.length > 0 && `${diff.changed.length} moved`,
                     diff.added.length > 0 && `${diff.added.length} only here`,
@@ -4312,7 +4314,7 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               Show everyone
             </Button>
             <Anchor component={Link} to="/roster" size="sm">
-              Back to Who's coming
+              Back to Roster
             </Anchor>
           </Group>
         </Alert>
@@ -4383,7 +4385,10 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
             highlight={highlight}
             party={party}
             lotOpen={lotOpen}
-            setLotOpen={setLotOpen}
+            setLotOpen={(open) => {
+              setLotOpen(open);
+              if (open) setRailOpen(true);
+            }}
             mapUpBearing={mapUpBearingFor(
               shownLot.address,
               shownLot.frontsToMan,
@@ -4423,212 +4428,30 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
               paddingRight: 4,
             }}
           >
-            {railManage ? (
-              <MapStatusControl
-                status={loaderData.mapStatus ?? ""}
-                fetcher={fetcher}
-              />
-            ) : null}
-            {/* Everyone's, deliberately: the camp had several layouts going and
-                no way to see any but the live one. Officers still own the verbs
-                that change the official map. */}
-            <VersionsPanel
-              snapshots={snapshots}
-              members={memberVersions}
-              viewing={viewing}
-              onView={openVersion}
-              onExit={() => setViewing(null)}
-              diff={diff}
-              canManage={canManage}
-              fetcher={fetcher}
-            />
-            <AerialPanel
-              aerials={aerials}
+            <SidePanel
               lot={shownLot}
-              mapUpBearing={mapUpBearingFor(
-                shownLot.address,
-                shownLot.frontsToMan,
-              )}
               burningMan={isBurningMan(event)}
-              canManage={loaderData.canManageAerial}
-              isShown={aerialIsShown}
-              setShown={(id, on) =>
-                setAerialShown((cur) => ({ ...cur, [id]: on }))
-              }
-              onDraft={(id, patch) =>
-                setAerialDrafts((cur) => ({
-                  ...cur,
-                  [id]: { ...cur[id], ...patch },
-                }))
-              }
-              pick={aerialPick}
-              setPick={setAerialPick}
-              swipe={aerialSwipe}
-              setSwipe={setAerialSwipe}
+              objects={shown.objects}
+              setObjects={readOnly ? noop : setObjects}
+              selectedId={selectedId}
+              canEdit={railEdit}
+              canManage={railManage}
+              myMembershipId={myMembershipId}
+              bannedKinds={bannedKinds}
+              suggestions={readOnly ? [] : suggestions}
+              lotOpen={lotOpen}
+              fetcher={fetcher}
+              wiki={loaderData.wiki}
             />
-            <Paper withBorder p="sm" radius="md">
-              <Text size="xs" fw={600} mb={6}>
-                Highlight
-              </Text>
-              <SegmentedControl
-                size="xs"
-                fullWidth
-                value={highlight}
-                onChange={setHighlight}
-                data={[
-                  { label: "All", value: "none" },
-                  { label: "Mine", value: "mine" },
-                  // Only offered while a ?party= link is in play — there is no
-                  // party to filter to otherwise.
-                  ...(party
-                    ? [
-                        {
-                          label: party.kind === "group" ? "Group" : "Party",
-                          value: "party",
-                        },
-                      ]
-                    : []),
-                  { label: "Homes", value: "domicile" },
-                  { label: "Vehicles", value: "vehicle" },
-                  { label: "Builds", value: "structure" },
-                ]}
-              />
-              <Checkbox
-                mt="sm"
-                size="xs"
-                label="Show doors"
-                checked={showDoors}
-                onChange={(e) => setShowDoors(e.currentTarget.checked)}
-              />
-              <Checkbox
-                mt={6}
-                size="xs"
-                label="Fire access (125′)"
-                checked={showFire}
-                onChange={(e) => setShowFire(e.currentTarget.checked)}
-              />
-              {showFire ? (
-                <Text size="xs" c="dimmed" mt={4}>
-                  Green = within 125′ hose reach of the street/alley. Red =
-                  beyond reach (needs an internal fire lane). Assumes rear-alley
-                  access.
-                </Text>
-              ) : null}
-              <Checkbox
-                mt={6}
-                size="xs"
-                label="Placement wishes"
-                checked={showWishes}
-                onChange={(e) => setShowWishes(e.currentTarget.checked)}
-              />
-              {showWishes ? (
-                <Text size="xs" c="dimmed" mt={4}>
-                  A faint line to whoever or whatever a camper asked to be near
-                  — their own vehicle, or a friend. Wishes, not rules: nothing
-                  stops you placing them apart. Set on the Bringing page.
-                </Text>
-              ) : null}
-              {isBurningMan(event) ? (
-                <>
-                  <Checkbox
-                    mt={6}
-                    size="xs"
-                    label="Uplink aim (NOC)"
-                    checked={showUplink}
-                    onChange={(e) => setShowUplink(e.currentTarget.checked)}
-                  />
-                  {showUplink ? (
-                    <Text size="xs" c="dimmed" mt={4}>
-                      Draws each uplink radio's path to the NOC tower in Center
-                      Camp and flags anything of yours tall enough to block it.
-                      Set the radio's Height to the antenna's height above
-                      ground. Neighbours' structures aren't modelled.
-                    </Text>
-                  ) : null}
-                </>
-              ) : null}
-            </Paper>
-            <Compass
-              mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
-              frontsToMan={lot.frontsToMan}
-              nocBearing={
-                showUplink && isBurningMan(event)
-                  ? (landmarkSightLine(
-                      lot.year,
-                      lot.address,
-                      frontageRadiusOf(lot),
-                      NOC_LANDMARK,
-                    )?.bearingDeg ?? null)
-                  : null
-              }
-              sun={sun}
-              year={sunYear}
-              arc={arc}
-              timeMin={timeMin}
-              setTimeMin={setTimeMin}
-              setSunDragging={setSunDragging}
-              animateShade={animateShade}
-              setAnimateShade={setAnimateShade}
-              windFromBearing={windFromBearing}
-              setWindFromBearing={setWindFromBearing}
-              windStrength={windStrength}
-              setWindStrength={setWindStrength}
-              windParticles={windParticles}
-              setWindParticles={setWindParticles}
-              resetWind={() => {
-                setWindFromBearing(BRC_WIND_FROM_BEARING);
-                setWindStrength(1);
-              }}
-            />
-            {railManage ? (
-              <SuggestionsPanel
-                suggestions={suggestions}
-                objects={objects}
-                setSelectedId={setSelectedId}
-                fetcher={fetcher}
-              />
-            ) : null}
-            {railManage ? (
-              <UnplacedTray unplaced={unplaced} fetcher={fetcher} />
-            ) : null}
-            {railManage ? <BlockPalette /> : null}
-            {railManage ? <Legend bannedKinds={bannedKinds} /> : null}
-            {selectedZoneId ? (
-              <ZonePanel
-                zones={zones}
-                selectedZoneId={selectedZoneId}
-                setZones={setZones}
-                canManage={railManage}
-                fetcher={fetcher}
-              />
-            ) : null}
-            {selectedCableId ? (
-              <CablePanel
-                cables={cables}
-                selectedCableId={selectedCableId}
-                setCables={setCables}
-                canManage={railManage}
-                fetcher={fetcher}
-              />
-            ) : null}
-            {selectedRoadId ? (
-              <RoadPanel
-                roads={roads}
-                selectedRoadId={selectedRoadId}
-                setRoads={setRoads}
-                canManage={railManage}
-                fetcher={fetcher}
-              />
-            ) : null}
             {selectedIds.length + selectedZoneIds.length > 1 ? (
               <Paper withBorder p="sm" radius="md" bg="blue.0">
                 <Text size="sm" fw={600}>
                   {selectedIds.length + selectedZoneIds.length} items selected
                 </Text>
                 <Text size="xs" c="dimmed">
-                  Drag any one to move them together; use the round handle above
-                  the box to rotate the group. Arrows nudge · Space/R rotate ·
-                  Del unplaces. Shift-click or box-drag to change the selection.
+                  Drag to move together, or use the top handle to rotate. Arrow
+                  keys nudge · Space/R rotate · Delete unplaces · Shift-click or
+                  box-drag to adjust selection.
                 </Text>
                 {railManage ? (
                   <Group gap="xs" mt="xs">
@@ -4704,21 +4527,201 @@ export default function CampMap({ loaderData }: Route.ComponentProps) {
                 ) : null}
               </Paper>
             ) : null}
-            <SidePanel
-              lot={shownLot}
-              burningMan={isBurningMan(event)}
-              objects={shown.objects}
-              setObjects={readOnly ? noop : setObjects}
-              selectedId={selectedId}
-              canEdit={railEdit}
-              canManage={railManage}
-              myMembershipId={myMembershipId}
-              bannedKinds={bannedKinds}
-              suggestions={readOnly ? [] : suggestions}
-              lotOpen={lotOpen}
-              fetcher={fetcher}
-              wiki={loaderData.wiki}
+            {selectedZoneId ? (
+              <ZonePanel
+                zones={zones}
+                selectedZoneId={selectedZoneId}
+                setZones={setZones}
+                canManage={railManage}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {selectedCableId ? (
+              <CablePanel
+                cables={cables}
+                selectedCableId={selectedCableId}
+                setCables={setCables}
+                canManage={railManage}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {selectedRoadId ? (
+              <RoadPanel
+                roads={roads}
+                selectedRoadId={selectedRoadId}
+                setRoads={setRoads}
+                canManage={railManage}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {railManage ? (
+              <SuggestionsPanel
+                suggestions={suggestions}
+                objects={objects}
+                setSelectedId={setSelectedId}
+                fetcher={fetcher}
+              />
+            ) : null}
+            {railManage ? (
+              <UnplacedTray unplaced={unplaced} fetcher={fetcher} />
+            ) : null}
+            {railManage ? <BlockPalette /> : null}
+            {railManage ? <Legend bannedKinds={bannedKinds} /> : null}
+            <Paper withBorder p="sm" radius="md">
+              <Text size="xs" fw={600} mb={6}>
+                Filters &amp; overlays
+              </Text>
+              <SegmentedControl
+                size="xs"
+                fullWidth
+                value={highlight}
+                onChange={setHighlight}
+                data={[
+                  { label: "All", value: "none" },
+                  { label: "Mine", value: "mine" },
+                  // Only offered while a ?party= link is in play — there is no
+                  // party to filter to otherwise.
+                  ...(party
+                    ? [
+                        {
+                          label: party.kind === "group" ? "Group" : "Party",
+                          value: "party",
+                        },
+                      ]
+                    : []),
+                  { label: "Shelters", value: "domicile" },
+                  { label: "Vehicles", value: "vehicle" },
+                  { label: "Structures", value: "structure" },
+                ]}
+              />
+              <Checkbox
+                mt="sm"
+                size="xs"
+                label="Show doors"
+                checked={showDoors}
+                onChange={(e) => setShowDoors(e.currentTarget.checked)}
+              />
+              <Checkbox
+                mt={6}
+                size="xs"
+                label="Fire access (125′)"
+                checked={showFire}
+                onChange={(e) => setShowFire(e.currentTarget.checked)}
+              />
+              {showFire ? (
+                <Text size="xs" c="dimmed" mt={4}>
+                  Green = within 125′ hose reach of the street or rear service
+                  road. Red = beyond reach (needs an internal fire lane).
+                </Text>
+              ) : null}
+              <Checkbox
+                mt={6}
+                size="xs"
+                label="Placement wishes"
+                checked={showWishes}
+                onChange={(e) => setShowWishes(e.currentTarget.checked)}
+              />
+              {showWishes ? (
+                <Text size="xs" c="dimmed" mt={4}>
+                  Shows faint lines to what campers asked to be near (a vehicle
+                  or friend). Advisory only; set on the Bringing page.
+                </Text>
+              ) : null}
+              {isBurningMan(event) ? (
+                <>
+                  <Checkbox
+                    mt={6}
+                    size="xs"
+                    label="Uplink aim (NOC)"
+                    checked={showUplink}
+                    onChange={(e) => setShowUplink(e.currentTarget.checked)}
+                  />
+                  {showUplink ? (
+                    <Text size="xs" c="dimmed" mt={4}>
+                      Shows each uplink radio's path to the Center Camp NOC
+                      tower and flags your structures tall enough to block it.
+                      Set the radio's height to its antenna height above ground.
+                      Neighbors' structures aren't modeled.
+                    </Text>
+                  ) : null}
+                </>
+              ) : null}
+            </Paper>
+            <Compass
+              mapUpBearing={mapUpBearingFor(lot.address, lot.frontsToMan)}
+              frontsToMan={lot.frontsToMan}
+              nocBearing={
+                showUplink && isBurningMan(event)
+                  ? (landmarkSightLine(
+                      lot.year,
+                      lot.address,
+                      frontageRadiusOf(lot),
+                      NOC_LANDMARK,
+                    )?.bearingDeg ?? null)
+                  : null
+              }
+              sun={sun}
+              year={sunYear}
+              arc={arc}
+              timeMin={timeMin}
+              setTimeMin={setTimeMin}
+              setSunDragging={setSunDragging}
+              animateShade={animateShade}
+              setAnimateShade={setAnimateShade}
+              windFromBearing={windFromBearing}
+              setWindFromBearing={setWindFromBearing}
+              windStrength={windStrength}
+              setWindStrength={setWindStrength}
+              windParticles={windParticles}
+              setWindParticles={setWindParticles}
+              resetWind={() => {
+                setWindFromBearing(BRC_WIND_FROM_BEARING);
+                setWindStrength(1);
+              }}
             />
+            {/* Everyone's, deliberately: the camp had several layouts going and
+                no way to see any but the live one. Officers still own the verbs
+                that change the official map. */}
+            <VersionsPanel
+              snapshots={snapshots}
+              members={memberVersions}
+              viewing={viewing}
+              onView={openVersion}
+              onExit={() => setViewing(null)}
+              diff={diff}
+              canManage={canManage}
+              fetcher={fetcher}
+            />
+            <AerialPanel
+              aerials={aerials}
+              lot={shownLot}
+              mapUpBearing={mapUpBearingFor(
+                shownLot.address,
+                shownLot.frontsToMan,
+              )}
+              burningMan={isBurningMan(event)}
+              canManage={loaderData.canManageAerial}
+              isShown={aerialIsShown}
+              setShown={(id, on) =>
+                setAerialShown((cur) => ({ ...cur, [id]: on }))
+              }
+              onDraft={(id, patch) =>
+                setAerialDrafts((cur) => ({
+                  ...cur,
+                  [id]: { ...cur[id], ...patch },
+                }))
+              }
+              pick={aerialPick}
+              setPick={setAerialPick}
+              swipe={aerialSwipe}
+              setSwipe={setAerialSwipe}
+            />
+            {railManage ? (
+              <MapStatusControl
+                status={loaderData.mapStatus ?? ""}
+                fetcher={fetcher}
+              />
+            ) : null}
           </Stack>
         ) : null}
       </Flex>
@@ -4796,7 +4799,7 @@ function UnplacedTray({
                     officer actually decides where it goes. */}
                 {u.placeNearVehicle ? (
                   <Badge size="xs" color="blue" variant="light">
-                    near car
+                    Near car
                   </Badge>
                 ) : null}
                 {/* Already parked in the staging apron. It's out there at true
@@ -4804,14 +4807,14 @@ function UnplacedTray({
                     somewhere to go, so it stays in this queue until it does. */}
                 {u.staged ? (
                   <Badge size="xs" color="gray" variant="light">
-                    staged
+                    Staged
                   </Badge>
                 ) : null}
                 {/* Harder than a preference: a truck has to physically reach
                     it, so it can't go mid-block. */}
                 {u.needsPumpout ? (
                   <Badge size="xs" color="orange" variant="light">
-                    pump-out
+                    Pump-out
                   </Badge>
                 ) : null}
                 <Tooltip label="Delete permanently" withArrow openDelay={150}>
@@ -4939,7 +4942,7 @@ function Legend({ bannedKinds }: { bannedKinds: string[] }) {
         mt={8}
         display="block"
       >
-        Camp structures: add your own kinds
+        Manage custom structures →
       </Anchor>
     </Paper>
   );
@@ -7067,7 +7070,7 @@ function Editor({
             {drawMode === "cable" ? (
               <>
                 <Text size="xs" c="dimmed">
-                  Click near nodes to route the line
+                  Click points to route the line
                   {draftPoints.length >= 2
                     ? ` · ${feetInches(pathLengthFt(draftPoints))}`
                     : ""}
@@ -7091,7 +7094,7 @@ function Editor({
             ) : drawMode === "zone" ? (
               <>
                 <Text size="xs" c="dimmed">
-                  Click to add points · outside the border is OK
+                  Click to add points (can extend outside the lot)
                 </Text>
                 <Button
                   size="compact-xs"
@@ -7111,9 +7114,9 @@ function Editor({
             ) : drawMode === "road" ? (
               <>
                 <Text size="xs" c="dimmed">
-                  Click to route the{" "}
-                  {roadKindLabel(roadDraftKind).toLowerCase()} centerline ·
-                  corners auto-cut back 45°
+                  Click points along the{" "}
+                  {roadKindLabel(roadDraftKind).toLowerCase()} centerline · 90°
+                  corners cut back 45°
                   {draftPoints.length >= 2
                     ? ` · ${feetInches(pathLengthFt(draftPoints))}`
                     : ""}
@@ -8512,8 +8515,9 @@ function Editor({
                             }}
                           >
                             <title>
-                              Drag to move (snaps to power nodes) · double-click
-                              to remove
+                              {c.kind === "power"
+                                ? "Drag to move (snaps to generators and spider boxes) · double-click to remove"
+                                : "Drag to move · double-click to remove"}
                             </title>
                           </circle>
                         ))}
@@ -9143,7 +9147,7 @@ function Compass({
   return (
     <Paper withBorder p="sm" radius="md">
       <Text size="xs" fw={600} mb={4}>
-        Orientation
+        Compass, sun &amp; wind
       </Text>
       <svg
         ref={svgRef}
@@ -9284,7 +9288,7 @@ function Compass({
             {sun.altitude > 0
               ? `sun ${Math.round(sun.altitude)}° up`
               : "night — lights on"}{" "}
-            · drag the sun around the dial
+            · drag sun to adjust
           </Text>
           <Group justify="space-between" align="center" mt={10} mb={2}>
             <Text size="xs" fw={600}>
@@ -9304,7 +9308,7 @@ function Compass({
           <Text size="xs" c="dimmed" mb={4}>
             {windOn
               ? `${windParticles} particles · from ${Math.round(windFromBearing)}°`
-              : "Off — pick a level to show the flow"}
+              : "Off — pick a level below"}
           </Text>
           <SegmentedControl
             size="xs"
@@ -9616,7 +9620,7 @@ function SidePanel({
             <Group justify="space-between">
               <div>
                 <Text fw={600} size="sm">
-                  Selected structure
+                  Selected item
                 </Text>
                 <Text size="xs" c="dimmed">
                   {selected.ownerName ?? "Camp / shared"}
@@ -9668,7 +9672,7 @@ function SidePanel({
               if (objSugs.length === 0) {
                 return canEdit && !isOfficer ? (
                   <Text size="xs" c="dimmed">
-                    Drag this item to suggest a change (officers approve).
+                    Drag this item to suggest a move (officers approve).
                   </Text>
                 ) : null;
               }
@@ -9733,24 +9737,26 @@ function SidePanel({
                           >
                             Approve
                           </Button>
-                          <Button
-                            size="compact-xs"
-                            color="green"
-                            variant="light"
-                            title="Apply this and clear the other suggestions"
-                            onClick={() =>
-                              fetcher.submit(
-                                {
-                                  intent: "approveSuggestion",
-                                  id: s.id,
-                                  clearOthers: "true",
-                                },
-                                { method: "post" },
-                              )
-                            }
-                          >
-                            Approve + clear rest
-                          </Button>
+                          {objSugs.length > 1 ? (
+                            <Button
+                              size="compact-xs"
+                              color="green"
+                              variant="light"
+                              title="Apply this and clear the other suggestions"
+                              onClick={() =>
+                                fetcher.submit(
+                                  {
+                                    intent: "approveSuggestion",
+                                    id: s.id,
+                                    clearOthers: "true",
+                                  },
+                                  { method: "post" },
+                                )
+                              }
+                            >
+                              Approve + clear rest
+                            </Button>
+                          ) : null}
                           <Button
                             size="compact-xs"
                             variant="default"
@@ -9817,7 +9823,7 @@ function SidePanel({
             )}
             <Select
               size="xs"
-              label="Kind"
+              label="Type"
               value={selected.kind}
               disabled={!canMeta}
               // Hide kinds disallowed this year, but keep the selected one visible
@@ -10250,28 +10256,32 @@ function SuggestionsPanel({
                         <Button
                           size="compact-xs"
                           color="green"
-                          title="Approve (keep the others)"
+                          title={
+                            sgs.length > 1 ? "Approve (keep others)" : "Approve"
+                          }
                           onClick={() =>
                             submit({ intent: "approveSuggestion", id: s.id })
                           }
                         >
                           ✓
                         </Button>
-                        <Button
-                          size="compact-xs"
-                          color="green"
-                          variant="light"
-                          title="Approve & clear the others"
-                          onClick={() =>
-                            submit({
-                              intent: "approveSuggestion",
-                              id: s.id,
-                              clearOthers: "true",
-                            })
-                          }
-                        >
-                          ✓✕
-                        </Button>
+                        {sgs.length > 1 ? (
+                          <Button
+                            size="compact-xs"
+                            color="green"
+                            variant="light"
+                            title="Approve & clear others"
+                            onClick={() =>
+                              submit({
+                                intent: "approveSuggestion",
+                                id: s.id,
+                                clearOthers: "true",
+                              })
+                            }
+                          >
+                            ✓✕
+                          </Button>
+                        ) : null}
                         <Button
                           size="compact-xs"
                           variant="default"
@@ -10458,8 +10468,9 @@ function CablePanel({
         </Paper>
         {canManage ? (
           <Text size="xs" c="dimmed">
-            Drag a handle to move a point (snaps to spider boxes / generators),
-            drag a dashed + to add one, double-click a handle to remove it.
+            {cable.kind === "power"
+              ? "Drag handles to move points (snaps to generators and spider boxes), drag a dashed midpoint to add one, or double-click a handle to remove it."
+              : "Drag handles to move points, drag a dashed midpoint to add one, or double-click a handle to remove it."}
           </Text>
         ) : null}
         <Select
@@ -10488,7 +10499,11 @@ function CablePanel({
         <TextInput
           size="xs"
           label="Name"
-          placeholder="e.g. Gen → Kitchen box"
+          placeholder={
+            cable.kind === "power"
+              ? "e.g. Generator → Kitchen"
+              : "e.g. Tank → Shower"
+          }
           value={cable.name ?? ""}
           disabled={!canManage}
           onChange={(e) => patch({ name: e.currentTarget.value })}
@@ -10657,12 +10672,12 @@ function RoadPanel({
           />
         </Group>
         <Text size="xs" c="dimmed">
-          BM's turn allowance for a 90° corner is a triangle with 20-ft legs.
+          Burning Man requires a 20′ corner cutback on 90° turns.
         </Text>
         <TextInput
           size="xs"
           label="Name"
-          placeholder="e.g. main fire lane"
+          placeholder="e.g. Main fire lane"
           value={road.name ?? ""}
           disabled={!canManage}
           onChange={(e) => patch({ name: e.currentTarget.value })}
@@ -10758,7 +10773,7 @@ function PlacementForm({
                 label="Street name (optional)"
                 name="street"
                 defaultValue={lot?.street ?? ""}
-                placeholder="overrides the year's name"
+                placeholder="Overrides default street name"
               />
             </Group>
             <Checkbox
@@ -10799,8 +10814,8 @@ function PlacementForm({
             label="Frontage radius override (ft, optional)"
             description={
               derivedRadius
-                ? `Auto from street: ${Math.round(derivedRadius)}′ from the Man${usingFallbackGeometry ? " (latest BRC layout — this year's measurements not loaded)" : ""}. Set only to override.`
-                : "Man→frontage distance; draws the wedge taper. Set if no street is picked."
+                ? `Auto from street: ${Math.round(derivedRadius)}′ from the Man${usingFallbackGeometry ? " (using latest BRC layout)" : ""}. Set only to override.`
+                : "Distance from the Man to your frontage (draws the wedge taper). Set if no street is selected."
             }
             name="innerRadiusFt"
             defaultValue={lot?.innerRadiusFt ?? undefined}
@@ -10809,8 +10824,7 @@ function PlacementForm({
         ) : null}
         {lot ? (
           <Text size="xs" c="dimmed">
-            Updating the lot adjusts the boundary without removing placed gear;
-            reposition anything that falls outside if the lot shrinks.
+            Resizing updates the lot boundary without removing placed items.
           </Text>
         ) : null}
         <Button size="xs" type="submit" loading={fetcher.state !== "idle"}>
